@@ -24,10 +24,7 @@ use std::time::Duration;
 
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
-use lash_core::{
-    ProcessAwaitOutput, ProcessEventLogTestSupport as _, ProcessId, ProcessWorkSubstrate as _,
-    StoreSet as _,
-};
+use lash_core::{ProcessAwaitOutput, ProcessEventLogTestSupport as _, ProcessId};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 use lashlang::testing::ast_builders as b;
 use serde_json::json;
@@ -261,11 +258,6 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
     assert_eq!(server.purge(&root.id), Some(true), "retention purges it");
 
     let registry = restate.lash_backend().process_registry();
-    let sweep = lash_restate::RestateProcessIngressRunner::new(
-        restate.connection(),
-        Arc::clone(&registry),
-        restate.stores().process_continuations(),
-    );
     let zombie = match first {
         First::Zombie => Some(zombie_writes_its_terminal(&restate, &process_id).await),
         First::Recovery => None,
@@ -284,7 +276,6 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
         .await
         .expect("the fresh invocation ends")
         .expect("the fresh invocation's output");
-    let _ = sweep.admit_pending_processes("fig-3818").await;
     let zombie = match zombie {
         Some(zombie) => zombie,
         None => zombie_writes_its_terminal(&restate, &process_id).await,

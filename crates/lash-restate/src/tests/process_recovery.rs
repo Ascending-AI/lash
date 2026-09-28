@@ -1580,12 +1580,12 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     .await;
 
     let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store());
-    let first = runner
-        .admit_pending_processes("test")
+    runner
+        .deliver_process_start(&task_1_id, "test:1")
         .await
         .expect("drive pending");
-    let second = runner
-        .admit_pending_processes("test")
+    runner
+        .deliver_process_start(&task_1_id, "test:2")
         .await
         .expect("drive pending again");
     server.await.expect("mock ingress server task");
@@ -1606,8 +1606,6 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
             "workflow sends must not carry an idempotency header; Restate coalesces by workflow key: {request}"
         );
     }
-    assert_eq!(first.admitted, vec![task_1_id.to_string()]);
-    assert_eq!(second.admitted, vec![task_1_id.to_string()]);
 
     // The durable backend reference is recorded so the process is observably
     // owned by Restate, and it names the segment it was minted for.
@@ -1682,10 +1680,14 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
     .await;
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
-    let report = runner
-        .admit_pending_processes("test")
+    runner
+        .deliver_process_start(&crashed_before_submit_id, "test:1")
         .await
-        .expect("sweep starts both rows");
+        .expect("deliver crashed row");
+    runner
+        .deliver_process_start(&cancelling.id, "test:1")
+        .await
+        .expect("deliver cancelling row");
     server.await.expect("mock ingress server task");
 
     let requests = captured.lock_recover().clone();
@@ -1716,26 +1718,6 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
         },
         "both rows reach the ingress, keyed by their own segment: {requests:?}"
     );
-    let mut admitted = report
-        .admitted
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    admitted.sort();
-    assert_eq!(admitted, {
-        let mut expected = vec![
-            cancelling.id.to_string(),
-            crashed_before_submit_id.to_string(),
-        ];
-        expected.sort();
-        expected
-    });
-    assert!(
-        report.deferred.is_empty(),
-        "neither row is deferred: {:?}",
-        report.deferred
-    );
-
     // The cancel-requested row is now owned by Restate and still non-terminal:
     // the sweep submitted it and wrote no terminal of its own. Its run honours
     // the standing request.

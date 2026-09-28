@@ -924,3 +924,14 @@ lash_store_sql::statements! {
              FOR UPDATE SKIP LOCKED";
     }
 }
+
+lash_store_sql::statements! {
+    /// Lock the due process-start obligations before claiming them.
+    pub(crate) struct ProcessStartObligationPostgresStatements @ "process" {
+        start_obligation_select_due_locking = "SELECT start_obligation_id FROM processes
+             WHERE start_obligation_state IN ('due', 'claimed') AND start_obligation_due_at_ms <= ?1
+             ORDER BY start_obligation_due_at_ms, start_obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
+    }
+}

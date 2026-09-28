@@ -47,8 +47,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     // The app sink, wired exactly as bootstrap wires it — through the
     // composition-owned watched decorator, feeding an mpsc channel.
     let (sink_tx, mut sink_rx) = mpsc::channel::<lash::process::ProcessEvent>(16);
-    let (fault_tx, _fault_rx) = mpsc::channel::<WorkerFaultNotice>(16);
-    let (watched, wiring) = watched_process_work(&double, sink_tx, fault_tx);
+    let (watched, wiring) = watched_process_work(&double, sink_tx);
     let backend = DecoratedBackend::over(double.lash_backend()).with_process_work(wiring);
     let core = explicit_durable_test_facets_on(backend.into())
         .provider(provider)
@@ -1177,91 +1176,11 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-/// The host end of the admission contract: a drive that admits rows and
-/// returns cannot report the backend fault that killed one of them in its
-/// return value, so the worker hands the typed fault to the sink the
-/// workbench already installs, and the workbench turns it into the notice
-/// it writes to its stderr process log.
 #[test]
-fn worker_faults_reach_the_workbench_sink_as_rendered_notices() {
-    run_async_test_on_stack_budget("workbench-worker-fault-sink", || {
-        worker_faults_reach_the_workbench_sink_as_rendered_notices_inner()
-    });
-}
-
-/// What the workbench renders for a backend fault: the typed operation
-/// survives into the host's own line, so the notice says which registry
-/// call failed without anyone parsing the message.
-fn rendered_backend_fault(process_id: &ProcessId) -> String {
-    format!(
-        "kind=recovery-backend-error process={process_id} operation=WriteTerminal error=terminal write rejected by the store"
-    )
-}
-/// A run that failed after admission names its row and no registry call.
-fn rendered_run_failure(process_id: &ProcessId) -> String {
-    format!("kind=recovery-run-failed process={process_id} operation=- error=engine run failed")
-}
-/// A scan that gave up part-way is pass-scoped, so it blames no row.
-const RENDERED_SCAN_FAILURE: &str =
-    "kind=non-terminal-scan-incomplete process=- operation=- error=registry page read failed";
-
-/// Hand one typed fault to the workbench's sink the way the durable process
-/// worker does, and return the line the host would render for it.
-async fn rendered_worker_fault(fault: lash::process::ProcessWorkerFault) -> String {
-    let (event_tx, _event_rx) = mpsc::channel::<lash::process::ProcessEvent>(4);
-    let (fault_tx, mut fault_rx) = mpsc::channel::<WorkerFaultNotice>(4);
-    let sink = ChannelProcessEventSink::new(event_tx, fault_tx);
-    lash::process::ProcessEventSink::emit_worker_fault(&sink, &fault).await;
-    fault_rx.recv().await.expect("worker fault notice").render()
-}
-
-async fn worker_faults_reach_the_workbench_sink_as_rendered_notices_inner() {
-    let faulted_row = ProcessId::fixture("workbench-faulted-row");
-    let backend_fault = lash::process::ProcessWorkerFault::RecoveryBackendError {
-        process_id: faulted_row.clone(),
-        operation: lash::durability::ProcessRecoveryOperation::WriteTerminal,
-        error: "terminal write rejected by the store".to_string(),
-    };
-    assert_eq!(
-        rendered_worker_fault(backend_fault).await,
-        rendered_backend_fault(&faulted_row)
-    );
-
-    let failed_run = ProcessId::fixture("workbench-failed-run");
-    let run_failure = lash::process::ProcessWorkerFault::RecoveryRunFailed {
-        process_id: failed_run.clone(),
-        error: "engine run failed".to_string(),
-    };
-    assert_eq!(
-        rendered_worker_fault(run_failure).await,
-        rendered_run_failure(&failed_run)
-    );
-
-    let scan_failure = lash::process::ProcessWorkerFault::NonTerminalScanIncomplete {
-        error: "registry page read failed".to_string(),
-    };
-    assert_eq!(
-        rendered_worker_fault(scan_failure).await,
-        RENDERED_SCAN_FAILURE
-    );
-}
-
-/// The rendering test above hands faults to the sink directly, so it would
-/// still pass if bootstrap stopped installing that sink. The wiring is the
-/// part the ticket is about — the Restate engine's process serving reports
-/// its worker faults to the sink installed on the engine and nowhere else —
-/// so guard the wiring itself.
-#[test]
-fn bootstrap_installs_the_fault_sink_on_the_engine() {
+fn bootstrap_installs_the_process_event_sink_on_the_engine() {
     const BOOTSTRAP_SOURCE: &str = include_str!("../bootstrap.rs");
-    assert!(
-        BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new("),
-        "bootstrap must build the fault-observing process event sink"
-    );
-    assert!(
-        BOOTSTRAP_SOURCE.contains(".with_process_event_sink(Arc::clone(&process_event_sink))"),
-        "bootstrap must install the fault-observing sink on the Restate engine"
-    );
+    assert!(BOOTSTRAP_SOURCE.contains("ChannelProcessEventSink::new(process_event_tx)"));
+    assert!(BOOTSTRAP_SOURCE.contains(".with_process_event_sink(Arc::clone(&process_event_sink))"));
 }
 
 /// The process ids the work rail renders with no session selected: the
@@ -1284,7 +1203,6 @@ async fn work_rail_process_ids(state: &AppState) -> Vec<String> {
 fn watched_process_work(
     double: &lash_restate_test::RestateTestBackend,
     sink_tx: tokio::sync::mpsc::Sender<lash::process::ProcessEvent>,
-    fault_tx: tokio::sync::mpsc::Sender<WorkerFaultNotice>,
 ) -> (
     Arc<dyn lash::process::ProcessRegistry>,
     lash::process::ProcessWorkWiring,
@@ -1299,7 +1217,7 @@ fn watched_process_work(
         authority,
         double.engine_stores().process_registry(),
         double.engine_stores().process_continuations(),
-        Some(Arc::new(ChannelProcessEventSink::new(sink_tx, fault_tx))),
+        Some(Arc::new(ChannelProcessEventSink::new(sink_tx))),
     )
     .process_work();
     (Arc::clone(wiring.registry()), wiring)

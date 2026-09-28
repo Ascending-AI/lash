@@ -851,12 +851,10 @@ pub mod process {
         facade_support::ObservedProcess, facade_support::ObservedProcessEvent,
         facade_support::ObservedProcessEventLite, facade_support::ObservedProcessEventPage,
         facade_support::ObservedProcessEventReadOutcome, facade_support::ObservedWorkItem,
-        facade_support::ObservedWorkItemState, facade_support::ProcessAdmissionDeferred,
-        facade_support::ProcessAdmissionIntake, facade_support::ProcessAdmissionReport,
-        facade_support::ProcessChangeHub, facade_support::ProcessEventSink,
-        facade_support::ProcessRuntimeHost, facade_support::ProcessToolVisibilityFilter,
-        facade_support::ProcessWake, facade_support::ProcessWorkObserver,
-        facade_support::ProcessWorkSnapshot, facade_support::ProcessWorkerFault,
+        facade_support::ObservedWorkItemState, facade_support::ProcessChangeHub,
+        facade_support::ProcessEventSink, facade_support::ProcessRuntimeHost,
+        facade_support::ProcessToolVisibilityFilter, facade_support::ProcessWake,
+        facade_support::ProcessWorkObserver, facade_support::ProcessWorkSnapshot,
         facade_support::SessionScopeId, facade_support::watch_process_registry,
         facade_support::watch_process_registry_with_sink, lifetime,
     };
@@ -889,7 +887,6 @@ pub mod process {
 
 /// Durability configuration and backend contracts.
 pub mod durability {
-    pub use lash_core::facade_support::{ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation};
     /// Effect-host inputs, replay projections, and local execution capabilities.
     pub use lash_core::runtime::{
         BoundaryReason, CanonicalRuntimeEffectEnvelope, EffectJournalIdentity,

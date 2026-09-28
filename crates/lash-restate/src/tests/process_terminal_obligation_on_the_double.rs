@@ -15,6 +15,7 @@ use super::*;
 
 use lash_core::StoreSet as _;
 use lash_core::runtime::drive::relay::relay_due;
+use lash_core::runtime::process_start::ProcessStartRelay;
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
 use lash_core::store::{ObligationKind, ObligationState};
 
@@ -70,7 +71,7 @@ struct World {
     admin: RestateAdminClient,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-    deployment: RestateProcessDeployment,
+    start_relay: ProcessStartRelay,
     relay: ProcessTerminalRelay,
     runner: Arc<TerminalRunner>,
 }
@@ -134,8 +135,12 @@ impl World {
             Arc::clone(&registry),
             Arc::clone(&continuations),
         );
-        deployment.install_park_reconciler(crate::RestateAdminClient::new(connection.clone()));
         let port: Arc<dyn lash_core::ProcessWorkSubstrate> = deployment.test_process_work();
+        let start_relay = ProcessStartRelay::new(
+            stores.obligation_ledger(ObligationKind::ProcessStart),
+            Arc::clone(&registry),
+            Arc::clone(&port),
+        );
         let relay = ProcessTerminalRelay::new(
             stores.obligation_ledger(ObligationKind::ProcessTerminal),
             Arc::clone(&registry),
@@ -147,7 +152,7 @@ impl World {
             ingress: RestateIngressClient::new(connection),
             registry,
             continuations,
-            deployment,
+            start_relay,
             relay,
             runner,
         }
@@ -162,12 +167,30 @@ impl World {
     }
 
     async fn sweep(&self) {
-        let _ = self
-            .deployment
-            .test_process_work()
-            .admit_pending_processes("process terminal obligation")
-            .await
-            .expect("the sweep runs");
+        relay_due(
+            &self.start_relay,
+            &lash_core::facade_support::SystemClock,
+            std::num::NonZeroUsize::new(128).expect("nonzero"),
+        )
+        .await
+        .expect("deliver due process starts");
+        crate::process::reconcile_process_parks(
+            &self.admin,
+            &crate::services::DEFAULT_NAMESPACE,
+            &self.registry,
+            &self.continuations,
+        )
+        .await
+        .expect("reconcile paused processes");
+        crate::process::park_reconcile::end_lost_process_runs(
+            &self.admin,
+            &crate::services::DEFAULT_NAMESPACE,
+            &self.registry,
+            &self.continuations,
+            std::num::NonZeroUsize::new(128).expect("nonzero"),
+        )
+        .await
+        .expect("end lost process runs");
     }
 
     async fn publication(&self, process_id: &ProcessId) -> Option<ObligationState> {

@@ -875,6 +875,31 @@ async fn add_prior_fixture_obligation_columns(pool: &sqlx::PgPool) {
         .await
         .expect("add the ADR 0109 obligation columns to the refusal fixture catalog");
     }
+    let start_check = OBLIGATION_CHECK.replace("obligation_", "start_obligation_");
+    sqlx::raw_sql(&format!(
+        "ALTER TABLE lash_processes
+             ADD COLUMN IF NOT EXISTS start_obligation_id TEXT,
+             ADD COLUMN IF NOT EXISTS start_obligation_state TEXT,
+             ADD COLUMN IF NOT EXISTS start_obligation_attempts INTEGER NOT NULL DEFAULT 0,
+             ADD COLUMN IF NOT EXISTS start_obligation_due_at_ms BIGINT,
+             ADD COLUMN IF NOT EXISTS start_obligation_claim_token TEXT,
+             ADD COLUMN IF NOT EXISTS start_obligation_stall_reason TEXT,
+             ADD COLUMN IF NOT EXISTS start_obligation_last_error TEXT,
+             ADD COLUMN IF NOT EXISTS start_obligation_settled_at_ms BIGINT,
+             DROP CONSTRAINT IF EXISTS ck_processes_start_obligation,
+             ADD CONSTRAINT ck_processes_start_obligation CHECK ({start_check});
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_id
+             ON lash_processes(start_obligation_id);
+         CREATE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_due
+             ON lash_processes(start_obligation_due_at_ms, start_obligation_id)
+             WHERE start_obligation_state IN ('due', 'claimed');
+         CREATE INDEX IF NOT EXISTS idx_lash_processes_start_obligation_stalled
+             ON lash_processes(start_obligation_id)
+             WHERE start_obligation_state = 'stalled';"
+    ))
+    .execute(pool)
+    .await
+    .expect("add the process-start obligation columns to the refusal fixture catalog");
 }
 
 /// The obligation columns' CHECK, as `schema.sql` states it on every ledger.

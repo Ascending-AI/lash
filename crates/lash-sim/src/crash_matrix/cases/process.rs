@@ -36,6 +36,69 @@ use crate::crash_matrix::world::{CoreBuild, CrashWorld};
 pub(crate) const PROCESS_WORKFLOW: &str = "LashProcessWorkflow";
 const PROCESS: &str = "main";
 
+/// A registration committed immediately before a deployment crash has no
+/// caller left to submit its run. Its start obligation must do so after the
+/// new deployment begins reconciling.
+pub(super) async fn stage_start(point: CrashPoint, seed: u64) -> Result<Staged, String> {
+    if point != CrashPoint::AfterStateCommit {
+        return Err(format!("process start has no {point:?} cell"));
+    }
+    let world = CrashWorld::new(seed, rlm_core(), true).await?;
+    world.restart().await?;
+    let request = publish_process(&world, "500ms")
+        .await?
+        .with_host_start_key(format!("crash-matrix-process-start-{seed}"));
+    let env_spec = request.env_spec.clone();
+    let registration = request.into_registration(None);
+    let registry = world.backend().process_registry();
+    let env_store = world.backend().process_env_store();
+    let started = lash_core::runtime::register_process_start(
+        &lash_core::runtime::ProcessStartStores {
+            registry: registry.as_ref(),
+            env_store: Some(&env_store),
+            engines: None,
+            engines_required: false,
+            executor: "process start crash matrix",
+        },
+        registration,
+        &[],
+        env_spec.as_ref(),
+    )
+    .await
+    .map_err(|error| format!("register before the crash: {error}"))?;
+    let process = started.record.id;
+    let origin_ms = world.now_ms();
+    world.crash_and_restart().await?;
+    let expected = Expected {
+        custom: vec![(
+            "process_start",
+            Arc::new(move |world: &CrashWorld| {
+                let process = process.clone();
+                Box::pin(async move {
+                    match world
+                        .backend()
+                        .process_registry()
+                        .get_process(&process)
+                        .await
+                    {
+                        Ok(Some(record)) if record.first_started.is_some() => Vec::new(),
+                        Ok(Some(_)) => vec![format!("process `{process}` has not started")],
+                        Ok(None) => vec![format!("process `{process}` disappeared")],
+                        Err(error) => vec![format!("read process `{process}`: {error}")],
+                    }
+                })
+            }),
+        )],
+        ..Expected::default()
+    };
+    Ok(Staged {
+        world,
+        notes: Vec::new(),
+        expected,
+        origin_ms: Some(origin_ms),
+    })
+}
+
 /// The journal commands of the process workflow's run the mid-journal cut
 /// draws from: after the input command (0) come the segment admission and
 /// start, the sleep's frontier, call and timer, the terminal write, the
@@ -76,6 +139,7 @@ fn rlm_core() -> CoreBuild {
         lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+            .recovery_lease(super::recovery_lease())
             .provider(provider)
             .model(model_spec()?)
             .build(owner)

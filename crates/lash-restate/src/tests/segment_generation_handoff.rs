@@ -578,16 +578,17 @@ impl Roll {
         self.server.settle().await;
     }
 
-    /// One pass of a deployment's recovery sweep over the shared stores.
-    async fn sweep(&self) {
-        let _report = RestateProcessIngressRunner::new(
+    /// Redeliver the current segment under its stable workflow key.
+    async fn sweep(&self, process_id: &ProcessId) {
+        let runner = RestateProcessIngressRunner::new(
             self.connection.clone(),
             Arc::clone(&self.registry),
             Arc::clone(&self.continuations),
-        )
-        .admit_pending_processes("fig-3795-l5")
-        .await
-        .expect("the recovery sweep runs");
+        );
+        runner
+            .deliver_process_start(process_id, "test:1")
+            .await
+            .expect("redeliver process start");
     }
 
     /// Every invocation of a generation lane of the process workflow.
@@ -1033,8 +1034,8 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         "{case}: the recorded route"
     );
 
-    roll.sweep().await;
-    roll.sweep().await;
+    roll.sweep(&process_id).await;
+    roll.sweep(&process_id).await;
     let live = roll.invocations_of(&stable_successor);
     assert_eq!(
         live.len(),
@@ -1076,7 +1077,7 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         .unwrap_or_else(|error| panic!("{case}: the awaiter failed: {error}"));
     roll.settle().await;
     let invocations = roll.server.invocations().len();
-    roll.sweep().await;
+    roll.sweep(&process_id).await;
     roll.settle().await;
     assert_eq!(
         roll.server.invocations().len(),
@@ -1109,7 +1110,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     .await;
     roll.settle().await;
 
-    roll.sweep().await;
+    roll.sweep(&process_id).await;
     roll.settle().await;
     assert_eq!(
         roll.invocations_of(&stable_successor).len(),

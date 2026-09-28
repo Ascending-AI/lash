@@ -60,9 +60,8 @@ impl ProcessLocalExecution {
                 env_spec,
                 execution_context: _,
             } => {
-                // Registering the row is the whole start: the registry's
-                // non-terminal row is the durable work queue, and the
-                // host-owned process-work substrate is its sole executor. A
+                // Registration arms the start obligation in the same
+                // transaction. The process-work substrate executes it. A
                 // runtime start derives its key from its admitted operation,
                 // and a host start from its caller or its admitted scope
                 // (ADR 0107).
@@ -82,18 +81,19 @@ impl ProcessLocalExecution {
                 let realization = started.realization();
                 let disposition = started.disposition;
                 let record = started.record;
-                // The poke is advisory. Registration already committed the
-                // durable row, and the row is the work queue: the engine's
-                // next admission pass submits every pending row, so the row
-                // runs whether or not this nudge lands. Turning a
-                // failed nudge into a start error would tell the caller the
-                // child does not exist while it is queued to run, and the
-                // retry that follows does the work twice.
-                if let Err(error) = process_work.admit_pending_processes("process_start").await {
+                // The registration obligation survives a failed immediate
+                // attempt and the relay retries it after this effect returns.
+                if let Err(error) = process_work
+                    .deliver_process_start(
+                        &record.id,
+                        &format!("process_start:{}:direct", record.id),
+                    )
+                    .await
+                {
                     tracing::warn!(
                         process_id = %record.id,
                         %error,
-                        "process start registered; advisory worker poke failed, the recovery sweep owns the run"
+                        "process start registered; immediate delivery failed, the obligation relay owns the run"
                     );
                 }
                 Ok((
@@ -438,13 +438,6 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl crate::ProcessWorkSubstrate for ReattachOnce {
-        async fn admit_pending_processes(
-            &self,
-            _reason: &str,
-        ) -> Result<crate::ProcessAdmissionReport, crate::PluginError> {
-            unreachable!("terminal-wait witness does not admit work")
-        }
-
         async fn await_process_terminal(
             &self,
             process_id: &crate::ProcessId,

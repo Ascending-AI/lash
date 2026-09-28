@@ -361,11 +361,20 @@ table lash_processes
   column record_json text not-null
   column segment_generation text nullable
   column start_key text nullable
+  column start_obligation_attempts integer not-null default
+  column start_obligation_claim_token text nullable
+  column start_obligation_due_at_ms bigint nullable
+  column start_obligation_id text nullable
+  column start_obligation_last_error text nullable
+  column start_obligation_settled_at_ms bigint nullable
+  column start_obligation_stall_reason text nullable
+  column start_obligation_state text nullable
   column status text not-null
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
   unique (obligation_id)
   unique (start_key) where start_key is not null
+  unique (start_obligation_id)
   primary-key (process_id)
 table lash_queued_run_members
   column collection_kind text not-null

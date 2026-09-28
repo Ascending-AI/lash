@@ -17,7 +17,9 @@ use lash_core_execution::store::{
 use lash_store_sql::Dialect;
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::ProcessObligationStatements;
+use lash_store_sql::process::processes::{
+    ProcessObligationStatements, ProcessStartObligationStatements,
+};
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
@@ -27,6 +29,7 @@ use sqlx::{PgPool, Postgres, Row};
 use crate::StoreError;
 use crate::process_sql::{
     ParentEndPlanObligationPostgresStatements, ProcessObligationPostgresStatements,
+    ProcessStartObligationPostgresStatements,
 };
 use crate::session_roots::{
     ControlIntentObligationPostgresStatements, SessionRootObligationPostgresStatements,
@@ -70,6 +73,12 @@ static PROCESSES: LazyLock<
     shared: ProcessObligationStatements::render(Dialect::postgres()),
     locking: ProcessObligationPostgresStatements::render(Dialect::postgres()),
 });
+static PROCESS_STARTS: LazyLock<
+    LedgerSql<ProcessStartObligationStatements, ProcessStartObligationPostgresStatements>,
+> = LazyLock::new(|| LedgerSql {
+    shared: ProcessStartObligationStatements::render(Dialect::postgres()),
+    locking: ProcessStartObligationPostgresStatements::render(Dialect::postgres()),
+});
 
 /// `kind`'s shared statements and its locking due read. Ingress names its
 /// turn-input table here; its ledger composes that table with the
@@ -92,6 +101,13 @@ fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str
         ObligationKind::ParentEnd => (
             PLANS.shared.obligation_sql(),
             PLANS.locking.obligation_select_due_locking.sql(),
+        ),
+        ObligationKind::ProcessStart => (
+            PROCESS_STARTS.shared.obligation_sql(),
+            PROCESS_STARTS
+                .locking
+                .start_obligation_select_due_locking
+                .sql(),
         ),
         ObligationKind::ProcessTerminal => (
             PROCESSES.shared.obligation_sql(),

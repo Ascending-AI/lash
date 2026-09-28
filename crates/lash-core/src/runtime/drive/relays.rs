@@ -12,6 +12,7 @@ use std::sync::Arc;
 use super::relay::ObligationRelay;
 use super::{ControlIntentRelay, IngressRelay, ParentEndRelay, ScopeCloseRelay};
 use crate::engine::ScopeCloseSink;
+use crate::runtime::process_start::ProcessStartRelay;
 use crate::runtime::process_terminal::ProcessTerminalRelay;
 use crate::runtime::session_delete::SessionDeleteRelay;
 use crate::store::ObligationKind;
@@ -40,7 +41,9 @@ impl RelayNeed {
             ObligationKind::Ingress
             | ObligationKind::ControlIntent
             | ObligationKind::ScopeClose => None,
-            ObligationKind::ParentEnd | ObligationKind::ProcessTerminal => Some(Self::ProcessWork),
+            ObligationKind::ParentEnd
+            | ObligationKind::ProcessStart
+            | ObligationKind::ProcessTerminal => Some(Self::ProcessWork),
             ObligationKind::SessionDelete => Some(Self::SessionAdministration),
         }
     }
@@ -184,6 +187,14 @@ pub fn obligation_relays(
             ObligationKind::SessionDelete => Arc::new(SessionDeleteRelay::new(
                 administration.clone().ok_or_else(|| unavailable(kind))?,
             )),
+            ObligationKind::ProcessStart => {
+                let wiring = processes.as_ref().ok_or_else(|| unavailable(kind))?;
+                Arc::new(ProcessStartRelay::new(
+                    backend.obligation_ledger(kind),
+                    Arc::clone(wiring.registry()),
+                    Arc::clone(wiring.port()),
+                ))
+            }
             ObligationKind::ProcessTerminal => {
                 let wiring = processes.as_ref().ok_or_else(|| unavailable(kind))?;
                 Arc::new(ProcessTerminalRelay::new(

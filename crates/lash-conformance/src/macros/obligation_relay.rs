@@ -20,6 +20,7 @@ macro_rules! obligation_relay_tests {
             ),
             (a_rearm_returns_a_stalled_obligation_to_due, "obligation-rearm"),
             (immediate_delivery_takes_only_a_due_obligation, "obligation-immediate"),
+            (registered_processes_are_claimed_through_every_obligation_page, "process-start-obligation-pages"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

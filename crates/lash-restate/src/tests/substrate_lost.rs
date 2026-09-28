@@ -1053,16 +1053,15 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
         body: r#"{"invocationId":"inv_current_ref","status":"PreviouslyAccepted"}"#,
     }])
     .await;
-    let report = RestateProcessIngressRunner::new(
+    RestateProcessIngressRunner::new(
         base_url,
         Arc::clone(&segment.registry),
         Arc::clone(&segment.continuations),
     )
-    .admit_pending_processes("admission-sweep")
+    .deliver_process_start(&segment.process_id, "test:1")
     .await
     .expect("sweep the pending rows");
     server.await.expect("capture server");
-    assert_eq!(report.admitted, vec![segment.process_id.to_string()]);
     let requests = captured.lock_recover().clone();
     assert_eq!(requests.len(), 1, "{requests:?}");
     assert!(

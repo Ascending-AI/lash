@@ -171,6 +171,82 @@ fn ledger_of(fixture: &ObligationLawFixture) -> Arc<dyn ObligationLedger> {
         .obligation_ledger(ObligationKind::SessionDelete)
 }
 
+/// Registrations arm their own start rows and a bounded due pass reaches
+/// every row without scanning the process registry.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance law: every store result is asserted"
+)]
+pub async fn registered_processes_are_claimed_through_every_obligation_page(
+    fixture: ObligationLawFixture,
+) {
+    use crate::{Lifetime, ProcessInput, ProcessProvenance, ProcessRegistration};
+    use std::collections::BTreeSet;
+
+    let registry = fixture.stores.process_registry();
+    let ledger = fixture
+        .stores
+        .obligation_ledger(ObligationKind::ProcessStart);
+    let mut registered = BTreeSet::new();
+    for index in 0..260 {
+        let process = registry
+            .register_process(
+                ProcessRegistration::new(
+                    ProcessInput::Engine {
+                        kind: "process-start-law".to_owned(),
+                        payload: serde_json::json!({"index": index}),
+                    },
+                    ProcessProvenance::host(),
+                    Lifetime::Detached,
+                )
+                .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+                    "process-start-law-env",
+                ))),
+            )
+            .await
+            .expect("register a process");
+        registered.insert(process.id);
+    }
+
+    let mut delivered = BTreeSet::new();
+    let mut pages = 0;
+    let now = (i64::MAX / 4) as u64;
+    loop {
+        let claims = ledger
+            .claim_due(now, 60_000, page(17))
+            .await
+            .expect("claim one bounded page");
+        if claims.is_empty() {
+            break;
+        }
+        pages += 1;
+        assert!(claims.len() <= 17);
+        for claim in claims {
+            let ObligationKey::ProcessStart { process_id } = claim.key.expect("decode start")
+            else {
+                panic!("a process-start ledger returned another key");
+            };
+            assert!(registered.contains(&process_id));
+            assert_eq!(claim.attempts, 1);
+            assert!(delivered.insert(process_id));
+            assert_eq!(
+                ledger
+                    .settle(
+                        &claim.id,
+                        &claim.token,
+                        ObligationSettlement::Delivered,
+                        now
+                    )
+                    .await
+                    .expect("settle start"),
+                SettleOutcome::Applied
+            );
+        }
+    }
+    assert!(pages > 1, "the law must exercise more than one page");
+    assert_eq!(delivered, registered);
+}
+
 /// Arming touches only a row that owes nothing, and a missing row arms
 /// nothing.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]

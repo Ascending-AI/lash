@@ -378,6 +378,56 @@ impl ObligationProbe for SessionDeleteProbe {
 /// terminal promise may still be stranded. A `stalled` publication is typed.
 struct ProcessTerminalProbe;
 
+struct ProcessStartProbe;
+
+#[async_trait::async_trait]
+impl ObligationProbe for ProcessStartProbe {
+    fn kind(&self) -> &'static str {
+        "process_start"
+    }
+
+    async fn unsettled(
+        &self,
+        world: &CrashWorld,
+        _expected: &Expected,
+    ) -> Result<Vec<String>, String> {
+        let processes = world
+            .backend()
+            .process_registry()
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..lash_core::ProcessListFilter::default()
+            })
+            .await
+            .map_err(|error| format!("list processes: {error}"))?;
+        let ledger = world
+            .backend()
+            .obligation_ledger(ObligationKind::ProcessStart);
+        let mut unsettled = Vec::new();
+        for record in processes
+            .iter()
+            .filter(|record| !record.input.is_externally_owned())
+        {
+            let id = lash_core::store::process_start_obligation_id(&record.id);
+            let standing = ledger
+                .standing(&id)
+                .await
+                .map_err(|error| error.to_string())?;
+            match standing {
+                Some(lash_core::store::ObligationStanding {
+                    state: ObligationState::Delivered | ObligationState::Stalled,
+                    ..
+                }) => {}
+                state => unsettled.push(format!(
+                    "process `{}` start obligation is {state:?}",
+                    record.id
+                )),
+            }
+        }
+        Ok(unsettled)
+    }
+}
+
 #[async_trait::async_trait]
 impl ObligationProbe for ProcessTerminalProbe {
     fn kind(&self) -> &'static str {
@@ -437,6 +487,7 @@ pub fn obligation_probes() -> Vec<Box<dyn ObligationProbe>> {
         Box::new(ControlIntentProbe),
         Box::new(ParentEndPlanProbe),
         Box::new(SessionDeleteProbe),
+        Box::new(ProcessStartProbe),
         Box::new(ProcessTerminalProbe),
     ]
 }

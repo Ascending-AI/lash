@@ -1027,97 +1027,20 @@ pub(crate) struct TurnCancelResponse {
     pub(crate) cancellations: Vec<TurnCancelReceipt>,
 }
 
-/// Host-visible notice the workbench renders when the durable-process worker
-/// reports a fault.
-///
-/// Driving pending processes is an *admission* call: it submits eligible rows
-/// to the engine and returns, so a read, write, run-submission, or registry-page
-/// failure after a partial pass has no return value left to ride. The
-/// worker reports it as a typed
-/// [`ProcessWorkerFault`](lash::process::ProcessWorkerFault) on the same
-/// unconditional sink the workbench already installs for process events, and
-/// this notice is the host end of that contract: typed fault in, one rendered
-/// line out on the workbench's stderr process log (the browser feed carries
-/// process *events*; a worker fault is an operator signal, not a UI row).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct WorkerFaultNotice {
-    pub(crate) kind: &'static str,
-    pub(crate) process_id: Option<ProcessId>,
-    pub(crate) operation: Option<String>,
-    pub(crate) error: String,
-}
-
-impl WorkerFaultNotice {
-    pub(crate) fn from_fault(fault: &lash::process::ProcessWorkerFault) -> Self {
-        match fault {
-            lash::process::ProcessWorkerFault::RecoveryBackendError {
-                process_id,
-                operation,
-                error,
-            } => Self {
-                kind: "recovery-backend-error",
-                process_id: Some(process_id.clone()),
-                // The typed operation is why this notice is actionable: it says
-                // which registry call failed without parsing the message.
-                operation: Some(format!("{operation:?}")),
-                error: error.clone(),
-            },
-            lash::process::ProcessWorkerFault::RecoveryRunFailed { process_id, error } => Self {
-                kind: "recovery-run-failed",
-                process_id: Some(process_id.clone()),
-                operation: None,
-                error: error.clone(),
-            },
-            // Pass-scoped: no row owns a scan that gave up part-way, so the
-            // notice carries no process id rather than blaming one.
-            lash::process::ProcessWorkerFault::NonTerminalScanIncomplete { error } => Self {
-                kind: "non-terminal-scan-incomplete",
-                process_id: None,
-                operation: None,
-                error: error.clone(),
-            },
-            other => Self {
-                kind: "unknown-worker-fault",
-                process_id: None,
-                operation: None,
-                error: format!("{other:?}"),
-            },
-        }
-    }
-
-    pub(crate) fn render(&self) -> String {
-        format!(
-            "kind={} process={} operation={} error={}",
-            self.kind,
-            self.process_id.as_deref().unwrap_or("-"),
-            self.operation.as_deref().unwrap_or("-"),
-            self.error
-        )
-    }
-}
-
 /// Best-effort [`ProcessEventSink`](lash::process::ProcessEventSink) that hands
 /// each appended process event to a channel (ADR 0017). `emit` runs inline on
 /// the registry append path, so it must return fast: it does no I/O, only a
 /// non-blocking `try_send`. Dropping on a full channel is intentional — the
 /// durable paged event log is the reconcile source, not this feed.
 ///
-/// The same sink carries the durable-process worker's typed faults, which have
-/// no durable log to reconcile from: dropping one loses the only report that a
-/// pass lost a row, so the fault channel is sized for the whole feed rather
-/// than sharing the event channel's drop-under-pressure budget.
 #[derive(Clone)]
 pub(crate) struct ChannelProcessEventSink {
     pub(crate) tx: mpsc::Sender<lash::process::ProcessEvent>,
-    pub(crate) faults: mpsc::Sender<WorkerFaultNotice>,
 }
 
 impl ChannelProcessEventSink {
-    pub(crate) fn new(
-        tx: mpsc::Sender<lash::process::ProcessEvent>,
-        faults: mpsc::Sender<WorkerFaultNotice>,
-    ) -> Self {
-        Self { tx, faults }
+    pub(crate) fn new(tx: mpsc::Sender<lash::process::ProcessEvent>) -> Self {
+        Self { tx }
     }
 }
 
@@ -1126,11 +1049,6 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
     async fn emit(&self, event: &lash::process::ProcessEvent) {
         // Non-blocking: drop on a full channel rather than slow every append.
         let _ = self.tx.try_send(event.clone());
-    }
-
-    async fn emit_worker_fault(&self, fault: &lash::process::ProcessWorkerFault) {
-        // Runs on the worker's own path, so it stays non-blocking like `emit`.
-        let _ = self.faults.try_send(WorkerFaultNotice::from_fault(fault));
     }
 }
 

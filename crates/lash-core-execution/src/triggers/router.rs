@@ -525,7 +525,6 @@ impl TriggerRouter {
         } = self.store.ingest_occurrence(request).await?;
         let process_work = &self.process_work;
         let mut deliveries = Vec::new();
-        let mut started_any = false;
         for reservation in reservations {
             // FIG-806: reservation status is committed outside the effect
             // journal and changes from Reserved to AlreadyReserved on replay.
@@ -551,7 +550,6 @@ impl TriggerRouter {
                     continue;
                 }
             };
-            started_any = true;
             let outcome = match reservation.reservation_status {
                 TriggerDeliveryReservationOutcome::Reserved => TriggerDeliveryEmitOutcome::Started,
                 TriggerDeliveryReservationOutcome::AlreadyReserved => {
@@ -559,12 +557,6 @@ impl TriggerRouter {
                 }
             };
             deliveries.push(reservation.emit_report(Some(process_id), outcome));
-        }
-        if started_any {
-            let _ = process_work
-                .port()
-                .admit_pending_processes("trigger_delivery")
-                .await?;
         }
         Ok((
             TriggerEmitReport::new(occurrence.occurrence_id, deliveries),

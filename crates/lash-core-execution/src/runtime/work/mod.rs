@@ -14,7 +14,7 @@ pub use awaiter::ProcessRegistryAwaiter;
 pub use cadence::{WorkCadenceError, WorkCadencePolicy};
 pub use wake_delivery::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 
-use super::process::{ProcessAdmissionReport, ProcessRegistry, WatchedRegistry};
+use super::process::{ProcessRegistry, WatchedRegistry};
 use crate::{PluginError, ProcessAwaitOutput, SessionId};
 
 /// Deployment port for **session work** (ADR 0104 O1/O2, FIG-3600): the
@@ -149,16 +149,22 @@ pub trait SessionDriver: Send + Sync {
     ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort>;
 }
 
-/// Deployment port for durable **process work**: admission of pending process
-/// rows, and the only sanctioned way to wait on a started one (ADR 0016).
+/// Deployment port for durable process work.
 #[async_trait::async_trait]
 pub trait ProcessWorkSubstrate: Send + Sync {
-    /// Admit every pending (non-terminal) process this owner can take.
-    /// Admission, not completion -- see [`ProcessAdmissionReport`].
-    async fn admit_pending_processes(
+    /// Submit the registered process to the engine. The relay supplies a key
+    /// unique to this claim attempt. An engine may use it to coalesce a
+    /// repeated send; workflow engines may coalesce by process workflow key.
+    async fn deliver_process_start(
         &self,
-        reason: &str,
-    ) -> Result<ProcessAdmissionReport, PluginError>;
+        process_id: &crate::ProcessId,
+        delivery_key: &str,
+    ) -> Result<(), PluginError> {
+        let _ = delivery_key;
+        Err(PluginError::Invoke(format!(
+            "this engine cannot start process `{process_id}`"
+        )))
+    }
 
     /// There is no polling fallback and no "attach if provided". [`ProcessTerminalWait::Reattach`]
     /// is recoverable: the port bounded one transport attachment while the
@@ -283,19 +289,6 @@ impl ProcessWorkWiring {
         Ok(self)
     }
 
-    /// Ask the bound substrate to admit this owner's claimable pending processes.
-    ///
-    /// A host calls this after its process endpoint is ready, or whenever
-    /// deployment recovery should be driven. The returned
-    /// [`ProcessAdmissionReport`] describes admission, not completion: admitted
-    /// processes may still be running when this future resolves.
-    pub async fn admit_pending_processes(
-        &self,
-        reason: &str,
-    ) -> Result<ProcessAdmissionReport, PluginError> {
-        self.port.admit_pending_processes(reason).await
-    }
-
     pub fn registry(&self) -> &Arc<dyn ProcessRegistry> {
         self.watched.registry()
     }
@@ -371,13 +364,6 @@ impl std::fmt::Debug for NoProcessWork {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for NoProcessWork {
-    async fn admit_pending_processes(
-        &self,
-        _reason: &str,
-    ) -> Result<ProcessAdmissionReport, PluginError> {
-        Ok(ProcessAdmissionReport::default())
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &crate::ProcessId,

@@ -870,11 +870,14 @@ fn port_failure(effect: ArmEffect, site: HostSite) -> lash_core::PluginError {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessWorkSubstrate for CrashProcessPort {
-    async fn admit_pending_processes(
+    async fn deliver_process_start(
         &self,
-        reason: &str,
-    ) -> Result<lash_core::facade_support::ProcessAdmissionReport, lash_core::PluginError> {
-        self.inner.admit_pending_processes(reason).await
+        process_id: &lash_core::ProcessId,
+        delivery_key: &str,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner
+            .deliver_process_start(process_id, delivery_key)
+            .await
     }
 
     async fn await_process_terminal(

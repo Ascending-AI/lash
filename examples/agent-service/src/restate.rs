@@ -127,14 +127,6 @@ mod restate_tests {
                 .await
                 .expect("serve agent-service E2E HTTP surface");
         });
-        let _ = harness
-            .backend
-            .process_deployment()
-            .process_work()
-            .admit_pending_processes("agent_service_e2e_startup")
-            .await
-            .expect("drive startup recovery");
-
         wait_for_endpoint_socket(local_probe_addr).await;
         harness
             .backend

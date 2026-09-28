@@ -31,18 +31,21 @@ pub enum ObligationKind {
     ParentEnd,
     /// A closing session owes its physical delete.
     SessionDelete,
+    /// A registered process owes its first engine run.
+    ProcessStart,
     /// A terminal process owes its terminal publication.
     ProcessTerminal,
 }
 
 impl ObligationKind {
     /// Every kind, in declaration order.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
         Self::ParentEnd,
         Self::SessionDelete,
+        Self::ProcessStart,
         Self::ProcessTerminal,
     ];
 
@@ -55,6 +58,7 @@ impl ObligationKind {
             Self::ScopeClose => "scope_close",
             Self::ParentEnd => "parent_end",
             Self::SessionDelete => "session_delete",
+            Self::ProcessStart => "process_start",
             Self::ProcessTerminal => "process_terminal",
         }
     }
@@ -68,7 +72,9 @@ impl ObligationKind {
                 &[KeyColumnType::Text, KeyColumnType::Text]
             }
             Self::ControlIntent => &[KeyColumnType::Integer],
-            Self::SessionDelete | Self::ProcessTerminal => &[KeyColumnType::Text],
+            Self::SessionDelete | Self::ProcessStart | Self::ProcessTerminal => {
+                &[KeyColumnType::Text]
+            }
         }
     }
 }
@@ -115,6 +121,8 @@ pub enum ObligationKey {
     /// A `session_meta` row.
     SessionDelete { session_id: SessionId },
     /// A `processes` row.
+    ProcessStart { process_id: ProcessId },
+    /// A `processes` row.
     ProcessTerminal { process_id: ProcessId },
 }
 
@@ -128,6 +136,7 @@ impl ObligationKey {
             Self::ScopeClose { .. } => ObligationKind::ScopeClose,
             Self::ParentEnd { .. } => ObligationKind::ParentEnd,
             Self::SessionDelete { .. } => ObligationKind::SessionDelete,
+            Self::ProcessStart { .. } => ObligationKind::ProcessStart,
             Self::ProcessTerminal { .. } => ObligationKind::ProcessTerminal,
         }
     }
@@ -162,7 +171,7 @@ impl ObligationKey {
             Self::SessionDelete { session_id } => {
                 vec![KeyColumn::Text(session_id.as_str().to_owned())]
             }
-            Self::ProcessTerminal { process_id } => {
+            Self::ProcessStart { process_id } | Self::ProcessTerminal { process_id } => {
                 vec![KeyColumn::Text(process_id.as_str().to_owned())]
             }
         }
@@ -196,12 +205,17 @@ impl ObligationKey {
             ObligationKind::SessionDelete => Self::SessionDelete {
                 session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
             },
-            ObligationKind::ProcessTerminal => Self::ProcessTerminal {
-                process_id: ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
+            ObligationKind::ProcessStart | ObligationKind::ProcessTerminal => {
+                let process_id = ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
                     .map_err(|error| UndecodableObligation {
                         detail: error.to_string(),
-                    })?,
-            },
+                    })?;
+                if kind == ObligationKind::ProcessStart {
+                    Self::ProcessStart { process_id }
+                } else {
+                    Self::ProcessTerminal { process_id }
+                }
+            }
             ObligationKind::ControlIntent => {
                 let sequence = next_integer(&mut columns, kind, "intent_id")?;
                 Self::ControlIntent {
@@ -279,6 +293,13 @@ impl std::fmt::Display for ObligationId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.0)
     }
+}
+
+/// The obligation created by a process registration. A caller may attempt
+/// delivery immediately after its registration transaction commits.
+#[must_use]
+pub fn process_start_obligation_id(process_id: &ProcessId) -> ObligationId {
+    ObligationId::new(format!("process_start:{}", process_id.as_str()))
 }
 
 /// The derived id of a terminal root's scope-close obligation (ADR 0109

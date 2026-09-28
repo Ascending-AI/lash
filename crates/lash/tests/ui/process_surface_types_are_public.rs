@@ -16,7 +16,6 @@ use lash::process::{
     DeclaredProcessIdentity, HandleId, Lifetime, LifetimeDecision, LifetimePolicy,
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NonTerminalProcessPage, ObservedProcess,
     ObservedProcessEvent, ObservedWorkItem, ObservedWorkItemState, ParentEndPlan,
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport,
     ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
     ProcessChangeCursor, ProcessChangeHub, ProcessClockRebind, ProcessCompletionAuthority,
     ProcessCompletionOutcome, ProcessContinuationStore, ProcessCursor, ProcessCursorError,
@@ -39,13 +38,13 @@ use lash::process::{
     ProcessTerminalSemantics, ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone,
     ProcessToolIntents, ProcessToolVisibilityFilter, ProcessValueSelector, ProcessWake,
     ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkObserver,
-    ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, ProcessWorkerFault, Processes,
-    ProjectionWatermark, ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope,
-    SessionScopeId, StartCx, StartCxError, WaitKind, WaitState, WakeDelivery,
-    WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
-    WakeDeliveryDisposition, WakeDeliveryDriveReport, WakeDeliveryDriver, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, lifetime, process_wake_source_key,
-    publish_process_execution_env, watch_process_registry, watch_process_registry_with_sink,
+    ProcessWorkSnapshot, ProcessWorkSubstrate, ProcessWorkWiring, Processes, ProjectionWatermark,
+    ScopeGrant, ScopeId, ScopeRef, SessionProcessAdmin, SessionScope, SessionScopeId, StartCx,
+    StartCxError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
+    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryDriveReport,
+    WakeDeliveryDriver, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason, WatchedRegistry,
+    lifetime, process_wake_source_key, publish_process_execution_env, watch_process_registry,
+    watch_process_registry_with_sink,
 };
 
 fn paged_events_signature_is_public(processes: &Processes, cursor: ProcessCursor) {

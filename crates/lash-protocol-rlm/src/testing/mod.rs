@@ -96,14 +96,21 @@ impl DoubleProcesses {
             .expect("open a handler on the double")
     }
 
-    /// Submit every pending registry row to the double's process workflow.
+    /// Deliver the due ProcessStart obligations to the double.
     pub(crate) async fn admit_pending(&self) {
-        let _report = self
-            .backend
-            .process_work()
-            .admit_pending_processes("test")
-            .await
-            .expect("admit the pending processes");
+        let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+            self.backend
+                .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+            self.registry(),
+            Arc::clone(self.backend.process_work().port()),
+        );
+        lash_core::runtime::drive::relay::relay_due(
+            &relay,
+            &lash_core::facade_support::SystemClock,
+            std::num::NonZeroUsize::new(1024).expect("nonzero"),
+        )
+        .await
+        .expect("deliver process starts");
     }
 
     /// Await `process_id`'s terminal registry record.

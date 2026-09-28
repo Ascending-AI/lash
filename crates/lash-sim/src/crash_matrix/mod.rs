@@ -84,6 +84,8 @@ pub enum Seam {
     ParentEnd,
     /// S-21: a session deletion's cleanup after its close.
     SessionDelete,
+    /// A registered process start that must survive a host crash.
+    ProcessStart,
     /// S-14: a process's terminal and its publication to engine waiters.
     ProcessTerminal,
     /// A control intent's cancel reaching a running effect-group child: the
@@ -95,12 +97,13 @@ pub enum Seam {
 
 impl Seam {
     /// Every seam, in registry order.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Ingress,
         Self::ControlIntent,
         Self::ScopeClose,
         Self::ParentEnd,
         Self::SessionDelete,
+        Self::ProcessStart,
         Self::ProcessTerminal,
         Self::ChildCancel,
     ];
@@ -114,6 +117,7 @@ impl Seam {
             Self::ScopeClose => "scope_close",
             Self::ParentEnd => "parent_end",
             Self::SessionDelete => "session_delete",
+            Self::ProcessStart => "process_start",
             Self::ProcessTerminal => "process_terminal",
             Self::ChildCancel => "child_cancel",
         }
@@ -128,6 +132,7 @@ impl Seam {
             Self::ScopeClose => &["S-8"],
             Self::ParentEnd => &["S-10", "S-11"],
             Self::SessionDelete => &["S-21"],
+            Self::ProcessStart => &[],
             Self::ProcessTerminal => &["S-14"],
             Self::ChildCancel => &[],
         }
@@ -508,6 +513,13 @@ pub const MATRIX: &[CaseSpec] = &[
         CrashPoint::AfterDeliveryBeforeSettle,
         DetectionBound::LapsedClaim,
         "a deletion whose close was acknowledged before the host died finishes deleting the session without a caller retry",
+    ),
+    // --- Process start -----------------------------------------------------
+    today(
+        Seam::ProcessStart,
+        CrashPoint::AfterStateCommit,
+        DetectionBound::LostImmediateSqliteFailover,
+        "a process committed immediately before its host died starts through its registered obligation",
     ),
     // --- Process terminal (S-14) ------------------------------------------
     today(

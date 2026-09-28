@@ -352,12 +352,6 @@ async fn async_main() -> anyhow_like::Result<()> {
             .bind(chat_discard.serve())
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .build();
-        let _ = restate_backend
-            .process_deployment()
-            .process_work()
-            .admit_pending_processes("agent_service_startup")
-            .await
-            .map_err(|err| err.to_string())?;
         let restate_listener = tokio::net::TcpListener::bind(restate_endpoint_addr)
             .await
             .map_err(|err| format!("bind agent-service Restate endpoint: {err}"))?;

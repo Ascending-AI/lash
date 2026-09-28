@@ -498,6 +498,14 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     park_build_generation text,
     segment_generation text,
     record_json text NOT NULL,
+    start_obligation_id text,
+    start_obligation_state text,
+    start_obligation_attempts integer DEFAULT 0 NOT NULL,
+    start_obligation_due_at_ms bigint,
+    start_obligation_claim_token text,
+    start_obligation_stall_reason text,
+    start_obligation_last_error text,
+    start_obligation_settled_at_ms bigint,
     obligation_id text,
     obligation_state text,
     obligation_attempts integer DEFAULT 0 NOT NULL,
@@ -510,6 +518,7 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     CONSTRAINT ck_processes_lifetime_scope CHECK ((((lifetime = 'detached'::text) AND (lifetime_scope_kind IS NULL) AND (lifetime_scope_id IS NULL)) OR ((lifetime = 'until'::text) AND (lifetime_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'session'::text])) AND (lifetime_scope_id IS NOT NULL)))),
     CONSTRAINT ck_processes_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_processes_parked CHECK (((parked_since_ms IS NULL) = (parked_reason_code IS NULL))),
+    CONSTRAINT ck_processes_start_obligation CHECK ((((start_obligation_state IS NULL) AND (start_obligation_id IS NULL) AND (start_obligation_due_at_ms IS NULL) AND (start_obligation_claim_token IS NULL) AND (start_obligation_stall_reason IS NULL) AND (start_obligation_settled_at_ms IS NULL)) OR ((start_obligation_state = 'due'::text) AND (start_obligation_id IS NOT NULL) AND (start_obligation_due_at_ms IS NOT NULL) AND (start_obligation_claim_token IS NULL) AND (start_obligation_stall_reason IS NULL) AND (start_obligation_settled_at_ms IS NULL)) OR ((start_obligation_state = 'claimed'::text) AND (start_obligation_id IS NOT NULL) AND (start_obligation_due_at_ms IS NOT NULL) AND (start_obligation_claim_token IS NOT NULL) AND (start_obligation_stall_reason IS NULL) AND (start_obligation_settled_at_ms IS NULL)) OR ((start_obligation_state = 'delivered'::text) AND (start_obligation_id IS NOT NULL) AND (start_obligation_due_at_ms IS NULL) AND (start_obligation_claim_token IS NULL) AND (start_obligation_stall_reason IS NULL) AND (start_obligation_settled_at_ms IS NOT NULL)) OR ((start_obligation_state = 'stalled'::text) AND (start_obligation_id IS NOT NULL) AND (start_obligation_due_at_ms IS NULL) AND (start_obligation_claim_token IS NULL) AND (start_obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (start_obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_processes_status CHECK ((status = ANY (ARRAY['running'::text, 'waiting'::text, 'completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text, 'caller_departed'::text])))
 );
 
@@ -2340,6 +2349,27 @@ CREATE INDEX idx_lash_processes_pending_cancel ON lash_durable_read_fixture.lash
 --
 
 CREATE UNIQUE INDEX idx_lash_processes_start_key ON lash_durable_read_fixture.lash_processes USING btree (start_key) WHERE (start_key IS NOT NULL);
+
+
+--
+-- Name: idx_lash_processes_start_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_start_obligation_due ON lash_durable_read_fixture.lash_processes USING btree (start_obligation_due_at_ms, start_obligation_id) WHERE (start_obligation_state = ANY (ARRAY['due'::text, 'claimed'::text]));
+
+
+--
+-- Name: idx_lash_processes_start_obligation_id; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_processes_start_obligation_id ON lash_durable_read_fixture.lash_processes USING btree (start_obligation_id);
+
+
+--
+-- Name: idx_lash_processes_start_obligation_stalled; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_start_obligation_stalled ON lash_durable_read_fixture.lash_processes USING btree (start_obligation_id) WHERE (start_obligation_state = 'stalled'::text);
 
 
 --

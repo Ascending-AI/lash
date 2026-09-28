@@ -285,14 +285,6 @@ mod served_only_outside_a_run {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
-        async fn admit_pending_processes(
-            &self,
-            _reason: &str,
-        ) -> Result<lash_core::facade_support::ProcessAdmissionReport, lash_core::PluginError>
-        {
-            Ok(lash_core::facade_support::ProcessAdmissionReport::default())
-        }
-
         async fn await_process_terminal(
             &self,
             process_id: &ProcessId,

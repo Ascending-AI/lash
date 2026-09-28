@@ -259,17 +259,12 @@ pub mod facade_support {
     pub use crate::runtime::ObservedWorkItem;
     pub use crate::runtime::ObservedWorkItemState;
     pub use crate::runtime::OutputState;
-    pub use crate::runtime::ProcessAdmissionDeferred;
-    pub use crate::runtime::ProcessAdmissionIntake;
-    pub use crate::runtime::ProcessAdmissionReport;
     pub use crate::runtime::ProcessChangeHub;
     pub use crate::runtime::ProcessEngineProcessContext;
     pub use crate::runtime::ProcessEngineRegistry;
     pub use crate::runtime::ProcessEventAppendPlan;
     pub use crate::runtime::ProcessEventSink;
     pub use crate::runtime::ProcessEventSinkRegistration;
-    pub use crate::runtime::ProcessRecoveryAttemptOutcome;
-    pub use crate::runtime::ProcessRecoveryOperation;
     pub use crate::runtime::ProcessRuntimeHost;
     pub use crate::runtime::ProcessStartPlan;
     pub use crate::runtime::ProcessTerminalSemantics;
@@ -281,7 +276,6 @@ pub mod facade_support {
     pub use crate::runtime::ProcessWakeDeliveryRequest;
     pub use crate::runtime::ProcessWorkObserver;
     pub use crate::runtime::ProcessWorkSnapshot;
-    pub use crate::runtime::ProcessWorkerFault;
     pub use crate::runtime::QueuedDrainCandidate;
     pub use crate::runtime::QueuedDrainPolicy;
     pub use crate::runtime::QueuedDrainRequest;

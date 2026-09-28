@@ -178,7 +178,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
 /// through one cursor, and `drain_status` counts the parked processes.
 #[tokio::test]
 async fn parked_work_merges_parked_turns_and_processes() {
-    let backend: lash_core::Backend = double_backend().await;
+    let backend: lash_core::Backend = double_backend_explicit_reconcile().await;
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(

@@ -150,10 +150,6 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
     refused_process_registrations,
 };
-pub use process::{
-    ProcessAdmissionDeferred, ProcessAdmissionIntake, ProcessAdmissionReport,
-    ProcessRecoveryAttemptOutcome, ProcessRecoveryOperation, ProcessWorkerFault,
-};
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;

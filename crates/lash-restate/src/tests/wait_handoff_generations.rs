@@ -1104,13 +1104,6 @@ struct RecordedWakes {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessWorkSubstrate for RecordedWakes {
-    async fn admit_pending_processes(
-        &self,
-        _reason: &str,
-    ) -> Result<lash_core::facade_support::ProcessAdmissionReport, lash_core::PluginError> {
-        Ok(Default::default())
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

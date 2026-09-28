@@ -861,17 +861,15 @@ struct CountingProcessWork {
 
 #[async_trait]
 impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
-    async fn admit_pending_processes(
+    async fn deliver_process_start(
         &self,
-        _reason: &str,
-    ) -> std::result::Result<
-        lash_core::facade_support::ProcessAdmissionReport,
-        lash_core::PluginError,
-    > {
+        _process_id: &lash_core::ProcessId,
+        _delivery_key: &str,
+    ) -> std::result::Result<(), lash_core::PluginError> {
         self.counters
             .process_admissions
             .fetch_add(1, Ordering::SeqCst);
-        Ok(lash_core::facade_support::ProcessAdmissionReport::default())
+        Ok(())
     }
 
     async fn await_process_terminal(

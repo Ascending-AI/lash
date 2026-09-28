@@ -255,36 +255,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             }
         }
     });
-    // The worker's own faults ride the same sink, because the drive that loses
-    // a row is admission-only and has no return value left to say so. They are
-    // rare and unreconcilable, so they get their own channel — never queued
-    // behind event pressure — and are written to the workbench's stderr
-    // process log, where an operator reads them.
-    let (worker_fault_tx, mut worker_fault_rx) = mpsc::channel::<WorkerFaultNotice>(256);
-    let mut worker_fault_shutdown = host_shutdown.subscribe();
-    let worker_fault_task = tokio::spawn(async move {
-        loop {
-            tokio::select! {
-                biased;
-                changed = worker_fault_shutdown.changed() => {
-                    if changed.is_err() || *worker_fault_shutdown.borrow() {
-                        break;
-                    }
-                }
-                notice = worker_fault_rx.recv() => match notice {
-                    Some(notice) => eprintln!(
-                        "agent-workbench process worker fault: {}",
-                        notice.render()
-                    ),
-                    None => break,
-                }
-            }
-        }
-    });
-    let process_event_sink = Arc::new(ChannelProcessEventSink::new(
-        process_event_tx,
-        worker_fault_tx,
-    )) as Arc<dyn lash::process::ProcessEventSink>;
+    let process_event_sink = Arc::new(ChannelProcessEventSink::new(process_event_tx))
+        as Arc<dyn lash::process::ProcessEventSink>;
     // One Restate backend over the store set: the engine host journals the
     // turns' effects, runs the background processes, whose appended events
     // reach the sink best-effort after their durable write, and drives each
@@ -598,13 +570,8 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     }
     .await;
     let _ = host_shutdown.send(true);
-    for (name, task) in [
-        ("process event logger", process_event_task),
-        ("process worker fault logger", worker_fault_task),
-    ] {
-        if let Err(error) = task.await {
-            eprintln!("agent-workbench: {name} task join failed: {error}");
-        }
+    if let Err(error) = process_event_task.await {
+        eprintln!("agent-workbench: process event logger task join failed: {error}");
     }
     let cleanup = shutdown_workbench(&shutdown_core, &shutdown_provider).await;
     match (operation, cleanup) {

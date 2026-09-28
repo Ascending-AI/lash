@@ -460,13 +460,14 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::ProcessWorkSubstrate for PokeAlwaysFails {
-        async fn admit_pending_processes(
+        async fn deliver_process_start(
             &self,
-            _reason: &str,
-        ) -> Result<crate::ProcessAdmissionReport, crate::PluginError> {
+            _process_id: &crate::ProcessId,
+            _delivery_key: &str,
+        ) -> Result<(), crate::PluginError> {
             self.pokes.fetch_add(1, Ordering::SeqCst);
-            Err(crate::PluginError::Session(
-                "injected worker poke failure".to_string(),
+            Err(crate::PluginError::Invoke(
+                "start delivery unavailable".into(),
             ))
         }
 
@@ -497,10 +498,10 @@ mod tests {
         }
     }
 
-    /// FIG-2964, native tier: the worker poke after registration is advisory.
+    /// The immediate delivery after registration is advisory.
     ///
     /// Registration already committed the durable row, and the row is the work
-    /// queue — the recovery sweep runs it whether or not the nudge lands. A
+    /// queue — the obligation relay retries it whether or not delivery lands. A
     /// failed nudge surfaced as a start error would tell the caller the child
     /// does not exist while it is queued to run, and the caller's retry would
     /// then do the work twice.

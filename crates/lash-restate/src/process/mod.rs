@@ -27,10 +27,7 @@ use lash_core::{
     ProcessCompletionAuthority, ProcessExecutionContext, ProcessExternalRef, ProcessRecord,
     ProcessRegistration, ProcessRegistry, ProcessStatus, ProcessTerminalWait, ProcessWorkSubstrate,
     ProcessWorkWiring, Resolution, RuntimeError, RuntimeErrorCode, ScopedEffectController,
-    facade_support::ProcessAdmissionDeferred, facade_support::ProcessAdmissionReport,
-    facade_support::ProcessEventSink, facade_support::ProcessRecoveryAttemptOutcome,
-    facade_support::ProcessRecoveryOperation, facade_support::ProcessWorkerFault,
-    facade_support::watch_process_registry_with_sink,
+    facade_support::ProcessEventSink, facade_support::watch_process_registry_with_sink,
 };
 use lash_core_worker::DurableProcessWorker;
 use restate_sdk::context::ContextPromises;
@@ -468,15 +465,8 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
     }
 }
 
-/// [`ProcessWorkSubstrate`] that drives pending processes by submitting their
-/// `LashProcessWorkflow` through the Restate ingress instead of running them
-/// in-process.
-///
-/// This is the controller-owned process work handle: a host-owned
-/// The process-work port calls it on ingress-relevant events. Per row, it POSTs
-/// `LashProcessWorkflow/{process_id}/run/send` to the ingress. Restate
-/// coalesces by workflow key, so duplicate submits are idempotent and no Lash
-/// registry lease is needed at the Restate tier.
+/// The process-work port for delivering registered starts and other process
+/// operations to Restate.
 pub struct RestateProcessIngressRunner {
     ingress: RestateIngressClient,
     /// The namespace the deployment's process workflow is named in
@@ -484,13 +474,7 @@ pub struct RestateProcessIngressRunner {
     namespace: crate::RestateNamespace,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-    event_sink: Option<Arc<dyn ProcessEventSink>>,
-    park_reconciler: ParkReconciler,
 }
-
-/// The admin client a deployment's sweep reconciles engine-paused segments
-/// into process parks through, once the host installs one.
-type ParkReconciler = Arc<std::sync::OnceLock<crate::RestateAdminClient>>;
 
 impl RestateProcessIngressRunner {
     /// The runner of a deployment in the default namespace.
@@ -519,8 +503,6 @@ impl RestateProcessIngressRunner {
             namespace,
             registry,
             continuations,
-            event_sink: None,
-            park_reconciler: ParkReconciler::default(),
         }
     }
 
@@ -537,77 +519,37 @@ impl RestateProcessIngressRunner {
             namespace,
             registry,
             continuations,
-            event_sink: None,
-            park_reconciler: ParkReconciler::default(),
         }
-    }
-
-    fn with_park_reconciler(mut self, reconciler: ParkReconciler) -> Self {
-        self.park_reconciler = reconciler;
-        self
-    }
-
-    /// `RestateProcessDeployment::new_with_sink` installs the host's sink here,
-    /// because a per-row deferral only reaches a host that reads the report —
-    /// and every in-tree caller of `claim_and_run_pending` discards it. The
-    /// fault surface is the path that does not depend on anyone reading a
-    /// return value.
-    pub(crate) fn with_event_sink(mut self, sink: Option<Arc<dyn ProcessEventSink>>) -> Self {
-        self.event_sink = sink;
-        self
-    }
-
-    /// Push one worker fault to the host-facing sink, or to `tracing` when this
-    /// handle has none, so a fault is never silent.
-    async fn emit_worker_fault(
-        &self,
-        process_id: &ProcessId,
-        operation: ProcessRecoveryOperation,
-        error: &PluginError,
-    ) {
-        let fault = ProcessWorkerFault::RecoveryBackendError {
-            process_id: process_id.clone(),
-            operation,
-            error: error.to_string(),
-        };
-        let Some(sink) = self.event_sink.as_ref() else {
-            tracing::error!(
-                target: "lash_restate::process",
-                event = "process_worker.fault",
-                fault = "recovery_backend_error",
-                process_id = %process_id,
-                operation = operation.label(),
-                error = %error,
-                "restate ingress sweep fault (no process event sink wired)"
-            );
-            return;
-        };
-        sink.emit_worker_fault(&fault).await;
     }
 
     async fn submit_record(
         &self,
         record: ProcessRecord,
-    ) -> Result<IngressSubmitOutcome, PluginError> {
+        _delivery_key: &str,
+    ) -> Result<(), PluginError> {
         let process_id = record.id.clone();
         // Externally-owned rows are never executed by Lash (ADR 0110).
         // Defensively refuse to POST a run for one even when reached directly,
-        // so both the sweep and any direct caller are safe; their closure comes
+        // so a direct caller is safe; their closure comes
         // from their external owner calling `complete_process`.
         if record.input.is_externally_owned() {
-            return Ok(IngressSubmitOutcome::ExternallyOwned);
+            return Err(PluginError::Session(format!(
+                "externally owned process `{process_id}` cannot be started by Lash"
+            )));
         }
-        // Re-read before submitting: the registry page is a snapshot, and the
-        // row may have moved under it.
-        let current = self.registry.get_process(&process_id).await?;
+        // Re-read before submitting: the row may have moved since delivery
+        // claimed its obligation.
+        let Some(current) = self.registry.get_process(&process_id).await? else {
+            return Ok(());
+        };
         // Idempotent by process id: never re-submit a finished process.
-        if let Some(current) = current.as_ref().filter(|current| current.is_terminal()) {
-            return Ok(IngressSubmitOutcome::SettledByPeer(current.status));
+        if current.is_terminal() {
+            return Ok(());
         }
         // A standing cancel request is not a reason to withhold the submission.
         // Only a `StartFailed` request is terminal on the spot; every other
         // origin is recorded and waits for the run to honour it. Since the
-        // sweep never writes a terminal of its own, skipping here would leave a
+        // relay never writes a terminal of its own, skipping here would leave a
         // cancel-requested row that was never submitted permanently
         // non-terminal: `await_process_terminal` would never return and
         // retention would never reclaim it. The row is submitted, and the
@@ -619,7 +561,7 @@ impl RestateProcessIngressRunner {
         // that key. A key it no longer holds runs the segment's admission,
         // which starts a segment that never started, ends a started one whose
         // journal is gone as `SubstrateLost`, and ignores a segment that has
-        // already handed over. So the sweep reaches every kind of substrate
+        // already handed over. The engine recovery pass reaches substrate
         // loss, and the reference is observational only.
         let latest_handover = self
             .continuations
@@ -688,119 +630,8 @@ impl RestateProcessIngressRunner {
                 },
             )
             .await
-            .map(|_| IngressSubmitOutcome::Submitted)
+            .map(|_| ())
     }
-}
-
-impl RestateProcessIngressRunner {
-    async fn claim_and_run_pending(&self) -> Result<ProcessAdmissionReport, PluginError> {
-        // Engine-paused segments become process parks before the pass reads
-        // its registry page (FIG-3675). A failed reconcile is reported and retried
-        // by the next pass; it never stops this one.
-        if let Some(admin) = self.park_reconciler.get()
-            && let Err(error) =
-                reconcile_process_parks(admin, &self.namespace, &self.registry, &self.continuations)
-                    .await
-        {
-            tracing::warn!(
-                error = %error,
-                "restate process park reconcile failed; the next sweep retries it"
-            );
-        }
-        let mut report = ProcessAdmissionReport::default();
-        let limit = std::num::NonZeroUsize::MIN.saturating_add(255);
-        let mut continuation = None;
-        loop {
-            let page = match self
-                .registry
-                .list_non_terminal_processes_page(limit, continuation)
-                .await
-            {
-                Ok(page) => page,
-                Err(error) => {
-                    // The only remaining escape: a page read that fails after
-                    // earlier pages already admitted rows. An `Err` may follow
-                    // partial admission; name the admitted ids so they are not
-                    // silently lost.
-                    if !report.admitted.is_empty() {
-                        tracing::error!(
-                            admitted = report.admitted.len(),
-                            error = %error,
-                            "restate non-terminal registry scan failed after partial admission"
-                        );
-                    }
-                    return Err(error);
-                }
-            };
-            let next = page.continuation;
-            for record in page.records {
-                // Externally-owned rows are never submitted to ingress (ADR
-                // 0110): Lash does not execute them on any tier, and their
-                // external owner closes them. The pass reports each as
-                // deferred.
-                if record.input.is_externally_owned() {
-                    report.deferred.push(ProcessAdmissionDeferred {
-                        process_id: record.id.clone(),
-                        disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
-                    });
-                    continue;
-                }
-                let process_id = record.id.clone();
-                match self.submit_record(record).await {
-                    Ok(IngressSubmitOutcome::Submitted) => report.admitted.push(process_id),
-                    Ok(IngressSubmitOutcome::ExternallyOwned) => {
-                        report.deferred.push(ProcessAdmissionDeferred {
-                            process_id,
-                            disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
-                        });
-                    }
-                    Ok(IngressSubmitOutcome::SettledByPeer(terminal_status)) => {
-                        report.deferred.push(ProcessAdmissionDeferred {
-                            process_id,
-                            disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
-                                terminal_status,
-                            },
-                        });
-                    }
-                    Err(error) => {
-                        // Per-row submit failure is a per-row deferral. Failing
-                        // the whole call here would throw away the ids that
-                        // already reached the ingress in this same pass.
-                        report.deferred.push(ProcessAdmissionDeferred {
-                            process_id: process_id.clone(),
-                            disposition: ProcessRecoveryAttemptOutcome::BackendError {
-                                operation: ProcessRecoveryOperation::SubmitRun,
-                                error: error.to_string(),
-                            },
-                        });
-                        // The deferral only reaches a host that reads the
-                        // report; the fault surface reaches one that does not.
-                        self.emit_worker_fault(
-                            &process_id,
-                            ProcessRecoveryOperation::SubmitRun,
-                            &error,
-                        )
-                        .await;
-                    }
-                }
-            }
-            let Some(next) = next else {
-                break;
-            };
-            continuation = Some(next);
-        }
-        Ok(report)
-    }
-}
-
-/// What one ingress submit attempt did with a row.
-enum IngressSubmitOutcome {
-    /// The row's workflow run was submitted to the ingress.
-    Submitted,
-    /// Lash never executes the row (externally owned); nothing was submitted.
-    ExternallyOwned,
-    /// The row was already terminal when re-read just before submitting.
-    SettledByPeer(ProcessStatus),
 }
 
 impl RestateProcessIngressRunner {
@@ -871,11 +702,16 @@ impl RestateProcessIngressRunner {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for RestateProcessIngressRunner {
-    async fn admit_pending_processes(
+    async fn deliver_process_start(
         &self,
-        _reason: &str,
-    ) -> Result<ProcessAdmissionReport, PluginError> {
-        self.claim_and_run_pending().await
+        process_id: &ProcessId,
+        delivery_key: &str,
+    ) -> Result<(), PluginError> {
+        let record = self.registry.get_process(process_id).await?;
+        if let Some(record) = record {
+            self.submit_record(record, delivery_key).await?;
+        }
+        Ok(())
     }
 
     async fn await_process_terminal(
@@ -1070,7 +906,6 @@ pub struct RestateProcessDeployment {
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     authority_id: crate::RestateAuthorityId,
     namespace: crate::RestateNamespace,
-    park_reconciler: ParkReconciler,
 }
 
 impl RestateProcessDeployment {
@@ -1132,20 +967,14 @@ impl RestateProcessDeployment {
         namespace: crate::RestateNamespace,
     ) -> Self {
         let connection = connection.into();
-        let fault_sink = sink.clone();
-        let park_reconciler = ParkReconciler::default();
         let watched = watch_process_registry_with_sink(registry, sink);
         let registry = Arc::clone(watched.registry());
-        let ingress_runner = Arc::new(
-            RestateProcessIngressRunner::in_namespace(
-                connection.clone(),
-                Arc::clone(&registry),
-                Arc::clone(&continuations),
-                namespace.clone(),
-            )
-            .with_event_sink(fault_sink)
-            .with_park_reconciler(Arc::clone(&park_reconciler)),
-        );
+        let ingress_runner = Arc::new(RestateProcessIngressRunner::in_namespace(
+            connection.clone(),
+            Arc::clone(&registry),
+            Arc::clone(&continuations),
+            namespace.clone(),
+        ));
         let process_work = ingress_runner;
         let port: Arc<dyn ProcessWorkSubstrate> = process_work.clone();
         let wiring = ProcessWorkWiring::new(watched, port);
@@ -1158,15 +987,7 @@ impl RestateProcessDeployment {
             continuations,
             authority_id,
             namespace,
-            park_reconciler,
         }
-    }
-
-    /// Reconcile engine-paused process segments into process parks on every
-    /// admission sweep, reading Restate's admin API through `admin`
-    /// (FIG-3675). Installed once; a second call keeps the first client.
-    pub fn install_park_reconciler(&self, admin: crate::RestateAdminClient) {
-        let _ = self.park_reconciler.set(admin);
     }
 
     #[cfg(test)]
@@ -1271,8 +1092,7 @@ impl RestateProcessServing {
     /// production default remains 10,000 completed effects per incarnation.
     /// Pause a segment's `run` invocation after `max_attempts` attempts
     /// instead of the default [`PROCESS_HANDLER_MAX_ATTEMPTS`]. A paused
-    /// segment's process is parked by the park reconcile
-    /// ([`RestateProcessDeployment::install_park_reconciler`]) with
+    /// segment's process is parked by the park reconcile with
     /// `ParkReason::EngineRetryExhausted`, and a resume retries it.
     pub fn with_retry_max_attempts(mut self, max_attempts: u64) -> Self {
         self.retry_max_attempts = max_attempts.max(1);

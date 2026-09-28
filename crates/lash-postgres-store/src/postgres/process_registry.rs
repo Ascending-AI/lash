@@ -359,6 +359,18 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 winner,
             ));
         }
+        if !record.input.is_externally_owned() {
+            crate::obligation_ledger::arm_obligation_id_tx(
+                &mut tx,
+                &lash_core_execution::store::ObligationKey::ProcessStart {
+                    process_id: record.id.clone(),
+                },
+                &lash_core_execution::store::process_start_obligation_id(&record.id),
+                crate::obligation_ledger::DUE_AT_ONCE_MS,
+            )
+            .await
+            .map_err(|error| PluginError::Session(error.to_string()))?;
+        }
         let process_id = record.id.clone();
         for session_id in observers {
             sqlx::query(process_sql().observer.insert.sql())

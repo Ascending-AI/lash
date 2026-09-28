@@ -206,7 +206,7 @@ alphabetical order of the old name.
 | `PendingTurnInputCancelOutcome` | *unchanged* | Closed enum of terminal cancel states. |
 | `PendingTurnInputCancelResult` | `PendingTurnInputCancelReceipt` | **Collision resolved.** Binds the addressed target to its outcome; the enum keeps `Outcome`. |
 | `PendingTurnInputSuffixCancelOutcome` | *unchanged* | Closed enum of terminal states for a suffix cancel. |
-| `ProcessAdmissionReport` | *unchanged* | Aggregate: admitted ids plus per-row deferral detail. |
+| `ProcessAdmissionReport` | removed by FIG-3918 | Process starts now use obligations instead of an admission scan. |
 | `ProcessCancelSummary` | `ProcessCancelReceipt` | Acknowledges a cancel request and names the state the process was left in. |
 | `ProcessDrainReport` | *unchanged* | Aggregate: abandoned ids plus per-row deferral detail. |
 | `ProcessEffectOutcome` | *unchanged* | Closed enum of terminal states per process operation. |
@@ -214,7 +214,7 @@ alphabetical order of the old name.
 | `ProcessHandleSummary` | `ProcessHandleView` | Read projection: the handle rendering of a process row. |
 | `ProcessLiveReferenceSummary` | `ProcessLiveReferenceView` | Read projection of a definition's live references. |
 | `ProcessPruneReport` | *unchanged* | Retention aggregate: rows, events, and deliveries deleted. FIG-1505 builds on this vocabulary. |
-| `ProcessRecoveryAttemptDisposition` | `ProcessRecoveryAttemptOutcome` | Closed enum of how one recovery attempt ended. |
+| `ProcessRecoveryAttemptDisposition` | removed by FIG-3918 | The per-row admission attempt was removed with the scan. |
 | `ProcessSessionDeleteReport` | *unchanged* | Aggregate of per-category deletion counts. |
 | `ProcessStatus` | *unchanged* | Point-in-time lifecycle state of a process row. |
 | `QueuedWorkWakeDisposition` | `QueuedWorkWakeOutcome` | Closed enum of how one wake ended. |

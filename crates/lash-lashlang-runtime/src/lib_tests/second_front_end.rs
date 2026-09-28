@@ -544,7 +544,7 @@ async fn run_worker(
         harness.env_ref(),
     )
     .await;
-    harness.drive_pending().await;
+    harness.drive_pending(&process_id).await;
     let terminal = harness.await_terminal(&process_id).await;
     assert!(
         matches!(terminal, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),

@@ -301,3 +301,107 @@ impl crate::obligation::ObligationStatementSet for ProcessObligationStatements {
         }
     }
 }
+
+crate::statements! {
+    /// `processes` start-obligation statements (ADR 0109): a registered process owes its first engine run. Both backends issue
+    /// them verbatim; every settling write compares the state and, while
+    /// claimed, the claim token.
+    pub struct ProcessStartObligationStatements @ "process" {
+        /// Arm the row keyed `?1` as obligation `?2`, due at
+        /// `?3`, if it owes nothing.
+        start_obligation_arm = "UPDATE processes
+             SET start_obligation_id = ?2, start_obligation_state = 'due', start_obligation_attempts = 0,
+                 start_obligation_due_at_ms = ?3, start_obligation_claim_token = NULL,
+                 start_obligation_stall_reason = NULL, start_obligation_last_error = NULL,
+                 start_obligation_settled_at_ms = NULL
+             WHERE process_id = ?1 AND start_obligation_state IS NULL";
+
+        /// At most `?2` obligations due at `?1`, a lapsed claim included,
+        /// oldest due first.
+        start_obligation_select_due = "SELECT start_obligation_id FROM processes
+             WHERE start_obligation_state IN ('due', 'claimed') AND start_obligation_due_at_ms <= ?1
+             ORDER BY start_obligation_due_at_ms, start_obligation_id
+             LIMIT ?2";
+
+        /// Claim obligation `?1` under token `?2` until `?3` if it is still
+        /// due at `?4`.
+        start_obligation_claim_due_row = "UPDATE processes
+             SET start_obligation_state = 'claimed', start_obligation_claim_token = ?2,
+                 start_obligation_attempts = start_obligation_attempts + 1, start_obligation_due_at_ms = ?3
+             WHERE start_obligation_id = ?1 AND start_obligation_state IN ('due', 'claimed')
+               AND start_obligation_due_at_ms <= ?4
+             RETURNING start_obligation_id, start_obligation_attempts, process_id";
+
+        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
+        /// its backoff: a producer's own immediate attempt.
+        start_obligation_claim = "UPDATE processes
+             SET start_obligation_state = 'claimed', start_obligation_claim_token = ?2,
+                 start_obligation_attempts = start_obligation_attempts + 1, start_obligation_due_at_ms = ?3
+             WHERE start_obligation_id = ?1 AND start_obligation_state = 'due'
+             RETURNING start_obligation_id, start_obligation_attempts, process_id";
+
+        /// Settle claim `?2` on obligation `?1` delivered at `?3`.
+        start_obligation_settle_delivered = "UPDATE processes
+             SET start_obligation_state = 'delivered', start_obligation_claim_token = NULL,
+                 start_obligation_due_at_ms = NULL, start_obligation_last_error = NULL,
+                 start_obligation_settled_at_ms = ?3
+             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
+               AND start_obligation_claim_token = ?2";
+
+        /// Hand claim `?2` on obligation `?1` back, due again at `?3`, with
+        /// error `?4`.
+        start_obligation_settle_retry = "UPDATE processes
+             SET start_obligation_state = 'due', start_obligation_claim_token = NULL,
+                 start_obligation_due_at_ms = ?3, start_obligation_last_error = ?4
+             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
+               AND start_obligation_claim_token = ?2";
+
+        /// Stall claim `?2` on obligation `?1` for reason `?3` with error
+        /// `?4` at `?5`.
+        start_obligation_settle_stall = "UPDATE processes
+             SET start_obligation_state = 'stalled', start_obligation_claim_token = NULL,
+                 start_obligation_due_at_ms = NULL, start_obligation_stall_reason = ?3,
+                 start_obligation_last_error = ?4, start_obligation_settled_at_ms = ?5
+             WHERE start_obligation_id = ?1 AND start_obligation_state = 'claimed'
+               AND start_obligation_claim_token = ?2";
+
+        /// Re-arm stalled obligation `?1`, due at `?2`, its attempts reset.
+        start_obligation_rearm = "UPDATE processes
+             SET start_obligation_state = 'due', start_obligation_attempts = 0, start_obligation_due_at_ms = ?2,
+                 start_obligation_stall_reason = NULL, start_obligation_settled_at_ms = NULL
+             WHERE start_obligation_id = ?1 AND start_obligation_state = 'stalled'";
+
+        /// At most `?2` stalled obligations after id `?1`, in id order.
+        start_obligation_select_stalled = "SELECT start_obligation_id, start_obligation_attempts, start_obligation_stall_reason, start_obligation_last_error, start_obligation_settled_at_ms, process_id
+             FROM processes
+             WHERE start_obligation_state = 'stalled' AND start_obligation_id > ?1
+             ORDER BY start_obligation_id
+             LIMIT ?2";
+
+        /// How many obligations are stalled.
+        start_obligation_count_stalled = "SELECT COUNT(*) FROM processes WHERE start_obligation_state = 'stalled'";
+
+        /// Obligation `?1`'s state and the claims taken since it was armed.
+        start_obligation_select_standing = "SELECT start_obligation_state, start_obligation_attempts FROM processes WHERE start_obligation_id = ?1";
+
+    }
+}
+
+impl crate::obligation::ObligationStatementSet for ProcessStartObligationStatements {
+    fn obligation_sql(&self) -> crate::obligation::ObligationSql<'_> {
+        crate::obligation::ObligationSql {
+            key_columns: 1,
+            arm: &self.start_obligation_arm,
+            select_due: &self.start_obligation_select_due,
+            claim_due_row: &self.start_obligation_claim_due_row,
+            claim: &self.start_obligation_claim,
+            settle_delivered: &self.start_obligation_settle_delivered,
+            settle_retry: &self.start_obligation_settle_retry,
+            settle_stall: &self.start_obligation_settle_stall,
+            rearm: &self.start_obligation_rearm,
+            select_stalled: &self.start_obligation_select_stalled,
+            count_stalled: &self.start_obligation_count_stalled,
+            select_standing: &self.start_obligation_select_standing,
+        }
+    }
+}

@@ -188,18 +188,17 @@ impl DoubleProcessHarness {
             .await
             .expect("register the harness process")
             .id;
-        self.drive_pending().await;
+        self.drive_pending(&process_id).await;
         process_id
     }
 
-    /// Admit every pending registry row to the installed worker: for a test
-    /// that registers through `register_harness_process` or its own sweep.
-    pub(crate) async fn drive_pending(&self) {
-        let _report = self
-            .wiring
-            .admit_pending_processes("test")
+    /// Deliver one registered process to the installed worker.
+    pub(crate) async fn drive_pending(&self, process_id: &lash_core::ProcessId) {
+        self.wiring
+            .port()
+            .deliver_process_start(process_id, "test:1")
             .await
-            .expect("admit the harness process");
+            .expect("deliver the harness process");
     }
 
     /// Await the process's terminal registry record.
@@ -517,7 +516,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         harness.env_ref(),
     )
     .await;
-    harness.drive_pending().await;
+    harness.drive_pending(&process_id).await;
     let result = harness.await_terminal(&process_id).await;
     assert!(
         matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),

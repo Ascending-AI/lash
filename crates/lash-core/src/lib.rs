@@ -388,12 +388,6 @@ pub mod facade_support {
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{QueuedEffectSource, QueuedTurnOptions, TurnOptions};
     pub use crate::runtime::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
-    pub use lash_core_execution::runtime::process::ProcessAdmissionDeferred;
-    pub use lash_core_execution::runtime::process::ProcessAdmissionIntake;
-    pub use lash_core_execution::runtime::process::ProcessAdmissionReport;
-    pub use lash_core_execution::runtime::process::ProcessRecoveryAttemptOutcome;
-    pub use lash_core_execution::runtime::process::ProcessRecoveryOperation;
-    pub use lash_core_execution::runtime::process::ProcessWorkerFault;
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
     pub use lash_core_store::session_identity::facade_ops::AgentFrameReasonFacadeOps;
     pub use lash_core_store::turn_input_vocabulary::facade_ops::TurnContextFacadeOps;

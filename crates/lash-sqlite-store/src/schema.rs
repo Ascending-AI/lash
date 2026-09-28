@@ -1070,6 +1070,14 @@ CREATE TABLE IF NOT EXISTS processes (
     park_build_generation TEXT,
     segment_generation    TEXT,
     record_json           TEXT NOT NULL,
+    start_obligation_id         TEXT,
+    start_obligation_state      TEXT,
+    start_obligation_attempts   INTEGER NOT NULL DEFAULT 0,
+    start_obligation_due_at_ms  INTEGER,
+    start_obligation_claim_token TEXT,
+    start_obligation_stall_reason TEXT,
+    start_obligation_last_error TEXT,
+    start_obligation_settled_at_ms INTEGER,
     obligation_id         TEXT,
     obligation_state      TEXT,
     obligation_attempts   INTEGER NOT NULL DEFAULT 0,
@@ -1078,6 +1086,7 @@ CREATE TABLE IF NOT EXISTS processes (
     obligation_stall_reason TEXT,
     obligation_last_error TEXT,
     obligation_settled_at_ms INTEGER,
+    CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
@@ -1089,6 +1098,14 @@ CREATE TABLE IF NOT EXISTS processes (
 -- and the stalled listing.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_obligation_id
     ON processes(obligation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_obligation_id
+    ON processes(start_obligation_id);
+CREATE INDEX IF NOT EXISTS idx_processes_start_obligation_due
+    ON processes(start_obligation_due_at_ms, start_obligation_id)
+    WHERE start_obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_processes_start_obligation_stalled
+    ON processes(start_obligation_id)
+    WHERE start_obligation_state = 'stalled';
 CREATE INDEX IF NOT EXISTS idx_processes_obligation_due
     ON processes(obligation_due_at_ms, obligation_id)
     WHERE obligation_state IN ('due', 'claimed');

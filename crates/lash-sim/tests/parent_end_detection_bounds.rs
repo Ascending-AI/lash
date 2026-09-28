@@ -58,13 +58,6 @@ impl ScriptedPort {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for ScriptedPort {
-    async fn admit_pending_processes(
-        &self,
-        _reason: &str,
-    ) -> Result<lash_core::facade_support::ProcessAdmissionReport, PluginError> {
-        Ok(lash_core::facade_support::ProcessAdmissionReport::default())
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

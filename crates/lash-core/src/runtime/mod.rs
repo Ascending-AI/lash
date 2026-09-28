@@ -39,6 +39,7 @@ pub mod drive;
 pub(crate) mod drive_claim;
 mod durable_queue;
 mod lifecycle;
+pub mod process_start;
 pub mod process_terminal;
 pub mod recovery_lease;
 use claim_settlement::TurnClaimSettlement;

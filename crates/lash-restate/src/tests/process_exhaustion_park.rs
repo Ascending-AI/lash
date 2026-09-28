@@ -141,7 +141,6 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         Arc::clone(&stores.continuations),
     );
     let admin = crate::RestateAdminClient::new(connection.clone());
-    deployment.install_park_reconciler(admin.clone());
 
     let process_id = registry
         .register_process(executed_registration())
@@ -149,8 +148,8 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         .expect("register the process")
         .id;
     let sweep = deployment.test_process_work();
-    let _ = sweep
-        .admit_pending_processes("r0c sweep")
+    sweep
+        .deliver_process_start(&process_id, "test:1")
         .await
         .expect("the sweep submits the process");
     let target = format!("LashProcessWorkflow/{process_id}/run");
@@ -162,10 +161,14 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     );
 
     // The next sweep reconciles the pause into a park.
-    let _ = sweep
-        .admit_pending_processes("r0c sweep")
-        .await
-        .expect("the next sweep");
+    crate::process::reconcile_process_parks(
+        &admin,
+        &crate::services::DEFAULT_NAMESPACE,
+        &registry,
+        &stores.continuations,
+    )
+    .await
+    .expect("reconcile the pause");
     let parked = registry
         .get_process(&process_id)
         .await
@@ -202,10 +205,14 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     );
 
     // A further sweep over the same pause writes nothing.
-    let _ = sweep
-        .admit_pending_processes("r0c sweep")
-        .await
-        .expect("a further sweep");
+    crate::process::reconcile_process_parks(
+        &admin,
+        &crate::services::DEFAULT_NAMESPACE,
+        &registry,
+        &stores.continuations,
+    )
+    .await
+    .expect("a further reconcile");
     assert_eq!(
         process_feed(&registry, &process_id).await,
         vec![(

@@ -295,16 +295,6 @@ struct NoopProcessWork;
 
 #[async_trait]
 impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
-    async fn admit_pending_processes(
-        &self,
-        _reason: &str,
-    ) -> std::result::Result<
-        lash_core::facade_support::ProcessAdmissionReport,
-        lash_core::PluginError,
-    > {
-        Ok(lash_core::facade_support::ProcessAdmissionReport::default())
-    }
-
     async fn await_process_terminal(
         &self,
         process_id: &lash_core::ProcessId,

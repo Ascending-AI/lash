@@ -19,7 +19,9 @@ use lash_core_execution::store::{
 };
 use lash_store_sql::obligation::{ObligationSql, ObligationStatementSet};
 use lash_store_sql::process::parent_end_plans::ParentEndPlanObligationStatements;
-use lash_store_sql::process::processes::ProcessObligationStatements;
+use lash_store_sql::process::processes::{
+    ProcessObligationStatements, ProcessStartObligationStatements,
+};
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
@@ -40,6 +42,8 @@ static PLANS: LazyLock<ParentEndPlanObligationStatements> =
     LazyLock::new(|| ParentEndPlanObligationStatements::render(Schema::Main.dialect()));
 static PROCESSES: LazyLock<ProcessObligationStatements> =
     LazyLock::new(|| ProcessObligationStatements::render(Schema::Main.dialect()));
+static PROCESS_STARTS: LazyLock<ProcessStartObligationStatements> =
+    LazyLock::new(|| ProcessStartObligationStatements::render(Schema::Main.dialect()));
 
 /// `kind`'s statements, rendered for the connection's own database. Ingress
 /// names its turn-input table here; its ledger composes that table with the
@@ -51,6 +55,7 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
         ObligationKind::ScopeClose => ROOTS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
         ObligationKind::ParentEnd => PLANS.obligation_sql(),
+        ObligationKind::ProcessStart => PROCESS_STARTS.obligation_sql(),
         ObligationKind::ProcessTerminal => PROCESSES.obligation_sql(),
     }
 }
@@ -60,7 +65,7 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
 pub(crate) const fn in_process_registry(kind: ObligationKind) -> bool {
     matches!(
         kind,
-        ObligationKind::ParentEnd | ObligationKind::ProcessTerminal
+        ObligationKind::ParentEnd | ObligationKind::ProcessStart | ObligationKind::ProcessTerminal
     )
 }
 

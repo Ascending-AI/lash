@@ -31,8 +31,8 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
     }])
     .await;
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuations);
-    let _ = runner
-        .admit_pending_processes("test")
+    runner
+        .deliver_process_start(&mid_chain_id, "test:1")
         .await
         .expect("drive pending");
     server.await.expect("capture server");
@@ -93,24 +93,23 @@ pub(super) async fn ingress_sweep_skips_externally_owned_rows() {
     .await;
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
-    let report = runner
-        .admit_pending_processes("test")
+    runner
+        .deliver_process_start(&executed_id, "test:1")
         .await
-        .expect("sweep skips externally-owned rows and submits the executed one");
+        .expect("submit the executed row");
     server.await.expect("mock ingress server task");
 
-    // Skipped is not silent: an externally-owned row is a typed deferral on this
-    // tier too, so one registry reads the same whichever tier drove it.
-    assert_eq!(report.admitted, vec![executed_id.to_string()]);
-    let externally_owned = report
-        .deferred
-        .iter()
-        .filter(|entry| entry.disposition == ProcessRecoveryAttemptOutcome::ExternallyOwned)
-        .map(|entry| entry.process_id.clone())
-        .collect::<Vec<_>>();
-    assert_eq!(
-        externally_owned,
-        vec![ext_first_id.to_string(), ext_second_id.to_string()]
+    assert!(
+        runner
+            .deliver_process_start(&ext_first_id, "test:2")
+            .await
+            .is_err()
+    );
+    assert!(
+        runner
+            .deliver_process_start(&ext_second_id, "test:3")
+            .await
+            .is_err()
     );
 
     let requests = captured.lock_recover().clone();
@@ -1398,7 +1397,6 @@ pub(super) async fn restate_process_attach_maps_malformed_ingress_body_to_plugin
 #[derive(Clone, Default)]
 pub(super) struct RecordingProcessEventSink {
     events: Arc<Mutex<Vec<(String, u64)>>>,
-    faults: Arc<Mutex<Vec<lash_core::facade_support::ProcessWorkerFault>>>,
 }
 
 #[async_trait::async_trait]
@@ -1407,10 +1405,6 @@ impl lash_core::facade_support::ProcessEventSink for RecordingProcessEventSink {
         self.events
             .lock_recover()
             .push((event.event_type.clone(), event.sequence));
-    }
-
-    async fn emit_worker_fault(&self, fault: &lash_core::facade_support::ProcessWorkerFault) {
-        self.faults.lock_recover().push(fault.clone());
     }
 }
 
@@ -1576,85 +1570,26 @@ pub(super) async fn restate_admin_client_cancels_kills_and_queries_invocation_st
     ));
 }
 
-/// A submit that fails mid-pass is that row's outcome, not the pass's. Failing
-/// the call would throw away the ids that already reached the ingress, so the
-/// failure rides back as a typed per-row deferral instead.
 #[tokio::test]
-pub(super) async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
+pub(super) async fn a_failed_process_start_delivery_is_retryable() {
     let registry = process_registry();
-    let submit_fails_id = registry
+    let process_id = registry
         .register_process(executed_registration())
         .await
-        .expect("register the row whose submit fails")
+        .expect("register")
         .id;
-
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "500 Internal Server Error",
         body: r#"{"message":"ingress unavailable"}"#,
     }])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
-    let report = runner
-        .admit_pending_processes("test")
+    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
+    let error = runner
+        .deliver_process_start(&process_id, "test:1")
         .await
-        .expect("a per-row submit failure does not fail the pass");
+        .expect_err("submit fails");
     server.await.expect("mock ingress server task");
-
-    assert!(report.admitted.is_empty());
-    assert_eq!(report.deferred.len(), 1, "{report:?}");
-    assert_eq!(report.deferred[0].process_id, submit_fails_id.as_str());
-    let ProcessRecoveryAttemptOutcome::BackendError { operation, .. } =
-        &report.deferred[0].disposition
-    else {
-        panic!(
-            "expected a typed backend error, got {:?}",
-            report.deferred[0]
-        );
-    };
-    assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
-}
-
-/// A per-row deferral only reaches a host that reads the report, and every
-/// in-tree caller discards it. The fault surface is the path that does not
-/// depend on anyone reading a return value, so a failed ingress submit has to
-/// arrive there too.
-#[tokio::test]
-pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
-    let sink = RecordingProcessEventSink::default();
-    let registry = process_registry();
-    let submit_fails_loudly_id = registry
-        .register_process(executed_registration())
-        .await
-        .expect("register the row whose submit fails")
-        .id;
-
-    let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
-        status: "500 Internal Server Error",
-        body: r#"{"message":"ingress unavailable"}"#,
-    }])
-    .await;
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store())
-        .with_event_sink(Some(Arc::new(sink.clone())));
-    let report = runner
-        .admit_pending_processes("test")
-        .await
-        .expect("a per-row submit failure does not fail the pass");
-    server.await.expect("mock ingress server task");
-    assert_eq!(report.deferred.len(), 1, "{report:?}");
-
-    let faults = sink.faults.lock_recover().clone();
-    assert_eq!(faults.len(), 1, "{faults:?}");
-    let lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError {
-        process_id,
-        operation,
-        ..
-    } = &faults[0]
-    else {
-        panic!("expected a recovery backend fault, got {:?}", faults[0]);
-    };
-    assert_eq!(process_id, &submit_fails_loudly_id);
-    assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
+    assert!(error.is_retryable(), "{error:?}");
 }
 
 /// Every wait of a non-session scope is owned by that scope's own

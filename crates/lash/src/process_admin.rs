@@ -446,17 +446,25 @@ impl Processes {
             )));
         };
         let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
-        // Advisory, exactly as the runtime start path treats it: the durable
-        // row is the work queue, so a failed nudge delays the run rather than
-        // failing the start.
-        if let Err(error) = process_work
-            .admit_pending_processes("admin_process_start")
-            .await
+        let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+            self.core
+                .backend
+                .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+            self.registry(),
+            process_work,
+        );
+        let id = lash_core::store::process_start_obligation_id(&record.id);
+        if let Err(error) = lash_core::runtime::drive::relay::deliver_now(
+            &relay,
+            &id,
+            self.core.env.core.clock.as_ref(),
+        )
+        .await
         {
             tracing::warn!(
                 process_id = %record.id,
                 %error,
-                "process start registered; advisory worker poke failed, the recovery sweep owns the run"
+                "process start registered; immediate delivery failed, the obligation relay owns the run"
             );
         }
         Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
@@ -1008,16 +1016,6 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
-        async fn admit_pending_processes(
-            &self,
-            _reason: &str,
-        ) -> std::result::Result<
-            lash_core::facade_support::ProcessAdmissionReport,
-            lash_core::PluginError,
-        > {
-            unreachable!("terminal-wait witness does not admit work")
-        }
-
         async fn await_process_terminal(
             &self,
             process_id: &lash_core::ProcessId,
