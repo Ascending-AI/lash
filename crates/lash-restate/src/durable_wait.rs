@@ -38,6 +38,9 @@ use restate_sdk::serde::Json;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+mod root_retirement;
+
+use self::root_retirement::closed_root_cancel_prefix;
 use crate::ingress::RestateAuthorityId;
 use crate::object_state::{self, StoredValueFormats};
 
@@ -409,6 +412,12 @@ pub struct RestateDurableWaitSettleRequest {
     pub resolution: Resolution,
 }
 
+#[derive(Clone, Debug, Serialize, serde::Deserialize)]
+pub struct RestateDurableWaitRootRequest {
+    pub session_id: SessionId,
+    pub root: lash_core::TurnId,
+}
+
 /// One executing effect under a scope's index (FIG-2499).
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateDurableWaitEffectRequest {
@@ -514,8 +523,9 @@ pub(crate) struct RestateDurableWaitIndexMetadata {
     /// Completion keys their owning group child's cancel decision closed, by
     /// the key's authority-free identity (`await_event_identity::derive_key_id`),
     /// so the group index that decides the child can name them (ADR 0099 §4,
-    /// W17). Carried in the metadata every handler already reads, so the
-    /// check journals nothing new; absent from the encoding while empty.
+    /// W17). Turn fences include their root so CloseRootScope can retire
+    /// them; older unscoped ids remain readable. The set is absent from the
+    /// encoding while empty.
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     cancel_decided: std::collections::BTreeSet<String>,
 }
@@ -526,10 +536,16 @@ impl RestateDurableWaitIndexMetadata {
         scope: &ExecutionScope,
         wait: &AwaitEventWaitIdentity,
     ) -> Result<bool, TerminalError> {
-        Ok(!self.cancel_decided.is_empty()
-            && self
-                .cancel_decided
-                .contains(&cancel_decided_id(scope, wait)?))
+        if self.cancel_decided.is_empty() {
+            return Ok(false);
+        }
+        let id = cancel_decided_id(scope, wait)?;
+        Ok(self.cancel_decided.contains(&id)
+            || scope.turn_id().is_some_and(|turn_id| {
+                let root = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+                self.cancel_decided
+                    .contains(&format!("{}{id}", closed_root_cancel_prefix(&root)))
+            }))
     }
 }
 
@@ -846,6 +862,7 @@ pub trait LashDurableWaitRegistry {
         request: Json<RestateDurableWaitIndexRequest>,
     ) -> HandlerResult<Json<RestateDurableWaitRegistration>>;
     async fn settle(request: Json<RestateDurableWaitSettleRequest>) -> HandlerResult<Json<()>>;
+    async fn retire_root(request: Json<RestateDurableWaitRootRequest>) -> HandlerResult<Json<()>>;
     async fn register_awakeable(
         request: Json<RestateDurableWaitAwakeableRequest>,
     ) -> HandlerResult<Json<RestateDurableWaitRegistration>>;
@@ -1006,10 +1023,8 @@ pub(crate) fn durable_wait_address_from_state_key(
 
 /// The index's stamped-state gate, answering its metadata row when it has
 /// one. The row is written only once the object passed the full gate, so an
-/// index with one is gated by that row alone: the index retains a resolution
-/// fence per retired wait for the session's life, and gating every one of
-/// them on every call made each call cost more the longer the session ran
-/// (FIG-3843).
+/// index with one is gated by that row alone. Checking every active value
+/// on each call would make a call's cost depend on their count (FIG-3843).
 async fn gate_durable_wait_index(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
@@ -1140,13 +1155,13 @@ async fn resolve_indexed_waits(
         let resolve = namespace
             .durable_wait_workflow(ctx, workflow_key)
             .resolve(Json(RestateDurableWaitResolveRequest {
-                key,
+                key: key.clone(),
                 resolution: resolution.clone(),
             }))
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
         let Json(outcome) = resolve.call().await?;
         if mirror_outcomes {
-            mirror_resolve_outcome(ctx, &address, resolution, &outcome);
+            mirror_resolve_outcome(ctx, &key, &address, resolution, &outcome);
         }
     }
     Ok(())
@@ -1154,6 +1169,7 @@ async fn resolve_indexed_waits(
 
 fn mirror_resolve_outcome(
     ctx: &ObjectContext<'_>,
+    key: &AwaitEventKey,
     address: &RestateDurableWaitAddress,
     accepted_terminal: Resolution,
     outcome: &ResolveOutcome,
@@ -1163,12 +1179,28 @@ fn mirror_resolve_outcome(
         ResolveOutcome::Accepted => accepted_terminal,
         ResolveOutcome::UnknownOrRevoked => return,
     };
+    retain_turn_wait_preimage(ctx, key, address);
     object_state::set_stamped(
         ctx,
         &durable_wait_index_resolution_key(address),
         &DURABLE_WAIT_REGISTRY_FORMATS,
         terminal,
     );
+}
+
+fn retain_turn_wait_preimage(
+    ctx: &ObjectContext<'_>,
+    key: &AwaitEventKey,
+    address: &RestateDurableWaitAddress,
+) {
+    if matches!(key.scope, ExecutionScope::Turn { .. }) {
+        object_state::set_stamped(
+            ctx,
+            &durable_wait_index_state_key(address),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            key.clone(),
+        );
+    }
 }
 
 /// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
@@ -1268,6 +1300,14 @@ pub(crate) fn split_cancellable_waits(
         .partition(|key| !key.wait.is_turn_control())
 }
 impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
+    async fn retire_root(
+        &self,
+        ctx: ObjectContext<'_>,
+        Json(request): Json<RestateDurableWaitRootRequest>,
+    ) -> HandlerResult<Json<()>> {
+        root_retirement::retire_root(ctx, &self.namespace, request).await
+    }
+
     async fn is_revoked(
         &self,
         ctx: ObjectContext<'_>,
@@ -1322,13 +1362,22 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     ) -> HandlerResult<Json<()>> {
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        if matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
+            // A late attach may register after CloseRootScope retired the root.
+            // Its workflow promise already owns the terminal; settling the
+            // attach must not restore a session-lifetime index row.
+            ctx.clear(&durable_wait_index_state_key(&address));
+            ctx.clear(&durable_wait_index_resolution_key(&address));
+            return Ok(Json(()));
+        }
+        retain_turn_wait_preimage(&ctx, &request.key, &address);
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_resolution_key(&address),
             &DURABLE_WAIT_REGISTRY_FORMATS,
             request.resolution,
         );
-        if address.classification == RestateDurableWaitClassification::DurableWait {
+        if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
             ctx.clear(&durable_wait_index_state_key(&address));
         }
         Ok(Json(()))
@@ -1354,13 +1403,16 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         // it in the index even when the workflow promise already held READY,
         // RANK, CANCEL, or ADMIT so a later registration cannot park or revive
         // the pre-retirement terminal.
+        retain_turn_wait_preimage(&ctx, &request.key, &address);
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_resolution_key(&address),
             &DURABLE_WAIT_REGISTRY_FORMATS,
             request.resolution,
         );
-        ctx.clear(&durable_wait_index_state_key(&address));
+        if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
+            ctx.clear(&durable_wait_index_state_key(&address));
+        }
         Ok(Json(()))
     }
 
@@ -1476,7 +1528,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ResolveOutcome::AlreadyResolved { terminal } => terminal.clone(),
             ResolveOutcome::Accepted | ResolveOutcome::UnknownOrRevoked => resolution.clone(),
         };
-        mirror_resolve_outcome(&ctx, &address, resolution, &outcome);
+        mirror_resolve_outcome(&ctx, &request.key, &address, resolution, &outcome);
         if outcome == ResolveOutcome::UnknownOrRevoked {
             return Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)));
         }
@@ -1512,11 +1564,14 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             .into());
         }
         let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
-        if !metadata.revoked
-            && metadata
-                .cancel_decided
-                .insert(cancel_decided_id(&request.scope, &request.wait)?)
-        {
+        let id = cancel_decided_id(&request.scope, &request.wait)?;
+        let id = if let Some(turn_id) = request.scope.turn_id() {
+            let root = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
+            format!("{}{id}", closed_root_cancel_prefix(&root))
+        } else {
+            id
+        };
+        if !metadata.revoked && metadata.cancel_decided.insert(id) {
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -1531,9 +1586,11 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
         let (waits, _controls) = split_cancellable_waits(load_indexed_waits(&ctx).await?);
         for key in &waits {
-            ctx.clear(&durable_wait_index_state_key(
-                &RestateDurableWaitAddress::for_key(key),
-            ));
+            if !matches!(key.scope, ExecutionScope::Turn { .. }) {
+                ctx.clear(&durable_wait_index_state_key(
+                    &RestateDurableWaitAddress::for_key(key),
+                ));
+            }
         }
         resolve_indexed_waits(&ctx, &self.namespace, waits, true).await?;
         Ok(Json(()))

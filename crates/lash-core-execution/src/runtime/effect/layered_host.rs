@@ -321,6 +321,14 @@ impl EffectHost for LayeredEffectHost {
         self.inner.turn_control_binding_id()
     }
 
+    async fn retire_closed_root_waits(
+        &self,
+        session_id: &SessionId,
+        root: &crate::TurnId,
+    ) -> Result<(), RuntimeError> {
+        self.inner.retire_closed_root_waits(session_id, root).await
+    }
+
     async fn list_outstanding_await_event_keys(
         &self,
         session_id: &SessionId,

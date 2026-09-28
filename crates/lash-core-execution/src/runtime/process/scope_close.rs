@@ -21,7 +21,7 @@ use std::sync::Arc;
 use crate::engine::ScopeCloseSink;
 use crate::store::{ControlIntentId, RootTerminal, StoreError};
 use crate::{
-    Clock, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId, TurnId,
+    Clock, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId, TurnId,
     apply_parent_end_plan, end_session_roots,
 };
 
@@ -32,6 +32,7 @@ pub struct RegistryScopeClose {
     registry: Arc<dyn ProcessRegistry>,
     delivery: Option<Arc<dyn ProcessWorkSubstrate>>,
     clock: Arc<dyn Clock>,
+    effect_host: Option<Arc<dyn EffectHost>>,
 }
 
 impl RegistryScopeClose {
@@ -43,6 +44,7 @@ impl RegistryScopeClose {
             registry,
             delivery: None,
             clock,
+            effect_host: None,
         }
     }
 
@@ -58,7 +60,33 @@ impl RegistryScopeClose {
             registry,
             delivery: Some(delivery),
             clock,
+            effect_host: None,
         }
+    }
+
+    /// Retire the closed root's wait-index rows through the same engine host
+    /// that issued them. This runs after the registry records the scope end.
+    #[must_use]
+    pub fn with_effect_host(mut self, effect_host: Arc<dyn EffectHost>) -> Self {
+        self.effect_host = Some(effect_host);
+        self
+    }
+
+    async fn retire_root_waits(
+        &self,
+        session: &SessionId,
+        root: &TurnId,
+    ) -> Result<(), StoreError> {
+        if let Some(host) = &self.effect_host {
+            host.retire_closed_root_waits(session, root)
+                .await
+                .map_err(|error| {
+                    StoreError::Backend(format!(
+                        "retire wait index for root `{root}` of session `{session}`: {error}"
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     /// Record `scope`'s end and, when this sink delivers, apply its plan.
@@ -112,7 +140,9 @@ impl ScopeCloseSink for RegistryScopeClose {
             terminal.session_id.clone(),
             terminal.root.clone(),
         ))
-        .await
+        .await?;
+        self.retire_root_waits(&terminal.session_id, &terminal.root)
+            .await
     }
 
     /// The session's roots close before the session itself: a start that
@@ -136,11 +166,15 @@ impl ScopeCloseSink for RegistryScopeClose {
             .map_err(|error| {
                 StoreError::Backend(format!("close session `{session}` roots: {error}"))
             })?;
+            for root in roots {
+                self.retire_root_waits(session, root).await?;
+            }
             self.close(&ScopeId::session(session.clone())).await
         } else {
             for root in roots {
                 self.close(&ScopeId::turn(session.clone(), root.clone()))
                     .await?;
+                self.retire_root_waits(session, root).await?;
             }
             self.close(&ScopeId::session(session.clone())).await
         }

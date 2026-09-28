@@ -197,6 +197,20 @@ async fn the_endpoint_builder_binds_every_lash_service() {
     }
 }
 
+#[tokio::test]
+async fn durable_wait_index_loads_state_lazily() {
+    let (backend, worker) = backend_and_process_worker().await;
+    let endpoint = backend.endpoint_builder(worker).build();
+    let document = discovery_document(&endpoint).await;
+    let index = document["services"]
+        .as_array()
+        .expect("services")
+        .iter()
+        .find(|service| service["name"] == "LashDurableWaitIndex")
+        .expect("the durable-wait index is bound");
+    assert_eq!(index["enableLazyState"], true);
+}
+
 /// A service bound under its generation lane serves every handler it serves
 /// under its stable name: the renamed binding keeps the generated
 /// dispatcher, which matches on the handler name alone (FIG-3795 `bind_as`).

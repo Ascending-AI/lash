@@ -20,18 +20,21 @@ impl LashCoreBuilder {
         // rows (FIG-3607 item 7) and, over the engine's process port, apply
         // the plan each row records (FIG-3822).
         let process_work = self.backend.process_work();
-        core.control.scope_close = Arc::new(if process_work.runs_processes() {
-            lash_core::RegistryScopeClose::with_delivery(
-                self.backend.process_registry(),
-                std::sync::Arc::clone(process_work.port()),
-                self.backend.clock(),
-            )
-        } else {
-            lash_core::RegistryScopeClose::new(
-                self.backend.process_registry(),
-                self.backend.clock(),
-            )
-        });
+        core.control.scope_close = Arc::new(
+            (if process_work.runs_processes() {
+                lash_core::RegistryScopeClose::with_delivery(
+                    self.backend.process_registry(),
+                    std::sync::Arc::clone(process_work.port()),
+                    self.backend.clock(),
+                )
+            } else {
+                lash_core::RegistryScopeClose::new(
+                    self.backend.process_registry(),
+                    self.backend.clock(),
+                )
+            })
+            .with_effect_host(self.backend.effect_host()),
+        );
         Ok(self.apply_core_overrides(core))
     }
 

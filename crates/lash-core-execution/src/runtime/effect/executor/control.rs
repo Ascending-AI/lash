@@ -51,6 +51,16 @@ pub trait EffectHost: AwaitEventResolver {
     /// handler recreation for as long as issued keys remain recoverable.
     fn turn_control_binding_id(&self) -> String;
 
+    /// Release a terminal root's wait-index rows after the scope-close sink
+    /// records its end. Hosts without a per-session wait index owe no work.
+    async fn retire_closed_root_waits(
+        &self,
+        _session_id: &SessionId,
+        _root: &TurnId,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     /// List the registered, unresolved await-event keys owned by `session_id`.
     ///
     /// This is a deployment-administrative snapshot, not a replay-sensitive

@@ -784,7 +784,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                     builder,
                     LashDurableWaitRegistryImpl::new(namespace.clone()).serve(),
                     &name,
-                    claimed(),
+                    claimed().enable_lazy_state(true),
                 ),
                 LashService::ProcessAttach => bind_as(
                     builder,

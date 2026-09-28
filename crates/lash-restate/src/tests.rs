@@ -18,8 +18,9 @@ use crate::controller::{
 };
 use crate::durable_wait::{
     DURABLE_WAIT_PROMISE_KEY, LASH_REPLAY_KEY_HEADER, RestateDurableWaitIndexMetadata,
-    RestateTurnCancelWake, durable_wait_address_from_state_key, durable_wait_index_state_key,
-    restate_await_event_key, restate_await_event_key_for_authority, split_cancellable_waits,
+    RestateDurableWaitRootRequest, RestateTurnCancelWake, durable_wait_address_from_state_key,
+    durable_wait_index_state_key, restate_await_event_key, restate_await_event_key_for_authority,
+    split_cancellable_waits,
 };
 use crate::process::{
     boundary_must_be_declined, handler_error_from_plugin, process_segment_workflow_key,
@@ -1488,6 +1489,7 @@ mod completion_routing_on_the_double;
 mod conformance_and_poison;
 mod direct_turn_acceptance_on_the_double;
 mod drain_barrier;
+mod durable_wait_root_retirement;
 mod effect_execution;
 mod failure_settlement;
 mod observer_intent_on_the_double;

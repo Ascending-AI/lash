@@ -22,10 +22,11 @@ use lash_core::{
 
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse,
-    RestateTurnCancelClosureParticipantRequest, durable_wait_index_key_for_scope,
-    durable_wait_index_object_key, restate_await_event_key_for_authority,
-    restate_await_event_key_is_valid, restate_await_event_key_is_valid_for_authority,
-    restate_durable_wait_request, restate_unknown_or_revoked,
+    RestateDurableWaitRootRequest, RestateTurnCancelClosureParticipantRequest,
+    durable_wait_index_key_for_scope, durable_wait_index_object_key,
+    restate_await_event_key_for_authority, restate_await_event_key_is_valid,
+    restate_await_event_key_is_valid_for_authority, restate_durable_wait_request,
+    restate_unknown_or_revoked,
 };
 use crate::effect_group::{
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
@@ -317,6 +318,35 @@ impl AwaitEventResolver for RestateEffectHost {
 impl EffectHost for RestateEffectHost {
     fn turn_control_binding_id(&self) -> String {
         self.turn_control_binding_id.to_string()
+    }
+
+    async fn retire_closed_root_waits(
+        &self,
+        session_id: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), RuntimeError> {
+        self.controller
+            .await_event_ingress
+            .ingress
+            .call_object_json::<_, ()>(
+                &self
+                    .controller
+                    .await_event_ingress
+                    .service(LashService::DurableWaitRegistry),
+                session_id,
+                "retire_root",
+                &RestateDurableWaitRootRequest {
+                    session_id: session_id.clone(),
+                    root: root.clone(),
+                },
+            )
+            .await
+            .map_err(|error| {
+                RuntimeError::new(
+                    RuntimeErrorCode::EngineAwaitEventSessionUpdate,
+                    error.to_string(),
+                )
+            })
     }
 
     async fn list_outstanding_await_event_keys(
