@@ -40,6 +40,10 @@ pub trait ScopeCloseSink: Send + Sync {
 
     /// Close `Session(session)` and the listed roots after its
     /// `CloseSession` intent.
+    ///
+    /// Closing the session closes every scope inside it: a closed session
+    /// admits no root, so a turn id it never admitted can no longer become
+    /// one, and no start may name it any more (FIG-3948).
     async fn close_session_scope(
         &self,
         session: &SessionId,

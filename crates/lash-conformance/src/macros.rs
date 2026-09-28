@@ -361,6 +361,7 @@ macro_rules! process_registry_tests {
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
+                (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),
                 (process_prune_scoped_by_originator, "scoped-prune"),
                 (process_prune_batch_tombstones, "batch-prune"),
                 (parked_processes_list_by_since_with_filters_and_keyset_pages, "parked-process-list"),

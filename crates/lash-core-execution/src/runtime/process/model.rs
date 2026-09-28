@@ -815,6 +815,28 @@ impl ProcessRegistration {
         Self::new(input, ProcessProvenance::host(), Lifetime::Detached)
     }
 
+    /// The scopes whose close refuses this start (FIG-3607 R11, FIG-3948):
+    /// its starter, the scope its lifetime names, and the session each of
+    /// them lies inside, deduplicated in ledger-key order — the order a
+    /// backend that locks each scope must take the locks in.
+    ///
+    /// The enclosing session is what fences a turn that never became a
+    /// root: no root close ever records such a turn's row, and its session's
+    /// close is the fact that it can no longer become one.
+    #[must_use]
+    pub fn closing_scopes(&self) -> Vec<ScopeId> {
+        let mut scopes: Vec<ScopeId> = self
+            .ancestry
+            .starter()
+            .into_iter()
+            .chain(self.lifetime.scope())
+            .flat_map(|scope| std::iter::once(scope.clone()).chain(scope.enclosing_session()))
+            .collect();
+        scopes.sort_by_key(|scope| (scope.storage_kind(), scope.storage_id()));
+        scopes.dedup();
+        scopes
+    }
+
     /// Sets the start's idempotency key.
     pub fn with_start_key(mut self, start_key: Option<StartKey>) -> Self {
         self.start_key = start_key;

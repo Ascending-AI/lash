@@ -7,7 +7,7 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core_execution::{ParentEndPlan, PluginError, ProcessRecord, ScopeId};
+use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ProcessRecord, ScopeId};
 use lash_sansio::ProcessId;
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -291,6 +291,10 @@ pub(super) async fn list_unrecorded_opener_parents(
 /// no cancel request yet, and a live status. `caller_departed` is excluded for
 /// the reason it is excluded from every non-terminal registry scan — lash may never act on
 /// such a row nor assert an outcome for it, and a cancel request is both.
+///
+/// A session's plan also owes the children of every scope inside the
+/// session that has no row of its own (FIG-3948): a turn that never became
+/// a root is closed by its session's close, which no root close precedes.
 pub(super) fn children_conn(
     conn: &Connection,
     parent: &ScopeId,
@@ -299,19 +303,48 @@ pub(super) fn children_conn(
 ) -> Result<Vec<ProcessRecord>, PluginError> {
     let (kind, id) = ledger_key(parent);
     let after = after.map(|value| value.to_string());
-    let mut statement = conn
-        .prepare(process_sql().process_sqlite.list_parent_end_children.sql())
-        .map_err(process_sqlite_error)?;
-    let rows = statement
-        .query_map(params![kind, id, after, limit.get() as i64], |row| {
-            row.get::<_, String>(0)
-        })
-        .map_err(process_sqlite_error)?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(process_sqlite_error)?;
+    let limit = limit.get() as i64;
+    let rows = match parent {
+        ScopeId::Session(session_id) => {
+            let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
+            let (drains_from, drains_to) =
+                EffectOpener::session_queue_drain_encoding_range(session_id);
+            record_json_rows(
+                conn,
+                process_sql().process_sqlite.list_session_end_children.sql(),
+                params![
+                    id,
+                    turns_from,
+                    turns_to,
+                    drains_from,
+                    drains_to,
+                    after,
+                    limit
+                ],
+            )?
+        }
+        ScopeId::Opener(_) => record_json_rows(
+            conn,
+            process_sql().process_sqlite.list_parent_end_children.sql(),
+            params![kind, id, after, limit],
+        )?,
+    };
     rows.into_iter()
         .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
         .collect()
+}
+
+fn record_json_rows(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> Result<Vec<String>, PluginError> {
+    let mut statement = conn.prepare(sql).map_err(process_sqlite_error)?;
+    statement
+        .query_map(params, |row| row.get::<_, String>(0))
+        .map_err(process_sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(process_sqlite_error)
 }
 
 pub(super) async fn children(

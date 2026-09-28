@@ -301,6 +301,179 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
     );
 }
 
+/// A turn scope that never became a root — the turn id of an input that
+/// joined an earlier root — has no terminal, so no root close ever records
+/// its row. Its session's close is the proof that it can no longer become a
+/// root (FIG-3948): from the session's row on, a start naming any scope
+/// inside the session is refused, and the session's plan owes a cancel to
+/// every live `Until` child of a scope inside it that has no row of its own.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn a_session_close_reaps_the_turn_scopes_that_never_became_roots(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    let session = SessionId::from("never-root-session");
+    let originator = SessionScope::new(session.as_str());
+    let session_scope = lash_core::ScopeId::session(session.clone());
+    let root = turn_scope(&session, "never-root-admitted");
+    let joined = turn_scope(&session, "never-root-joined");
+    let drain = lash_core::ScopeId::queue_drain(session.clone(), "never-root-drain");
+    let other_session = SessionId::from("never-root-session-other");
+    let foreign = turn_scope(&other_session, "never-root-joined");
+
+    let root_child = register_child(&registry, &originator, &root, Lives::Until)
+        .await
+        .expect("register a child under the admitted root");
+    let joined_child = register_child(&registry, &originator, &joined, Lives::Until)
+        .await
+        .expect("an open session admits a start under a turn it may still admit");
+    let joined_detached = register_child(&registry, &originator, &joined, Lives::Detached)
+        .await
+        .expect("register a detached child the never-root turn started");
+    let drain_child = register_child(&registry, &originator, &drain, Lives::Until)
+        .await
+        .expect("register a child under a drain that recorded no end");
+    let foreign_child = register_child(
+        &registry,
+        &SessionScope::new(other_session.as_str()),
+        &foreign,
+        Lives::Until,
+    )
+    .await
+    .expect("register a child under another session's turn");
+
+    // What the session's close intent does through a record-only scope
+    // owner: the admitted roots' rows, then the session's own.
+    lash_core::engine::ScopeCloseSink::close_session_scope(
+        &crate::RegistryScopeClose::new(
+            Arc::clone(&registry),
+            Arc::new(crate::facade_support::SystemClock),
+        ),
+        &session,
+        lash_core::store::ControlIntentId::from_sequence(1),
+        &[crate::TurnId::from("never-root-admitted")],
+    )
+    .await
+    .expect("close the session's scope");
+
+    assert!(
+        registry
+            .get_parent_end_plan(&joined)
+            .await
+            .expect("read the never-root turn's ledger row")
+            .is_none(),
+        "no root close ever records a row for a turn that never became a root"
+    );
+    let owed = registry
+        .get_parent_end_plan(&session_scope)
+        .await
+        .expect("read the session's close row")
+        .expect("the close records the session's row");
+    assert!(
+        owed.settled_at_ms.is_none()
+            && owed.obligation_state == Some(lash_core::store::ObligationState::Due),
+        "the session's plan owes the never-root turn's child its cancel, so it is \
+         not settled as childless: {owed:?}"
+    );
+    let mut expected = vec![joined_child.id.clone(), drain_child.id.clone()];
+    expected.sort();
+    assert_eq!(
+        registry
+            .list_parent_end_children(&session_scope, None, PAGE)
+            .await
+            .expect("page the closed session's children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        expected,
+        "the session's plan owes every live Until child of a scope inside it with no \
+         row of its own: not the root's child, which the root's own row owes; not the \
+         detached child; not another session's"
+    );
+
+    for (scope, lives) in [
+        (&joined, Lives::Until),
+        (&joined, Lives::Detached),
+        (&turn_scope(&session, "never-root-late"), Lives::Until),
+    ] {
+        match register_child(&registry, &originator, scope, lives).await {
+            Err(crate::PluginError::ParentEnded { parent, .. }) => assert_eq!(
+                parent, session_scope,
+                "the session's row is what refuses a start under `{scope}`"
+            ),
+            other => {
+                panic!("a start under `{scope}` of a closed session must be refused, got {other:?}")
+            }
+        }
+    }
+    register_child(
+        &registry,
+        &SessionScope::new(other_session.as_str()),
+        &foreign,
+        Lives::Until,
+    )
+    .await
+    .expect("another session's turns are not fenced by this session's close");
+
+    // The relay's delivery of the session's `ParentEnd` obligation.
+    let work = crate::NoProcessWork::for_registry(Arc::clone(&registry));
+    let applied = crate::apply_parent_end_plan(registry.as_ref(), &work, &session_scope, 1)
+        .await
+        .expect("apply the session's plan");
+    assert_eq!(applied.delivered, 2, "one cancel per owed child");
+    for child in [&joined_child, &drain_child] {
+        let cancel = registry
+            .get_process(&child.id)
+            .await
+            .expect("read a reaped child")
+            .expect("the reaped child is retained")
+            .cancel_request
+            .expect("the session's plan requested the child's cancel");
+        assert_eq!(
+            (cancel.origin, cancel.requester),
+            (
+                crate::CancelOrigin::ParentEnded,
+                crate::parent_end_requester(&session_scope)
+            ),
+            "the session's end is what cancels a child of a scope inside it"
+        );
+    }
+    for untouched in [&root_child, &joined_detached, &foreign_child] {
+        assert!(
+            registry
+                .get_process(&untouched.id)
+                .await
+                .expect("read an untouched child")
+                .expect("the untouched child is retained")
+                .cancel_request
+                .is_none(),
+            "the session's plan leaves `{}` alone",
+            untouched.id
+        );
+    }
+    assert!(
+        registry
+            .get_parent_end_plan(&session_scope)
+            .await
+            .expect("re-read the session's close row")
+            .expect("the row survives its application")
+            .settled_at_ms
+            .is_some(),
+        "the applied session plan settles"
+    );
+    assert!(
+        !registry
+            .list_unrecorded_opener_parents(None, PAGE)
+            .await
+            .expect("page unrecorded opener parents")
+            .iter()
+            .any(|scope| scope == &joined || scope == &drain),
+        "a reaped never-root scope owes recovery nothing"
+    );
+}
+
 /// A turn whose commit outran its ledger row is reported as a recovery
 /// candidate until the row exists — and nothing else is.
 #[expect(

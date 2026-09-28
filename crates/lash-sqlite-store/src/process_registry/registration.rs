@@ -37,20 +37,16 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     let registration = prepare_process_registration(registration)?;
                     // Admission against closure (FIG-3607 R11): a new start is
                     // refused once its starter has ended, whatever its own
-                    // lifetime, and once the scope its lifetime names has
-                    // closed. Both are read in this transaction, so a start
+                    // lifetime, once the scope its lifetime names has closed,
+                    // and once the session either lies inside has closed
+                    // (FIG-3948). All are read in this transaction, so a start
                     // racing a close either commits first and is swept, or
                     // sees the row and is refused.
-                    for scope in registration
-                        .ancestry
-                        .starter()
-                        .into_iter()
-                        .chain(registration.lifetime.scope())
-                    {
-                        if super::parent_end::plan_exists_conn(tx, scope)? {
+                    for scope in registration.closing_scopes() {
+                        if super::parent_end::plan_exists_conn(tx, &scope)? {
                             return Err(lash_core_execution::PluginError::ParentEnded {
                                 start_key: registration.start_key.clone(),
-                                parent: scope.clone(),
+                                parent: scope,
                             });
                         }
                     }

@@ -257,8 +257,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         let registration =
             lash_core_execution::runtime::prepare_process_registration(registration)?;
         // Admission against closure (FIG-3607 R11): a new start is refused
-        // once its starter has ended, whatever its own lifetime, and once the
-        // scope its lifetime names has closed.
+        // once its starter has ended, whatever its own lifetime, once the
+        // scope its lifetime names has closed, and once the session either
+        // lies inside has closed (FIG-3948).
         //
         // The reads and this transaction's insert are one decision, so each
         // is taken under its scope's advisory lock. Without it the pair is a
@@ -269,22 +270,15 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         // scope. Holding the lock orders the two writes either way round. The
         // locks are taken in key order, so two starts never wait on each
         // other's second lock.
-        let mut fenced: Vec<&lash_core_execution::ScopeId> = registration
-            .ancestry
-            .starter()
-            .into_iter()
-            .chain(registration.lifetime.scope())
-            .collect();
-        fenced.sort_by_key(|scope| (scope.storage_kind(), scope.storage_id()));
-        fenced.dedup();
+        let fenced = registration.closing_scopes();
         for scope in &fenced {
             parent_end::lock_parent_scope_tx(&mut tx, scope).await?;
         }
         for scope in fenced {
-            if parent_end::plan_exists_tx(&mut tx, scope).await? {
+            if parent_end::plan_exists_tx(&mut tx, &scope).await? {
                 return Err(lash_core_execution::PluginError::ParentEnded {
                     start_key: registration.start_key.clone(),
-                    parent: scope.clone(),
+                    parent: scope,
                 });
             }
         }

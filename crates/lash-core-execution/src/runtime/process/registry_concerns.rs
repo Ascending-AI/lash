@@ -596,6 +596,13 @@ pub trait ProcessLifecycle: Send + Sync {
     /// and that do not already carry a cancel request, ordered by process id and resumed after `after`. A terminal
     /// child and a child already carrying a request are settled by definition,
     /// so two concurrent passes converge instead of conflicting.
+    ///
+    /// A session's plan also owes every such child of a turn or queue-drain
+    /// scope inside the session that has no ledger row of its own (FIG-3948).
+    /// Such a scope is a turn the session never admitted as a root: no root
+    /// close records its row, and the session's close is the proof that it
+    /// can no longer become one. A scope inside the session that has its own
+    /// row is its own plan's to sweep.
     async fn list_parent_end_children(
         &self,
         parent: &crate::ScopeId,

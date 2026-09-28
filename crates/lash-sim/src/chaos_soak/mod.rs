@@ -448,6 +448,120 @@ pub async fn run(config: SoakConfig) -> SoakReport {
 mod tests {
     use super::*;
 
+    /// FIG-3948: the soak shape of FIG-3943, with the child registered under
+    /// the turn id of the input that joined the earlier held root, which
+    /// never becomes a root. The session's delete closes its scope, and that
+    /// close reaps the child: nothing else ever would.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_child_under_a_turn_that_never_became_a_root_is_reaped_by_its_session_close() {
+        let seed = 0x3948;
+        let mut driver = driver::Driver::new(seed).await.expect("world");
+        driver
+            .step(
+                seed,
+                &plan::Step::Open {
+                    session: 0,
+                    lane: plan::Lane::Held,
+                    parent: None,
+                },
+            )
+            .await
+            .expect("open held session");
+        let session = driver.ledger.sessions[0].id.clone();
+        let hold = driver.world.hold_session_drive(&session).await;
+        let durable = driver
+            .world
+            .core()
+            .expect("core")
+            .session(session.clone())
+            .durable()
+            .await
+            .expect("durable session");
+        for input in ["held-first", "held-second"] {
+            durable
+                .send(lash::TurnInput::text(
+                    crate::crash_matrix::invariants::input_text(input),
+                ))
+                .id(input)
+                .await
+                .expect("accept held input");
+            driver.ledger.held.push(driver::HeldRoot {
+                session: session.clone(),
+                root: input.to_owned(),
+                admission: driver::Admission::Known,
+            });
+        }
+        hold.release();
+        assert!(
+            driver.wait_reached("held-second").await,
+            "both inputs reach the model under the held root"
+        );
+        let store = driver
+            .world
+            .backend()
+            .session_store_factory()
+            .open_existing_store_by_id(&session)
+            .await
+            .expect("open store")
+            .expect("existing store");
+        let second = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
+            &session,
+            "held-second",
+        ));
+        assert_eq!(
+            store
+                .root_of_input(&session, &second)
+                .await
+                .expect("resolve second input"),
+            Some(lash_core::TurnId::from("held-first")),
+            "the second input joined the first root, so its turn id is never a root"
+        );
+        let never_root =
+            lash_core::ScopeId::turn(session.clone(), lash_core::TurnId::from("held-second"));
+        let child = driver::register_child(&driver.world, &session, &never_root)
+            .await
+            .expect("an open session admits a child under a turn it may still admit");
+        // Only the child: its scope records no row of its own, so it is not
+        // a scope the soak expects closed.
+        driver
+            .ledger
+            .children
+            .push(crate::crash_matrix::invariants::ChildOf {
+                child: child.clone(),
+                parent: never_root,
+            });
+        let receipt = driver
+            .cancel(&session, "held-second")
+            .await
+            .expect("cancel second input's root");
+        assert_eq!(receipt, "requested");
+        driver.delete(0).await.expect("delete the session");
+        let mut report = EpochReport {
+            seed,
+            ..EpochReport::default()
+        };
+        finish(&mut driver, &mut report).await;
+        assert!(report.passed(), "{}", report.evidence());
+        let cancel = driver
+            .world
+            .backend()
+            .process_registry()
+            .get_process(&child)
+            .await
+            .expect("read the child")
+            .expect("the child is retained")
+            .cancel_request
+            .expect("the session's close reaps the child of a turn that never became a root");
+        assert_eq!(
+            (cancel.origin, cancel.requester),
+            (
+                lash_core::CancelOrigin::ParentEnded,
+                lash_core::parent_end_requester(&lash_core::ScopeId::session(session.clone()))
+            )
+        );
+        driver.world.finish().await;
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_second_held_input_uses_and_closes_its_admitted_root_scope() {
         let seed = 0x3943;

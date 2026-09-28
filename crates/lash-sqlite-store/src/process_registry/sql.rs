@@ -194,6 +194,34 @@ lash_store_sql::statements! {
      ORDER BY process_id ASC
      LIMIT ?4";
 
+        /// Processes closed session `?1` still owes a cancel (FIG-3948): those
+        /// living `Until` the session itself, and those living `Until` a turn
+        /// in `[?2, ?3)` or a queue drain in `[?4, ?5)` of it whose scope has
+        /// no ledger row of its own — a turn the session never admitted as a
+        /// root, which its close proved can no longer become one. A scope
+        /// with its own row is its own plan's to sweep. After `?6`, at most
+        /// `?7`.
+        ///
+        /// Each arm is a range of `idx_processes_lifetime_pending`.
+        /// PostgreSQL's twin casts its cursor parameter, which is the fork.
+        list_session_end_children = "SELECT child.record_json FROM processes AS child
+     WHERE child.lifetime = 'until'
+       AND child.cancel_requested_at_ms IS NULL
+       AND {{live_process_status(child.status)}}
+       AND ((child.lifetime_scope_kind = 'session' AND child.lifetime_scope_id = ?1)
+         OR (((child.lifetime_scope_kind = 'turn'
+               AND child.lifetime_scope_id >= ?2 AND child.lifetime_scope_id < ?3)
+             OR (child.lifetime_scope_kind = 'queue_drain'
+               AND child.lifetime_scope_id >= ?4 AND child.lifetime_scope_id < ?5))
+           AND NOT EXISTS (
+               SELECT 1 FROM parent_end_plans AS plan
+               WHERE plan.parent_kind = child.lifetime_scope_kind
+                 AND plan.parent_id = child.lifetime_scope_id
+           )))
+       AND (?6 IS NULL OR child.process_id > ?6)
+     ORDER BY child.process_id ASC
+     LIMIT ?7";
+
         /// Turn scopes with live `Until` children and no ledger row yet:
         /// after `?1`, at most `?2`.
         ///

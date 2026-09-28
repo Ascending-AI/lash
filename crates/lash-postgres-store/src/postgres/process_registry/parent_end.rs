@@ -7,7 +7,7 @@
 
 use std::num::NonZeroUsize;
 
-use lash_core_execution::{ParentEndPlan, PluginError, ProcessRecord, ScopeId};
+use lash_core_execution::{EffectOpener, ParentEndPlan, PluginError, ProcessRecord, ScopeId};
 use lash_sansio::ProcessId;
 use sqlx::{PgPool, Postgres, Row, Transaction};
 
@@ -284,19 +284,42 @@ pub(super) async fn children(
     limit: NonZeroUsize,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
     let (kind, id) = ledger_key(parent);
-    let rows = sqlx::query(
-        process_sql()
-            .process_postgres
-            .list_parent_end_children
-            .sql(),
-    )
-    .bind(kind)
-    .bind(id)
-    .bind(after.map(|value| value.to_string()))
-    .bind(limit.get() as i64)
-    .fetch_all(pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
+    let after = after.map(|value| value.to_string());
+    let limit = limit.get() as i64;
+    // A session's plan also owes the children of every scope inside the
+    // session that has no row of its own (FIG-3948).
+    let query = match parent {
+        ScopeId::Session(session_id) => {
+            let (turns_from, turns_to) = EffectOpener::session_turn_encoding_range(session_id);
+            let (drains_from, drains_to) =
+                EffectOpener::session_queue_drain_encoding_range(session_id);
+            sqlx::query(
+                process_sql()
+                    .process_postgres
+                    .list_session_end_children
+                    .sql(),
+            )
+            .bind(id)
+            .bind(turns_from)
+            .bind(turns_to)
+            .bind(drains_from)
+            .bind(drains_to)
+        }
+        ScopeId::Opener(_) => sqlx::query(
+            process_sql()
+                .process_postgres
+                .list_parent_end_children
+                .sql(),
+        )
+        .bind(kind)
+        .bind(id),
+    };
+    let rows = query
+        .bind(after)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
     rows.into_iter()
         .map(|row| {
             let json: String = row.get(0);

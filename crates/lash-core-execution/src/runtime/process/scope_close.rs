@@ -147,7 +147,10 @@ impl ScopeCloseSink for RegistryScopeClose {
 
     /// The session's roots close before the session itself: a start that
     /// names a root is refused from the moment its root closes, and the
-    /// session's own row is the last fact the close writes.
+    /// session's own row is the last fact the close writes. That row also
+    /// closes every scope inside the session with no row of its own — a turn
+    /// that never became a root (FIG-3948): it refuses a start naming one,
+    /// and its plan cancels their children.
     async fn close_session_scope(
         &self,
         session: &SessionId,

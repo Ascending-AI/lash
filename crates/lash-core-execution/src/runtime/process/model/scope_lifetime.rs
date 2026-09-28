@@ -514,6 +514,20 @@ impl ScopeId {
         }
     }
 
+    /// The session scope this scope lies inside: a turn's or a queue drain's
+    /// session. A session lies inside no other scope, and a process scope
+    /// inside no session (ADR 0094 ends it through its own parent).
+    ///
+    /// A session's close closes every scope inside it (FIG-3948): once a
+    /// session has closed it admits no root, so a turn id it never admitted
+    /// can no longer become one.
+    #[must_use]
+    pub fn enclosing_session(&self) -> Option<Self> {
+        self.opener()
+            .and_then(EffectOpener::session_id)
+            .map(|session_id| Self::Session(session_id.clone()))
+    }
+
     /// Storage discriminant, as written to a `*_kind` column. The opener arms
     /// take their opener's arm name.
     #[must_use]

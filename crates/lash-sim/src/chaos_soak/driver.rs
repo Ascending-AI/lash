@@ -1062,7 +1062,7 @@ impl Driver {
 /// Register an externally-owned child process of `session` that lives until
 /// `parent` ends: a row lash never executes, so it pins no build, and only
 /// the parent-end cancel of its scope settles it.
-async fn register_child(
+pub(super) async fn register_child(
     world: &CrashWorld,
     session: &SessionId,
     parent: &ScopeId,
