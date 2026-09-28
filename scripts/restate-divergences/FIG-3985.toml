@@ -6,8 +6,10 @@
 # `--include-divergent` runs them.
 
 [suites.effect-group.replay.divergent]
-# FIG-3712's residue: while the turn is suspended at an await on this leg, a
-# tool child that fails retryably and then sleeps finds no dispatch context
-# ("no executor currently routes ... tool child 0") and never takes its first
-# attempt, so the test times out waiting for it.
-"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its retrying tool child: no executor routes it (FIG-3985)"
+# FIG-3712's residue: while the turn is suspended at an await on this leg, its
+# tool child finds no dispatch context ("no executor currently routes ... tool
+# child 0") and never runs, so the resumed turn waits on it for good.
+"tests::conformance_and_poison::an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration" = "a suspended turn strands its tool child: no executor routes it (FIG-3985)"
+"tests::conformance_and_poison::a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate" = "a suspended turn strands its tool child: no executor routes it (FIG-3985)"
+"tests::conformance_and_poison::public_migrated_tools_redrive_to_literal_outcomes" = "a suspended turn strands its tool children: no executor routes them (FIG-3985)"
+"tests::conformance_and_poison::public_signal_intent_wakes_parked_process" = "a suspended turn strands its tool child: no executor routes it (FIG-3985)"
