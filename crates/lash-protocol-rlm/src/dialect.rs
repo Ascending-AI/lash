@@ -25,6 +25,7 @@ use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 /// never the language.
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
+    pub(crate) code_renderer: crate::render::CodeRendererSlot,
     pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
     pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
@@ -125,6 +126,7 @@ impl DialectSession {
             self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
             self.services.channel,
+            self.services.code_renderer.clone(),
         )
         .await;
         self.state.mark_code_execution_response_returned();
@@ -215,10 +217,12 @@ impl DialectSession {
     pub(crate) fn prepare_bound_variables_prompt(
         &self,
         exclude: &BTreeSet<String>,
+        params: lash_render::RenderParams,
     ) -> Result<BoundVariablesPromptRender, SessionError> {
         let globals = self.state.bound_variable_values(exclude);
         let opaque = self.state.opaque_bound_variables(exclude);
         let cache = Arc::clone(&self.bound_variable_render_cache);
+        let renderer = self.services.code_renderer.clone();
         Ok(BoundVariablesPromptRender::new(move || {
             let mut cache = cache
                 .lock()
@@ -228,6 +232,8 @@ impl DialectSession {
                 &globals,
                 &opaque,
                 DialectPromptVocabulary::default(),
+                renderer.0.as_ref(),
+                &params,
             )
         }))
     }
@@ -391,10 +397,13 @@ mod tests {
                 .message
         }
 
-        let native = parse_failure_feedback(crate::plugin::RlmChannel::NativeTool).await;
+        let native = Box::pin(parse_failure_feedback(
+            crate::plugin::RlmChannel::NativeTool,
+        ))
+        .await;
         assert!(!native.contains("</typescript>"), "{native}");
 
-        let cell = parse_failure_feedback(crate::plugin::RlmChannel::Cell).await;
+        let cell = Box::pin(parse_failure_feedback(crate::plugin::RlmChannel::Cell)).await;
         assert!(cell.contains("standalone `</typescript>` line"), "{cell}");
     }
 }
@@ -408,6 +417,7 @@ pub(crate) fn test_dialect_services() -> RlmDialectServices {
         deferred_trigger_resolver: None,
         execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+        code_renderer: Default::default(),
         channel: crate::plugin::RlmChannel::Cell,
     }
 }

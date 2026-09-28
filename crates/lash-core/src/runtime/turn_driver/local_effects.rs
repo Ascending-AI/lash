@@ -6,6 +6,7 @@ struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
     protocol_iteration: usize,
     messages: crate::MessageSequence,
+    active_events: Arc<Vec<crate::SessionHistoryRecord>>,
     event_tx: TurnObserver,
 }
 
@@ -80,7 +81,12 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     .run_exec_code(
                         language,
                         &code,
-                        runner.messages.clone(),
+                        Arc::new(
+                            crate::facade_support::ChronologicalProjection::from_turn_view(
+                                runner.active_events.as_slice(),
+                                &runner.messages,
+                            ),
+                        ),
                         runner.protocol_iteration,
                         envelope.invocation.into_runtime_invocation(),
                         &runner.event_tx,
@@ -209,6 +215,7 @@ pub(super) fn turn_effect_executor(
             driver: owned_driver,
             protocol_iteration: machine.protocol_iteration(),
             messages: machine.message_sequence(),
+            active_events: driver.turn_pipeline.active_events(),
             event_tx,
         }),
         replay_trace,

@@ -214,9 +214,10 @@ pub use lash_lashlang_runtime::{
     lashlang_surface_extension,
 };
 pub use lash_protocol_rlm::{
-    ExecutionBounds, InstructionBound, MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID,
-    RlmChannel, RlmProtocolPluginConfig, RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory,
-    RlmSessionConfigDecodeError, TypeExpr, TypeField, UnsetBound, format_type_expr,
+    BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ExecutionBounds, InstructionBound,
+    MemoryBound, NamedDataType, RLM_PROTOCOL_PLUGIN_ID, RlmChannel, RlmProtocolPluginConfig,
+    RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
+    TypeExpr, TypeField, UnsetBound, format_type_expr,
 };
 /// Projection vocabulary: register lazy host projections on a
 /// [`ProjectionRegistry`] or bind projected values to the active session via
@@ -225,9 +226,10 @@ pub use lash_protocol_rlm::{
 pub use lash_protocol_rlm::{
     ProjectionRegistry, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
 };
+pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
-    RlmCreateExtras, RlmFinalAnswerFormat, RlmSessionConfig, RlmSessionConfigConflict,
-    RlmTermination, RlmTurnOptions,
+    RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig,
+    RlmSessionConfigConflict, RlmTermination, RlmTurnOptions,
 };
 pub use lashlang::LinkedModule;
 
@@ -260,6 +262,7 @@ fn rlm_termination_options(
     let override_options = ProtocolTurnOptions::typed(lash_rlm_types::RlmTurnOptions {
         termination: Some(termination),
         final_answer_format: None,
+        render: None,
     })?;
     Ok(current
         .map(|current| current.merged_with_override(&override_options))

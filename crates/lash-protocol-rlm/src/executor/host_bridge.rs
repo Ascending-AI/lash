@@ -16,12 +16,12 @@ use lash_lashlang_runtime::{
 };
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, Record as FlowRecord, Sleep,
-    Value as FlowValue, ValueProjectionContext, ValueProjector,
+    Value as FlowValue,
 };
 use serde_json::Value;
 
 use super::cell_run::{CellRun, LashlangCellOpener};
-use crate::projection::{flow_to_json_value, format_output_value};
+use crate::projection::flow_to_json_value;
 
 pub(super) struct HostBridge<'run> {
     ctx: RuntimeExecutionContext<'run>,
@@ -29,8 +29,7 @@ pub(super) struct HostBridge<'run> {
     /// mint and its recorded frontier — or the reason this execution has no
     /// logical opener to mint under.
     cell: Arc<Result<CellRun, LashlangCellOpener>>,
-    print_projector: std::sync::Arc<dyn ValueProjector>,
-    observations: Mutex<Vec<Observation>>,
+    prints: Arc<Mutex<Vec<FlowValue>>>,
     printed_images: Mutex<Vec<AttachmentRef>>,
     calls: Mutex<Vec<(usize, lash_core::ExecutedCall)>>,
     next_tool_index: Mutex<usize>,
@@ -50,7 +49,7 @@ pub(super) struct HostBridge<'run> {
 pub(super) struct HostBridgeConfig<'run> {
     pub ctx: RuntimeExecutionContext<'run>,
     pub cell: Arc<Result<CellRun, LashlangCellOpener>>,
-    pub print_projector: std::sync::Arc<dyn ValueProjector>,
+    pub prints: Arc<Mutex<Vec<FlowValue>>>,
     pub lashlang_execution_trace: Option<LashlangExecutionTrace>,
     pub host_environment: lashlang::LashlangHostEnvironment,
     pub deferred_execution_grants: BTreeMap<lash_core::ToolId, ToolExecutionGrant>,
@@ -66,8 +65,7 @@ impl<'run> HostBridge<'run> {
         Self {
             cell: config.cell,
             ctx: config.ctx,
-            print_projector: config.print_projector,
-            observations: Mutex::new(Vec::new()),
+            prints: config.prints,
             printed_images: Mutex::new(Vec::new()),
             calls: Mutex::new(Vec::new()),
             next_tool_index: Mutex::new(0),
@@ -158,7 +156,7 @@ impl<'run> HostBridge<'run> {
         let mut calls = self.calls.into_inner().recover();
         calls.sort_by_key(|(index, _)| *index);
         CollectedExecutionOutput {
-            observations: self.observations.into_inner().recover(),
+            observations: Vec::new(),
             printed_images: self.printed_images.into_inner().recover(),
             calls: calls.into_iter().map(|(_, call)| call).collect(),
         }
@@ -894,18 +892,7 @@ impl HostBridge<'_> {
     async fn print(&self, value: FlowValue) -> Result<(), ExecutionHostError> {
         let attachment_store = self.ctx.attachment_store();
         let images = collect_printed_images(&value, attachment_store.as_ref()).await?;
-        let projected_text = {
-            let _phase = self.ctx.named_phase("rlm_lashlang.print_project");
-            self.print_projector
-                .project(ValueProjectionContext::new(&value))
-        };
-        let raw_text = format_output_value(&value);
-        let projection =
-            crate::rlm_support::observation_projection_metadata(&raw_text, &projected_text);
-        self.observations.lock_recover().push(Observation {
-            text: raw_text,
-            projection,
-        });
+        self.prints.lock_recover().push(value);
         if !images.is_empty() {
             self.printed_images.lock_recover().extend(images);
         }

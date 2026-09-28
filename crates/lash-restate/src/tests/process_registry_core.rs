@@ -743,8 +743,8 @@ finish(await handle);
     // committed before the crash but whose `PresentToolResult` had not yet
     // landed appends its presentation on the resume — here the `start_process`
     // and resumed `replay_pending_input` boundaries — before the checkpoint.
-    // FIG-3586: the cell the crash interrupted seals its run once it answers,
-    // which the pre-crash run never reached.
+    // The interrupted cell seals once it answers; the pre-crash run never
+    // reached that boundary. It prints nothing, so no prints step is recorded.
     assert_eq!(
         replayed_envelopes.len(),
         recorded_effect_count + 4,

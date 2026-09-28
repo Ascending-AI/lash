@@ -11,6 +11,9 @@ pub(crate) struct TypescriptDialect {
 }
 
 impl TypescriptDialect {
+    pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
+        self.services.code_renderer.clone()
+    }
     pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
         Self { surface, services }
     }
@@ -32,6 +35,7 @@ impl TypescriptDialect {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         }
@@ -713,6 +717,7 @@ mod tests {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
@@ -771,6 +776,7 @@ mod tests {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
@@ -851,6 +857,7 @@ mod tests {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
@@ -912,6 +919,7 @@ mod tests {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
@@ -996,6 +1004,7 @@ mod tests {
                 deferred_trigger_resolver: None,
                 execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
                 execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                code_renderer: Default::default(),
                 channel: crate::plugin::RlmChannel::Cell,
             },
         );
@@ -1143,6 +1152,7 @@ mod tests {
                         execution_trace_config:
                             crate::executor::RlmLashlangExecutionTraceConfig::default(),
                         execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+                        code_renderer: Default::default(),
                         channel: crate::plugin::RlmChannel::Cell,
                     },
                 );

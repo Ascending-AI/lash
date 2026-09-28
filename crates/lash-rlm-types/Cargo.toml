@@ -21,5 +21,6 @@ workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
+lash-render = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }

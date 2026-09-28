@@ -781,15 +781,7 @@
     },
     "TextProjectionMetadata": {
       "properties": {
-        "limit": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "limit_mode": {
-          "type": "string"
-        },
-        "max_lines": {
+        "limit_chars": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
@@ -799,17 +791,7 @@
           "minimum": 0.0,
           "type": "integer"
         },
-        "original_lines": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "projected_chars": {
-          "format": "uint",
-          "minimum": 0.0,
-          "type": "integer"
-        },
-        "projected_lines": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
@@ -819,13 +801,9 @@
         }
       },
       "required": [
-        "limit",
-        "limit_mode",
-        "max_lines",
+        "limit_chars",
         "original_chars",
-        "original_lines",
         "projected_chars",
-        "projected_lines",
         "truncated"
       ],
       "type": "object"

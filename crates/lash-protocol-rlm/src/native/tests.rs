@@ -56,6 +56,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
             termination: Some(termination),
             final_answer_format: None,
+            render: None,
         })
         .unwrap(),
     }

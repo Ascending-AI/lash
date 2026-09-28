@@ -3,6 +3,10 @@ use super::{ExecutionBounds, InstructionBound, MemoryBound, RlmAbilities, RlmLan
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RlmProtocolPluginConfig {
+    #[serde(skip)]
+    pub code_renderer: crate::render::CodeRendererSlot,
+    #[serde(default)]
+    pub render: lash_rlm_types::RlmRenderPatch,
     /// Host construction-time discovery; never recorded in protocol state.
     #[serde(skip)]
     pub discovery: Option<lash_core::ToolDiscovery>,
@@ -101,6 +105,8 @@ impl RlmProtocolPluginConfigBuilder<InstructionBound, MemoryBound, super::RlmCha
     /// Available only once both bounds are chosen.
     pub fn build(self) -> RlmProtocolPluginConfig {
         RlmProtocolPluginConfig {
+            code_renderer: crate::render::CodeRendererSlot::default(),
+            render: lash_rlm_types::RlmRenderPatch::default(),
             discovery: None,
             channel: self.channel,
             instruction_limit: self.instruction_limit,

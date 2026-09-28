@@ -486,7 +486,7 @@ mod tests {
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: "print big".to_string(),
-            output: vec![output.to_string()],
+            output: vec![output.to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
@@ -599,6 +599,17 @@ mod tests {
                 .await
                 .expect("`history.length` should answer"),
             FlowValue::Number(1.0)
+        );
+    }
+
+    #[tokio::test]
+    async fn history_index_reads_the_typed_print_value_in_a_typescript_cell() {
+        let projection = step_projection("typed print");
+        assert_eq!(
+            run_history_cell("finish(history[0].output[0]);", &projection)
+                .await
+                .expect("indexed history output"),
+            FlowValue::String("typed print".into())
         );
     }
 
@@ -723,7 +734,7 @@ mod tests {
             id: "terminal".to_string(),
             protocol_iteration: 1,
             code: "finish { answer: 42 }".to_string(),
-            output: vec!["terminal output".to_string()],
+            output: vec!["terminal output".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,
@@ -733,7 +744,7 @@ mod tests {
             id: "retained".to_string(),
             protocol_iteration: 0,
             code: "print \"next\"".to_string(),
-            output: vec!["next".to_string()],
+            output: vec!["next".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,

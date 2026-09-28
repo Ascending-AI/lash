@@ -137,6 +137,7 @@ async fn execute_with_deferred_trigger(
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
+        crate::render::CodeRendererSlot::default(),
     )
     .await;
     handler.close().await.expect("close the cell's handler");
@@ -165,7 +166,8 @@ fn deferred_trigger_constructor_and_event_schema_link() {
                     )),
                     calls: Arc::clone(&calls),
                 });
-            let (state, response) = execute_with_deferred_trigger(language, code, resolver).await;
+            let (state, response) =
+                Box::pin(execute_with_deferred_trigger(language, code, resolver)).await;
             assert!(response.error.is_none(), "{language}: {:?}", response.error);
             assert_eq!(
                 response.terminal_finish.as_ref().unwrap()["type"],
@@ -193,7 +195,7 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 )),
                 calls,
             });
-        let (mut state, response) = execute_with_deferred_trigger(
+        let (mut state, response) = Box::pin(execute_with_deferred_trigger(
             "typescript",
             r#"
                 const remember = async (change: calendar.Change) => true;
@@ -203,7 +205,7 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
                 }));
             "#,
             resolver,
-        )
+        ))
         .await;
         assert!(response.error.is_none(), "{:?}", response.error);
 
@@ -250,7 +252,8 @@ fn deferred_trigger_references_inside_helpers_and_processes_are_gathered() {
                     )),
                     calls: Arc::clone(&calls),
                 });
-            let (_, response) = execute_with_deferred_trigger(language, code, resolver).await;
+            let (_, response) =
+                Box::pin(execute_with_deferred_trigger(language, code, resolver)).await;
             assert!(response.error.is_none(), "{language}: {:?}", response.error);
             assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         }
@@ -285,7 +288,8 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
                     outcome,
                     calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 });
-            let (_, response) = execute_with_deferred_trigger("typescript", code, resolver).await;
+            let (_, response) =
+                Box::pin(execute_with_deferred_trigger("typescript", code, resolver)).await;
             let error = response
                 .error
                 .expect("link must reject unavailable definition");
@@ -354,6 +358,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
+            crate::render::CodeRendererSlot::default(),
         )
         .await;
         handler.close().await.expect("close the cell's handler");
@@ -966,11 +971,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                 observation.text.chars().count(),
                 "projection metadata must belong to its observation"
             );
-            assert_eq!(
-                observation.projection.original_lines,
-                observation.text.lines().count(),
-                "projection metadata must belong to its observation"
-            );
+            assert_eq!(observation.projection.limit_chars, 8_000);
         }
 
         let after = lash_core::TriggerStore::list_subscriptions(
@@ -1710,7 +1711,7 @@ pub(super) fn foreground_sleep_executes_through_runtime_context() {
 }
 
 #[test]
-pub(super) fn print_observation_preserves_raw_output_and_records_projection_metadata() {
+pub(super) fn print_observation_preserves_typed_value_and_records_cut_metadata() {
     block_on(async {
         let large = "x".repeat(60 * 1024);
         let record = format!(
@@ -1725,36 +1726,24 @@ pub(super) fn print_observation_preserves_raw_output_and_records_projection_meta
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.observations.len(), 1);
+        assert_eq!(response.observations[0].value["output"], large);
+        assert!(response.observations[0].text.starts_with("[cut: "));
         assert!(
-            response.observations[0].text.contains(&large),
-            "raw observation should preserve full printed value"
+            response.observations[0]
+                .text
+                .contains("narrow with history[")
         );
         let metadata = &response.observations[0].projection;
         assert!(metadata.truncated, "{metadata:?}");
-        assert_eq!(metadata.original_chars, 61_517);
-        // `print` hands the host the record itself, so the projector summarises
-        // it field by field instead of cutting the rendering at the byte limit
-        // (FIG-3061).
-        assert_eq!(metadata.projected_chars, 330);
-        assert_ne!(metadata.original_chars, metadata.projected_chars);
-        assert_eq!(metadata.original_lines, 1);
-        assert_eq!(metadata.projected_lines, 1);
-        assert_eq!(
-            metadata.limit,
-            crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_bytes
-        );
-        assert_eq!(
-            metadata.max_lines,
-            crate::rlm_support::PRINT_HISTORY_PROJECTION_CONFIG.max_lines
-        );
+        assert!(metadata.original_chars > 60_000);
+        assert!(metadata.projected_chars < metadata.original_chars);
+        assert_eq!(metadata.limit_chars, 8_000);
     });
 }
 
-/// The byte cap is still the backstop for the rendering route: `console.log`
-/// stringifies before the observation is written, so its projection is a cut
-/// string, not a summary. Both routes stay inside the same budget.
+/// Console output is also rendered under the fixed character cap.
 #[test]
-pub(super) fn console_log_of_a_large_record_still_stops_at_the_byte_cap() {
+pub(super) fn console_log_of_a_large_record_stops_at_the_char_cap() {
     block_on(async {
         let large = "x".repeat(60 * 1024);
         let code = format!(

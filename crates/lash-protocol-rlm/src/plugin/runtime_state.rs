@@ -45,6 +45,7 @@ impl RlmRuntimeState {
             deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,
         };
         Self::new(Arc::new(crate::dialect::TypescriptDialect::new(
@@ -69,13 +70,30 @@ impl RlmRuntimeState {
     /// — the turn-machine build and each journaled execution-environment sync
     /// — so the projector never reads this state directly and a redrive
     /// replays the recorded render (FIG-3538).
-    pub(crate) async fn bound_variables_prompt(&self) -> Result<Arc<str>, SessionError> {
+    pub(crate) async fn bound_variables_prompt(
+        &self,
+        recorded: Option<&lash_core::RecordedRender>,
+    ) -> Result<Arc<str>, SessionError> {
+        let renderer = self.dialect.renderer();
+        #[cfg(test)]
+        let fallback = lash_core::RecordedRender {
+            renderer_id: renderer.0.id().to_string(),
+            params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+                .unwrap_or_default(),
+        };
+        #[cfg(test)]
+        let recorded = recorded.or(Some(&fallback));
+        let recorded = lash_core::RecordedRender::require_available(recorded, renderer.0.id())
+            .map_err(|code| SessionError::Protocol(code.to_string()))?;
+        let params: crate::render::ResolvedRlmRender =
+            serde_json::from_value(recorded.params.clone())
+                .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let exclude = self.protected_projected_binding_names().await;
         Ok(self
             .execution
             .lock()
             .await
-            .prepare_bound_variables_prompt(&exclude)?
+            .prepare_bound_variables_prompt(&exclude, params.preview)?
             .render())
     }
 
@@ -786,7 +804,7 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let prompt = state
-                    .bound_variables_prompt()
+                    .bound_variables_prompt(None)
                     .await
                     .expect("bound variables prompt");
                 assert!(!prompt.contains("scratch_note"));
@@ -802,7 +820,7 @@ mod tests {
                 .expect("execute code");
 
                 let prompt = state
-                    .bound_variables_prompt()
+                    .bound_variables_prompt(None)
                     .await
                     .expect("bound variables prompt");
                 assert!(prompt.contains(r#"- `scratch_note` = "after execution""#));
@@ -829,7 +847,7 @@ mod tests {
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
-                    .bound_variables_prompt()
+                    .bound_variables_prompt(None)
                     .await
                     .expect("bound variables prompt");
                 assert!(rendered.contains("cancelled_tail"));
@@ -839,7 +857,7 @@ mod tests {
                     .await
                     .expect("cancel second cell");
                 let rendered = state
-                    .bound_variables_prompt()
+                    .bound_variables_prompt(None)
                     .await
                     .expect("bound variables prompt");
                 assert!(rendered.contains("survives"));

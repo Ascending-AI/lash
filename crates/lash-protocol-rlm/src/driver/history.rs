@@ -61,9 +61,8 @@ use lash_core::{
     facade_support::BorrowedChronologicalEntry, facade_support::BorrowedChronologicalPayload,
 };
 use lash_rlm_types::{RlmAttachmentRef, RlmImageRef};
-use lashlang::{Value as FlowValue, ValueProjectionContext, ValueProjector};
 
-use crate::projection::{decode_rlm_protocol_event, json_to_flow_value, rlm_history_projection};
+use crate::projection::{decode_rlm_protocol_event, rlm_history_projection};
 
 pub(super) struct RlmHistoryRenderInput<'a> {
     pub(super) images: bool,
@@ -561,25 +560,19 @@ fn message_text(
 /// executed calls, error, and final value.
 /// Never empty.
 pub(crate) fn step_output_text(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
+    _vocabulary: crate::dialect::DialectPromptVocabulary,
     index: usize,
     entry: &lash_rlm_types::RlmTrajectoryEntry,
 ) -> String {
     let mut out = String::new();
     for (output_index, item) in entry.output.iter().enumerate() {
-        let (preview, projected_lossy) = project_history_output(item);
-        let raw_len = item.chars().count();
-        let full_ref = projected_ref(
-            vocabulary,
-            projected_lossy,
-            &format!("history[{index}].output[{output_index}]"),
-        );
         if !out.is_empty() {
             out.push_str("\n\n");
         }
         let _ = write!(
             out,
-            "history[{index}].output[{output_index}] ({raw_len} chars{full_ref}):\n{preview}"
+            "history[{index}].output[{output_index}]:\n{}",
+            item.text
         );
     }
     if !entry.images.is_empty() {
@@ -736,34 +729,4 @@ pub(crate) fn preview_retained_copy(
         "preview only — full value retained; re-run `{}` for the rest",
         vocabulary.print_statement(reference)
     )
-}
-
-fn projected_ref(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    projected_lossy: bool,
-    reference: &str,
-) -> String {
-    if projected_lossy {
-        format!(" — {}", preview_retained_copy(vocabulary, reference))
-    } else {
-        String::new()
-    }
-}
-
-fn project_history_output(item: &str) -> (String, bool) {
-    let value = history_output_value(item);
-    let projected =
-        crate::rlm_support::print_history_projector().project(ValueProjectionContext::new(&value));
-    let lossy = crate::rlm_support::projection_is_lossy(item, &projected);
-    (projected, lossy)
-}
-
-fn history_output_value(item: &str) -> FlowValue {
-    let trimmed = item.trim_start();
-    if (trimmed.starts_with('{') || trimmed.starts_with('['))
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(item)
-    {
-        return json_to_flow_value(value);
-    }
-    FlowValue::String(item.into())
 }

@@ -464,6 +464,7 @@ impl RuntimeBoundaryHarness {
         let response = ExecResponse {
             observations: vec![lash_core::Observation {
                 text: output.clone(),
+                value: serde_json::json!(output),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

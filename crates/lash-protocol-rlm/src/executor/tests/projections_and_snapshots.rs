@@ -1170,6 +1170,8 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             &globals,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         );
 
         assert!(
@@ -1233,6 +1235,8 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             &globals,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         )
         .to_string();
 
@@ -1240,12 +1244,12 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         assert!(s.contains("`big_map`:"), "{s}");
         assert!(s.contains("keys=24"), "{s}");
         assert!(s.contains("≈ {") && s.contains("room_0"), "{s}");
-        assert!(s.contains("fields omitted"), "{s}");
+        assert!(s.contains("≈ {"), "{s}");
         // Large list -> type + len=N + projector preview.
         assert!(s.contains("`big_notes`:"), "{s}");
         assert!(s.contains("len=45"), "{s}");
         assert!(s.contains("≈ [") && s.contains("note 0:"), "{s}");
-        assert!(s.contains("items omitted"), "{s}");
+        assert!(s.contains("hidden items"), "{s}");
     });
 }
 

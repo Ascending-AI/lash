@@ -124,6 +124,11 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
+    let ctx = ctx.with_recorded_render(lash_core::RecordedRender {
+        renderer_id: "lash.ax.v1".to_string(),
+        params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+            .unwrap_or_default(),
+    });
     Box::pin(execute_code_with_channel_and_bounds_with_trigger_resolver(
         state,
         ctx,
@@ -137,6 +142,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
+        crate::render::CodeRendererSlot::default(),
     ))
     .await
 }
@@ -155,7 +161,18 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
+    code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
+    #[cfg(test)]
+    let ctx = if ctx.recorded_render().is_none() {
+        ctx.with_recorded_render(lash_core::RecordedRender {
+            renderer_id: code_renderer.0.id().to_string(),
+            params: serde_json::to_value(crate::render::ResolvedRlmRender::default())
+                .unwrap_or_default(),
+        })
+    } else {
+        ctx
+    };
     let clean_code = clean_model_code(&request.code);
     // The cell's replay run (FIG-3586): every command it issues is keyed by
     // its issue ordinal under the cell's own replay key, and the cell seals
@@ -164,7 +181,8 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     // Boxed: the seal runs under the same context after the cell, and an
     // unboxed context held across the cell would size every caller's future.
     let seal_ctx = Box::new(ctx.clone());
-    let response = Box::pin(execute_code_inner(
+    let prints = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut response = Box::pin(execute_code_inner(
         state,
         ctx,
         Arc::clone(&cell),
@@ -178,8 +196,102 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
+        Arc::clone(&prints),
     ))
     .await;
+    if let Ok(cell) = cell.as_ref()
+        && !seal_ctx.is_cancelled()
+        && !seal_ctx.has_nested_effect_error()
+    {
+        let values = prints
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if !values.is_empty() {
+            let recorded = lash_core::RecordedRender::require_available(
+                seal_ctx.recorded_render(),
+                code_renderer.0.id(),
+            );
+            match recorded.and_then(|recorded| {
+                serde_json::from_value::<crate::render::ResolvedRlmRender>(recorded.params.clone())
+                    .map_err(|_| lash_core::RuntimeErrorCode::RecordedRendererUnavailable)
+            }) {
+                Ok(params) => {
+                    let renderer = code_renderer.0;
+                    let history_index = crate::projection::rlm_history_projection(
+                        seal_ctx.chronological_projection().as_ref(),
+                    )
+                    .len();
+                    let key = format!(
+                        "{}:prints",
+                        cell.identities()
+                            .namespace()
+                            .as_str()
+                            .trim_end_matches(":lk2")
+                    );
+                    let outcome = seal_ctx
+                        .journaled_language_value_with(
+                            key,
+                            format!("rlm.prints:{}", renderer.id()),
+                            move || {
+                                let mut observations = Vec::new();
+                                for value in values {
+                                    let observation = crate::render::rendered_print(
+                                        renderer.as_ref(),
+                                        &value,
+                                        &params.print,
+                                        history_index,
+                                        observations.len(),
+                                        flow_to_json_value(&value),
+                                    );
+                                    if let Some(observation) = observation {
+                                        observations.push(observation);
+                                    }
+                                }
+                                serde_json::to_value(observations).map_err(|error| {
+                                    lash_core::RuntimeEffectControllerError::new(
+                                        lash_core::RuntimeErrorCode::RecordedRendererUnavailable,
+                                        error.to_string(),
+                                    )
+                                })
+                            },
+                        )
+                        .await;
+                    match outcome {
+                        Ok(value) => match serde_json::from_value(value) {
+                            Ok(observations) => response.observations = observations,
+                            Err(error) => {
+                                response.error = Some(lash_core::CellFailure::new(
+                                    lash_core::CellFailureKind::Host,
+                                    error.to_string(),
+                                ))
+                            }
+                        },
+                        Err(error) => {
+                            let message = error.to_string();
+                            seal_ctx.record_nested_runtime_effect_error(error);
+                            response.error = Some(lash_core::CellFailure::new(
+                                lash_core::CellFailureKind::Host,
+                                message,
+                            ));
+                        }
+                    }
+                }
+                Err(code) => {
+                    let error = lash_core::RuntimeEffectControllerError::new(
+                        code,
+                        "recorded RLM renderer or parameters are unavailable",
+                    );
+                    let message = error.to_string();
+                    seal_ctx.record_nested_runtime_effect_error(error);
+                    response.error = Some(lash_core::CellFailure::new(
+                        lash_core::CellFailureKind::Host,
+                        message,
+                    ));
+                }
+            }
+        }
+    }
     if let Ok(cell) = cell.as_ref()
         && !seal_ctx.is_cancelled()
     {
@@ -324,6 +436,7 @@ async fn execute_code_inner(
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
+    prints: Arc<std::sync::Mutex<Vec<lashlang::Value>>>,
 ) -> ExecResponse {
     state.mark_execution_started();
     let execution_checkpoint = state.execution_checkpoint();
@@ -620,11 +733,10 @@ async fn execute_code_inner(
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
     }
-    let print_projector = Arc::new(crate::rlm_support::print_history_projector());
     let host = HostBridge::new(HostBridgeConfig {
         ctx: ctx.clone(),
         cell,
-        print_projector,
+        prints,
         lashlang_execution_trace: lashlang_execution_trace.clone(),
         host_environment,
         deferred_execution_grants,

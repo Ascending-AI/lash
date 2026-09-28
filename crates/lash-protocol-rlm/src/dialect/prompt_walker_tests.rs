@@ -273,7 +273,10 @@ fn assembled_prompt_fragments_with_projection(
     fragments.push((
         "bound variables",
         session
-            .prepare_bound_variables_prompt(&std::collections::BTreeSet::new())
+            .prepare_bound_variables_prompt(
+                &std::collections::BTreeSet::new(),
+                lash_render::RenderParams::preview(),
+            )
             .expect("bound variables prompt")
             .render()
             .to_string(),

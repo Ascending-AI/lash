@@ -689,7 +689,7 @@ impl RuntimeTurnDriver<'_> {
         &self,
         language: String,
         code: &str,
-        messages: crate::MessageSequence,
+        chronological_projection: Arc<crate::facade_support::ChronologicalProjection>,
         protocol_iteration: usize,
         invocation: crate::RuntimeInvocation,
         event_tx: &TurnObserver,
@@ -698,14 +698,6 @@ impl RuntimeTurnDriver<'_> {
         crate::RuntimeEffectControllerError,
     > {
         let code_executor = self.session.plugins().code_executor();
-        let read_view = self
-            .checkpoint_state_view(messages, protocol_iteration)
-            .map_err(|error| {
-                crate::RuntimeEffectControllerError::from(crate::PluginError::Session(
-                    error.to_string(),
-                ))
-            })?;
-        let chronological_projection = read_view.shared_chronological_projection();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self
             .execution_context(event_tx, chronological_projection)

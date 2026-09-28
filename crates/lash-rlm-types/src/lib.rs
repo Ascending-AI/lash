@@ -137,7 +137,7 @@ pub struct RlmTrajectoryEntry {
     /// `output: String` and `observations: Vec<String>` — those carried
     /// the same content twice, wasting tokens on every history-bearing
     /// iteration.
-    pub output: Vec<String>,
+    pub output: Vec<RlmPrint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<AttachmentRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -153,6 +153,22 @@ pub struct RlmTrajectoryEntry {
 }
 
 pub type RlmExecutedCall = lash_sansio::ExecutedCallRecord;
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RlmPrint {
+    pub text: String,
+    pub value: serde_json::Value,
+}
+
+impl From<String> for RlmPrint {
+    fn from(text: String) -> Self {
+        Self {
+            value: serde_json::Value::String(text.clone()),
+            text,
+        }
+    }
+}
 pub type RlmExecutedCallOutcome = lash_sansio::ExecutedCallOutcome;
 
 fn is_zero(value: &usize) -> bool {
@@ -161,7 +177,10 @@ fn is_zero(value: &usize) -> bool {
 
 impl RlmTrajectoryEntry {
     pub fn output_chars(&self) -> usize {
-        self.output.iter().map(|s| s.chars().count()).sum()
+        self.output
+            .iter()
+            .map(|print| print.text.chars().count())
+            .sum()
     }
 }
 
@@ -230,7 +249,7 @@ pub enum RlmHistoryItem {
         id: String,
         protocol_iteration: usize,
         code: String,
-        output: Vec<String>,
+        output: Vec<serde_json::Value>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         images: Vec<RlmImageRef>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -253,7 +272,11 @@ impl RlmHistoryItem {
             id: entry.id.clone(),
             protocol_iteration: entry.protocol_iteration,
             code: entry.code.clone(),
-            output: entry.output.clone(),
+            output: entry
+                .output
+                .iter()
+                .map(|print| print.value.clone())
+                .collect(),
             images: entry
                 .images
                 .iter()
@@ -321,7 +344,7 @@ mod rlm_step_serde_tests {
             id: "step-1".to_string(),
             protocol_iteration: 3,
             code: "print('hello')".to_string(),
-            output: vec!["hello".to_string()],
+            output: vec!["hello".to_string().into()],
             images: vec![lash_sansio::AttachmentRef {
                 id: "image-1".parse().expect("valid attachment id"),
                 media_type: "image/png".parse().expect("valid media type"),
@@ -539,6 +562,8 @@ pub enum RlmFinalAnswerFormat {
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RlmCreateExtras {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<RlmRenderPatch>,
     /// Session-wide termination requirement. Absence is the `Natural` default.
     ///
     /// Absence is a distinct statement from an explicit `Natural`: options that
@@ -569,6 +594,23 @@ pub struct RlmTurnOptions {
     /// Presentation preference for this turn's final answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub final_answer_format: Option<RlmFinalAnswerFormat>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<RlmRenderPatch>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RlmRenderPatch {
+    #[serde(
+        default,
+        skip_serializing_if = "lash_render::RenderParamsPatch::is_empty"
+    )]
+    pub print: lash_render::RenderParamsPatch,
+    #[serde(
+        default,
+        skip_serializing_if = "lash_render::RenderParamsPatch::is_empty"
+    )]
+    pub preview: lash_render::RenderParamsPatch,
 }
 
 impl RlmTurnOptions {
@@ -626,6 +668,7 @@ impl From<&RlmCreateExtras> for RlmSessionConfig {
 impl From<&RlmSessionConfig> for RlmCreateExtras {
     fn from(config: &RlmSessionConfig) -> Self {
         Self {
+            render: None,
             termination: config.termination.clone(),
             final_answer_format: config.final_answer_format.clone(),
         }
@@ -829,6 +872,7 @@ mod turn_options_tests {
         let encoded = serde_json::to_string(&RlmTurnOptions {
             termination: Some(RlmTermination::Natural),
             final_answer_format: None,
+            render: None,
         })
         .expect("encode");
         assert!(!encoded.contains("dialect"), "{encoded}");

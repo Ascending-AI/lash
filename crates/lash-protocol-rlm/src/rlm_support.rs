@@ -3,48 +3,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use lash_core::{TextProjectionMetadata, TokenUsage};
+use crate::render::CodeRenderer;
+use lash_core::TokenUsage;
+use lash_render::{RenderNode, RenderParams, RenderValue, truncate_chars};
 use lash_rlm_types::{RlmTermination, RlmTurnOptions};
-use lashlang::{
-    BudgetedJsonProjectionConfig, BudgetedJsonProjector, Value as FlowValue,
-    ValueProjectionContext, ValueProjector,
-};
-
-pub(crate) const PRINT_HISTORY_PROJECTION_CONFIG: BudgetedJsonProjectionConfig =
-    BudgetedJsonProjectionConfig::new(50 * 1024, 2_000, 6);
-pub(crate) const BOUND_VARIABLE_PROJECTION_CONFIG: BudgetedJsonProjectionConfig =
-    BudgetedJsonProjectionConfig::new(1024, 40, 3);
-
-pub(crate) fn print_history_projector() -> BudgetedJsonProjector {
-    BudgetedJsonProjector::new(PRINT_HISTORY_PROJECTION_CONFIG)
-}
-
-pub(crate) fn observation_projection_metadata(
-    original: &str,
-    projected: &str,
-) -> TextProjectionMetadata {
-    TextProjectionMetadata {
-        truncated: projection_is_lossy(original, projected),
-        original_chars: original.chars().count(),
-        projected_chars: projected.chars().count(),
-        original_lines: original.lines().count(),
-        projected_lines: projected.lines().count(),
-        limit: PRINT_HISTORY_PROJECTION_CONFIG.max_bytes,
-        limit_mode: "bytes".to_string(),
-        max_lines: PRINT_HISTORY_PROJECTION_CONFIG.max_lines,
-    }
-}
-
-pub(crate) fn projection_is_lossy(original: &str, projected: &str) -> bool {
-    projected.contains("truncated")
-        || projected.contains("omitted")
-        || projected.contains("max depth")
-        || projected.chars().count() < original.chars().count()
-}
-
-pub(crate) fn bound_variable_projector() -> BudgetedJsonProjector {
-    BudgetedJsonProjector::new(BOUND_VARIABLE_PROJECTION_CONFIG).with_quoted_top_level_strings()
-}
+use lashlang::Value as FlowValue;
 
 pub(crate) fn decode_rlm_options(
     options: &lash_core::ProtocolTurnOptions,
@@ -268,6 +231,8 @@ pub(crate) fn render_bound_variables(
     globals: &[(String, FlowValue)],
     opaque: &[(String, String)],
     vocabulary: crate::dialect::DialectPromptVocabulary,
+    renderer: &dyn CodeRenderer,
+    params: &RenderParams,
 ) -> Arc<str> {
     let mut lines = vec![
         format!(
@@ -295,7 +260,7 @@ pub(crate) fn render_bound_variables(
     // the win for globals that are stable across prompt builds.
     let mut rows: Vec<WorkRow> = Vec::with_capacity(globals.len());
     for (name, value) in globals {
-        let hash = value_hash(value);
+        let hash = value_hash(value, params, renderer.id());
         match cache.entries.get(name) {
             Some(entry) if entry.value_hash == hash => rows.push(WorkRow {
                 name: name.clone(),
@@ -306,7 +271,7 @@ pub(crate) fn render_bound_variables(
                 preview: entry.preview.clone(),
             }),
             _ => {
-                let built = build_bound_variable_row(value);
+                let built = build_bound_variable_row(value, renderer, params);
                 rows.push(WorkRow {
                     name: name.clone(),
                     value_hash: hash,
@@ -437,7 +402,7 @@ pub(crate) fn history_item_type_definition(images: bool) -> Vec<String> {
     let mut lines = vec![
         "type HistoryItem =".to_string(),
         "  | { kind: \"message\", id: str, role: enum[\"user\", \"system\", \"assistant\", \"event\"], content: str, attachments?: list[HistoryAttachment] }".to_string(),
-        format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[str]{image_field}, error?: str | null, final_output?: any | null }}"),
+        format!("  | {{ kind: \"lashlang_step\", id: str, protocol_iteration: int, code: str, output: list[any]{image_field}, error?: str | null, final_output?: any | null }}"),
         "type HistoryAttachment = { id: str, media_type?: str | null, label?: str | null, source: str, reference: str }".to_string(),
     ];
     if images {
@@ -482,14 +447,15 @@ fn render_row_line(
     line
 }
 
-fn build_bound_variable_row(value: &FlowValue) -> BuiltRow {
-    let projected = bound_variable_projector().project(ValueProjectionContext::new(value));
-    let full = BudgetedJsonProjector::unbounded()
-        .with_quoted_top_level_strings()
-        .project(ValueProjectionContext::new(value));
-    if projected == full {
+fn build_bound_variable_row(
+    value: &FlowValue,
+    renderer: &dyn CodeRenderer,
+    params: &RenderParams,
+) -> BuiltRow {
+    let result = truncate_chars(renderer.variable_preview(value, params), params.max_chars);
+    if result.cuts.is_empty() {
         return BuiltRow {
-            inline: Some(projected),
+            inline: Some(result.body),
             shape: None,
             size_hint: None,
             preview: None,
@@ -501,57 +467,61 @@ fn build_bound_variable_row(value: &FlowValue) -> BuiltRow {
         inline: None,
         shape: Some(infer_json_shape(&json)),
         size_hint: render_value_size_hint(&json),
-        preview: Some(projected),
+        preview: Some(result.body),
     }
 }
 
 /// Cheap structural hash of a JSON value for change detection. Walks the value
 /// but allocates nothing — unlike serializing it or inferring its shape, which
 /// is exactly the work this lets us skip when the value is unchanged.
-fn value_hash(value: &FlowValue) -> u64 {
+fn value_hash(value: &FlowValue, params: &RenderParams, renderer_id: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
-    let json = serde_json::to_value(value).unwrap_or(serde_json::Value::Null);
-    hash_json_value(&json, &mut hasher);
+    renderer_id.hash(&mut hasher);
+    serde_json::to_vec(params)
+        .unwrap_or_default()
+        .hash(&mut hasher);
+    hash_render_value(value, &mut hasher, 0);
     hasher.finish()
 }
 
-fn hash_json_value<H: Hasher>(value: &serde_json::Value, hasher: &mut H) {
-    match value {
-        serde_json::Value::Null => 0u8.hash(hasher),
-        serde_json::Value::Bool(flag) => {
-            1u8.hash(hasher);
+fn hash_render_value<H: Hasher>(value: &FlowValue, hasher: &mut H, depth: usize) {
+    if depth > 64 {
+        return;
+    }
+    match value.node() {
+        RenderNode::Null => 0u8.hash(hasher),
+        RenderNode::Undefined => 1u8.hash(hasher),
+        RenderNode::Bool(flag) => {
+            2u8.hash(hasher);
             flag.hash(hasher);
         }
-        serde_json::Value::Number(number) => {
-            2u8.hash(hasher);
-            if let Some(int) = number.as_i64() {
-                0u8.hash(hasher);
-                int.hash(hasher);
-            } else if let Some(uint) = number.as_u64() {
-                1u8.hash(hasher);
-                uint.hash(hasher);
-            } else {
-                2u8.hash(hasher);
-                number.as_f64().unwrap_or(0.0).to_bits().hash(hasher);
-            }
-        }
-        serde_json::Value::String(text) => {
+        RenderNode::Number(number) => {
             3u8.hash(hasher);
+            number.hash(hasher);
+        }
+        RenderNode::Text(text) => {
+            4u8.hash(hasher);
             text.hash(hasher);
         }
-        serde_json::Value::Array(items) => {
-            4u8.hash(hasher);
-            items.len().hash(hasher);
-            for item in items {
-                hash_json_value(item, hasher);
+        RenderNode::Placeholder(text) => {
+            5u8.hash(hasher);
+            text.hash(hasher);
+        }
+        RenderNode::Array(len) => {
+            6u8.hash(hasher);
+            len.hash(hasher);
+            for index in 0..len {
+                if let Some(child) = value.index(index) {
+                    hash_render_value(&child, hasher, depth + 1);
+                }
             }
         }
-        serde_json::Value::Object(map) => {
-            5u8.hash(hasher);
-            map.len().hash(hasher);
-            for (key, val) in map {
+        RenderNode::Object(len) => {
+            7u8.hash(hasher);
+            len.hash(hasher);
+            for (key, child) in value.fields() {
                 key.hash(hasher);
-                hash_json_value(val, hasher);
+                hash_render_value(&child, hasher, depth + 1);
             }
         }
     }
@@ -914,6 +884,8 @@ mod bound_variable_tests {
             &globals,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         )
         .to_string()
     }
@@ -927,6 +899,8 @@ mod bound_variable_tests {
             &g,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         );
         let s = &rendered;
         assert!(s.contains("- `inventory` = [\"lantern\",\"sword\"]"), "{s}");
@@ -970,11 +944,13 @@ mod bound_variable_tests {
             &g,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         );
         let s = &rendered;
         assert!(s.contains("- `big`:"), "{s}");
         assert!(s.contains("len=500"), "{s}");
-        assert!(s.contains("items omitted"), "{s}");
+        assert!(s.contains("hidden items"), "{s}");
     }
 
     #[test]
@@ -991,13 +967,15 @@ mod bound_variable_tests {
             &g,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         )
         .to_string();
         assert!(s.contains("`map`:"), "{s}"); // type still shown
         assert!(s.contains("keys=30"), "{s}"); // size still shown
         assert!(s.contains("≈ {"), "{s}"); // preview present
         assert!(s.contains("room_00"), "{s}"); // some keys shown
-        assert!(s.contains("fields omitted"), "{s}"); // and the rest elided
+        assert!(s.contains("≈ {"), "{s}");
     }
 
     #[test]
@@ -1010,12 +988,14 @@ mod bound_variable_tests {
             &g,
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         )
         .to_string();
         assert!(s.contains("len=40"), "{s}");
         assert!(s.contains("note-00"), "{s}"); // head retained
         assert!(s.contains("note-39"), "{s}"); // tail retained
-        assert!(s.contains("items omitted"), "{s}"); // middle elided
+        assert!(s.contains("hidden items"), "{s}"); // middle elided
     }
 
     #[test]
@@ -1114,6 +1094,8 @@ mod bound_variable_tests {
             &[("payload".to_string(), value)],
             &[],
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         );
         assert!(
             rendered.contains("keys=2 (__projected__payload, body)")

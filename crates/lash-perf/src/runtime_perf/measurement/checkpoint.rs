@@ -616,6 +616,9 @@ fn checkpoint_pending_exec(
         result: Ok(ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "checkpoint observation: resumed after ExecCode effect boundary".to_string(),
+                value: serde_json::json!(
+                    "checkpoint observation: resumed after ExecCode effect boundary"
+                ),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

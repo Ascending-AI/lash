@@ -716,6 +716,7 @@ fn rlm_contract_config(
     let options = lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
         termination: Some(termination),
         final_answer_format: None,
+        render: None,
     })
     .map_err(|err| FixedScriptRunnerError::Assertion(err.to_string()))?;
     rlm_contract_config_with_turn_options(options)
@@ -814,6 +815,7 @@ fn rlm_exec_response(
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
+                value: serde_json::json!(value),
                 projection: Default::default(),
             })
             .collect(),
@@ -850,6 +852,7 @@ fn rlm_exec_response_with_tool_calls(
             .iter()
             .map(|value| lash_core::Observation {
                 text: (*value).to_string(),
+                value: serde_json::json!(value),
                 projection: Default::default(),
             })
             .collect(),

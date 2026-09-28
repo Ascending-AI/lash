@@ -1261,7 +1261,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         assert_eq!(
             serde_json::to_string(&requests[1][..requests[1].len() - 1])
                 .expect("serialize stable request message prefix"),
-            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<typescript>\nprint(\"first work complete\");\n</typescript>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0] (19 chars):\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
+            r#"[{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"perform two iterations","response_meta":null,"cache_breakpoint":false}}]},{"role":"Assistant","blocks":[{"Text":{"text":"<typescript>\nprint(\"first work complete\");\n</typescript>","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","blocks":[{"Text":{"text":"history[1].output[0]:\nfirst work complete","response_meta":null,"cache_breakpoint":false}}]},{"role":"User","starts_user_segment":true,"blocks":[{"Text":{"text":"mid-turn injection marker","response_meta":null,"cache_breakpoint":true}}]}]"#
         );
         assert_eq!(
             serde_json::to_string(&requests[2])?

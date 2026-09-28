@@ -4,4 +4,4 @@ error[E0560]: struct `lash::rlm::RlmTurnOptions` has no field named `dialect`
 12 |         dialect: Some("typescript"),
    |         ^^^^^^^ `lash::rlm::RlmTurnOptions` does not have this field
    |
-   = note: all struct fields are already assigned
+   = note: available fields are: `render`

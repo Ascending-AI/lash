@@ -421,7 +421,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 state.images.extend(response.printed_images);
                 for observation in response.observations {
                     if !observation.text.is_empty() {
-                        state.output.push(observation.text);
+                        state.output.push(lash_rlm_types::RlmPrint {
+                            text: observation.text,
+                            value: observation.value,
+                        });
                     }
                 }
                 match outcome {

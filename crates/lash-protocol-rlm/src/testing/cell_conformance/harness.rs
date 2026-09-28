@@ -303,6 +303,8 @@ impl Session {
             &self.state.bound_variable_values(&none),
             &self.state.opaque_bound_variables(&none),
             crate::dialect::DialectPromptVocabulary::default(),
+            &crate::render::BuiltinCodeRenderer,
+            &lash_render::RenderParams::preview(),
         )
         .to_string()
     }

@@ -25,7 +25,7 @@ pub(super) struct RlmDriverState {
     /// raw stdout-style emission). Replaces the old split between a
     /// concatenated `combined_output: String` and a sibling
     /// `observations: Vec<String>` — the two carried the same content.
-    pub(super) output: Vec<String>,
+    pub(super) output: Vec<lash_rlm_types::RlmPrint>,
     /// What the cell resolved to. Parked as the `error` / `terminal_finish`
     /// key pair recorded states already carry.
     #[serde(flatten)]

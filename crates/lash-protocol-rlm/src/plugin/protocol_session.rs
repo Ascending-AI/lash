@@ -114,9 +114,12 @@ impl ProtocolSessionPlugin for RlmProtocolSession {
 
     async fn bound_variables_prompt(
         &self,
-        _ctx: ProtocolSessionContext<'_>,
+        ctx: ProtocolSessionContext<'_>,
     ) -> Result<Option<std::sync::Arc<str>>, SessionError> {
-        self.runtime_state.bound_variables_prompt().await.map(Some)
+        self.runtime_state
+            .bound_variables_prompt(ctx.recorded_render())
+            .await
+            .map(Some)
     }
 
     fn configure_runtime_on_materialize(
@@ -261,6 +264,14 @@ pub(crate) fn resolve_rlm_session_options(
     is_root_session: bool,
 ) -> Result<ProtocolTurnOptions, SessionError> {
     let mut resolved = guarded_session_config(existing, plugin_options)?;
+    let existing_render = super::channel::without_channel(existing)
+        .decode::<RlmCreateExtras>()
+        .map_err(|error| SessionError::Protocol(error.to_string()))?
+        .render;
+    let requested_render = plugin_options
+        .decode::<RlmCreateExtras>(RLM_PROTOCOL_PLUGIN_ID)
+        .map_err(|error| SessionError::Protocol(error.to_string()))?
+        .and_then(|extras| extras.render);
 
     if existing.is_empty() {
         resolved.final_answer_format = Some(resolved.final_answer_format.unwrap_or({
@@ -272,7 +283,9 @@ pub(crate) fn resolve_rlm_session_options(
         }));
     }
 
-    rlm_session_config_options(&resolved)
+    let mut extras = RlmCreateExtras::from(&resolved);
+    extras.render = existing_render.or(requested_render);
+    Ok(ProtocolTurnOptions::typed(extras)?)
 }
 
 /// The config a session materializes with: what it recorded, with the
@@ -353,6 +366,7 @@ mod tests {
         let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
             termination: Some(lash_rlm_types::RlmTermination::Natural),
             final_answer_format: None,
+            render: None,
         })
         .expect("existing options");
 
@@ -391,6 +405,7 @@ mod tests {
             RlmCreateExtras {
                 termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
                 final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+                render: None,
             },
         )
         .expect("plugin options");
@@ -477,6 +492,7 @@ mod tests {
         let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
             termination: Some(lash_rlm_types::RlmTermination::Natural),
             final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+            render: None,
         })
         .expect("existing options");
 
@@ -497,6 +513,7 @@ mod tests {
         let existing = ProtocolTurnOptions::typed(RlmCreateExtras {
             termination: Some(lash_rlm_types::RlmTermination::FinishRequired { schema: None }),
             final_answer_format: None,
+            render: None,
         })
         .expect("existing options");
         let requested = PluginOptions::typed(

@@ -206,12 +206,18 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
     ) -> Result<crate::sansio::ProjectorTurnInputs, crate::SessionError> {
         let protocol_session = std::sync::Arc::clone(self.session.plugins().protocol_session());
-        let bound_variables_prompt = protocol_session
-            .bound_variables_prompt(crate::plugin::ProtocolSessionContext::new(
-                &mut self.session,
-                &self.session_id,
-            ))
-            .await?;
+        let recorded_render = self
+            .turn_pipeline
+            .state()
+            .authority
+            .resolved_render
+            .as_ref();
+        let mut context =
+            crate::plugin::ProtocolSessionContext::new(&mut self.session, &self.session_id);
+        if let Some(recorded_render) = recorded_render {
+            context = context.with_recorded_render(recorded_render);
+        }
+        let bound_variables_prompt = protocol_session.bound_variables_prompt(context).await?;
         Ok(crate::sansio::ProjectorTurnInputs {
             prompt_usage: self.turn_pipeline.state().last_prompt_usage.clone(),
             bound_variables_prompt,

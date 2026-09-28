@@ -62,6 +62,7 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
         Ok(lash_core::ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "exec output".to_string(),
+                value: serde_json::json!("exec output"),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

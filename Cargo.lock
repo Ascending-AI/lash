@@ -2275,6 +2275,7 @@ dependencies = [
  "insta",
  "jsonschema",
  "lash-internal-core-execution",
+ "lash-internal-render",
  "lash-internal-sansio",
  "lash-internal-typescript",
  "lash-regress",
@@ -2459,6 +2460,7 @@ dependencies = [
  "lash-internal-lashlang",
  "lash-internal-lashlang-runtime",
  "lash-internal-plugin-process-controls",
+ "lash-internal-render",
  "lash-internal-restate-test",
  "lash-internal-rlm-types",
  "lash-internal-sansio",
@@ -2473,6 +2475,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2679,6 +2682,7 @@ dependencies = [
 name = "lash-internal-rlm-types"
 version = "0.0.0-dev"
 dependencies = [
+ "lash-internal-render",
  "lash-internal-sansio",
  "serde",
  "serde_json",
@@ -2916,6 +2920,7 @@ dependencies = [
  "lash-internal-provider-google",
  "lash-internal-provider-openai",
  "lash-internal-remote-protocol",
+ "lash-internal-render",
  "lash-internal-restate",
  "lash-internal-restate-test",
  "lash-internal-rlm-types",

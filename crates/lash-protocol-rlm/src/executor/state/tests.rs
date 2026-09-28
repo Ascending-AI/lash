@@ -1396,6 +1396,7 @@ fn the_dialect_pins_snapshot_engine_id() {
             deferred_trigger_resolver: None,
             execution_trace_config: crate::executor::RlmLashlangExecutionTraceConfig::default(),
             execution_bounds: crate::plugin::ExecutionBounds::unbounded(),
+            code_renderer: Default::default(),
             channel: crate::plugin::RlmChannel::Cell,
         },
     );

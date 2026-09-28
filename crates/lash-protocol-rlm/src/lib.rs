@@ -19,6 +19,8 @@ pub use native::{
 };
 mod projection;
 mod protocol;
+pub mod render;
+pub use render::{BuiltinCodeRenderer, CodeRenderer, CodeRendererSlot, ResolvedRlmRender};
 mod rlm_support;
 pub mod scenario_contracts;
 mod stream_mask;

@@ -55,7 +55,7 @@ fn step_event(code: &str) -> SessionHistoryRecord {
             id: "lashlang_step_0".to_string(),
             protocol_iteration: 0,
             code: code.to_string(),
-            output: vec!["ok".to_string()],
+            output: vec!["ok".to_string().into()],
             images: Vec::new(),
             calls: Vec::new(),
             calls_omitted: 0,

@@ -3,8 +3,7 @@ use std::sync::Arc;
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
 use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
 use lashlang::{
-    BudgetedJsonProjector, ImageValue, ProjectedValue, Record as FlowRecord, State as FlowState,
-    Value as FlowValue, ValueProjectionContext, ValueProjector,
+    ImageValue, ProjectedValue, Record as FlowRecord, State as FlowState, Value as FlowValue,
 };
 use serde_json::Value;
 
@@ -484,10 +483,6 @@ fn optional_json_u32(value: &Value) -> Option<Option<u32>> {
             .map(Some),
         _ => None,
     }
-}
-
-pub(crate) fn format_output_value(value: &FlowValue) -> String {
-    BudgetedJsonProjector::unbounded().project(ValueProjectionContext::new(value))
 }
 
 #[cfg(test)]

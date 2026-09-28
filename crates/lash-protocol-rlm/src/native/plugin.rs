@@ -127,6 +127,21 @@ struct NativeProtocolDriver {
     dialect: Arc<TypescriptDialect>,
 }
 impl lash_core::plugin::ProtocolDriverPlugin for NativeProtocolDriver {
+    fn resolve_render(
+        &self,
+        options: &lash_core::ProtocolTurnOptions,
+    ) -> Result<Option<lash_core::RecordedRender>, String> {
+        let options = crate::rlm_support::decode_rlm_options(options)?;
+        let resolved = crate::render::ResolvedRlmRender::resolve(
+            &self.config.render,
+            &options.render.unwrap_or_default(),
+        );
+        Ok(Some(lash_core::RecordedRender {
+            renderer_id: self.config.code_renderer.0.id().to_string(),
+            params: serde_json::to_value(resolved).map_err(|error| error.to_string())?,
+        }))
+    }
+
     fn build_preamble(
         &self,
         input: lash_core::ProtocolBuildInput,

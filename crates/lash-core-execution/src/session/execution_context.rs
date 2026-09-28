@@ -341,6 +341,38 @@ impl<'run> RuntimeExecutionContext<'run> {
             .into_language_runtime_value()
     }
 
+    /// Records a language-owned value once under a cell-scoped key. Replay
+    /// serves the stored result without invoking `run` again.
+    pub async fn journaled_language_value_with<F>(
+        &self,
+        effect_id: String,
+        operation: String,
+        run: F,
+    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError>
+    where
+        F: FnOnce() -> Result<serde_json::Value, crate::RuntimeEffectControllerError> + Send + 'run,
+    {
+        // The cell replay key and causal parent identify this record. Live
+        // turn indices may differ on redrive and must not change its envelope.
+        let invocation = self.deferred_resolution_invocation(&effect_id);
+        self.dispatch
+            .effect_controller
+            .scoped()
+            .execute_effect(
+                crate::RuntimeEffectEnvelope::new(
+                    invocation,
+                    crate::RuntimeEffectCommand::LanguageRuntimeValue { operation },
+                ),
+                crate::RuntimeEffectLocalExecutor::language_runtime_value_with(
+                    move |_| async move {
+                        Ok(crate::RuntimeEffectOutcome::LanguageRuntimeValue { value: run()? })
+                    },
+                ),
+            )
+            .await?
+            .into_language_runtime_value()
+    }
+
     /// Journals a replayed language run's seal at `key` (FIG-3586): the
     /// run's facts ride in `facts` and so in the envelope, and `producer` is
     /// the outcome — served back on replay, so the answer names who wrote the
@@ -835,6 +867,11 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn recorded_render(&self) -> Option<&crate::RecordedRender> {
         self.execution_env_spec.render.as_ref()
+    }
+
+    pub fn with_recorded_render(mut self, recorded: crate::RecordedRender) -> Self {
+        self.execution_env_spec.render = Some(recorded);
+        self
     }
 
     pub fn with_process_execution(

@@ -56,11 +56,7 @@ pub struct TextProjectionMetadata {
     pub truncated: bool,
     pub original_chars: usize,
     pub projected_chars: usize,
-    pub original_lines: usize,
-    pub projected_lines: usize,
-    pub limit: usize,
-    pub limit_mode: String,
-    pub max_lines: usize,
+    pub limit_chars: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -164,6 +160,7 @@ impl<'de> serde::Deserialize<'de> for ExecCodeFailure {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct Observation {
     pub text: String,
+    pub value: serde_json::Value,
     pub projection: TextProjectionMetadata,
 }
 
@@ -216,15 +213,12 @@ mod tests {
         let legacy_json = serde_json::json!({
             "observations": [{
                 "text": "step output",
+                "value": "step output",
                 "projection": {
                     "truncated": false,
                     "original_chars": 11,
                     "projected_chars": 11,
-                    "original_lines": 1,
-                    "projected_lines": 1,
-                    "limit": 51200,
-                    "limit_mode": "bytes",
-                    "max_lines": 2000
+                    "limit_chars": 51200
                 }
             }],
             "calls": [],

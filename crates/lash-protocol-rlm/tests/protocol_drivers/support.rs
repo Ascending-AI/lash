@@ -38,6 +38,7 @@ pub(crate) fn test_config_with_termination(rlm_termination: RlmTermination) -> T
         lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
             termination: Some(rlm_termination),
             final_answer_format: None,
+            render: None,
         })
         .expect("valid rlm turn options"),
     )
@@ -346,6 +347,7 @@ pub(crate) fn exec_response(
             .iter()
             .map(|item| lash_sansio::Observation {
                 text: (*item).to_string(),
+                value: serde_json::json!(*item),
                 projection: Default::default(),
             })
             .collect(),
@@ -910,7 +912,12 @@ impl RlmProtocolExpectations {
                 .unwrap_or_else(|| panic!("{scenario_name} missing RLM trajectory entry"));
             assert_eq!(entry.code, expected.code, "{scenario_name} trajectory code");
             assert_eq!(
-                entry.output, expected.output,
+                entry
+                    .output
+                    .iter()
+                    .map(|print| &print.text)
+                    .collect::<Vec<_>>(),
+                expected.output.iter().collect::<Vec<_>>(),
                 "{scenario_name} trajectory output"
             );
             assert_eq!(

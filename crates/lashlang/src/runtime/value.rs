@@ -10,12 +10,14 @@
 //! from a projected binding.
 
 use std::borrow::Borrow;
+use std::borrow::Cow;
 use std::fmt;
 
 use std::ops::Deref;
 use std::sync::Arc;
 
 use compact_str::CompactString;
+use lash_render::{RenderNode, RenderValue};
 use rustc_hash::FxHashMap;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -27,6 +29,117 @@ use super::{
     read_field_ref_direct, read_index_ref_direct, stringify_value, value_contains_projected,
     value_len, value_type_name, write_number,
 };
+
+impl RenderValue for Value {
+    fn node(&self) -> RenderNode<'_> {
+        match self {
+            Self::Null => RenderNode::Null,
+            Self::Undefined => RenderNode::Undefined,
+            Self::Bool(value) => RenderNode::Bool(*value),
+            Self::Number(value) => {
+                let mut number = String::new();
+                let _ = write_number(&mut number, *value);
+                RenderNode::Number(Cow::Owned(if value.is_finite() {
+                    number
+                } else {
+                    "null".into()
+                }))
+            }
+            Self::String(value) => RenderNode::Text(Cow::Borrowed(value.as_str())),
+            Self::Tuple(values) | Self::List(values) => RenderNode::Array(values.len()),
+            Self::Record(record) => RenderNode::Object(record.len()),
+            Self::Image(image) => {
+                RenderNode::Placeholder(Cow::Owned(format!("[Image: {}]", image.id)))
+            }
+            Self::Resource(resource) => {
+                RenderNode::Placeholder(Cow::Owned(format!("[Resource: {}]", resource.alias)))
+            }
+            Self::Ref(_) => RenderNode::Placeholder(Cow::Borrowed("[unavailable reference]")),
+            Self::Projected(projected) => match &projected.kind {
+                ProjectedKind::Scalar(value) => value.node(),
+                ProjectedKind::Custom(_) if projected.is_unavailable() => RenderNode::Placeholder(
+                    Cow::Owned(format!("[{} unavailable]", projected.name())),
+                ),
+                ProjectedKind::Custom(descriptor) => {
+                    if descriptor.type_name() == "list" {
+                        return match descriptor.read_one(ProjectedReadRequest::Len) {
+                            Some(ProjectedReadResponse::Len(len)) => RenderNode::Array(len),
+                            Some(ProjectedReadResponse::Value(Value::Number(len)))
+                                if len >= 0.0 =>
+                            {
+                                RenderNode::Array(len as usize)
+                            }
+                            _ => RenderNode::Placeholder(Cow::Owned(
+                                projected
+                                    .render()
+                                    .unwrap_or_else(|error| format!("[{error}]")),
+                            )),
+                        };
+                    }
+                    match descriptor.read_one(ProjectedReadRequest::Keys) {
+                        Some(ProjectedReadResponse::Keys(keys)) => RenderNode::Object(keys.len()),
+                        Some(ProjectedReadResponse::Value(Value::List(keys))) => {
+                            RenderNode::Object(keys.len())
+                        }
+                        _ => match descriptor.read_one(ProjectedReadRequest::Len) {
+                            Some(ProjectedReadResponse::Len(len)) => RenderNode::Array(len),
+                            Some(ProjectedReadResponse::Value(Value::Number(len)))
+                                if len >= 0.0 =>
+                            {
+                                RenderNode::Array(len as usize)
+                            }
+                            _ => RenderNode::Placeholder(Cow::Owned(
+                                projected
+                                    .render()
+                                    .unwrap_or_else(|error| format!("[{error}]")),
+                            )),
+                        },
+                    }
+                }
+            },
+        }
+    }
+
+    fn index(&self, index: usize) -> Option<Cow<'_, Self>> {
+        match self {
+            Self::Tuple(values) | Self::List(values) => values.get(index).map(Cow::Borrowed),
+            Self::Projected(projected) => projected
+                .get_index(&Self::Number(index as f64))
+                .ok()
+                .flatten()
+                .map(Cow::Owned),
+            _ => None,
+        }
+    }
+
+    fn fields(&self) -> impl Iterator<Item = (Cow<'_, str>, Cow<'_, Self>)> + '_ {
+        let fields: Vec<_> = match self {
+            Self::Record(record) => record
+                .iter()
+                .map(|(key, value)| (Cow::Borrowed(key), Cow::Borrowed(value)))
+                .collect(),
+            Self::Projected(projected) => projected
+                .keys()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|key| {
+                    let value = match &projected.kind {
+                        ProjectedKind::Scalar(value) => match value.as_ref() {
+                            Value::Record(record) => record.get(&key).cloned(),
+                            _ => None,
+                        },
+                        ProjectedKind::Custom(descriptor) => descriptor
+                            .read_one(ProjectedReadRequest::Field(Arc::from(key.as_str())))
+                            .map(Into::into),
+                    };
+                    value.map(|value| (Cow::Owned(key), Cow::Owned(value)))
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        fields.into_iter()
+    }
+}
 
 /// Marker key that wraps a Type literal at its outermost level so a host-side
 /// consumer can tell a Type value apart from a plain record. The inner value

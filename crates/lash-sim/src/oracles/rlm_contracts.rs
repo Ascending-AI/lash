@@ -860,7 +860,7 @@ pub(super) fn require_rlm_trajectory_output_contains(
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .any(|value| value.as_str() == Some(expected))
+        .any(|value| value.get("text").and_then(Value::as_str) == Some(expected))
     {
         Ok(())
     } else {

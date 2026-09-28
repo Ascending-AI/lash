@@ -21,6 +21,6 @@ pub(crate) use context::{
 #[cfg(test)]
 pub(crate) use transport::{flow_record_to_json_value, flow_record_to_tool_args};
 pub(crate) use transport::{
-    flow_to_json_value, format_output_value, json_to_flow_value,
-    normalize_tool_args_for_projection, rehydrate_projected_globals,
+    flow_to_json_value, json_to_flow_value, normalize_tool_args_for_projection,
+    rehydrate_projected_globals,
 };

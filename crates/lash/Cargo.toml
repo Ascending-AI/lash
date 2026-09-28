@@ -43,6 +43,7 @@ lash-subagents = { workspace = true, optional = true }
 lash-typescript = { workspace = true, optional = true }
 lash-http-transport = { workspace = true, optional = true }
 lash-protocol-rlm = { workspace = true, optional = true }
+lash-render = { workspace = true, optional = true }
 lash-protocol-standard = { workspace = true }
 lash-plugin-tool-output-budget = { workspace = true }
 lash-rlm-types = { workspace = true, optional = true }
@@ -61,6 +62,7 @@ default = []
 rlm = [
     "dep:lash-lashlang-runtime",
     "dep:lash-protocol-rlm",
+    "dep:lash-render",
     "dep:lash-rlm-types",
     "dep:lashlang",
 ]

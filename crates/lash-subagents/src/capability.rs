@@ -95,6 +95,7 @@ impl SubagentSpawnContext<'_> {
             lash_rlm_types::RlmCreateExtras {
                 termination: Some(termination),
                 final_answer_format: Some(self.final_answer_format.clone()),
+                render: None,
             },
         )
         .map_err(|err| format!("failed to encode rlm plugin options: {err}"))?;

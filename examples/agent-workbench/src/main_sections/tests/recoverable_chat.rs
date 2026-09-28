@@ -874,7 +874,10 @@ async fn workbench_browser_recovery_projection_preserves_rows_and_scopes_session
                     id: "durable-tool-trajectory".to_string(),
                     protocol_iteration: 1,
                     code: "durable.tool_projection()".to_string(),
-                    output: vec!["durable projection".to_string()],
+                    output: vec![lash_rlm_types::RlmPrint {
+                        text: "durable projection".to_string(),
+                        value: serde_json::json!("durable projection"),
+                    }],
                     calls: vec![
                         lash::persistence::ExecutedCallRecord {
                             operation: "durable.success".to_string(),

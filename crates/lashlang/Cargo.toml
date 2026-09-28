@@ -40,6 +40,7 @@ futures-executor = "0.3"
 lash-core-execution = { workspace = true }
 lash-regress = { workspace = true }
 lash-sansio = { workspace = true }
+lash-render = { workspace = true }
 num-bigint = { workspace = true }
 num-traits = { workspace = true }
 rustc-hash = "2"

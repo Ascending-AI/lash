@@ -89,6 +89,7 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
         Ok(lash_core::ExecResponse {
             observations: vec![lash_core::Observation {
                 text: "next cell executed".to_string(),
+                value: serde_json::json!("next cell executed"),
                 projection: Default::default(),
             }],
             calls: Vec::new(),

@@ -369,6 +369,7 @@ impl PluginFactory for RlmProtocolPluginFactory {
         .with_plugin_extensions(&ctx.extensions)
         .map_err(|err| PluginError::Registration(err.to_string()))?;
         let services = RlmDialectServices {
+            code_renderer: config.code_renderer.clone(),
             projection_resolver: Arc::clone(&self.projection_resolver),
             artifact_store: self.artifact_store.clone(),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),

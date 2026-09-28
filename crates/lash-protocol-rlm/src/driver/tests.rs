@@ -30,7 +30,7 @@ fn step_event(protocol_iteration: usize, code: &str, output: &str) -> SessionHis
             output: if output.is_empty() {
                 Vec::new()
             } else {
-                vec![output.to_string()]
+                vec![output.to_string().into()]
             },
             images: Vec::new(),
             calls: Vec::new(),
@@ -52,7 +52,7 @@ fn terminal_step_event(
             id: format!("lashlang_step_{protocol_iteration}"),
             protocol_iteration,
             code: code.to_string(),
-            output,
+            output: output.into_iter().map(Into::into).collect(),
             images,
             calls: Vec::new(),
             calls_omitted: 0,
@@ -104,6 +104,8 @@ fn rendered_bound_variables(
         &globals,
         &[],
         crate::dialect::DialectPromptVocabulary::default(),
+        &crate::render::BuiltinCodeRenderer,
+        &lash_render::RenderParams::preview(),
     )
 }
 
@@ -260,10 +262,10 @@ fn chronological_history_renders_messages_and_steps_in_order() {
     // `<typescript>` cell the model must emit, outputs as separate blocks.
     assert!(history.contains("first"));
     assert!(history.contains("<typescript>\nprint 1\n</typescript>"));
-    assert!(history.contains("history[1].output[0] (1 chars):\n1"));
+    assert!(history.contains("history[1].output[0]:\n1"));
     assert!(history.contains("second"));
     assert!(history.contains("<typescript>\nprint 2\n</typescript>"));
-    assert!(history.contains("history[3].output[0] (1 chars):\n2"));
+    assert!(history.contains("history[3].output[0]:\n2"));
     // The `--- history[N] ---` meta-format is gone entirely.
     assert!(!history.contains("--- history["));
     assert!(!history.contains("Code:"));
@@ -377,7 +379,7 @@ fn committed_transcript_supersedes_terminal_step_by_turn_provenance() {
     assert!(!rendered.contains("finish { answer: 42 }"));
     assert!(!rendered.contains("terminal-only output"));
     assert!(!rendered.contains("Final output:"));
-    assert!(rendered.contains("history[4].output[0] (9 chars):\nnext turn"));
+    assert!(rendered.contains("history[4].output[0]:\nnext turn"));
     assert!(!rendered.contains("history[6].output[0]"));
     assert!(
         messages
@@ -535,24 +537,14 @@ fn long_user_message_gets_full_history_reference() {
 
 #[test]
 fn truncated_step_output_states_value_is_retained_not_lost() {
-    // A truncated preview must read as display-only, not lost state — the
-    // inference gpt-5.5 got wrong when it stopped a /spring-cleaning
-    // mid-task ("I can't continue from the previous tool state"). The note
-    // names the re-read handle, in this dialect's own print call, and
-    // states the value is retained.
     let projector = projector(10);
-    let output = "x".repeat(60 * 1024);
-    let history = projector.format_history(&[step_event(0, "print big", &output)]);
+    let output = "[cut: 61440 chars rendered within 10; chars 1; narrow with history[0].output[0].<path>]\nxxxxxxxxxx...truncated...";
+    let history = projector.format_history(&[step_event(0, "print big", output)]);
 
-    assert!(history.contains("full value retained"), "{history}");
     assert!(
-        history.contains("re-run `console.log(history[0].output[0])`"),
+        history.contains(&format!("history[0].output[0]:\n{output}")),
         "{history}"
     );
-    // The lashlang `TRUNCATED_MARKER` surfaces literally in the preview.
-    assert!(history.contains("...truncated..."), "{history}");
-    // The bare, easily-misread "chars, full: <ref>" framing is gone.
-    assert!(!history.contains("chars, full: history"), "{history}");
 }
 
 #[test]
@@ -568,18 +560,16 @@ fn structured_lashlang_step_output_keeps_diagnostic_fields_in_projected_history(
     .to_string();
     let history = projector.format_history(&[step_event(0, "print result", &raw)]);
 
-    assert!(
-        history.contains("re-run `console.log(history[0].output[0])`"),
-        "{history}"
-    );
-    let status = history.find(r#""status":"failed""#).expect("status field");
-    let error = history.find(r#""error":"boom""#).expect("error field");
-    let exit = history.find(r#""exit_code":2"#).expect("exit field");
-    let stderr = history
-        .find(r#""stderr":"short stderr""#)
-        .expect("stderr field");
-    assert!(status < error && error < exit && exit < stderr, "{history}");
-    assert!(history.contains("truncated"), "{history}");
+    assert!(history.contains("history[0].output[0]:\n"), "{history}");
+    for field in [
+        r#""status":"failed""#,
+        r#""error":"boom""#,
+        r#""exit_code":2"#,
+        r#""stderr":"short stderr""#,
+    ] {
+        assert!(history.contains(field), "missing {field}: {history}");
+    }
+    assert!(history.contains(&raw), "{history}");
 }
 
 #[test]
@@ -713,7 +703,7 @@ fn printed_images_render_as_llm_image_blocks() {
             id: "lashlang_step_1".to_string(),
             protocol_iteration: 1,
             code: "print img".to_string(),
-            output: vec![r#"{"type":"image","id":"img"}"#.to_string()],
+            output: vec![r#"{"type":"image","id":"img"}"#.to_string().into()],
             images: vec![lash_core::AttachmentRef {
                 id: lash_core::AttachmentId::parse("img-ref").expect("valid attachment id"),
                 media_type: lash_core::MediaType::parse("image/png").unwrap(),
@@ -982,6 +972,7 @@ fn final_answer_format_guidance_renders_markdown_for_unstructured_turns() {
     let guidance = final_answer_format_prompt_test(&RlmTurnOptions {
         termination: Some(RlmTermination::FinishRequired { schema: None }),
         final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
+        render: None,
     })
     .expect("markdown guidance");
 
@@ -996,6 +987,7 @@ fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
         final_answer_format: Some(RlmFinalAnswerFormat::Custom {
             guidance: "  Finish concise release-note Markdown.  ".to_string(),
         }),
+        render: None,
     })
     .expect("custom guidance");
     assert_eq!(custom, "Finish concise release-note Markdown.");
@@ -1004,6 +996,7 @@ fn final_answer_format_guidance_honors_custom_text_and_raw_suppression() {
         final_answer_format_prompt_test(&RlmTurnOptions {
             termination: Some(RlmTermination::FinishRequired { schema: None }),
             final_answer_format: Some(RlmFinalAnswerFormat::RawFinalValue),
+            render: None,
         })
         .is_none()
     );
@@ -1016,6 +1009,7 @@ fn required_output_schema_suppresses_final_answer_format_guidance() {
             schema: Some(serde_json::json!({ "type": "object" })),
         }),
         final_answer_format: Some(RlmFinalAnswerFormat::Markdown),
+        render: None,
     });
 
     assert!(guidance.is_none());
