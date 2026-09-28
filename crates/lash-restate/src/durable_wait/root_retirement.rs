@@ -21,16 +21,38 @@ fn belongs_to_closed_root(
     }
 }
 
+/// Whether `key` waits on the terminal of a physical turn the root's ending
+/// commit covers: that turn committed, the ending one or a frame switch before
+/// it, and its terminal is published one-way after its commit (FIG-4025).
+fn owes_published_terminal(
+    key: &AwaitEventKey,
+    committed_turn: Option<&lash_core::TurnId>,
+) -> bool {
+    let (Some(committed_turn), AwaitEventWaitIdentity::TurnTerminal, Some(turn_id)) =
+        (committed_turn, &key.wait, key.scope.turn_id())
+    else {
+        return false;
+    };
+    lash_core::store::PhysicalTurn::split_turn_id(turn_id).1
+        <= lash_core::store::PhysicalTurn::split_turn_id(committed_turn).1
+}
+
 pub(super) async fn retire_root(
     ctx: ObjectContext<'_>,
     namespace: &crate::RestateNamespace,
     request: RestateDurableWaitRootRequest,
 ) -> HandlerResult<Json<()>> {
-    if request.session_id.as_str() != ctx.key() || request.root.as_str().is_empty() {
+    if request.session_id.as_str() != ctx.key()
+        || request.root.as_str().is_empty()
+        || request.committed_turn.as_ref().is_some_and(|turn| {
+            lash_core::store::PhysicalTurn::split_turn_id(turn).0 != request.root
+        })
+    {
         return Err(TerminalError::new(format!(
-            "root retirement for session `{}` and root `{}` addressed index {}",
+            "root retirement for session `{}`, root `{}` and committed turn {:?} addressed index {}",
             request.session_id,
             request.root,
+            request.committed_turn,
             ctx.key()
         ))
         .into());
@@ -42,6 +64,22 @@ pub(super) async fn retire_root(
         .filter(|key| belongs_to_closed_root(key, &request.session_id, &request.root))
     {
         let address = RestateDurableWaitAddress::for_key(&key);
+        if owes_published_terminal(&key, request.committed_turn.as_ref()) {
+            // Its commit's terminal wins the promise, not a `Cancelled` from
+            // here. A wait whose terminal has not landed stays registered: the
+            // landing publish settles it, and session revocation still can.
+            let Json(landed) = namespace
+                .durable_wait_workflow(&ctx, address.workflow_key.clone())
+                .peek()
+                .header(LASH_REPLAY_KEY_HEADER.to_string(), key.key_id.clone())
+                .call()
+                .await?;
+            if landed.is_some() {
+                ctx.clear(&durable_wait_index_state_key(&address));
+                ctx.clear(&durable_wait_index_resolution_key(&address));
+            }
+            continue;
+        }
         if object_state::get_stamped::<Resolution>(
             &ctx,
             &durable_wait_index_resolution_key(&address),

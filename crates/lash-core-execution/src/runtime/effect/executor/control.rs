@@ -52,11 +52,15 @@ pub trait EffectHost: AwaitEventResolver {
     fn turn_control_binding_id(&self) -> String;
 
     /// Release a terminal root's wait-index rows after the scope-close sink
-    /// records its end. Hosts without a per-session wait index owe no work.
+    /// records its end. `committed_turn` is the physical turn whose commit
+    /// ended the root, when one did: that commit still owes its turn's
+    /// terminal to every waiter, so it is never released as cancelled
+    /// (FIG-4025). Hosts without a per-session wait index owe no work.
     async fn retire_closed_root_waits(
         &self,
         _session_id: &SessionId,
         _root: &TurnId,
+        _committed_turn: Option<&TurnId>,
     ) -> Result<(), RuntimeError> {
         Ok(())
     }

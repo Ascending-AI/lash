@@ -49,6 +49,7 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
                 &RestateDurableWaitRootRequest {
                     session_id: session_id.clone(),
                     root,
+                    committed_turn: None,
                 },
                 &state,
             ),
@@ -108,6 +109,7 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
             &RestateDurableWaitRootRequest {
                 session_id: session_id.clone(),
                 root: closed_root.clone(),
+                committed_turn: None,
             },
             state,
         )
@@ -165,6 +167,7 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
             &RestateDurableWaitRootRequest {
                 session_id: session_id.clone(),
                 root: TurnId::from("fenced-root"),
+                committed_turn: None,
             },
             &state,
         ),
@@ -186,6 +189,181 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
         fences[0]
             .as_str()
             .is_some_and(|id| id.contains("other-fenced-root"))
+    );
+}
+
+/// Arm the index's registration witness for `key`, start `attach` on it,
+/// and wait until the index has registered that attach's wait.
+async fn registered_attach(
+    attach: &crate::RestateTurnAttach,
+    key: &AwaitEventKey,
+    address: TurnAddress,
+) -> tokio::task::JoinHandle<Result<lash_core::facade_support::TurnTerminal, lash_core::RuntimeError>>
+{
+    let registration = crate::durable_wait::arm_wait_registration_witness(key);
+    let attach = attach.clone();
+    let waiter = tokio::spawn(async move { attach.await_terminal(&address).await });
+    assert_eq!(
+        registration.await.expect("the index observed the attach"),
+        crate::durable_wait::RestateDurableWaitRegistration::Registered,
+        "the attach parks on the open terminal"
+    );
+    waiter
+}
+
+/// FIG-4025: a committed turn's terminal is published one-way after its
+/// commit, so CloseRootScope can retire the root while that publish is still
+/// in flight. Every wait registered on the terminal — live attaches, and a
+/// capped read whose caller already gave up (send resolution's
+/// `TERMINAL_READ`) — resolves with the real terminal, never `Cancelled`,
+/// and a read after the cap reads it too. A root that ended without a commit
+/// owes no terminal, so retiring it still releases its waiter.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_publishes() {
+    use lash_core::engine::ScopeCloseSink as _;
+    use lash_core::store::{RootTerminal, RootTerminalCause, RootTerminalKind, TurnCommitId};
+
+    let server = lash_restate_test::RestateTestServer::new(
+        lash_restate_test::ServerConfig::default().with_seed(0x4025),
+    )
+    .expect("start the server double");
+    server
+        .register(
+            Endpoint::builder()
+                .bind(LashDurableWaitWorkflowImpl::default().serve())
+                .bind(LashDurableWaitRegistryImpl::default().serve())
+                .build(),
+        )
+        .await
+        .expect("register the durable-wait services");
+    let connection = RestateConnection::with_transport(server.ingress_url(), server.transport());
+    let host = Arc::new(RestateEffectHost::new(
+        connection.clone(),
+        test_restate_authority_id(),
+    ));
+    let attach = crate::RestateTurnAttach::new(connection, test_restate_authority_id());
+    let stores = memory_process_stores().await;
+    let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
+    let scope_close = lash_core::RegistryScopeClose::new(
+        registry,
+        Arc::new(lash_core::facade_support::SystemClock),
+    )
+    .with_effect_host(host.clone());
+
+    let session = SessionId::from("fig4025-session");
+    let root = TurnId::from("fig4025-root");
+    // The root switched frames once: its final physical turn is its second.
+    let final_turn = lash_core::store::PhysicalTurn::derive_turn_id(&root, 1);
+    let address = TurnAddress::new(session.clone(), final_turn.clone());
+    let key = host
+        .await_event_key(
+            &address.execution_scope(),
+            AwaitEventWaitIdentity::TurnTerminal,
+        )
+        .await
+        .expect("derive the final turn's terminal key");
+    let terminal = lash_core::facade_support::TurnTerminal::Committed {
+        outcome: lash_sansio::TurnOutcome::Finished(lash_sansio::TurnFinish::AssistantMessage {
+            text: "committed before its root closed".to_string(),
+        }),
+        session_revision: Some(2),
+    };
+    let published = serde_json::to_value(&terminal).expect("encode the terminal");
+
+    let mut waiters = Vec::new();
+    for _ in 0..3 {
+        waiters.push(registered_attach(&attach, &key, address.clone()).await);
+    }
+    // Send resolution's capped read registers the same wait, and its caller
+    // stops listening when the cap elapses; its invocation stays parked.
+    registered_attach(&attach, &key, address.clone())
+        .await
+        .abort();
+
+    // A root lost without a commit, in the same session, owes no terminal.
+    let lost_root = TurnId::from("fig4025-lost-root");
+    let lost_address = TurnAddress::new(session.clone(), lost_root.clone());
+    let lost_key = host
+        .await_event_key(
+            &lost_address.execution_scope(),
+            AwaitEventWaitIdentity::TurnTerminal,
+        )
+        .await
+        .expect("derive the lost root's terminal key");
+    let lost_waiter = registered_attach(&attach, &lost_key, lost_address).await;
+
+    // The final turn committed, so its root's scope closes while the
+    // commit's one-way terminal publish is still in flight: the publish
+    // reaches the index only once the retirement has run.
+    scope_close
+        .close_root_scope(&RootTerminal {
+            session_id: session.clone(),
+            root: root.clone(),
+            kind: RootTerminalKind::Answered,
+            cause: RootTerminalCause::Committed {
+                commit: TurnCommitId::new(root.clone(), 1),
+                turn: final_turn.clone(),
+                stop: None,
+            },
+            head_revision: Some(2),
+            at_ms: 1,
+        })
+        .await
+        .expect("close the committed root's scope");
+    scope_close
+        .close_root_scope(&RootTerminal {
+            session_id: session.clone(),
+            root: lost_root.clone(),
+            kind: RootTerminalKind::Failed,
+            cause: RootTerminalCause::SubstrateLost { cancelled_by: None },
+            head_revision: None,
+            at_ms: 1,
+        })
+        .await
+        .expect("close the lost root's scope");
+    let lost = lost_waiter
+        .await
+        .expect("the lost root's waiter task")
+        .expect_err("a root without a commit has no terminal to wait for");
+    assert_eq!(
+        lost.code,
+        lash_core::RuntimeErrorCode::TurnControlUnknownOrRevoked,
+        "retiring the lost root releases its waiter: {lost}"
+    );
+
+    let publish = host
+        .publish_await_event(&key, Resolution::Ok(published.clone()))
+        .await
+        .expect("publish the committed terminal");
+    assert!(
+        !matches!(publish, Some(ResolveOutcome::AlreadyResolved { .. })),
+        "the retirement left the terminal's promise open: {publish:?}"
+    );
+    for waiter in waiters {
+        let observed = waiter
+            .await
+            .expect("the waiter task")
+            .expect("every registered waiter reads the published terminal");
+        assert_eq!(
+            serde_json::to_value(&observed).expect("encode the observed terminal"),
+            published
+        );
+    }
+    let reread = attach
+        .await_terminal(&address)
+        .await
+        .expect("a read after the cap reads the published terminal");
+    assert_eq!(
+        serde_json::to_value(&reread).expect("encode the re-read terminal"),
+        published
+    );
+    server.settle().await;
+    assert_eq!(
+        host.list_outstanding_await_event_keys(&session)
+            .await
+            .expect("list the session's outstanding waits"),
+        Vec::<AwaitEventKey>::new(),
+        "the publish settled every wait the retirement left registered"
     );
 }
 

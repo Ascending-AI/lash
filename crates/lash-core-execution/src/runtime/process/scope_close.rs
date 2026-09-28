@@ -19,7 +19,7 @@
 use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
-use crate::store::{ControlIntentId, RootTerminal, StoreError};
+use crate::store::{ControlIntentId, RootTerminal, RootTerminalCause, StoreError};
 use crate::{
     Clock, EffectHost, ProcessRegistry, ProcessWorkSubstrate, ScopeId, SessionId, TurnId,
     apply_parent_end_plan, end_session_roots,
@@ -76,9 +76,10 @@ impl RegistryScopeClose {
         &self,
         session: &SessionId,
         root: &TurnId,
+        committed_turn: Option<&TurnId>,
     ) -> Result<(), StoreError> {
         if let Some(host) = &self.effect_host {
-            host.retire_closed_root_waits(session, root)
+            host.retire_closed_root_waits(session, root, committed_turn)
                 .await
                 .map_err(|error| {
                     StoreError::Backend(format!(
@@ -141,7 +142,11 @@ impl ScopeCloseSink for RegistryScopeClose {
             terminal.root.clone(),
         ))
         .await?;
-        self.retire_root_waits(&terminal.session_id, &terminal.root)
+        let committed_turn = match &terminal.cause {
+            RootTerminalCause::Committed { turn, .. } => Some(turn),
+            _ => None,
+        };
+        self.retire_root_waits(&terminal.session_id, &terminal.root, committed_turn)
             .await
     }
 
@@ -170,14 +175,14 @@ impl ScopeCloseSink for RegistryScopeClose {
                 StoreError::Backend(format!("close session `{session}` roots: {error}"))
             })?;
             for root in roots {
-                self.retire_root_waits(session, root).await?;
+                self.retire_root_waits(session, root, None).await?;
             }
             self.close(&ScopeId::session(session.clone())).await
         } else {
             for root in roots {
                 self.close(&ScopeId::turn(session.clone(), root.clone()))
                     .await?;
-                self.retire_root_waits(session, root).await?;
+                self.retire_root_waits(session, root, None).await?;
             }
             self.close(&ScopeId::session(session.clone())).await
         }

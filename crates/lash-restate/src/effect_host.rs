@@ -294,20 +294,19 @@ impl EffectHost for RestateEffectHost {
         &self,
         session_id: &SessionId,
         root: &lash_core::TurnId,
+        committed_turn: Option<&lash_core::TurnId>,
     ) -> Result<(), RuntimeError> {
-        self.controller
-            .await_event_ingress
+        let await_event_ingress = &self.controller.await_event_ingress;
+        await_event_ingress
             .ingress
             .call_object_json::<_, ()>(
-                &self
-                    .controller
-                    .await_event_ingress
-                    .service(LashService::DurableWaitRegistry),
+                &await_event_ingress.service(LashService::DurableWaitRegistry),
                 session_id,
                 "retire_root",
                 &RestateDurableWaitRootRequest {
                     session_id: session_id.clone(),
                     root: root.clone(),
+                    committed_turn: committed_turn.cloned(),
                 },
             )
             .await
