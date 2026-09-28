@@ -595,6 +595,12 @@ fn controller_abort(root: Option<&TurnId>, error: RuntimeEffectControllerError) 
 /// session: the engine's next attempt replays the journal from its start
 /// and must start from that session (FIG-3982), and a host's read of the
 /// runtime in between must not see the dropped attempt's state.
+///
+/// An attempt dropped after its root's terminal commit, suspended in the
+/// commit's host delivery, has already adopted that commit: the resident
+/// session is the durable head, and its code cells were settled before the
+/// commit captured them. The guard discards only the attempt's own fields
+/// then, and the committed state stays adopted (FIG-4027).
 struct EngineAttempt<'r> {
     runtime: &'r mut LashRuntime,
     returned: bool,
@@ -618,7 +624,16 @@ impl Drop for EngineAttempt<'_> {
     fn drop(&mut self) {
         let runtime = &mut *self.runtime;
         runtime.engine_retries_root = false;
-        if !self.returned {
+        if self.returned {
+            return;
+        }
+        let committed = runtime
+            .drive_root
+            .as_ref()
+            .is_some_and(|root| root.terminal_written);
+        if committed {
+            runtime.discard_attempt_fields();
+        } else {
             runtime.discard_root_residue();
         }
     }
@@ -779,10 +794,16 @@ impl LashRuntime {
     /// resident session state it touched), so the next root starts from the
     /// durable session exactly as a redrive in a fresh process does.
     fn discard_root_residue(&mut self) {
+        self.discard_attempt_fields();
+        self.invalidate_resident_session_state();
+    }
+
+    /// Discard the fields a root's attempt keeps only while it runs: its
+    /// sealed run, its journaled claims and its admitted turn index.
+    fn discard_attempt_fields(&mut self) {
         self.drive_root = None;
         self.journaled_drive_claims.clear();
         self.admitted_turn_index = None;
-        self.invalidate_resident_session_state();
     }
 
     /// Seal `admitted`, then run its root.
