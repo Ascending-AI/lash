@@ -170,46 +170,8 @@ impl RestateEffectHost {
     }
 }
 
-/// The deployment host's registered resolver, read at call time.
-///
-/// The endpoint's `EffectGroupDispatch` holds this from construction: it must
-/// not capture a resolver snapshot, because the one registration a
-/// `ToolChildHost` install performs can land after the services were built.
-struct RestateHostGroupExecutors {
-    controller: Arc<RestateEffectHostController>,
-}
-
-impl GroupExecutors for RestateHostGroupExecutors {
-    fn executor_for(
-        &self,
-        envelope: &RuntimeEffectEnvelope,
-    ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        self.controller
-            .group_executors
-            .get()?
-            .executor_for(envelope)
-    }
-
-    fn routes(&self, envelope: &RuntimeEffectEnvelope) -> bool {
-        self.controller
-            .group_executors
-            .get()
-            .is_some_and(|executors| executors.routes(envelope))
-    }
-
-    /// The registered resolver's routing, read at call time like every
-    /// other answer here; with nothing registered there is no host stack to
-    /// route through.
-    fn route_handler_child_controller<'run>(
-        &self,
-        controller: ScopedEffectController<'run>,
-    ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        match self.controller.group_executors.get() {
-            Some(executors) => executors.route_handler_child_controller(controller),
-            None => Ok(controller),
-        }
-    }
-}
+mod group_executors;
+use group_executors::RestateHostGroupExecutors;
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for RestateEffectHost {
@@ -421,6 +383,7 @@ impl EffectHost for RestateEffectHost {
         // on which runtime was built last.
         self.register_group_executors(Arc::clone(installed) as Arc<dyn GroupExecutors>)
             .ok()?;
+        installed.enable_handler_group_pinning();
         Some(Arc::clone(installed))
     }
 
@@ -939,6 +902,12 @@ impl RestateEffectHostController {
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group, opener)?;
+        // A replay-leg handler can suspend at the very next await. Pin its
+        // local tool contexts before probing the index so a child dispatched
+        // during that suspension can still resolve its executor.
+        if let Some(executors) = self.group_executors.get() {
+            executors.pin_group(&group);
+        }
         // The group dispatches on this host's build's lane (FIG-3795): its
         // children run on the build that opened it.
         let dispatch_lane = self.await_event_ingress.namespace.own_or_stable(
@@ -980,6 +949,9 @@ impl RestateEffectHostController {
                     shape.replay_keys.len()
                 ))
             })?;
+            if let Some(executors) = self.group_executors.get() {
+                executors.release_group(&group_key);
+            }
             return Err(group_shape_error(format!(
                 "effect group {group_key} child {position} ({replay_key}) has no registered executor; refusing before group state is created"
             )));
@@ -1051,15 +1023,30 @@ impl RestateEffectHostController {
             }
             EffectGroupOpenResponse::ReopenedReady => Ok(handle),
             EffectGroupOpenResponse::ReopenedClosed { effective } => match effective {
-                EffectGroupCloseDisposition::Refused { reason } => Err(group_shape_error(format!(
-                    "effect group {group_key} routing was refused: {reason:?}"
-                ))),
-                EffectGroupCloseDisposition::RunToCompletion
-                | EffectGroupCloseDisposition::Cancel => Ok(handle),
+                EffectGroupCloseDisposition::Refused { reason } => {
+                    if let Some(executors) = self.group_executors.get() {
+                        executors.release_group(&group_key);
+                    }
+                    Err(group_shape_error(format!(
+                        "effect group {group_key} routing was refused: {reason:?}"
+                    )))
+                }
+                EffectGroupCloseDisposition::RunToCompletion => Ok(handle),
+                EffectGroupCloseDisposition::Cancel => {
+                    if let Some(executors) = self.group_executors.get() {
+                        executors.release_group(&group_key);
+                    }
+                    Ok(handle)
+                }
             },
-            EffectGroupOpenResponse::Retired => Err(group_shape_error(format!(
-                "effect group {group_key} is retired"
-            ))),
+            EffectGroupOpenResponse::Retired => {
+                if let Some(executors) = self.group_executors.get() {
+                    executors.release_group(&group_key);
+                }
+                Err(group_shape_error(format!(
+                    "effect group {group_key} is retired"
+                )))
+            }
             EffectGroupOpenResponse::ShapeMismatch if content_checked => Err(
                 crate::effect_group::content_checked_shape_mismatch(&group_key),
             ),
@@ -1286,6 +1273,11 @@ impl RuntimeEffectController for RestateEffectHostController {
         };
         let settlement = settlement_from_payload(record, payload)?;
         handle.advance()?;
+        if handle.is_exhausted()
+            && let Some(executors) = self.group_executors.get()
+        {
+            executors.release_group(handle.group_key());
+        }
         Ok(settlement)
     }
 
@@ -1390,7 +1382,14 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/close", error))?;
         match response {
-            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
+            EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => {
+                if disposition == LoserPolicy::Cancel
+                    && let Some(executors) = self.group_executors.get()
+                {
+                    executors.release_group(&group_key);
+                }
+                Ok(())
+            }
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
                 "effect group {group_key} close attempted to widen its declared loser disposition"
             ))),

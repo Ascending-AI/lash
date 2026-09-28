@@ -237,7 +237,8 @@ impl LashRuntime {
         let services = services
             .with_attachment_store(Arc::clone(&host.core.durability.attachment_store))
             .with_process_env_store(Arc::clone(&host.core.durability.process_env_store))
-            .with_clock(Arc::clone(&host.core.clock));
+            .with_clock(Arc::clone(&host.core.clock))
+            .with_tool_children(host.core.control.tool_children.clone());
         if let Some(snapshot) = state.plugin_state() {
             services
                 .plugins

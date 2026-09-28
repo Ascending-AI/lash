@@ -237,6 +237,17 @@ impl RuntimeExecutionContext<'_> {
             )
         })?;
 
+        if let Some(tool_children) = &self.tool_children {
+            tool_children.pin_open_tool_group(
+                &group_key,
+                &opener,
+                children
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(position, child)| child.tool().map(|_| position)),
+            );
+        }
+
         let authority = controller
             .await_event_authority_binding_id()
             .ok_or_else(|| {
