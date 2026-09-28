@@ -82,6 +82,17 @@ impl lash_core::TurnInputStore for SnapshotStore {
         Ok(admitted)
     }
 
+    async fn admit_pending_turn_inputs(
+        &self,
+        batch: lash_core::PendingTurnInputBatch,
+        _ingress_claim_ttl_ms: u64,
+    ) -> std::result::Result<lash_core::TurnInputAdmission, lash_core::store::StoreError> {
+        lash_core::SessionCommitStore::read_session_state_version(self).await?;
+        self.enqueue_pending_turn_inputs(batch)
+            .await
+            .map(lash_core::TurnInputAdmission::Enqueued)
+    }
+
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
@@ -282,6 +293,14 @@ impl lash_core::TurnInputStore for BoundSessionStore {
         &self,
         _batch: lash_core::PendingTurnInputBatch,
     ) -> std::result::Result<Vec<lash_core::PendingTurnInput>, lash_core::store::StoreError> {
+        unreachable!("BoundSessionStore does not serve pending turn input")
+    }
+
+    async fn admit_pending_turn_inputs(
+        &self,
+        _batch: lash_core::PendingTurnInputBatch,
+        _ingress_claim_ttl_ms: u64,
+    ) -> std::result::Result<lash_core::TurnInputAdmission, lash_core::store::StoreError> {
         unreachable!("BoundSessionStore does not serve pending turn input")
     }
 

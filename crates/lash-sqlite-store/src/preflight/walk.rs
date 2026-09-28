@@ -183,7 +183,7 @@ fn read_module_artifacts(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::artifact_store::artifact_sql()
             .refs
             .select_preflight_page
@@ -263,7 +263,7 @@ fn read_parked_segments(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::process_registry::sql::process_sql()
             .handover_sqlite
             .list_parked_segments
@@ -301,7 +301,7 @@ fn read_started_processes(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::process_registry::sql::process_sql()
             .process_sqlite
             .list_live_for_preflight
@@ -333,7 +333,7 @@ fn read_pending_wakes(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::process_registry::sql::process_sql()
             .wake_sqlite
             .list_undelivered_for_walk
@@ -372,7 +372,7 @@ fn read_session_checkpoints(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::artifact_store::artifact_sql()
             .blobs_sqlite
             .select_session_checkpoint_page
@@ -430,7 +430,7 @@ fn read_session_execution_state(
     after: Option<&str>,
     limit: usize,
 ) -> rusqlite::Result<(Vec<DurableItem>, Option<String>)> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::artifact_store::artifact_sql()
             .blobs_sqlite
             .select_session_checkpoint_page
@@ -522,7 +522,7 @@ struct ManifestComponentProbe {
 }
 
 fn load_blob(conn: &Connection, blob_ref: &str) -> rusqlite::Result<Option<Vec<u8>>> {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         crate::artifact_store::artifact_sql()
             .blobs
             .select_content

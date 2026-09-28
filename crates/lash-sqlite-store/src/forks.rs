@@ -130,7 +130,8 @@ pub(super) async fn pin_in_catalog(
                         node_id: node_id.clone().into(),
                     });
                 }
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     session_sql().anchors.insert.sql(),
                     params![node_id, checkpoint_ref, source_session_id.as_str()],
                 )
@@ -426,7 +427,7 @@ pub(super) async fn fork_at_in_catalog(
                 Some(checkpoint_ref.clone().into()),
                 Some(request.node_id.clone()),
             )?;
-            tx.execute(
+            crate::conn::cached_execute(tx,
                 session_sql().head.insert_fork.sql(),
                 params![
                     request.session_id.as_str(),

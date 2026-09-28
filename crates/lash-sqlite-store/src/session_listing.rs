@@ -10,7 +10,7 @@ pub(crate) fn list_session_summaries(
     conn: &Connection,
     filter: &SessionListFilter,
 ) -> rusqlite::Result<Vec<SessionSummary>> {
-    let mut stmt = conn.prepare(
+    let mut stmt = conn.prepare_cached(
         crate::session_sql::session_sql()
             .meta_sqlite
             .select_catalog

@@ -199,7 +199,8 @@ pub(crate) fn record_turn_park_conn(
     match (decide_turn_park_write(head.as_ref(), write), stored) {
         (TurnParkWriteDecision::Unchanged, Some(park)) => return Ok(park),
         (TurnParkWriteDecision::AttachEngine, Some(mut park)) => {
-            conn.execute(
+            crate::conn::cached_execute(
+                conn,
                 turn_parks().attach_engine.sql(),
                 params![session_id.as_str(), write.turn_id.as_str(), engine_ref],
             )
@@ -211,7 +212,8 @@ pub(crate) fn record_turn_park_conn(
             // A same-root re-park keeps `park_id` and `since_ms`, refreshes
             // the reason and `last_refused_ms`, counts the refusal and
             // clears a requested redrive — no feed event.
-            conn.execute(
+            crate::conn::cached_execute(
+                conn,
                 turn_parks().update_same_turn.sql(),
                 params![
                     session_id.as_str(),
@@ -293,7 +295,8 @@ pub(crate) fn record_turn_park_conn(
         at_ms,
         park_build_generation.as_deref(),
     )?;
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         turn_parks().insert.sql(),
         params![
             session_id.as_str(),
@@ -338,7 +341,8 @@ pub(crate) fn set_resume_intent_conn(
     park_id: lash_core_execution::store::ParkId,
     intent: ControlIntentId,
 ) -> Result<(), StoreError> {
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         turn_parks().set_resume_intent.sql(),
         params![
             session_id.as_str(),

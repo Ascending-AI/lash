@@ -504,7 +504,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
             .transpose()?;
         let rows = conn
             .call(move |conn| {
-                let mut statement = conn.prepare(
+                let mut statement = conn.prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .turn_parks_sqlite
                         .list
@@ -604,7 +604,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         let session = after.map_or_else(String::new, |key| key.session.to_string());
         let root = after.map_or_else(String::new, |key| key.root.to_string());
         conn.call(move |conn| {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare_cached(
                 crate::session_roots::session_roots_sql()
                     .roots
                     .select_open_page
@@ -653,7 +653,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         };
         conn.call(move |conn| {
             let sql = &crate::session_roots::session_roots_sql().verbs;
-            let mut stmt = conn.prepare(sql.intents.sql())?;
+            let mut stmt = conn.prepare_cached(sql.intents.sql())?;
             let rows = stmt
                 .query_map(
                     params![
@@ -698,11 +698,13 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                     row.get::<_, i64>(0)
                 })?
                 .min(through_seq);
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 sql.turn_park_events.delete_events_through.sql(),
                 params![through_seq],
             )?;
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 sql.turn_park_clock.raise_compaction_horizon.sql(),
                 params![through_seq],
             )?;
@@ -798,7 +800,8 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                             });
                         }
                     }
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         crate::turn_ingress::turn_ingress_sql()
                             .retired_scopes_sqlite
                             .insert_new

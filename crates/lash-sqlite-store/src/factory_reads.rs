@@ -58,7 +58,7 @@ impl SqliteSessionStoreFactory {
                         },
                     )));
                 }
-                let mut statement = conn.prepare(
+                let mut statement = conn.prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .turn_park_events
                         .select_events_after

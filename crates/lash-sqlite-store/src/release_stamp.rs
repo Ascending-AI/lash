@@ -129,7 +129,8 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     {
         return Ok(());
     }
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         session_sql().release_stamp.upsert.sql(),
         params![
             BUILD_RELEASE,

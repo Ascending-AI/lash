@@ -112,7 +112,8 @@ pub(crate) fn write_root_terminal_conn(
         return Ok(());
     }
     let sql = session_roots_sql();
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         sql.roots.insert_open.sql(),
         params![terminal.session_id.as_str(), terminal.root.as_str()],
     )
@@ -208,7 +209,8 @@ pub(crate) fn end_lost_root_conn(
         head_revision: None,
         at_ms,
     };
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         crate::session_sql::session_sql()
             .head
             .clear_pending_follow_on
@@ -220,7 +222,9 @@ pub(crate) fn end_lost_root_conn(
 
     let sql = &session_roots_sql().verbs;
     let mut inputs = {
-        let mut stmt = tx.prepare(sql.bound_inputs.sql()).map_err(sqlite_error)?;
+        let mut stmt = tx
+            .prepare_cached(sql.bound_inputs.sql())
+            .map_err(sqlite_error)?;
         stmt.query_map(params![session.as_str(), root.as_str()], |row| {
             row.get::<_, String>(0)
         })
@@ -232,20 +236,21 @@ pub(crate) fn end_lost_root_conn(
     inputs.sort();
     inputs.dedup();
     for input in inputs {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.input.sql(),
             params![session.as_str(), input, "cancelled"],
         )
         .map_err(sqlite_error)?;
     }
     for batch in batches {
-        tx.execute(sql.delete_batch_items.sql(), params![batch])
+        crate::conn::cached_execute(tx, sql.delete_batch_items.sql(), params![batch])
             .map_err(sqlite_error)?;
-        tx.execute(sql.delete_batch.sql(), params![session.as_str(), batch])
+        crate::conn::cached_execute(tx, sql.delete_batch.sql(), params![session.as_str(), batch])
             .map_err(sqlite_error)?;
     }
     for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
-        tx.execute(statement, params![session.as_str()])
+        crate::conn::cached_execute(tx, statement, params![session.as_str()])
             .map_err(sqlite_error)?;
     }
     Ok(Some(terminal))
@@ -355,13 +360,15 @@ pub(crate) fn bind_root_inputs_conn(
             return Err(root_binding_conflict(session_id, input, &bound, root));
         }
     }
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         sql.roots.insert_open.sql(),
         params![session_id.as_str(), root.as_str()],
     )
     .map_err(sqlite_error)?;
     for input in inputs {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.inputs.insert.sql(),
             params![session_id.as_str(), input.as_str(), root.as_str()],
         )
@@ -744,7 +751,7 @@ pub(crate) fn delete_session_roots_conn(
         sql.inputs.delete_by_session.sql(),
         sql.intents.delete_verbs_by_session.sql(),
     ] {
-        tx.execute(statement, params![session_id.as_str()])
+        crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
             .map_err(sqlite_error)?;
     }
     Ok(())

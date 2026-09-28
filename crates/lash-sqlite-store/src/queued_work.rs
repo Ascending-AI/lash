@@ -320,7 +320,8 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     }
     for (index, payload) in batch.payloads.iter().enumerate() {
         let item_id = format!("{batch_id}:item:{index}");
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             sql.queued_items.insert_new.sql(),
             params![batch_id, index as i64, item_id, encode_json(payload)?],
         )
@@ -446,7 +447,8 @@ pub(crate) fn raise_wake_redelivery_fence_conn(
             ),
         )
     })?;
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         crate::process_registry::sql::process_sql()
             .fence_sqlite
             .upsert_max

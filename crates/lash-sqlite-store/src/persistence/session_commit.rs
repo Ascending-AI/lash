@@ -204,7 +204,7 @@ impl SessionCommitStore for Store {
                     };
                     if owner != session_id {
                         let mut stmt =
-                            tx.prepare(session_sql().head.select_readable_range.sql())?;
+                            tx.prepare_cached(session_sql().head.select_readable_range.sql())?;
                         let rows = stmt
                             .query_map(params![session_id.as_str(), candidate_generation], |row| {
                                 Ok((
@@ -456,7 +456,7 @@ impl SessionCommitStore for Store {
                         && commit.interrupted_turn_input_cancellation.as_ref() == settlement.effective_cancellation()
                     {
                                     let closure = settlement.authorization();
-                                    tx.execute(crate::turn_ingress::turn_ingress_sql().closures.delete_settled.sql(),
+                                    crate::conn::cached_execute(tx, crate::turn_ingress::turn_ingress_sql().closures.delete_settled.sql(),
                                         params![closure.session_id().as_str(), closure.turn_id().as_str(), encode_json(closure)?],
                                     ).map_err(sqlite_error)?;
                                 }
@@ -778,7 +778,7 @@ impl SessionCommitStore for Store {
                             });
                         }
                     }
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         session_sql().head.upsert.sql(),
                         params![
                             meta.session_id.as_str(),
@@ -792,7 +792,7 @@ impl SessionCommitStore for Store {
                         ],
                     )
                     .map_err(sqlite_error)?;
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         session_sql().meta.touch_last_commit.sql(),
                         params![commit.session_id.as_str(), crate::clamp_epoch_ms(now)],
                     )
@@ -862,7 +862,7 @@ impl SessionCommitStore for Store {
                                     (
                                         lash_core_execution::store::claim_plan::TurnInputSettlementRegime::Claimed,
                                         Some(claim),
-                                    ) => tx.execute(
+                                    ) => crate::conn::cached_execute(tx,
                                         pending_inputs.settle_claimed.sql(),
                                         params![
                                             settlement_plan.session_id().as_str(),
@@ -884,7 +884,7 @@ impl SessionCommitStore for Store {
                                     (
                                         lash_core_execution::store::claim_plan::TurnInputSettlementRegime::Unclaimed,
                                         _,
-                                    ) => tx.execute(
+                                    ) => crate::conn::cached_execute(tx,
                                         pending_inputs.settle_unclaimed.sql(),
                                         params![
                                             settlement_plan.session_id().as_str(),
@@ -983,7 +983,7 @@ impl SessionCommitStore for Store {
                             // turn that is over, dropping is the cancel this
                             // table already has.
                             match disposition {
-                                lash_core_execution::TurnCancelDisposition::Defer => tx.execute(
+                                lash_core_execution::TurnCancelDisposition::Defer => crate::conn::cached_execute(tx,
                                     pending_inputs.defer_to_next_turn.sql(),
                                     params![
                                         commit.session_id.as_str(),
@@ -992,7 +992,7 @@ impl SessionCommitStore for Store {
                                         deferred_ingress.as_str(),
                                     ],
                                 ),
-                                lash_core_execution::TurnCancelDisposition::Drop => tx.execute(
+                                lash_core_execution::TurnCancelDisposition::Drop => crate::conn::cached_execute(tx,
                                     pending_inputs.cancel.sql(),
                                     params![
                                         commit.session_id.as_str(),
@@ -1024,7 +1024,7 @@ impl SessionCommitStore for Store {
                         tx, &commit.session_id, &commit.committed_attachment_ids, now as i64,
                     )?;
                     if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             crate::attachments::attachment_sql()
                                 .manifest
                                 .commit_owned
@@ -1048,7 +1048,7 @@ impl SessionCommitStore for Store {
                         let receipt = plan.receipt_write(&result);
                         let result_json = encode_json(receipt.result)?;
                         let identity = append_identity_columns(receipt.append_request_identity);
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             session_sql().turn_commits.insert.sql(),
                             params![
                                 receipt.session_id.as_str(),
@@ -1072,7 +1072,7 @@ impl SessionCommitStore for Store {
                                     &commit.session_id,
                                     batch_id,
                                 )?;
-                                tx.execute(
+                                crate::conn::cached_execute(tx,
                                     session_sql().turn_commits.insert_marker.sql(),
                                     params![
                                         commit.session_id.as_str(),
@@ -1088,7 +1088,7 @@ impl SessionCommitStore for Store {
                     }
                     if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
                         let closure = settlement.authorization();
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             crate::turn_ingress::turn_ingress_sql()
                                 .closures
                                 .delete_by_turn

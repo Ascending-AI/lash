@@ -440,7 +440,7 @@ impl SqliteTriggerStore {
         self.conn
             .call(move |conn| {
                 Ok((|| {
-                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                    let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((
@@ -695,7 +695,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             "trigger_subscription_revision",
                             record.revision,
                         )?;
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             sql.subscription.upsert.sql(),
                             params![
                                 record.subscription_id.as_str(),
@@ -715,7 +715,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         )
                         .map_err(process_sqlite_error)?;
                     }
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         sql.receipt.insert.sql(),
                         params![
                             operation_id.as_str(),
@@ -892,7 +892,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             outcome: request.outcome,
                             occurred_at_ms,
                         };
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             sql.occurrence.insert.sql(),
                             params![
                                 record.occurrence_id.as_str(),
@@ -922,7 +922,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         && record.outcome == lash_core_execution::TriggerOccurrenceOutcome::Fired
                         && reservations.is_empty()
                     {
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             sql.occurrence.arm_reclaimable.sql(),
                             params![record.occurrence_id.as_str(), record.occurred_at_ms as i64],
                         )
@@ -1040,7 +1040,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         let subscription_id = subscription_id.to_string();
         let process_id = process_id.clone();
         self.conn
-            .call(move |conn| {
+            .write(move |conn| {
                 Ok((|| {
                     let bound = conn
                         .execute(
@@ -1163,19 +1163,22 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         let deleted_owner_scopes_json =
             serde_json::to_string(&deleted_owner_scopes).map_err(process_decode_error)?;
         self.conn
-            .call(move |conn| {
+            .write(move |tx| {
                 let sql = trigger_sql();
-                let tx = conn.transaction()?;
-                let reclaimed_delivery_count = tx.execute(
+                let reclaimed_delivery_count = crate::conn::cached_execute(
+                    tx,
                     sql.delivery_sqlite.delete_retention_candidates.sql(),
                     params![&candidates_json],
                 )?;
-                let reclaimed_occurrence_count =
-                    tx.execute(sql.occurrence_sqlite.delete_orphan_fired.sql(), [])?;
+                let reclaimed_occurrence_count = crate::conn::cached_execute(
+                    tx,
+                    sql.occurrence_sqlite.delete_orphan_fired.sql(),
+                    [],
+                )?;
 
                 let blocked_owner_scopes = {
                     let mut stmt =
-                        tx.prepare(sql.delivery_sqlite.select_session_owner_scopes.sql())?;
+                        tx.prepare_cached(sql.delivery_sqlite.select_session_owner_scopes.sql())?;
                     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
                     rows.collect::<Result<std::collections::HashSet<_>, _>>()?
                 };
@@ -1187,16 +1190,17 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                 let receipt_owner_ids_json = serde_json::to_string(&receipt_owner_ids)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
 
-                let reclaimed_subscription_count = tx.execute(
+                let reclaimed_subscription_count = crate::conn::cached_execute(
+                    tx,
                     sql.subscription_sqlite.delete_unreferenced_for_owners.sql(),
                     params![&deleted_owner_scopes_json],
                 )?;
-                let reclaimed_mutation_receipt_count = tx.execute(
+                let reclaimed_mutation_receipt_count = crate::conn::cached_execute(
+                    tx,
                     sql.receipt_sqlite.delete_for_session_owners.sql(),
                     params![&receipt_owner_ids_json],
                 )?;
 
-                tx.commit()?;
                 Ok(lash_core_execution::TriggerRetentionReconciliationReport {
                     reclaimed_delivery_count,
                     reclaimed_occurrence_count,
@@ -1218,18 +1222,18 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         let candidates_json = serde_json::to_string(candidates).map_err(process_decode_error)?;
         let armed_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         self.conn
-            .call(move |conn| {
+            .write(move |tx| {
                 let sql = trigger_sql();
-                let tx = conn.transaction()?;
-                let deleted = tx.execute(
+                let deleted = crate::conn::cached_execute(
+                    tx,
                     sql.delivery_sqlite.delete_retention_candidates.sql(),
                     params![&candidates_json],
                 )?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     sql.occurrence_sqlite.arm_reclaimable_for_candidates.sql(),
                     params![&candidates_json, armed_at_ms],
                 )?;
-                tx.commit()?;
                 Ok(deleted)
             })
             .await
@@ -1241,94 +1245,91 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         cutoff_epoch_ms: u64,
     ) -> lash_core_execution::TriggerOccurrenceReclamationResult {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-        let partial = Arc::new(Mutex::new(
-            lash_core_execution::TriggerOccurrenceReclamationReport::default(),
-        ));
-        let partial_for_call = Arc::clone(&partial);
-        self.conn
+        // The scope read stays a single autocommit statement; each candidate's
+        // delete is its own gated write transaction, so a mid-loop failure
+        // still commits every row already reclaimed (FIG-3975).
+        let scoped = self
+            .conn
             .call(move |conn| {
                 let sql = trigger_sql();
                 Ok((|| {
-                    let rows = {
-                        let mut stmt = conn
-                            .prepare(sql.occurrence_sqlite.select_reclamation_scope.sql())
-                            .map_err(|error| {
-                                lash_core_execution::MaintenanceFailure::failed_before_any_work(
-                                    Box::new(process_sqlite_error(error)),
-                                )
-                            })?;
-                        let rows = stmt
-                            .query_map(params![cutoff_epoch_ms], |row| {
-                                Ok((
-                                    row.get::<_, i64>(0)?,
-                                    row.get::<_, i64>(1)?,
-                                    row.get::<_, i64>(2)?,
-                                    row.get::<_, i64>(3)?,
-                                    row.get::<_, Option<String>>(4)?,
-                                ))
-                            })
-                            .map_err(|error| {
-                                lash_core_execution::MaintenanceFailure::failed_before_any_work(
-                                    Box::new(process_sqlite_error(error)),
-                                )
-                            })?;
-                        rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                    let mut stmt = conn
+                        .prepare(sql.occurrence_sqlite.select_reclamation_scope.sql())
+                        .map_err(|error| {
                             lash_core_execution::MaintenanceFailure::failed_before_any_work(
                                 Box::new(process_sqlite_error(error)),
                             )
-                        })?
-                    };
+                        })?;
+                    let rows = stmt
+                        .query_map(params![cutoff_epoch_ms], |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, i64>(1)?,
+                                row.get::<_, i64>(2)?,
+                                row.get::<_, i64>(3)?,
+                                row.get::<_, Option<String>>(4)?,
+                            ))
+                        })
+                        .map_err(|error| {
+                            lash_core_execution::MaintenanceFailure::failed_before_any_work(
+                                Box::new(process_sqlite_error(error)),
+                            )
+                        })?;
+                    let rows = rows.collect::<Result<Vec<_>, _>>().map_err(|error| {
+                        lash_core_execution::MaintenanceFailure::failed_before_any_work(Box::new(
+                            process_sqlite_error(error),
+                        ))
+                    })?;
 
                     let first = &rows[0];
-                    let mut report = lash_core_execution::TriggerOccurrenceReclamationReport {
+                    let report = lash_core_execution::TriggerOccurrenceReclamationReport {
                         inspected_occurrence_count: first.0 as usize,
                         live_fan_out_count: first.1 as usize,
                         grace_deferred_count: first.2 as usize,
                         audit_retained_count: first.3 as usize,
                         ..lash_core_execution::TriggerOccurrenceReclamationReport::default()
                     };
-                    *partial_for_call
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = report.clone();
                     let candidates = rows
                         .into_iter()
                         .filter_map(|(_, _, _, _, occurrence_id)| occurrence_id)
                         .collect::<Vec<_>>();
-
-                    for occurrence_id in candidates {
-                        let deleted = conn
-                            .execute(
-                                sql.occurrence_sqlite.delete_reclaimable_by_id.sql(),
-                                params![occurrence_id, cutoff_epoch_ms],
-                            )
-                            .map_err(|error| {
-                                lash_core_execution::MaintenanceFailure::failed(
-                                    Box::new(process_sqlite_error(error)),
-                                    report.clone(),
-                                )
-                            })?;
-                        if deleted == 0 {
-                            report.reinspection_deferred_count += 1;
-                        } else {
-                            report.reclaimed_occurrence_count += deleted;
-                        }
-                        *partial_for_call
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner) = report.clone();
-                    }
-                    Ok(report)
+                    Ok((report, candidates))
                 })())
             })
             .await
             .map_err(|error| {
-                lash_core_execution::MaintenanceFailure::failed(
-                    Box::new(process_sqlite_error(error)),
-                    partial
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .clone(),
-                )
-            })?
+                lash_core_execution::MaintenanceFailure::failed_before_any_work(Box::new(
+                    process_sqlite_error(error),
+                ))
+            })?;
+        let (mut report, candidates) = scoped?;
+        for occurrence_id in candidates {
+            let deleted = self
+                .conn
+                .write(move |tx| {
+                    crate::conn::cached_execute(
+                        tx,
+                        trigger_sql()
+                            .occurrence_sqlite
+                            .delete_reclaimable_by_id
+                            .sql(),
+                        params![occurrence_id, cutoff_epoch_ms],
+                    )
+                })
+                .await
+                .map_err(|error| {
+                    lash_core_execution::MaintenanceFailure::failed(
+                        Box::new(process_sqlite_error(error)),
+                        report.clone(),
+                    )
+                })?;
+            if deleted == 0 {
+                report.reinspection_deferred_count += 1;
+            } else {
+                report.reclaimed_occurrence_count += deleted;
+            }
+        }
+        Ok(report)
     }
 
     async fn prune_mutation_receipts(
@@ -1337,8 +1338,9 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
     ) -> Result<usize, lash_core_execution::PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
-            .call(move |conn| {
-                conn.execute(
+            .write(move |tx| {
+                crate::conn::cached_execute(
+                    tx,
                     trigger_sql().receipt.prune_host_and_platform.sql(),
                     params![cutoff_epoch_ms],
                 )
@@ -1353,8 +1355,9 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
     ) -> Result<usize, lash_core_execution::PluginError> {
         let cutoff_epoch_ms = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
         self.conn
-            .call(move |conn| {
-                conn.execute(
+            .write(move |tx| {
+                crate::conn::cached_execute(
+                    tx,
                     trigger_sql().occurrence_sqlite.prune_non_fired.sql(),
                     params![cutoff_epoch_ms],
                 )
@@ -1386,7 +1389,9 @@ fn reserve_sqlite_deliveries(
         }
         None => &sql.subscription_sqlite.select_enabled_for_source,
     };
-    let mut stmt = tx.prepare(statement.sql()).map_err(process_sqlite_error)?;
+    let mut stmt = tx
+        .prepare_cached(statement.sql())
+        .map_err(process_sqlite_error)?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1410,7 +1415,8 @@ fn reserve_sqlite_deliveries(
     for subscription in subscriptions {
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.delivery.insert.sql(),
             params![
                 occurrence.occurrence_id.as_str(),

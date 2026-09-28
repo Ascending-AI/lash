@@ -343,7 +343,8 @@ impl QueuedWorkStore for Store {
             .map(str::to_string);
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::turn_ingress::turn_ingress_sql()
                         .queued_batches
                         .abandon_claim
@@ -374,7 +375,7 @@ impl QueuedWorkStore for Store {
             .write(move |tx| {
                 let mut changed = 0;
                 for claim in claims {
-                    changed += tx.execute(
+                    changed += crate::conn::cached_execute(tx,
                         crate::turn_ingress::turn_ingress_sql()
                             .queued_batches
                             .abandon_claim
@@ -444,7 +445,8 @@ impl QueuedWorkStore for Store {
                             &wake,
                         )?;
                     }
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         sql.queued_batches_sqlite.delete_cancelled.sql(),
                         params![session_id.as_str(), batch_id.as_str()],
                     )

@@ -33,7 +33,8 @@ pub(crate) fn reclaim_settled_plans_conn(
     conn: &Connection,
     cutoff: i64,
 ) -> Result<usize, PluginError> {
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         process_sql().plan_sqlite.delete_reclaimable.sql(),
         params![cutoff],
     )
@@ -61,7 +62,8 @@ pub(super) fn record_conn(
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent);
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         process_sql().plan.insert_if_absent.sql(),
         params![
             kind,
@@ -246,7 +248,7 @@ pub(super) async fn list_unrecorded_opener_parents(
     let rows = registry
         .conn
         .call(move |conn| {
-            let mut statement = conn.prepare(
+            let mut statement = conn.prepare_cached(
                 process_sql()
                     .process_sqlite
                     .list_unrecorded_opener_parents
@@ -342,12 +344,14 @@ pub(super) async fn settle(
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     process_sql().plan.settle.sql(),
                     params![kind, id.clone(), settled_at_ms as i64],
                 )
                 .map_err(process_sqlite_error)?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     process_sql().plan.obligation_apply_delivered.sql(),
                     params![kind, id, settled_at_ms as i64],
                 )

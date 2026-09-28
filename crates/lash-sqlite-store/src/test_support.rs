@@ -45,7 +45,8 @@ impl StoreTestSupport for Store {
                 }
                 let head_json = serde_json::to_string(&head)
                     .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::session_sql::session_sql().head.set_head_json.sql(),
                     params![session_id.as_str(), head_json],
                 )?;
@@ -62,7 +63,8 @@ impl StoreTestSupport for Store {
         let session_id = self.selected_session_id()?;
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::session_sql::session_sql()
                         .meta
                         .set_state_version
@@ -82,14 +84,16 @@ impl StoreTestSupport for Store {
         let session_id = self.selected_session_id()?;
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::session_sql::session_sql()
                         .meta
                         .set_state_version
                         .sql(),
                     params![session_id.as_str(), i64::from(version)],
                 )?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::session_sql::session_sql()
                         .head
                         .corrupt_head_json

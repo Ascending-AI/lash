@@ -184,8 +184,9 @@ impl AttachmentStore for SqliteAttachmentStore {
         let attachment_id = reference.id.as_str().to_string();
         let stored_at_ms = crate::clamp_epoch_ms(self.clock.timestamp_ms());
         self.conn
-            .call(move |connection| {
-                connection.execute(
+            .write(move |tx| {
+                crate::conn::cached_execute(
+                    tx,
                     attachment_blob_sql().upsert.sql(),
                     params![attachment_id, bytes, stored_at_ms],
                 )
@@ -216,8 +217,9 @@ impl AttachmentStore for SqliteAttachmentStore {
     async fn delete(&self, id: &AttachmentId) -> Result<(), AttachmentStoreError> {
         let attachment_id = id.as_str().to_string();
         self.conn
-            .call(move |connection| {
-                connection.execute(
+            .write(move |tx| {
+                crate::conn::cached_execute(
+                    tx,
                     attachment_blob_sql().delete_by_id.sql(),
                     params![attachment_id],
                 )
@@ -232,7 +234,7 @@ impl AttachmentStore for SqliteAttachmentStore {
             .conn
             .call(|connection| {
                 let mut statement =
-                    connection.prepare(attachment_blob_sql().select_all_refs.sql())?;
+                    connection.prepare_cached(attachment_blob_sql().select_all_refs.sql())?;
                 statement
                     .query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))

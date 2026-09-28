@@ -61,7 +61,8 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     let record =
                         ProcessRecord::from_prepared_registration(registration, process_id, now);
                     let originator_id = record.originator_id();
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().process_sqlite.insert_registration.sql(),
                         params![
                             record.id.as_str(),
@@ -102,7 +103,8 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().observer.insert.sql(),
                             params![session_id.as_str(), record.id.as_str()],
                         )

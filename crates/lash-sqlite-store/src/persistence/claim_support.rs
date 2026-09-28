@@ -177,7 +177,8 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     },
                 );
             }
-            conn.execute(
+            crate::conn::cached_execute(
+                conn,
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs
                     .cancel
@@ -622,7 +623,7 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
             }
         };
         values.push(owner.incarnation_id.clone().into());
-        let mut stmt = tx.prepare(statement).map_err(sqlite_error)?;
+        let mut stmt = tx.prepare_cached(statement).map_err(sqlite_error)?;
         let rows = stmt
             .query_map(
                 rusqlite::params_from_iter(values.iter()),
@@ -989,7 +990,8 @@ pub(super) fn append_turn_cancel_outcome_conn(
         .get_or_insert_default()
         .affected_inputs
         .push(affected);
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         crate::turn_ingress::turn_ingress_sql()
             .cancel_requests_sqlite
             .update_record
@@ -1015,7 +1017,8 @@ pub(super) fn append_turn_cancel_wake_conn(
         .get_or_insert_default()
         .affected_wakes
         .push(affected);
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         crate::turn_ingress::turn_ingress_sql()
             .cancel_requests_sqlite
             .update_record
@@ -1072,7 +1075,8 @@ pub(super) fn reconcile_turn_cancel_winner_conn(
     let revision = i64::try_from(revision).map_err(|_| {
         StoreError::Backend("turn cancel intent revision exceeds SQLite range".to_string())
     })?;
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         crate::turn_ingress::turn_ingress_sql()
             .cancel_requests_sqlite
             .upsert_record
@@ -1208,7 +1212,8 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
         // dropping is the cancel this table already has. An optional
         // `COALESCE(?N, ingress_json)` assignment carried both before.
         match disposition {
-            lash_core_execution::TurnCancelDisposition::Defer => conn.execute(
+            lash_core_execution::TurnCancelDisposition::Defer => crate::conn::cached_execute(
+                conn,
                 sql.pending_inputs.defer_to_next_turn.sql(),
                 params![
                     session_id.as_str(),
@@ -1217,7 +1222,8 @@ pub(super) fn repair_orphaned_active_turn_inputs_conn(
                     deferred_ingress.as_str(),
                 ],
             ),
-            lash_core_execution::TurnCancelDisposition::Drop => conn.execute(
+            lash_core_execution::TurnCancelDisposition::Drop => crate::conn::cached_execute(
+                conn,
                 sql.pending_inputs.cancel.sql(),
                 params![
                     session_id.as_str(),

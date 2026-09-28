@@ -346,7 +346,7 @@ pub(crate) async fn attach_process_registry(
     }
     let name = process_registry.open_name();
     conn.call(move |conn| {
-        conn.execute(crate::connection_sql::ATTACH_PROCESS_REGISTRY, params![name])?;
+        crate::conn::cached_execute(conn, crate::connection_sql::ATTACH_PROCESS_REGISTRY, params![name])?;
         let expected_version = crate::schema::PROCESS_SCHEMA_VERSION;
         let deadline = std::time::Instant::now() + policy.busy_timeout;
         loop {

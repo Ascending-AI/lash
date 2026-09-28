@@ -47,7 +47,8 @@ impl SqliteProcessRegistry {
                             handover.segment_ordinal
                         )));
                     }
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().handover_sqlite.insert.sql(),
                         params![
                             process_id.as_str(),
@@ -170,7 +171,7 @@ impl SqliteProcessRegistry {
                         });
                     }
                     let encoded = process_encode_json(&marker)?;
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         process_sql().handover.mark_started.sql(),
                         params![process_id.as_str(), segment_ordinal as i64, encoded],
                     )
@@ -195,7 +196,7 @@ impl SqliteProcessRegistry {
                     // drain's live-generation index reads the generation the
                     // segment's start actually recorded, never a losing
                     // caller's.
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         process_sql().process.set_segment_generation.sql(),
                         params![
                             process_id.as_str(),
@@ -223,7 +224,8 @@ impl SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().handover.delete_through.sql(),
                         params![process_id.as_str(), segment_ordinal as i64],
                     )
@@ -244,7 +246,8 @@ impl SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().handover.delete_by_process.sql(),
                         params![process_id.as_str()],
                     )

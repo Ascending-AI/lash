@@ -119,11 +119,11 @@ type ClaimRow = (
     Result<ObligationKey, lash_core_execution::store::UndecodableObligation>,
 );
 
-fn read_claim(kind: ObligationKind, row: &Row<'_>) -> rusqlite::Result<ClaimRow> {
+pub(crate) fn read_claim(kind: ObligationKind, row: &Row<'_>) -> rusqlite::Result<ClaimRow> {
     Ok((row.get(0)?, row.get(1)?, read_key(kind, row, 2)?))
 }
 
-fn claimed(
+pub(crate) fn claimed(
     (id, attempts, key): ClaimRow,
     token: &ClaimToken,
 ) -> Result<ClaimedObligation, StoreError> {
@@ -195,6 +195,33 @@ pub(crate) fn arm_obligation_id_tx(
     arm_table_tx(conn, obligation_sql(key.kind()), key, id.clone(), now_ms)
 }
 
+/// [`SqliteObligationLedger::claim`] inside a transaction the caller already
+/// holds (FIG-3975): the admission that arms the row claims its obligation
+/// in the same commit, so the producer's immediate ask owes no second store
+/// round-trip. `token` is the transaction's minted claim token and
+/// `until_ms` its expiry. `None` when `id` is not due — as `claim` answers.
+pub(crate) fn claim_obligation_tx(
+    conn: &rusqlite::Connection,
+    sql: ObligationSql<'static>,
+    kind: ObligationKind,
+    id: &ObligationId,
+    token: &ClaimToken,
+    until_ms: u64,
+) -> Result<Option<ClaimedObligation>, StoreError> {
+    let until = sql_i64("obligation claim expiry", until_ms)?;
+    let mut claim = conn.prepare_cached(sql.claim.sql()).map_err(sqlite_error)?;
+    let mut rows = claim
+        .query(rusqlite::params![id.as_str(), token.as_str(), until])
+        .map_err(sqlite_error)?;
+    let row = rows
+        .next()
+        .map_err(sqlite_error)?
+        .map(|row| read_claim(kind, row))
+        .transpose()
+        .map_err(sqlite_error)?;
+    row.map(|row| claimed(row, token)).transpose()
+}
+
 /// Arm `key`'s row in the table `sql` addresses as obligation `id`, due at
 /// `now_ms`, inside the caller's transaction. `None` when the row is missing
 /// or already carries an obligation.
@@ -258,13 +285,13 @@ impl ObligationLedger for SqliteObligationLedger {
             .conn
             .write(move |tx| {
                 let ids = {
-                    let mut select = tx.prepare(sql.select_due.sql())?;
+                    let mut select = tx.prepare_cached(sql.select_due.sql())?;
                     select
                         .query_map(rusqlite::params![now, limit], |row| row.get::<_, String>(0))?
                         .collect::<rusqlite::Result<Vec<_>>>()?
                 };
                 let mut claimed = Vec::with_capacity(ids.len());
-                let mut claim = tx.prepare(sql.claim_due_row.sql())?;
+                let mut claim = tx.prepare_cached(sql.claim_due_row.sql())?;
                 for id in ids {
                     let mut rows =
                         claim.query(rusqlite::params![id, token.as_str(), until, now])?;
@@ -298,7 +325,7 @@ impl ObligationLedger for SqliteObligationLedger {
         let row = self
             .conn
             .write(move |tx| {
-                let mut claim = tx.prepare(sql.claim.sql())?;
+                let mut claim = tx.prepare_cached(sql.claim.sql())?;
                 let mut rows = claim.query(rusqlite::params![id, bound.as_str(), until])?;
                 rows.next()?.map(|row| read_claim(kind, row)).transpose()
             })
@@ -321,8 +348,9 @@ impl ObligationLedger for SqliteObligationLedger {
         let changed = match settlement {
             ObligationSettlement::Delivered => {
                 self.conn
-                    .call(move |conn| {
-                        conn.execute(
+                    .write(move |tx| {
+                        crate::conn::cached_execute(
+                            tx,
                             sql.settle_delivered.sql(),
                             rusqlite::params![id, token, now],
                         )
@@ -332,8 +360,9 @@ impl ObligationLedger for SqliteObligationLedger {
             ObligationSettlement::Retry { due_at_ms, error } => {
                 let due = sql_i64("obligation due instant", due_at_ms)?;
                 self.conn
-                    .call(move |conn| {
-                        conn.execute(
+                    .write(move |tx| {
+                        crate::conn::cached_execute(
+                            tx,
                             sql.settle_retry.sql(),
                             rusqlite::params![id, token, due, error],
                         )
@@ -342,8 +371,9 @@ impl ObligationLedger for SqliteObligationLedger {
             }
             ObligationSettlement::Stall { reason, error } => {
                 self.conn
-                    .call(move |conn| {
-                        conn.execute(
+                    .write(move |tx| {
+                        crate::conn::cached_execute(
+                            tx,
                             sql.settle_stall.sql(),
                             rusqlite::params![id, token, reason.as_str(), error, now],
                         )
@@ -365,7 +395,9 @@ impl ObligationLedger for SqliteObligationLedger {
         let id = id.as_str().to_owned();
         let changed = self
             .conn
-            .call(move |conn| conn.execute(sql.rearm.sql(), rusqlite::params![id, now]))
+            .write(move |tx| {
+                crate::conn::cached_execute(tx, sql.rearm.sql(), rusqlite::params![id, now])
+            })
             .await
             .map_err(sqlite_error)?;
         Ok(changed == 1)
@@ -391,7 +423,7 @@ impl ObligationLedger for SqliteObligationLedger {
         let rows: Vec<StalledRow> = self
             .conn
             .call(move |conn| {
-                let mut select = conn.prepare(sql.select_stalled.sql())?;
+                let mut select = conn.prepare_cached(sql.select_stalled.sql())?;
                 select
                     .query_map(rusqlite::params![after, limit], |row| {
                         Ok((

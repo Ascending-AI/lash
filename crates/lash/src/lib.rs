@@ -466,8 +466,8 @@ pub mod persistence {
         SessionNodeRecord, SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
         StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
         StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-        StoreSchemaVerdict, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion,
-        facade_support::SessionNodeProjection,
+        StoreSchemaVerdict, TurnInputAdmission, TurnInputStore, VacuumReport, WorkClaim,
+        WorkCompletion, facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,

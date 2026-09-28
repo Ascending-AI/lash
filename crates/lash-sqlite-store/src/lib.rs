@@ -466,7 +466,7 @@ impl Store {
         let session_ids = self
             .conn
             .call(|conn| {
-                let mut stmt = conn.prepare(
+                let mut stmt = conn.prepare_cached(
                     crate::session_sql::session_sql()
                         .head
                         .select_sole_bound_session_id

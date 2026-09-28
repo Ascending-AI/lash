@@ -222,12 +222,14 @@ impl SqliteProcessRegistry {
                 Ok(tx_outcome((|| {
                     let mut record = Self::require_process_conn(tx, &process_id)?;
                     let changed = if add {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().observer_sqlite.insert_if_absent.sql(),
                             params![session_id.as_str(), process_id.as_str()],
                         )
                     } else {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().observer.delete.sql(),
                             params![session_id.as_str(), process_id.as_str()],
                         )
@@ -294,13 +296,15 @@ impl SqliteProcessRegistry {
                         config,
                         fleet_format,
                     )?;
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().process.set_wake_session_id.sql(),
                         params![process_id.as_str(), target],
                     )
                     .map_err(process_sqlite_error)?;
                     if let Some(previous) = previous {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().wake.discard_retargeted.sql(),
                             params![process_id.as_str(), previous],
                         )
@@ -456,7 +460,8 @@ impl SqliteProcessRegistry {
         record: &ProcessRecord,
     ) -> Result<(), lash_core_execution::PluginError> {
         let change_seq = Self::next_change_seq_conn(conn)?;
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().process.update_mutable_columns.sql(),
             params![
                 record.id.as_str(),
@@ -493,7 +498,7 @@ impl SqliteProcessRegistry {
     pub(crate) fn next_change_seq_conn(
         conn: &Connection,
     ) -> Result<u64, lash_core_execution::PluginError> {
-        conn.execute(process_sql().clock_sqlite.bump.sql(), [])
+        crate::conn::cached_execute(conn, process_sql().clock_sqlite.bump.sql(), [])
             .map_err(process_sqlite_error)?;
         conn.query_row(process_sql().clock_sqlite.select_current.sql(), [], |row| {
             u64_from_sql("ProcessChangeClock", "current_seq", row.get::<_, i64>(0)?)
@@ -655,7 +660,8 @@ impl SqliteProcessRegistry {
                 projected_record,
                 wake_delivery,
             } => {
-                conn.execute(
+                crate::conn::cached_execute(
+                    conn,
                     process_sql().event.insert.sql(),
                     params![
                         process_id.as_str(),
@@ -748,7 +754,8 @@ impl SqliteProcessRegistry {
             return Ok(());
         };
         let delivery = lash_core_execution::WakeDelivery::pending(wake.clone(), config)?;
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().wake_sqlite.insert_pending.sql(),
             params![
                 delivery.delivery_id.as_str(),
@@ -809,7 +816,8 @@ impl SqliteProcessRegistry {
         let Some(target_session_id) = target_session_id else {
             return Ok(());
         };
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().floor_sqlite.upsert_max.sql(),
             params![
                 target_session_id.as_str(),

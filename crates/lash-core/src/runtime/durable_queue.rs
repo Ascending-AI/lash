@@ -29,6 +29,15 @@ use super::observation::{
 /// pre-checkpoint start.
 pub const EMPTY_HEAD_REVISION: SessionRevision = SessionRevision(0);
 
+/// The revision a committed head mints for a queue observation event: the
+/// head's own revision when a checkpoint backs it, else the empty head.
+fn revision_of_head(meta: Option<crate::store::SessionHeadMeta>) -> SessionRevision {
+    match meta {
+        Some(meta) if meta.checkpoint_ref.is_some() => SessionRevision::new(meta.head_revision),
+        _ => EMPTY_HEAD_REVISION,
+    }
+}
+
 fn store_error(err: impl std::fmt::Display) -> crate::RuntimeError {
     crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
 }
@@ -101,10 +110,7 @@ impl DurableSessionOps {
         store: &Arc<dyn crate::RuntimePersistence>,
     ) -> SessionRevision {
         match store.load_session_head_meta().await {
-            Ok(Some(meta)) if meta.checkpoint_ref.is_some() => {
-                SessionRevision::new(meta.head_revision)
-            }
-            Ok(_) => EMPTY_HEAD_REVISION,
+            Ok(meta) => revision_of_head(meta),
             Err(err) => {
                 tracing::warn!(
                     session_id = %self.session_id,
@@ -117,13 +123,19 @@ impl DurableSessionOps {
     }
 
     /// Publish one `QueueChanged` event, best-effort, after durable success.
+    /// `revision`, when the admission already read it (FIG-3975), is stamped
+    /// directly instead of costing the head read again.
     async fn publish_queue_changed(
         &self,
         store: &Arc<dyn crate::RuntimePersistence>,
         kind: SessionQueueEventKind,
         batch_ids: Vec<String>,
+        revision: Option<SessionRevision>,
     ) {
-        let revision = self.publication_revision(store).await;
+        let revision = match revision {
+            Some(revision) => revision,
+            None => self.publication_revision(store).await,
+        };
         let drafts = vec![LiveReplayEventDraft::new(
             None::<String>,
             SessionObservationEventPayload::QueueChanged { kind, batch_ids },
@@ -180,7 +192,7 @@ impl DurableSessionOps {
         run_spec: crate::RunSpec,
     ) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
         let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
-        let enqueued = enqueue_turn_inputs_to_store(
+        let (enqueued, revision) = enqueue_turn_inputs_to_store(
             self.session_id.clone(),
             Arc::clone(store),
             &self.ingress,
@@ -200,6 +212,7 @@ impl DurableSessionOps {
             } else {
                 Vec::new()
             },
+            revision,
         )
         .await;
         Ok(enqueued)
@@ -254,6 +267,7 @@ impl DurableSessionOps {
                 store,
                 SessionQueueEventKind::Cancelled,
                 vec![input_id.to_string()],
+                None,
             )
             .await;
         }
@@ -280,8 +294,13 @@ impl DurableSessionOps {
             })
             .collect::<Vec<_>>();
         if !cancelled_ids.is_empty() {
-            self.publish_queue_changed(store, SessionQueueEventKind::Cancelled, cancelled_ids)
-                .await;
+            self.publish_queue_changed(
+                store,
+                SessionQueueEventKind::Cancelled,
+                cancelled_ids,
+                None,
+            )
+            .await;
         }
         Ok(receipts)
     }
@@ -307,8 +326,13 @@ impl DurableSessionOps {
                 })
                 .collect::<Vec<_>>();
             if !cancelled_ids.is_empty() {
-                self.publish_queue_changed(store, SessionQueueEventKind::Cancelled, cancelled_ids)
-                    .await;
+                self.publish_queue_changed(
+                    store,
+                    SessionQueueEventKind::Cancelled,
+                    cancelled_ids,
+                    None,
+                )
+                .await;
             }
         }
         Ok(outcome)
@@ -329,6 +353,7 @@ impl DurableSessionOps {
                 store,
                 SessionQueueEventKind::Cancelled,
                 vec![batch_id.to_string()],
+                None,
             )
             .await;
         }
@@ -359,6 +384,7 @@ impl DurableSessionOps {
                 .iter()
                 .map(|batch| batch.batch_id.to_string())
                 .collect(),
+            None,
         )
         .await;
         Ok(())
@@ -385,6 +411,7 @@ impl DurableSessionOps {
                 .iter()
                 .map(|input| input.input_id.to_string())
                 .collect(),
+            None,
         )
         .await;
         Ok(())
@@ -417,6 +444,7 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
         run_spec,
     )
     .await?
+    .0
     .pop()
     .ok_or_else(|| {
         crate::RuntimeError::new(
@@ -430,6 +458,13 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
 /// under one shared `ingress` and `run_spec` (FIG-3842), then deliver the
 /// drive each admitted row's ingress obligation owes (ADR 0109 §3). The rows
 /// come back in request order; a refusal accepted nothing.
+///
+/// The admission is the store's whole round when the backend folds it
+/// (FIG-3975): it answers [`crate::TurnInputAdmission`] with the claims its commit
+/// already took, so the only post-commit operation is the drive ask itself.
+/// A backend that does not fold answers `Enqueued`; the relay then takes
+/// each row's claim as before. The revision a fused admission read rides
+/// back so the caller's queue event does not read the head again.
 pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     session_id: SessionId,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -437,7 +472,7 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     inputs: Vec<(crate::TurnInput, Option<String>)>,
     ingress: crate::TurnInputIngress,
     run_spec: crate::RunSpec,
-) -> Result<Vec<crate::PendingTurnInput>, crate::RuntimeError> {
+) -> Result<(Vec<crate::PendingTurnInput>, Option<SessionRevision>), crate::RuntimeError> {
     let mut drafts = Vec::with_capacity(inputs.len());
     for (input, source_key) in inputs {
         let mut draft =
@@ -455,19 +490,32 @@ pub(in crate::runtime) async fn enqueue_turn_inputs_to_store(
     }
     let batch = crate::PendingTurnInputBatch::new(session_id, drafts)
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
-    store.read_session_state_version().await.map_err(|err| {
-        crate::RuntimeError::new(crate::RuntimeErrorCode::StoreCommitFailed, err.to_string())
-    })?;
-    let enqueued = store
-        .enqueue_pending_turn_inputs(batch)
+    let admission = store
+        .admit_pending_turn_inputs(batch, ingress_relay.claim_ttl_ms())
         .await
         .map_err(super::error::runtime_error_from_turn_input_admission)?;
     // Each admission armed its row's ingress obligation; deliver them now
     // (ADR 0109 §3). An attempt that fails is the relay's to retry: the
     // inputs are accepted either way. A row a resend answered is delivered
-    // only if its obligation is still due.
-    for row in &enqueued {
-        ingress_relay.deliver_admitted(row.input_id.as_str()).await;
-    }
-    Ok(enqueued)
+    // only if its obligation is still due — a fused admission's claim list
+    // holds exactly those rows.
+    let (enqueued, revision) = match admission {
+        crate::TurnInputAdmission::Fused {
+            rows,
+            ingress_claims,
+            committed_head,
+        } => {
+            for claimed in ingress_claims {
+                ingress_relay.deliver_claimed(claimed).await;
+            }
+            (rows, Some(revision_of_head(committed_head)))
+        }
+        crate::TurnInputAdmission::Enqueued(rows) => {
+            for row in &rows {
+                ingress_relay.deliver_admitted(row.input_id.as_str()).await;
+            }
+            (rows, None)
+        }
+    };
+    Ok((enqueued, revision))
 }

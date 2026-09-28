@@ -112,7 +112,7 @@ pub(super) async fn list_non_terminal_processes_page(
                     ),
                     None => (process_queries.list_first_non_terminal_process_page.sql(), None),
                 };
-                let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(
                         params![through_process_id.as_str(), after_process_id, row_limit],
@@ -180,7 +180,7 @@ mod tests {
                      ANALYZE;",
                 )?;
                 let explain = |sql: &str, params: &[&dyn rusqlite::ToSql]| {
-                    let mut stmt = conn.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                    let mut stmt = conn.prepare_cached(&format!("EXPLAIN QUERY PLAN {sql}"))?;
                     stmt.query_map(params, |row| row.get::<_, String>(3))?
                         .collect::<Result<Vec<_>, _>>()
                 };

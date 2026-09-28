@@ -166,6 +166,14 @@ impl TurnInputStore for FacadeStore {
         unreachable!("compile-only facade store")
     }
 
+    async fn admit_pending_turn_inputs(
+        &self,
+        _batch: PendingTurnInputBatch,
+        _ingress_claim_ttl_ms: u64,
+    ) -> Result<lash::persistence::TurnInputAdmission, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
     async fn list_pending_turn_inputs(
         &self,
         _session_id: &SessionId,

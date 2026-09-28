@@ -55,7 +55,7 @@ pub(crate) fn count_retired_parks_by_executable_generation(
     conn: &rusqlite::Connection,
 ) -> rusqlite::Result<std::collections::BTreeMap<lash_core_execution::ExecutableGeneration, usize>>
 {
-    let mut statement = conn.prepare(
+    let mut statement = conn.prepare_cached(
         super::turn_ingress_sql()
             .family
             .count_retired_parks_by_executable_generation

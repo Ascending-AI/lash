@@ -167,7 +167,8 @@ impl Store {
         blob_ref: &BlobRef,
     ) -> Result<(), StoreError> {
         let stored = encode_artifact_blob(&descriptor, profile, content)?;
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             artifact_sql().blobs_sqlite.insert_ignore.sql(),
             params![blob_ref.as_str(), stored],
         )
@@ -263,7 +264,8 @@ impl Store {
                 .map(|descriptor| descriptor.blob_ref.as_str())
                 .collect::<Vec<_>>(),
         )?;
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             crate::session_sql::session_sql()
                 .checkpoint_edges
                 .insert_batch

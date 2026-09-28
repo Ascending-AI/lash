@@ -176,8 +176,12 @@ pub(crate) fn retire_unreachable_ancestry_conn(
         let Some(parent_node_id) = parent_node_id else {
             return Ok(());
         };
-        conn.execute(session_sql().graph_sqlite.retire.sql(), params![node_id])
-            .map_err(sqlite_error)?;
+        crate::conn::cached_execute(
+            conn,
+            session_sql().graph_sqlite.retire.sql(),
+            params![node_id],
+        )
+        .map_err(sqlite_error)?;
         let Some(parent_node_id) = parent_node_id else {
             return Ok(());
         };

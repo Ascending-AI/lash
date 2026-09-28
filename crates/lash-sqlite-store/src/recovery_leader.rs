@@ -131,7 +131,11 @@ impl RecoveryLeaderStore for SqliteRecoveryLeader {
         self.conn
             .write(move |tx| {
                 let now = db_now(tx)?;
-                Ok(tx.execute(SQL.resign.sql(), rusqlite::params![name, holder, term, now])? == 1)
+                Ok(crate::conn::cached_execute(
+                    tx,
+                    SQL.resign.sql(),
+                    rusqlite::params![name, holder, term, now],
+                )? == 1)
             })
             .await
             .map_err(sqlite_error)

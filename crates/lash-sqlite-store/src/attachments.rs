@@ -230,7 +230,8 @@ pub(crate) fn commit_attachment_refs_conn(
         // The fresh committed root supersedes an unarmed, unclaimed
         // condemnation. A restoring writer's claim is left for that writer to
         // settle.
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             attachment_sql()
                 .condemnation
                 .delete_unclaimed_condemned
@@ -240,7 +241,8 @@ pub(crate) fn commit_attachment_refs_conn(
         .map_err(sqlite_error)?;
         // Copy the evidence onto the adopter's row so it outlives the
         // uploader's intent being forgotten.
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             attachment_sql().manifest.upsert_adopted.sql(),
             params![
                 now,
@@ -265,7 +267,8 @@ impl Store {
         let rows = self
             .conn
             .call(|conn| {
-                let mut statement = conn.prepare(attachment_sql().condemnation.select_all.sql())?;
+                let mut statement =
+                    conn.prepare_cached(attachment_sql().condemnation.select_all.sql())?;
                 statement
                     .query_map([], |row| {
                         Ok((
@@ -338,7 +341,8 @@ impl Store {
                                 lash_core_execution::AttachmentCondemnation::AlreadyCondemned,
                             );
                         }
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             attachment_sql().condemnation_sqlite.insert_condemned.sql(),
                             params![attachment_id],
                         )
@@ -347,7 +351,8 @@ impl Store {
                         // row for it is stale evidence of an upload whose bytes this
                         // sweep is about to delete. Clearing them here is what makes
                         // a negative byte-absence tombstone unnecessary.
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             attachment_sql().manifest.delete_by_id.sql(),
                             params![attachment_id],
                         )
@@ -374,7 +379,8 @@ impl Store {
         let armed = self
             .conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     attachment_sql().condemnation.arm_delete.sql(),
                     params![attachment_id],
                 )
@@ -396,7 +402,8 @@ impl Store {
         let attachment_id = attachment_id.as_str().to_string();
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     attachment_sql().condemnation.delete_sweep_owned.sql(),
                     params![attachment_id],
                 )
@@ -427,7 +434,8 @@ impl Store {
                     let Some((token, session_id)) = claim else {
                         return Ok(());
                     };
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         attachment_sql().manifest.delete_unproven_for_session.sql(),
                         params![attachment_id, session_id],
                     )
@@ -439,7 +447,8 @@ impl Store {
                         )
                         .map_err(sqlite_error)?;
                     if condemned_superseded == 0 {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             attachment_sql().condemnation.clear_write_claim.sql(),
                             params![attachment_id, token],
                         )
@@ -466,7 +475,8 @@ impl Store {
         let attachment_id = attachment_id.as_str().to_string();
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     attachment_sql().condemnation.delete_armed.sql(),
                     params![attachment_id],
                 )
@@ -549,7 +559,7 @@ impl AttachmentManifest for Store {
                         // A fresh attempt has proven nothing, so it takes the row
                         // with no upload stamp. Evidence and commitment already on
                         // the row were earned by earlier attempts and are kept.
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             attachment_sql().manifest.insert_intent.sql(),
                             params![
                                 attachment_id,
@@ -609,7 +619,8 @@ impl AttachmentManifest for Store {
                         }
                         // The bytes exist now, so this attempt's claim on the
                         // condemnation is released with the condemnation itself.
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             attachment_sql().condemnation.delete_by_write_token.sql(),
                             params![attachment_id, write_id],
                         )
@@ -640,7 +651,8 @@ impl AttachmentManifest for Store {
                     let outcome: Result<(), StoreError> = (|| {
                         // Only this attempt's own unstamped, uncommitted row. A
                         // superseded permit matches nothing and deletes nothing.
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             attachment_sql().manifest.delete_unproven_for_write.sql(),
                             params![attachment_id, session_id.as_str(), write_id],
                         )
@@ -652,7 +664,8 @@ impl AttachmentManifest for Store {
                             )
                             .map_err(sqlite_error)?;
                         if condemned_superseded == 0 {
-                            tx.execute(
+                            crate::conn::cached_execute(
+                                tx,
                                 attachment_sql().condemnation.clear_write_claim.sql(),
                                 params![attachment_id, write_id],
                             )
@@ -706,8 +719,9 @@ impl AttachmentManifest for Store {
             let older_than = crate::clamp_epoch_ms(older_than_epoch_ms);
             self.conn
                 .call(move |conn| {
-                    let mut stmt =
-                        conn.prepare(attachment_sql().manifest_sqlite.select_uncommitted.sql())?;
+                    let mut stmt = conn.prepare_cached(
+                        attachment_sql().manifest_sqlite.select_uncommitted.sql(),
+                    )?;
                     let rows = stmt.query_map(params![older_than], |row| {
                         let id: String = row.get(0)?;
                         let session_id: SessionId = SessionId::from(row.get::<_, String>(1)?);
@@ -779,14 +793,15 @@ impl AttachmentManifest for Store {
             };
             self.conn
                 .write(move |tx| {
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         attachment_sql()
                             .manifest_sqlite
                             .delete_deleted_session_roots
                             .sql(),
                         [],
                     )?;
-                    tx.execute(forget, params![cutoff])?;
+                    crate::conn::cached_execute(tx, forget, params![cutoff])?;
                     Ok(())
                 })
                 .await
@@ -829,8 +844,9 @@ impl AttachmentManifest for Store {
             let session_id = SessionId::from(session_id.to_string());
             let attachment_id = attachment_id.as_str().to_string();
             self.conn
-                .call(move |conn| {
-                    conn.execute(
+                .write(move |tx| {
+                    crate::conn::cached_execute(
+                        tx,
                         attachment_sql().manifest_sqlite.forget_for_session.sql(),
                         params![session_id.as_str(), attachment_id.as_str()],
                     )
@@ -846,7 +862,7 @@ impl AttachmentManifest for Store {
             self.conn
                 .call(move |conn| {
                     let mut stmt =
-                        conn.prepare(attachment_sql().manifest.select_rooted_ids.sql())?;
+                        conn.prepare_cached(attachment_sql().manifest.select_rooted_ids.sql())?;
                     let rows = stmt.query_map([], |row| {
                         let id: String = row.get(0)?;
                         crate::attachment_id_from_sql("AttachmentManifest", "attachment_id", id)

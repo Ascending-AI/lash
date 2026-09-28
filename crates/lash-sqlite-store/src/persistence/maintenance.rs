@@ -14,14 +14,14 @@ impl StoreMaintenance for Store {
         let (removed_node_count, removed_pending_turn_input_tombstone_count) = self
             .conn
             .write(move |tx| {
-                let removed_node_count = tx.execute(
+                let removed_node_count = crate::conn::cached_execute(tx,
                     session_sql()
                         .graph_sqlite
                         .delete_tombstoned_for_session
                         .sql(),
                     params![session_id.as_str()],
                 )?;
-                let removed_pending_turn_input_tombstone_count = tx.execute(
+                let removed_pending_turn_input_tombstone_count = crate::conn::cached_execute(tx,
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs
                         .delete_withdrawn

@@ -48,7 +48,8 @@ pub(super) async fn settle(
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome(
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     STATEMENTS.obligation_settle_published.sql(),
                     params![process_id, settled_at_ms],
                 )

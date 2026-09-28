@@ -108,7 +108,8 @@ pub(crate) fn read_recorded(
 /// [`lash_core_execution::FLEET_FORMAT_VERSION`], and a recorded row wins.
 /// When that constant moves, this write is the move.
 pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         session_sql().fleet_format.insert_if_absent.sql(),
         params![i64::from(lash_core_execution::FLEET_FORMAT_VERSION)],
     )?;

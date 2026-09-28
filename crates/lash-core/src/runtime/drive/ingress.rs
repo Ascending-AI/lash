@@ -20,7 +20,9 @@
 
 use std::sync::Arc;
 
-use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now};
+use super::relay::{
+    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_claimed, deliver_now,
+};
 use crate::engine::EngineRefusal;
 pub use crate::engine::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 use crate::store::ingress_obligation::ingress_obligation_id;
@@ -113,6 +115,34 @@ impl IngressRelay {
                     )
             })
             .map(|standing| ingress_drive_request(item_id, standing.attempts)))
+    }
+
+    /// The claim TTL a fused admission stamps on the ingress claims it takes
+    /// inside its commit (FIG-3975): the relay's own TTL, so the claim
+    /// outlives the ask it precedes exactly as [`deliver_now`]'s would.
+    pub fn claim_ttl_ms(&self) -> u64 {
+        self.policy.claim_ttl_ms
+    }
+
+    /// Ask for the drive `claimed` — taken by the admission's own
+    /// transaction (FIG-3975) — owes, settling it as [`deliver_admitted`]
+    /// would after its own claim.
+    pub async fn deliver_claimed(&self, claimed: crate::store::ClaimedObligation) {
+        let id = claimed.id.clone();
+        match deliver_claimed(self, claimed, self.clock.as_ref()).await {
+            Ok(
+                RelayVerdict::Requested
+                | RelayVerdict::Delivered
+                | RelayVerdict::NotDue
+                | RelayVerdict::ClaimLost,
+            ) => {}
+            Ok(verdict) => tracing::debug!(
+                obligation_id = id.as_str(),
+                ?verdict,
+                "admitted ingress was not delivered at once; the relay retries it"
+            ),
+            Err(error) => report_store_failure(&id, &error),
+        }
     }
 
     /// Ask for the drive the admission of item `item_id` owes, right after

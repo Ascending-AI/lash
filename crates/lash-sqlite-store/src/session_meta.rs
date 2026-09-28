@@ -104,13 +104,15 @@ pub(crate) fn write_session_meta(
     if changed == 0 {
         return Ok(false);
     }
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         session_sql().observer_intents.delete_by_session.sql(),
         params![stored.session_id.as_str()],
     )
     .map_err(sqlite_error)?;
     for (process_index, intent) in stored.pending_observer_intents.iter().enumerate() {
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             session_sql().observer_intents.insert.sql(),
             params![
                 stored.session_id.as_str(),
@@ -257,7 +259,8 @@ pub(crate) fn retain_admission_base_conn(
     session_id: &SessionId,
     checkpoint_ref: Option<&lash_core_execution::store::BlobRef>,
 ) -> Result<(), StoreError> {
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         session_sql().meta.retain_admission_base.sql(),
         rusqlite::params![
             session_id.as_str(),

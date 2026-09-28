@@ -1324,6 +1324,38 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     }
 }
 
+/// What [`TurnInputStore::admit_pending_turn_inputs`] committed (FIG-3975).
+///
+/// The admission's own commit can answer the follow-ups the caller owes
+/// next — the session state-version check, the claim of each admitted row's
+/// still-due ingress obligation for the producer's immediate ask, and the
+/// committed head the queue event publishes against — so a backend that can
+/// fold them returns [`TurnInputAdmission::Fused`] instead of leaving the
+/// caller three more store round-trips.
+#[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
+pub enum TurnInputAdmission {
+    /// The admission transaction did it all: `ingress_claims` holds — in
+    /// request order — the claim of each admitted row's still-due ingress
+    /// obligation, taken under the caller's TTL for the producer's immediate
+    /// ask, and `committed_head` is the session head the same transaction
+    /// read (`None` before the session's first checkpoint).
+    Fused {
+        /// The admitted rows, in request order.
+        rows: Vec<crate::PendingTurnInput>,
+        /// The claims the transaction took for the rows whose ingress
+        /// obligation was still due, in row order. A replayed row whose
+        /// obligation is claimed or settled contributes no claim, so
+        /// `ingress_claims` may be shorter than `rows`.
+        ingress_claims: Vec<ClaimedObligation>,
+        /// The session head the committed transaction read.
+        committed_head: Option<SessionHeadMeta>,
+    },
+    /// Only the rows were enqueued: the caller owes each admitted row's
+    /// ingress claim through the relay and the head read itself.
+    Enqueued(Vec<crate::PendingTurnInput>),
+}
+
 /// Pending turn-input lifecycle capability: durable ingress for model-visible
 /// user input.
 ///
@@ -1492,6 +1524,26 @@ pub trait TurnInputStore: Send + Sync {
         let batch = crate::PendingTurnInputBatch::one(input);
         crate::PendingTurnInputBatch::only(self.enqueue_pending_turn_inputs(batch).await?)
     }
+
+    /// Admit `batch` as the producer's whole store-side round (FIG-3975):
+    /// the session state-version gate plus
+    /// [`enqueue_pending_turn_inputs`](Self::enqueue_pending_turn_inputs),
+    /// with whatever else the admission's own commit can answer riding the
+    /// same write transaction ([`TurnInputAdmission`]).
+    ///
+    /// An implementation that folds takes each admitted row's still-due
+    /// ingress-obligation claim inside the transaction — under
+    /// `ingress_claim_ttl_ms`, the relay's claim TTL, so the claim outlives
+    /// the send it precedes — and reads the committed head before it
+    /// commits. One that does not fold still runs the version check before
+    /// the enqueue and answers
+    /// [`TurnInputAdmission::Enqueued`], leaving the caller to claim through
+    /// the relay and read the head itself.
+    async fn admit_pending_turn_inputs(
+        &self,
+        batch: crate::PendingTurnInputBatch,
+        ingress_claim_ttl_ms: u64,
+    ) -> Result<TurnInputAdmission, StoreError>;
 
     /// The run spec `session_id` interned under `hash`, if it holds one
     /// (FIG-3838). Spec rows are immutable and live until their session is

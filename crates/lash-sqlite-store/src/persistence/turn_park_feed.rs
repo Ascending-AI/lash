@@ -16,7 +16,7 @@ use super::*;
 /// into one `RETURNING` round trip).
 fn allocate_turn_park_seq_conn(conn: &rusqlite::Connection) -> Result<i64, StoreError> {
     let clock = &crate::turn_ingress::turn_ingress_sql().turn_park_clock;
-    let bumped = conn.execute(clock.bump.sql(), []).map_err(sqlite_error)?;
+    let bumped = crate::conn::cached_execute(conn, clock.bump.sql(), []).map_err(sqlite_error)?;
     if bumped != 1 {
         return Err(StoreError::Backend(format!(
             "turn park clock bump touched {bumped} rows, expected its one seed row"
@@ -40,7 +40,8 @@ fn insert_turn_park_event_conn(
     build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
     let (cause, reason_json) = kind.encode_columns();
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         crate::turn_ingress::turn_ingress_sql()
             .turn_park_events
             .insert_event

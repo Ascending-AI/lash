@@ -68,7 +68,8 @@ impl TurnInputStore for Store {
                         }
                         Some(_) => Ok(()),
                         None => {
-                            tx.execute(
+                            crate::conn::cached_execute(
+                                tx,
                                 sql.bindings_sqlite.insert_new.sql(),
                                 params![session_id.as_str(), binding_id, admitted_scope_json],
                             )
@@ -215,7 +216,7 @@ impl TurnInputStore for Store {
                                         turn_id: authorization.turn_id().clone(),
                                     });
                                 }
-                                tx.execute(
+                                crate::conn::cached_execute(tx,
                                     sql.closures.insert_new.sql(),
                                     params![
                                         authorization.session_id().as_str(),
@@ -255,7 +256,7 @@ impl TurnInputStore for Store {
         let encoded = self
             .conn
             .call(move |conn| {
-                let mut statement = conn.prepare(
+                let mut statement = conn.prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .closures
                         .list_by_session
@@ -291,7 +292,7 @@ impl TurnInputStore for Store {
         let encoded = self
             .conn
             .call(move |conn| {
-                let mut statement = conn.prepare(
+                let mut statement = conn.prepare_cached(
                     crate::turn_ingress::turn_ingress_sql()
                         .closures
                         .list_by_session
@@ -400,7 +401,8 @@ impl TurnInputStore for Store {
                                     "turn cancel intent revision exceeds SQLite range".to_string(),
                                 )
                             })?;
-                            tx.execute(
+                            crate::conn::cached_execute(
+                                tx,
                                 crate::turn_ingress::turn_ingress_sql()
                                     .cancel_requests
                                     .advance_intent_revision
@@ -415,7 +417,8 @@ impl TurnInputStore for Store {
                         request,
                         outcome: None,
                     };
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         crate::turn_ingress::turn_ingress_sql()
                             .cancel_requests_sqlite
                             .insert_first
@@ -507,6 +510,34 @@ impl TurnInputStore for Store {
         self.conn
             .write_flow(move |tx| {
                 let outcome = enqueue_pending_turn_inputs_conn(tx, &batch, now, first_nonce);
+                match outcome {
+                    Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
+                    Err(err) => Ok(TxOutcome::Rollback(Err(err))),
+                }
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    async fn admit_pending_turn_inputs(
+        &self,
+        batch: lash_core_execution::PendingTurnInputBatch,
+        ingress_claim_ttl_ms: u64,
+    ) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
+        let drafts = batch.drafts().len() as u64;
+        let first_nonce = self.commit_count.fetch_add(drafts, AtomicOrdering::Relaxed);
+        let now = self.clock.timestamp_ms();
+        let fleet = self.fleet_format();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = admit_pending_turn_inputs_conn(
+                    tx,
+                    &batch,
+                    now,
+                    first_nonce,
+                    fleet,
+                    ingress_claim_ttl_ms,
+                );
                 match outcome {
                     Ok(value) => Ok(TxOutcome::Commit(Ok(value))),
                     Err(err) => Ok(TxOutcome::Rollback(Err(err))),
@@ -837,7 +868,8 @@ impl TurnInputStore for Store {
         let lease_token = claim.lease_token.clone();
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs_sqlite
                         .abandon_claim
@@ -967,7 +999,8 @@ impl TurnInputStore for Store {
                             lash_core_execution::TurnCancelRepairResult::Applied(_)
                         )
                     {
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             crate::turn_ingress::turn_ingress_sql()
                                 .closures
                                 .delete_by_turn
@@ -1016,7 +1049,8 @@ impl TurnInputStore for Store {
         let triples = encode_json(&triples)?;
         self.conn
             .write(move |tx| {
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs_sqlite
                         .abandon_claims
@@ -1094,7 +1128,8 @@ fn enqueue_pending_turn_inputs_conn(
                 });
                 let state = lash_core_execution::TurnInputState::open(draft.ingress.clone());
                 let run_spec = admit_run_spec_conn(tx, draft, &mut interned)?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     sql.pending_inputs.insert_new.sql(),
                     params![
                         crate::session_ingress::allocate_sequence(tx, session_id)?,
@@ -1126,6 +1161,53 @@ fn enqueue_pending_turn_inputs_conn(
         );
     }
     Ok(admitted)
+}
+
+/// The fused admission (FIG-3975): inside the one enqueue transaction, answer
+/// the caller's session state-version probe, claim each admitted row's
+/// still-due ingress obligation under one minted token for the producer's
+/// immediate ask, and read the head the queue event publishes against. A
+/// failure anywhere rolls the whole admission back, as the separate calls
+/// would have.
+fn admit_pending_turn_inputs_conn(
+    tx: &Connection,
+    batch: &lash_core_execution::PendingTurnInputBatch,
+    now: u64,
+    first_nonce: u64,
+    fleet: lash_core_execution::FleetFormat,
+    ingress_claim_ttl_ms: u64,
+) -> Result<lash_core_execution::TurnInputAdmission, StoreError> {
+    let session_id = batch.session_id();
+    read_session_state_version_conn(tx, session_id, fleet)?;
+    let rows = enqueue_pending_turn_inputs_conn(tx, batch, now, first_nonce)?;
+    // Claim only the obligations still `due`: a row a resend answered whose
+    // obligation is claimed, delivered or stalled is not the producer's ask
+    // to make — the relay's own claim would have answered `NotDue` the same.
+    let token = lash_core_execution::store::ClaimToken::mint();
+    let until_ms = now.saturating_add(ingress_claim_ttl_ms);
+    let sql = crate::ingress_obligation::turn_input_sql();
+    let mut ingress_claims = Vec::with_capacity(rows.len());
+    for row in &rows {
+        let id = lash_core_execution::store::ingress_obligation::ingress_obligation_id(
+            row.input_id.as_str(),
+        );
+        if let Some(claimed) = crate::obligation_ledger::claim_obligation_tx(
+            tx,
+            sql,
+            lash_core_execution::store::ObligationKind::Ingress,
+            &id,
+            &token,
+            until_ms,
+        )? {
+            ingress_claims.push(claimed);
+        }
+    }
+    let committed_head = try_load_session_head_meta_from_conn(tx, session_id, fleet)?;
+    Ok(lash_core_execution::TurnInputAdmission::Fused {
+        rows,
+        ingress_claims,
+        committed_head,
+    })
 }
 
 /// Admit `draft`'s run spec inside its enqueue transaction (FIG-3838): refuse
@@ -1165,7 +1247,8 @@ fn admit_run_spec_conn(
     if let Some((hash, canonical)) = spec.interned()
         && !interned.contains(hash)
     {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.run_specs.intern.sql(),
             params![draft.session_id.as_str(), hash, canonical],
         )

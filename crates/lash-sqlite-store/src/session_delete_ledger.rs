@@ -56,7 +56,8 @@ pub(crate) fn arm_on_close_acknowledged_conn(
             "obligation due instant {at_ms} exceeds the stored range"
         ))
     })?;
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         crate::obligation_ledger::obligation_sql(ObligationKind::SessionDelete)
             .arm
             .sql(),

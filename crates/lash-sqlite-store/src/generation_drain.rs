@@ -55,7 +55,11 @@ impl GenerationDrainStore for SqliteGenerationDrain {
         let now = millis("drain mark instant", now_ms)?;
         self.registry
             .write(move |tx| {
-                Ok(tx.execute(SQL.mark.sql(), rusqlite::params![generation, now])? == 1)
+                Ok(crate::conn::cached_execute(
+                    tx,
+                    SQL.mark.sql(),
+                    rusqlite::params![generation, now],
+                )? == 1)
             })
             .await
             .map_err(sqlite_error)
@@ -64,7 +68,15 @@ impl GenerationDrainStore for SqliteGenerationDrain {
     async fn clear_draining(&self, generation: &BuildGeneration) -> Result<bool, StoreError> {
         let generation = generation.as_str().to_owned();
         self.registry
-            .write(move |tx| Ok(tx.execute(SQL.clear.sql(), rusqlite::params![generation])? == 1))
+            .write(move |tx| {
+                Ok(
+                    crate::conn::cached_execute(
+                        tx,
+                        SQL.clear.sql(),
+                        rusqlite::params![generation],
+                    )? == 1,
+                )
+            })
             .await
             .map_err(sqlite_error)
     }

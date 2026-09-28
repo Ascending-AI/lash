@@ -816,8 +816,8 @@ pub use store::{
     SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
     StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
     StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnCancelRepairDecision,
-    TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, WriterPin,
-    compare_releases, release_stamp_advances,
+    TurnCancelRepairResult, TurnInputAdmission, TurnInputStore, VacuumReport, WorkClaim,
+    WorkCompletion, WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

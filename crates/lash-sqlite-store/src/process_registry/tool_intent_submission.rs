@@ -78,7 +78,8 @@ pub(super) async fn complete(
                     serde_json::from_str(&encoded).map_err(process_decode_error)?;
                 if submission.outcome.is_none() {
                     submission.outcome = Some(outcome);
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         crate::turn_ingress::tool_intent_sql()
                             .shared
                             .update_submission

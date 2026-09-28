@@ -62,7 +62,8 @@ pub(crate) fn open_root_intent_conn(
     let mut intent = insert_intent_conn(tx, session, kind, plan.park.engine.as_ref(), at_ms)?;
     let park_sql = &crate::turn_ingress::turn_ingress_sql().turn_parks;
     if request.verb == RootVerb::Redrive {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             park_sql.set_resume_intent.sql(),
             params![
                 session.as_str(),
@@ -93,7 +94,8 @@ pub(crate) fn open_root_intent_conn(
             park: request.park,
             new_root: new_root.clone(),
         };
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.set_kind.sql(),
             params![
                 intent.id.sequence() as i64,
@@ -118,7 +120,8 @@ pub(crate) fn open_root_intent_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         head.clear_pending_follow_on.sql(),
         params![session.as_str()],
     )
@@ -135,7 +138,9 @@ pub(crate) fn open_root_intent_conn(
         },
     )?;
     let mut inputs: Vec<String> = {
-        let mut stmt = tx.prepare(sql.bound_inputs.sql()).map_err(sqlite_error)?;
+        let mut stmt = tx
+            .prepare_cached(sql.bound_inputs.sql())
+            .map_err(sqlite_error)?;
         stmt.query_map(params![session.as_str(), request.root.as_str()], |row| {
             row.get(0)
         })
@@ -151,29 +156,34 @@ pub(crate) fn open_root_intent_conn(
         } else {
             "cancelled"
         };
-        tx.execute(sql.input.sql(), params![session.as_str(), input, state])
+        crate::conn::cached_execute(tx, sql.input.sql(), params![session.as_str(), input, state])
             .map_err(sqlite_error)?;
         if let Some(root) = new_root.as_ref() {
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 sql.rebind.sql(),
                 params![session.as_str(), input, root.as_str()],
             )
             .map_err(sqlite_error)?;
         } else if request.verb == RootVerb::Fork {
-            tx.execute(sql.unbind.sql(), params![session.as_str(), input])
+            crate::conn::cached_execute(tx, sql.unbind.sql(), params![session.as_str(), input])
                 .map_err(sqlite_error)?;
         }
     }
     if request.verb == RootVerb::Cancel {
         for batch in batches {
-            tx.execute(sql.delete_batch_items.sql(), params![batch])
+            crate::conn::cached_execute(tx, sql.delete_batch_items.sql(), params![batch])
                 .map_err(sqlite_error)?;
-            tx.execute(sql.delete_batch.sql(), params![session.as_str(), batch])
-                .map_err(sqlite_error)?;
+            crate::conn::cached_execute(
+                tx,
+                sql.delete_batch.sql(),
+                params![session.as_str(), batch],
+            )
+            .map_err(sqlite_error)?;
         }
     }
     for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
-        tx.execute(statement, params![session.as_str()])
+        crate::conn::cached_execute(tx, statement, params![session.as_str()])
             .map_err(sqlite_error)?;
     }
     for prior in plan.supersede {
@@ -205,7 +215,8 @@ pub(crate) fn open_root_intent_conn(
         &ParkEventKind::Cancelled { cause },
         crate::clamp_epoch_ms(at_ms),
     )?;
-    tx.execute(
+    crate::conn::cached_execute(
+        tx,
         sql.raise_epoch.sql(),
         params![session.as_str(), close_admission(intent.id).as_str()],
     )

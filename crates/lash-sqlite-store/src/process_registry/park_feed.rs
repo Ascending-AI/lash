@@ -53,7 +53,8 @@ pub(crate) fn log_process_park_transitions_conn(
         let generation = matches!(kind, ParkEventKind::Parked { .. })
             .then_some(build_generation)
             .flatten();
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().park_event.insert_event.sql(),
             params![
                 seq,
@@ -310,12 +311,14 @@ pub(super) async fn compact_process_park_feed(
                     })
                     .map_err(process_sqlite_error)?;
                 let through_seq = through_seq.min(current);
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     sql.park_event.delete_events_through.sql(),
                     params![through_seq],
                 )
                 .map_err(process_sqlite_error)?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     sql.park_clock_sqlite.raise_compaction_horizon.sql(),
                     params![through_seq],
                 )

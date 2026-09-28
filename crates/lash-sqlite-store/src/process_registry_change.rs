@@ -47,7 +47,8 @@ pub(crate) fn compact_process_tombstones_conn(
         )
         .map_err(process_sqlite_error)?;
     if let Some(compacted_through) = compacted_through {
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().clock_sqlite.raise_compaction_horizon.sql(),
             params![compacted_through],
         )
@@ -163,7 +164,8 @@ fn prune_process_rows_conn(
 ) -> Result<ProcessPruneReport, lash_core_execution::PluginError> {
     let process_ids_json = serde_json::to_string(&prunable).map_err(process_decode_error)?;
     let process_count = prunable.len() as i64;
-    conn.execute(
+    crate::conn::cached_execute(
+        conn,
         process_sql().clock_sqlite.bump_by.sql(),
         params![process_count],
     )
@@ -204,7 +206,8 @@ fn prune_process_rows_conn(
             serde_json::from_str(&record_json).map_err(process_decode_error)?;
         let cleanup = lash_core_execution::ProcessArtifactCleanup::from_record(&record);
         let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
-        conn.execute(
+        crate::conn::cached_execute(
+            conn,
             process_sql().cleanup_sqlite.insert.sql(),
             params![process_id.as_str(), cleanup_json],
         )
@@ -222,7 +225,7 @@ fn prune_process_rows_conn(
         sql.observer_sqlite.delete_by_process_ids.sql(),
         sql.handover_sqlite.delete_by_process_ids.sql(),
     ] {
-        conn.execute(dependent, params![process_ids_json])
+        crate::conn::cached_execute(conn, dependent, params![process_ids_json])
             .map_err(process_sqlite_error)?;
     }
     let pruned_processes = conn

@@ -15,13 +15,21 @@
 //!   [`SqliteConnection::open`] applies these once on the connection thread,
 //!   for a file and for a named `memdb` database alike.
 //!
-//! * **`IMMEDIATE` write transactions.** rusqlite's `Connection::transaction`
-//!   opens `BEGIN DEFERRED`, which only takes the write lock on the first write
-//!   statement. Every read-then-write path the crate promises to serialise
-//!   cross-process (head-revision CAS, lease fencing, the queued-work claim)
-//!   must therefore use [`SqliteConnection::write`], which opens
-//!   `BEGIN IMMEDIATE` so the write lock is acquired up front and a contending
-//!   writer waits on the busy timeout instead of reading a stale snapshot.
+//! * **`IMMEDIATE` write transactions behind a per-database gate.**
+//!   rusqlite's `Connection::transaction` opens `BEGIN DEFERRED`, which only
+//!   takes the write lock on the first write statement. Every read-then-write
+//!   path the crate promises to serialise cross-process (head-revision CAS,
+//!   lease fencing, the queued-work claim) must therefore use
+//!   [`SqliteConnection::write`], which opens `BEGIN IMMEDIATE` so the write
+//!   lock is acquired up front and a contending writer waits on the busy
+//!   timeout instead of reading a stale snapshot. In-process writers never
+//!   reach that wait: every connection opened on one database shares a
+//!   process-wide gate (FIG-3975), taken on the connection thread before
+//!   `BEGIN IMMEDIATE` and released when the transaction ends, so in-process
+//!   contention wakes on the gate's release rather than sleeping in SQLite's
+//!   busy handler. The gate is never held across an `.await`, so a suspended
+//!   caller cannot keep it. `busy_timeout` still stands for writers in other
+//!   processes.
 //!
 //! * **Error mapping.** `conn.call(...)` returns [`tokio_rusqlite::Error`],
 //!   which wraps [`rusqlite::Error`]. The helpers flatten that so closures only
@@ -29,6 +37,8 @@
 //!   `rusqlite::Error` to feed through `sqlite_error` / `process_sqlite_error`.
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::Duration;
 use tokio_rusqlite::Connection as AsyncConnection;
 
@@ -67,6 +77,33 @@ pub(crate) enum TxOutcome<T> {
 /// Busy timeout applied to every connection. Matches the prior store's
 /// 15-second window so cross-process writers wait rather than fail fast.
 pub(crate) const BUSY_TIMEOUT_MS: u32 = 15_000;
+
+/// Prepared statements each connection keeps cached (FIG-3975). rusqlite's
+/// default cache of 16 evicts constantly under this store's statement mix,
+/// so nearly every `execute`/`query_row` re-parsed its SQL; the catalog's
+/// distinct statements fit comfortably inside 256.
+const PREPARED_STATEMENT_CACHE_CAPACITY: usize = 256;
+
+/// The process-wide write gates, one per database identity
+/// ([`DatabaseTarget::canonical_name`], so differently-spelled paths and
+/// `memdb` names of the same database share one gate). Entries are weak so
+/// a closed backend's gate is forgotten; the connections keep it alive.
+static WRITE_GATES: LazyLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// `target`'s shared write gate, created on first open.
+fn write_gate(target: &DatabaseTarget) -> Arc<Mutex<()>> {
+    let key = target.canonical_name();
+    let mut gates = WRITE_GATES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(Mutex::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
+}
 
 /// SQLite synchronous setting selected for a connection.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -190,6 +227,9 @@ fn is_busy(err: &rusqlite::Error) -> bool {
 #[derive(Clone)]
 pub(crate) struct SqliteConnection {
     inner: AsyncConnection,
+    /// The gate every in-process writer to this database queues on (FIG-3975);
+    /// shared by all connections opened on the same `canonical_name`.
+    write_gate: Arc<Mutex<()>>,
     #[cfg(feature = "testing")]
     fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
@@ -246,6 +286,7 @@ impl SqliteConnection {
         policy: SqliteConnectionPolicy,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
+        let gate = write_gate(target);
         let inner = AsyncConnection::open(target.open_name()).await?;
         let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
@@ -253,6 +294,7 @@ impl SqliteConnection {
                 // Install the busy handler through the rusqlite API *before* the
                 // WAL conversion so ordinary write contention waits on it.
                 c.busy_timeout(policy.busy_timeout)?;
+                c.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
                 // The WAL switch is not covered by the busy handler, so it gets
                 // its own bounded retry loop (see `set_wal_journal_mode`).
                 set_wal_journal_mode(c, policy.busy_timeout)?;
@@ -263,6 +305,7 @@ impl SqliteConnection {
             .await?;
         Ok(Self {
             inner,
+            write_gate: gate,
             #[cfg(feature = "testing")]
             fault_injector,
         })
@@ -280,6 +323,7 @@ impl SqliteConnection {
         inner
             .call(move |c| {
                 c.busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)?;
+                c.set_prepared_statement_cache_capacity(PREPARED_STATEMENT_CACHE_CAPACITY);
                 c.execute_batch(crate::connection_sql::READ_ONLY_PRAGMAS)?;
                 install_perf_statement_witness(c);
                 Ok(())
@@ -287,6 +331,7 @@ impl SqliteConnection {
             .await?;
         Ok(Self {
             inner,
+            write_gate: write_gate(target),
             #[cfg(feature = "testing")]
             fault_injector: None,
         })
@@ -333,16 +378,28 @@ impl SqliteConnection {
     /// Run `f` inside a `BEGIN IMMEDIATE` transaction on the connection thread,
     /// committing on `Ok` and rolling back (via drop) on `Err`. The write lock
     /// is acquired up front. Use this for every read-then-write path.
+    ///
+    /// The database's in-process write gate is taken on the connection thread
+    /// and held until the transaction ends (FIG-3975): writers in this process
+    /// wait on it instead of contending through `busy_timeout`, which remains
+    /// for other processes' writers. It is never held across an `.await`, so a
+    /// caller whose future is suspended mid-call (a Restate handler) cannot
+    /// keep it: the transaction runs to its end on the connection thread
+    /// whether or not the caller is polled again.
     pub(crate) async fn write<T, F>(&self, f: F) -> rusqlite::Result<T>
     where
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
+        let write_gate = Arc::clone(&self.write_gate);
         #[cfg(feature = "testing")]
         let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
+                    let _write_gate = write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     #[cfg(feature = "testing")]
                     let write_transaction_ordinal = fault_injector
@@ -368,11 +425,15 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
+        let write_gate = Arc::clone(&self.write_gate);
         #[cfg(feature = "testing")]
         let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
+                    let _write_gate = write_gate
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
                     #[cfg(feature = "testing")]
                     let write_transaction_ordinal = fault_injector
@@ -399,6 +460,17 @@ impl SqliteConnection {
     }
 }
 
+/// `Connection::execute` through the connection's prepared-statement cache
+/// (FIG-3975): rusqlite's own `execute` re-prepares its SQL on every call, so
+/// every repeated write statement routes here instead.
+pub(crate) fn cached_execute(
+    conn: &Connection,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> rusqlite::Result<usize> {
+    conn.prepare_cached(sql)?.execute(params)
+}
+
 /// Collapse a `tokio_rusqlite::Result<rusqlite::Result<T>>` into a single
 /// `rusqlite::Result<T>`. tokio-rusqlite carries the closure's `rusqlite::Error`
 /// in its `Error::Error` variant; `Error::ConnectionClosed` / `Error::Close` are
@@ -410,5 +482,82 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
         Err(other) => Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
             std::io::Error::other(other.to_string()),
         ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// The counting busy handler the gate proofs read: every `SQLITE_BUSY`
+    /// waits here instead of inside an untracked `busy_timeout`, so a run
+    /// can prove no in-process writer ever entered SQLite's sleep path
+    /// (FIG-3975). It retries like the default handler so genuinely
+    /// contended work — a writer in another process — still completes.
+    static BUSY_SLEEPS: AtomicUsize = AtomicUsize::new(0);
+
+    fn counting_busy_handler(previous_invocations: i32) -> bool {
+        BUSY_SLEEPS.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(1));
+        previous_invocations < 5_000
+    }
+
+    /// FIG-3975's binding proof: sixteen connections to one database writing
+    /// concurrently queue on the shared gate, so none ever contends for
+    /// SQLite's write lock — the busy handler's count stays at zero. Without
+    /// the gate the same writes sleep in `busy_timeout` and are counted.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn in_process_writers_queue_on_the_gate_without_a_busy_sleep() {
+        let dir = tempfile::tempdir().expect("gate test tempdir");
+        let target = DatabaseTarget::File(dir.path().join("core.db"));
+        let mut connections = Vec::with_capacity(16);
+        for _ in 0..16 {
+            connections.push(
+                SqliteConnection::open(&target)
+                    .await
+                    .expect("open gated connection"),
+            );
+        }
+        connections[0]
+            .write(|tx| {
+                tx.execute_batch("CREATE TABLE writes_seen (n INTEGER)")?;
+                Ok(())
+            })
+            .await
+            .expect("create the contention table");
+        for connection in &connections {
+            connection
+                .call(|c| c.busy_handler(Some(counting_busy_handler)))
+                .await
+                .expect("install the counting busy handler");
+        }
+        BUSY_SLEEPS.store(0, Ordering::SeqCst);
+        let mut writers = Vec::new();
+        for connection in connections {
+            writers.push(tokio::spawn(async move {
+                for _ in 0..50 {
+                    connection
+                        .write(|tx| {
+                            crate::conn::cached_execute(
+                                tx,
+                                "INSERT INTO writes_seen VALUES (1)",
+                                [],
+                            )?;
+                            Ok(())
+                        })
+                        .await
+                        .expect("queued write");
+                }
+            }));
+        }
+        for writer in writers {
+            writer.await.expect("writer task");
+        }
+        assert_eq!(
+            BUSY_SLEEPS.load(Ordering::SeqCst),
+            0,
+            "an in-process writer slept in SQLite's busy handler"
+        );
     }
 }

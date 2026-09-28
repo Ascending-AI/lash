@@ -95,12 +95,14 @@ pub(super) async fn delete_session_from_catalog(
                 // process-owned session id that never entered it would leave
                 // its tombstoned rows unreachable forever, because the id is
                 // just as unbindable as a host-facing one once deleted.
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     session_sql().deleted_sqlite.insert_from_meta.sql(),
                     params![session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     session_sql().deleted_sqlite.insert_root.sql(),
                     params![session_id.as_str()],
                 )
@@ -150,7 +152,8 @@ pub(super) async fn delete_session_from_catalog(
                 }
             }
             report.enumerated_blob_count = candidates.len();
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 session_sql().head.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
@@ -177,7 +180,8 @@ pub(super) async fn delete_session_from_catalog(
             // and no session-scoped vacuum could ever reach it: the owning id is
             // permanently unbindable. Live sessions' rows stay resident for their
             // own vacuum, so this is not a catalog-wide sweep.
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 session_sql()
                     .graph_sqlite
                     .delete_tombstoned_reclaimable
@@ -185,18 +189,21 @@ pub(super) async fn delete_session_from_catalog(
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 session_sql().lineage.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
             let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 turn_ingress.queued_batches.delete_by_session.sql(),
                 params![session_id.as_str()],
             )
             .map_err(sqlite_error)?;
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 crate::process_registry::sql::process_sql()
                     .fence
                     .delete_by_session
@@ -240,7 +247,7 @@ pub(super) async fn delete_session_from_catalog(
                 turn_ingress.closures.delete_by_session.sql(),
                 turn_ingress.bindings.delete_by_session.sql(),
             ] {
-                tx.execute(statement, params![session_id.as_str()])
+                crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
             // The session's logical roots and their input bindings go with
@@ -251,10 +258,11 @@ pub(super) async fn delete_session_from_catalog(
                 session_sql().observer_intents.delete_by_session.sql(),
                 session_sql().meta.delete_by_session.sql(),
             ] {
-                tx.execute(statement, params![session_id.as_str()])
+                crate::conn::cached_execute(tx, statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 crate::attachments::attachment_sql()
                     .manifest_sqlite
                     .delete_deleted_session_roots
@@ -267,7 +275,8 @@ pub(super) async fn delete_session_from_catalog(
                 // when the owner transaction removed its final head/anchor.
                 // The root bytes may remain as another root's opaque component;
                 // its projection no longer has a live root owner in that case.
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     session_sql()
                         .checkpoint_edges
                         .delete_unrooted_for_checkpoint

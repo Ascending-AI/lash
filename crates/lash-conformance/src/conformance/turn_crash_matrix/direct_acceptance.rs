@@ -33,6 +33,18 @@ impl crate::store::RuntimePersistenceDecorator for CountingAcceptanceStore {
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         self.inner.enqueue_pending_turn_inputs(batch).await
     }
+
+    async fn admit_pending_turn_inputs(
+        &self,
+        batch: crate::PendingTurnInputBatch,
+        ingress_claim_ttl_ms: u64,
+    ) -> Result<crate::TurnInputAdmission, StoreError> {
+        self.enqueues
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.inner
+            .admit_pending_turn_inputs(batch, ingress_claim_ttl_ms)
+            .await
+    }
 }
 
 fn counted(

@@ -110,7 +110,7 @@ impl lash_core_execution::ProcessQuery for SqliteProcessRegistry {
             .call(move |conn| {
                 Ok((|| {
                     let (sql, values) = sql::list_processes_query(&filter, status, definition);
-                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                    let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             row.get::<_, String>(0)
@@ -262,7 +262,8 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                                 "process `{process_id}` is not observed by `{from_session_id}`"
                             )));
                         }
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().observer_sqlite.insert_if_absent.sql(),
                             params![to_session_id.as_str(), process_id.as_str()],
                         )
@@ -321,7 +322,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                 } else {
                     registry.list_observed.sql()
                 };
-                let mut stmt = conn.prepare(sql)?;
+                let mut stmt = conn.prepare_cached(sql)?;
                 let rows = stmt.query_map(
                     params![session_id.as_str(), status, retired_since_ms],
                     |row| row.get::<_, String>(0),
@@ -441,7 +442,8 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                                 params![session_id],
                             )
                             .map_err(process_sqlite_error)?;
-                        tx.execute(
+                        crate::conn::cached_execute(
+                            tx,
                             process_sql().floor.delete_by_session.sql(),
                             params![session_id],
                         )
@@ -804,7 +806,8 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                     // onto the process row in the same transaction (FIG-3795
                     // S2): the drain's live-generation index reads it without
                     // unfolding the event.
-                    tx.execute(
+                    crate::conn::cached_execute(
+                        tx,
                         process_sql().process.set_segment_generation.sql(),
                         params![
                             process_id.as_str(),
@@ -1115,7 +1118,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    tx.execute(
+                    crate::conn::cached_execute(tx,
                         process_sql().wake.reclaim_lapsed_claims.sql(),
                         params![now as i64],
                     )
@@ -1144,7 +1147,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
                     };
                     for id in &ids {
                         let claim_token = uuid::Uuid::new_v4().to_string();
-                        tx.execute(
+                        crate::conn::cached_execute(tx,
                             process_sql().wake.start_enqueuing.sql(),
                             params![
                                 id,
@@ -1178,7 +1181,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
                     } else {
                         wake.list_delivery_ids.sql()
                     };
-                    let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
+                    let mut stmt = conn.prepare_cached(sql).map_err(process_sqlite_error)?;
                     let ids = if let Some(state) = state {
                         stmt.query_map(params![state.as_str()], |row| row.get::<_, String>(0))
                             .map_err(process_sqlite_error)?

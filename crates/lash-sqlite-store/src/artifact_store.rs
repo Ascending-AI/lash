@@ -181,7 +181,8 @@ impl Store {
                 }
                 let blob_ref =
                     Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().refs.insert_pointer.sql(),
                     params![namespace, artifact_ref, blob_ref.as_str()],
                 )?;
@@ -195,7 +196,8 @@ impl Store {
                         "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
                     )));
                 }
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().owners.insert_edge.sql(),
                     params![namespace, artifact_ref, owner_kind, owner_id],
                 )?;
@@ -230,7 +232,8 @@ impl Store {
                         StoreError::ArtifactDestinationOwnerRetired,
                     )));
                 }
-                let inserted = tx.execute(
+                let inserted = crate::conn::cached_execute(
+                    tx,
                     artifact_sql().owners_sqlite.transfer_edge.sql(),
                     params![namespace, artifact_ref, to_kind, to_id, from_kind, from_id],
                 )?;
@@ -248,7 +251,8 @@ impl Store {
                         )));
                     }
                 }
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().owners.delete_edge.sql(),
                     params![namespace, artifact_ref, from_kind, from_id],
                 )?;
@@ -273,11 +277,13 @@ impl Store {
         let Some(blob_ref) = blob_ref else {
             return Ok(());
         };
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             artifact_sql().refs.delete_unowned.sql(),
             params![namespace, artifact_ref],
         )?;
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             artifact_sql().blobs_sqlite.reclaim_unowned_artifact.sql(),
             params![blob_ref],
         )?;
@@ -295,7 +301,8 @@ impl Store {
                 let (owner_kind, owner_id) = owner
                     .storage_parts()
                     .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().owners.delete_edge.sql(),
                     params![namespace, artifact_ref, owner_kind, owner_id],
                 )?;
@@ -320,17 +327,19 @@ impl Store {
                 let (owner_kind, owner_id) = owner
                     .storage_parts()
                     .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().retirements.insert_retirement.sql(),
                     params![owner_kind, owner_id],
                 )?;
                 let refs = {
                     let mut stmt =
-                        tx.prepare(artifact_sql().owners_sqlite.select_owned_refs.sql())?;
+                        tx.prepare_cached(artifact_sql().owners_sqlite.select_owned_refs.sql())?;
                     stmt.query_map(params![namespace, owner_kind, owner_id], |row| row.get(0))?
                         .collect::<Result<Vec<String>, _>>()?
                 };
-                tx.execute(
+                crate::conn::cached_execute(
+                    tx,
                     artifact_sql().owners.delete_owner_edges.sql(),
                     params![namespace, owner_kind, owner_id],
                 )?;

@@ -22,13 +22,15 @@ pub(crate) async fn reclaim(
     store
         .conn
         .write(move |tx| {
-            let removed_receipt_count = tx.execute(
+            let removed_receipt_count = crate::conn::cached_execute(
+                tx,
                 session_sql().turn_commits_sqlite.delete_retained.sql(),
                 params![cutoff],
             )?;
             let removed_usage_delta_count =
-                tx.execute(session_sql().usage.delete_reclaimable.sql(), [])?;
-            let removed_attachment_root_count = tx.execute(
+                crate::conn::cached_execute(tx, session_sql().usage.delete_reclaimable.sql(), [])?;
+            let removed_attachment_root_count = crate::conn::cached_execute(
+                tx,
                 crate::attachments::attachment_sql()
                     .manifest_sqlite
                     .delete_deleted_session_roots

@@ -119,7 +119,7 @@ impl Store {
                 ],
             ),
         };
-        let mut stmt = conn.prepare(statement).map_err(sqlite_error)?;
+        let mut stmt = conn.prepare_cached(statement).map_err(sqlite_error)?;
         let rows = stmt
             .query_map(rusqlite::params_from_iter(bound), |row| {
                 Ok((
@@ -340,7 +340,7 @@ impl Store {
         // Match PostgreSQL's strict ordering even though SQLite's component
         // side is not FK-enforced: every dead root loses its complete outgoing
         // edge set before any hash-ordered blob delete can reach a component.
-        tx.execute(session_sql().checkpoint_edges.delete_unrooted.sql(), [])
+        crate::conn::cached_execute(tx, session_sql().checkpoint_edges.delete_unrooted.sql(), [])
             .map_err(sqlite_error)?;
         let all_hashes = {
             let mut stmt = tx
@@ -361,7 +361,8 @@ impl Store {
             if retained.contains_key(hash) {
                 continue;
             }
-            tx.execute(
+            crate::conn::cached_execute(
+                tx,
                 crate::artifact_store::artifact_sql()
                     .blobs
                     .delete_by_hash
@@ -398,7 +399,8 @@ mod tests {
                     (MODULE_ARTIFACT_NAMESPACE, "mod-a", "blob-mod"),
                     (PROCESS_ENV_NAMESPACE, "env-a", "blob-env"),
                 ] {
-                    conn.execute(
+                    crate::conn::cached_execute(
+                        conn,
                         "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
                          VALUES (?1, ?2, ?3)",
                         params![namespace, artifact_ref, blob_ref],
@@ -435,7 +437,8 @@ mod tests {
         store
             .conn
             .call(|conn| {
-                conn.execute(
+                crate::conn::cached_execute(
+                    conn,
                     "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref)
                      VALUES ('foreign_namespace', 'ref-a', 'blob-a')",
                     [],

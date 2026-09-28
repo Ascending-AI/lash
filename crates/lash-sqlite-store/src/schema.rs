@@ -1570,13 +1570,11 @@ pub(crate) async fn ensure_versioned_schema(
     conn: &SqliteConnection,
     database: SqliteDatabase,
 ) -> rusqlite::Result<()> {
-    conn.call(move |c| {
-        let tx = prepare_versioned_schema(c, database)?;
-        tx.commit()
-    })
-    .await
+    conn.write(move |tx| apply_versioned_schema_tx(tx, database, database.schema_version()))
+        .await
 }
 
+#[cfg(test)]
 fn prepare_versioned_schema<'connection>(
     connection: &'connection mut Connection,
     database: SqliteDatabase,
@@ -1584,6 +1582,7 @@ fn prepare_versioned_schema<'connection>(
     prepare_versioned_schema_at_version(connection, database, database.schema_version())
 }
 
+#[cfg(test)]
 fn prepare_versioned_schema_at_version<'connection>(
     connection: &'connection mut Connection,
     database: SqliteDatabase,
@@ -1597,27 +1596,43 @@ fn prepare_versioned_schema_at_version<'connection>(
     // `busy_timeout`). Holding the write lock from the first statement makes
     // every contender serialise on the busy handler instead.
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    let apply_schema = |tx: &rusqlite::Transaction<'_>| -> rusqlite::Result<()> {
-        tx.execute_batch(database.schema())?;
+    apply_versioned_schema_tx(&tx, database, schema_version)?;
+    Ok(tx)
+}
+
+/// The version check — and, when needed, the schema batch — inside the
+/// caller's write transaction (`conn.write` for opens, the fixture's own
+/// transaction for the versioned-open tests).
+fn apply_versioned_schema_tx(
+    tx: &Transaction<'_>,
+    database: SqliteDatabase,
+    schema_version: i32,
+) -> rusqlite::Result<()> {
+    let apply_schema = |conn: &Transaction<'_>| -> rusqlite::Result<()> {
+        conn.execute_batch(database.schema())?;
         for fragment in database.fragments() {
-            tx.execute_batch(fragment)?;
+            conn.execute_batch(fragment)?;
         }
         Ok(())
     };
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
-        apply_schema(&tx)?;
-        stamp_deployment_metadata(&tx, database)?;
-        return Ok(tx);
+        // The stamp is authoritative: a database at this version was fully
+        // laid down by the open that stamped it, so the idempotent schema
+        // batch below is skipped rather than re-run on every connection
+        // open (FIG-3975). Only the deployment's own bookkeeping still
+        // writes.
+        stamp_deployment_metadata(tx, database)?;
+        return Ok(());
     }
-    if user_version == 0 && !has_user_schema_objects(&tx)? {
-        apply_schema(&tx)?;
+    if user_version == 0 && !has_user_schema_objects(tx)? {
+        apply_schema(tx)?;
         tx.pragma_update(None, "user_version", schema_version)?;
-        stamp_deployment_metadata(&tx, database)?;
-        return Ok(tx);
+        stamp_deployment_metadata(tx, database)?;
+        return Ok(());
     }
     let writing_release = deployment_metadata_holder(database)
-        .then(|| crate::release_stamp::read_release(&tx))
+        .then(|| crate::release_stamp::read_release(tx))
         .flatten();
     Err(rusqlite::Error::SqliteFailure(
         rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
@@ -1775,6 +1790,43 @@ mod observer_intent_migration_tests {
             legacy_rows, 2,
             "a refused open must not run the deleted fold"
         );
+    }
+}
+
+#[cfg(test)]
+mod schema_version_tests {
+    use super::*;
+
+    /// FIG-3975: the `user_version` stamp is authoritative — a database
+    /// stamped at this build's version was fully laid down by the open that
+    /// stamped it, so reopening does not re-run the schema batch. Dropping a
+    /// stamped table proves the skip: the open leaves it absent rather than
+    /// recreating it.
+    #[test]
+    fn a_current_stamp_skips_the_schema_batch() {
+        let mut connection = Connection::open_in_memory().expect("open schema fixture");
+        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+            .expect("lay down the current schema")
+            .commit()
+            .expect("commit the fixture");
+        connection
+            .execute_batch("DROP TABLE pending_turn_inputs")
+            .expect("drop a stamped table");
+
+        prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
+            .expect("a matching stamp opens without the schema batch")
+            .commit()
+            .expect("commit the stamp write");
+
+        let present: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'pending_turn_inputs'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check the dropped table");
+        assert_eq!(present, 0, "the schema batch re-ran over a current stamp");
     }
 }
 

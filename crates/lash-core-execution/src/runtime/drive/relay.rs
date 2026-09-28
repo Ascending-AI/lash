@@ -257,6 +257,22 @@ pub async fn deliver_now(
     attempt(relay, claimed, clock).await
 }
 
+/// Deliver an obligation the producer's own transaction already claimed
+/// (FIG-3975): a fused admission takes the claim inside its commit, so the
+/// only work left is the attempt and its settlement — identical to the claim
+/// [`deliver_now`] takes then hands here.
+///
+/// # Errors
+///
+/// Only a store failure; a failed delivery is a settlement, not an error.
+pub async fn deliver_claimed(
+    relay: &dyn ObligationRelay,
+    claimed: ClaimedObligation,
+    clock: &dyn Clock,
+) -> Result<RelayVerdict, StoreError> {
+    attempt(relay, claimed, clock).await
+}
+
 /// One bounded due pass: claim at most `limit` due obligations and attempt
 /// each. One obligation's failure, undecodable key or lost claim never stops
 /// the rows behind it.

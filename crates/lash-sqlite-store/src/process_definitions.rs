@@ -168,7 +168,7 @@ impl lash_core_execution::ProcessDefinitionRegistry for SqliteProcessDefinitionR
                                 updated_at_ms: now_ms,
                             };
                             let record_json = encode_record(&record)?;
-                            tx.execute(
+                            crate::conn::cached_execute(tx,
                                 process_sql().definition.insert_first_revision.sql(),
                                 rusqlite::params![
                                     definition_id,
@@ -233,7 +233,7 @@ impl lash_core_execution::ProcessDefinitionRegistry for SqliteProcessDefinitionR
                         new_record.updated_at_ms = now_ms;
                         new_record.change_seq += 1;
                         let record_json = encode_record(&new_record)?;
-                        let updated = tx.execute(
+                        let updated = crate::conn::cached_execute(tx,
                             process_sql().definition.update_revision.sql(),
                             rusqlite::params![
                                 owner_json,
@@ -277,7 +277,8 @@ impl lash_core_execution::ProcessDefinitionRegistry for SqliteProcessDefinitionR
         let owner_json = encode_owner(owner_scope).map_err(sqlite_plugin_error)?;
         self.conn
             .call(move |conn| {
-                let mut stmt = conn.prepare(process_sql().definition.list_by_owner_scope.sql())?;
+                let mut stmt =
+                    conn.prepare_cached(process_sql().definition.list_by_owner_scope.sql())?;
                 let rows =
                     stmt.query_map(rusqlite::params![owner_json], |row| row.get::<_, String>(0))?;
                 let mut records = Vec::new();

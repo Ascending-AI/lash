@@ -18,7 +18,8 @@ pub(super) fn release_undelivered_turn_input_claims_conn(
 ) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
     for claim in claims {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.pending_inputs_sqlite.abandon_claim.sql(),
             params![
                 claim.session_id.as_str(),
@@ -49,7 +50,8 @@ pub(super) fn defer_undelivered_queue_claims_conn(
     let sql = crate::turn_ingress::turn_ingress_sql();
     let mut deferred = Vec::new();
     for claim in claims {
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             sql.queued_batches.abandon_claim.sql(),
             params![
                 claim.session_id.as_str(),
@@ -188,7 +190,8 @@ fn insert_graph_nodes_one_at_a_time(
             .map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;
-        tx.execute(
+        crate::conn::cached_execute(
+            tx,
             session_sql().graph.insert.sql(),
             params![
                 session_id.as_str(),

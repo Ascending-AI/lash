@@ -104,7 +104,8 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
     {
         self.conn
             .call(|conn| {
-                let mut statement = conn.prepare(process_sql().cleanup.list_pending.sql())?;
+                let mut statement =
+                    conn.prepare_cached(process_sql().cleanup.list_pending.sql())?;
                 statement
                     .query_map([], |row| row.get::<_, String>(0))?
                     .map(|row| {
@@ -131,7 +132,8 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
         let process_id = process_id.clone();
         self.conn
             .write(move |tx| {
-                let removed = tx.execute(
+                let removed = crate::conn::cached_execute(
+                    tx,
                     process_sql().cleanup.delete_for_process.sql(),
                     params![process_id.as_str()],
                 )?;

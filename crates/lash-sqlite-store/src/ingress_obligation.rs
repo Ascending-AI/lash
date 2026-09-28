@@ -112,7 +112,7 @@ impl DueObligationPeek for SqliteDuePeek {
         let rows: Vec<(i64, String)> = self
             .conn
             .call(move |conn| {
-                let mut select = conn.prepare(sql.sql())?;
+                let mut select = conn.prepare_cached(sql.sql())?;
                 select
                     .query_map(rusqlite::params![now, limit], |row| {
                         Ok((row.get(0)?, row.get(1)?))
