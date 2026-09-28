@@ -3,11 +3,14 @@
 //! One *sample* is a send→outcome round trip on a live Restate server. The
 //! host measures the wall spans it can see; a per-sample store poller reads
 //! durable evidence at a fixed 2 ms cadence so the claim, application and
-//! settlement instants do not ride the follower's own wake schedule:
+//! settlement instants do not ride the follower's own wake schedule. Every
+//! read is keyed — the open-input row, the input's root binding, the root's
+//! terminal — and all of them run on the lane's one observer connection, so
+//! the cadence never rescans session history or opens a connection per tick:
 //!
 //! * `claim` — the input's pending row first reports `Held` (the drive took
 //!   it), or leaves the open set.
-//! * `applied` — the input appears in durable turn-input applications.
+//! * `applied` — the input's durable binding names the root that took it.
 //! * `settled` — the root's terminal evidence is readable.
 //!
 //! The follower tail (`settled→complete`) is what live replay, the settled
@@ -22,7 +25,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
-use lash_core::drive::root_of_physical_turn;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
@@ -512,21 +514,20 @@ async fn run_lane(
         ),
     };
     // The poller's read path is the observer's, never the session's own:
-    // `durable()` binds the catalog's non-creating acquisition seam, so this
-    // is a reader handle beside the live writer.
-    let durable = topology
-        .observer
-        .session(session_id.clone())
-        .durable()
-        .await
-        .map_err(anyhow::Error::from)?;
+    // `open_existing_store_by_id` binds the catalog's non-creating
+    // acquisition seam, so this is a reader store beside the live writer —
+    // one connection whose keyed reads serve every sample's poller.
     let factory = topology.observer.backend().session_store_factory();
+    let poll_store = factory
+        .open_existing_store_by_id(&session_id)
+        .await
+        .map_err(|error| anyhow::anyhow!("resolve the observer store for `{session_id}`: {error}"))?
+        .with_context(|| format!("the observer catalog has no store for `{session_id}`"))?;
     let hold = holds.map(|registry| registry.lane(&session_id));
     let ctx = SampleCtx {
         spec,
         session: &session,
-        durable: &durable,
-        factory: &factory,
+        poll_store: &poll_store,
         session_id: &session_id,
         timing: &timing,
     };
@@ -544,8 +545,7 @@ async fn run_lane(
 struct SampleCtx<'a> {
     spec: &'a CaseSpec,
     session: &'a LaneSession,
-    durable: &'a lash::DurableSession,
-    factory: &'a Arc<dyn lash::persistence::SessionStoreFactory>,
+    poll_store: &'a Arc<dyn lash::persistence::RuntimePersistence>,
     session_id: &'a SessionId,
     timing: &'a Arc<ProviderTiming>,
 }
@@ -612,8 +612,7 @@ async fn measure_send(
     after_accept();
     let input_id = handle.input_id().clone();
     let poller = tokio::spawn(poll_marks(
-        ctx.durable.clone(),
-        Arc::clone(ctx.factory),
+        Arc::clone(ctx.poll_store),
         ctx.session_id.clone(),
         input_id.clone(),
         t_request,
@@ -680,10 +679,13 @@ fn status_name(status: &lash::TurnStatus) -> String {
 
 /// The durable-evidence poller for one send: claim, application and
 /// settlement instants read from the store itself, not the follower's wake
-/// schedule.
+/// schedule. Every read is keyed — the open-input row, the input's root
+/// binding, the root's terminal — on `store`'s one connection (FIG-3974):
+/// the input→root binding and the terminal are the same point reads the
+/// follower resolves with, so the poller never decodes the session's commit
+/// history.
 async fn poll_marks(
-    durable: lash::DurableSession,
-    factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store: Arc<dyn lash::persistence::RuntimePersistence>,
     session_id: SessionId,
     input_id: lash_core::InputId,
     t_request: Instant,
@@ -695,7 +697,7 @@ async fn poll_marks(
     loop {
         let now = elapsed_ms(t_request);
         if marks.claim_ms.is_none()
-            && let Ok(rows) = durable.pending_turn_inputs().await
+            && let Ok(rows) = store.list_pending_turn_inputs(&session_id).await
         {
             match rows.iter().find(|row| row.input.input_id == input_id) {
                 Some(row) => {
@@ -709,17 +711,17 @@ async fn poll_marks(
                 None => {}
             }
         }
+        // The claim's transaction binds the input to its root, so the keyed
+        // `root_of_input` read is the applied mark and the settled mark's
+        // key in one.
         if root.is_none()
-            && let Ok(applications) = durable.turn_input_applications().await
-            && let Some(application) = applications
-                .iter()
-                .find(|application| application.input_id == input_id)
+            && let Ok(Some(bound)) = store.root_of_input(&session_id, &input_id).await
         {
             marks.applied_ms = Some(now);
-            root = Some(root_of_physical_turn(&application.turn_id).0);
+            root = Some(bound);
         }
         if let Some(root) = &root {
-            if let Ok(Some(_)) = factory.root_terminal(&session_id, root).await {
+            if let Ok(Some(_)) = store.root_terminal(&session_id, root).await {
                 marks.settled_ms = Some(now);
                 break;
             }
@@ -1010,5 +1012,162 @@ pub(crate) fn build_report(
             pass: violations.is_empty(),
             violations,
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use lash_core::SessionStoreFactory;
+
+    use super::*;
+
+    /// The store half of `poll_marks`' keyed-read contract (FIG-3974): the
+    /// claim, applied and settled marks come from point reads — the pending
+    /// row, the input's root binding, the root's terminal — on the one store
+    /// the lane's pollers share. `list_turn_input_applications`, the
+    /// full-history receipt decode the poller issued every tick before, is
+    /// armed to panic: reaching it at all is the regression.
+    struct PollProbeStore {
+        inner: Arc<dyn lash::persistence::RuntimePersistence>,
+        row: lash::PendingTurnInput,
+        root: lash_core::TurnId,
+        terminal: lash::persistence::RootTerminal,
+        pending_calls: AtomicUsize,
+        applications_calls: AtomicUsize,
+        root_of_input_calls: AtomicUsize,
+        root_terminal_calls: AtomicUsize,
+    }
+
+    impl PollProbeStore {
+        fn over(
+            inner: Arc<dyn lash::persistence::RuntimePersistence>,
+            session_id: &SessionId,
+            input_id: &lash_core::InputId,
+            root: &lash_core::TurnId,
+        ) -> Self {
+            Self {
+                inner,
+                row: lash::PendingTurnInput {
+                    input_id: input_id.clone(),
+                    session_id: session_id.clone(),
+                    enqueue_seq: 1,
+                    source_key: None,
+                    state: lash_core::TurnInputState::open(lash_core::TurnInputIngress::next_turn()),
+                    enqueued_at_ms: 0,
+                    input: lash::TurnInput::empty(),
+                    run_spec: None,
+                },
+                root: root.clone(),
+                terminal: lash::persistence::RootTerminal {
+                    session_id: session_id.clone(),
+                    root: root.clone(),
+                    kind: lash::persistence::RootTerminalKind::Answered,
+                    cause: lash::persistence::RootTerminalCause::Committed {
+                        commit: lash::persistence::TurnCommitId::new(root.clone(), 0),
+                        turn: root.clone(),
+                        stop: None,
+                    },
+                    head_revision: None,
+                    at_ms: 1,
+                },
+                pending_calls: AtomicUsize::new(0),
+                applications_calls: AtomicUsize::new(0),
+                root_of_input_calls: AtomicUsize::new(0),
+                root_terminal_calls: AtomicUsize::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl lash::persistence::RuntimePersistenceDecorator for PollProbeStore {
+        fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
+            self.inner.as_ref()
+        }
+
+        /// The row reports `Pending` on the first read and `Held` after, a
+        /// drive's claim landing between two ticks.
+        async fn list_pending_turn_inputs(
+            &self,
+            _session_id: &SessionId,
+        ) -> Result<Vec<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
+            let call = self.pending_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![if call == 0 {
+                lash::PendingTurnInputRead::pending(self.row.clone())
+            } else {
+                lash::PendingTurnInputRead::held(self.row.clone(), 0)
+            }])
+        }
+
+        async fn list_turn_input_applications(
+            &self,
+            _session_id: &SessionId,
+        ) -> Result<Vec<lash_core::TurnInputApplication>, lash::persistence::StoreError> {
+            self.applications_calls.fetch_add(1, Ordering::SeqCst);
+            panic!("the store poller must never rescan turn-input applications");
+        }
+
+        /// The input's root binding: absent until the claim transaction
+        /// records it, keyed on `input` only.
+        async fn root_of_input(
+            &self,
+            _session_id: &SessionId,
+            _input: &lash_core::InputId,
+        ) -> Result<Option<lash_core::TurnId>, lash::persistence::StoreError> {
+            let call = self.root_of_input_calls.fetch_add(1, Ordering::SeqCst);
+            Ok((call >= 2).then(|| self.root.clone()))
+        }
+
+        /// The root's terminal evidence: absent on the read before it lands,
+        /// present after.
+        async fn root_terminal(
+            &self,
+            _session_id: &SessionId,
+            _root: &lash_core::TurnId,
+        ) -> Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
+        {
+            let call = self.root_terminal_calls.fetch_add(1, Ordering::SeqCst);
+            Ok((call >= 1).then(|| self.terminal.clone()))
+        }
+    }
+
+    /// The poller's marks land in claim, applied, settled order — each from
+    /// a point read on the probe — and the applications scan never runs.
+    #[tokio::test]
+    async fn the_store_poller_marks_keyed_reads_without_an_applications_scan() {
+        let session_id = SessionId::from("latency-probe");
+        let input_id = lash_core::InputId::from("latency-probe-input");
+        let root = lash_core::TurnId::from("latency-probe-root");
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open the in-memory store set");
+        let inner = stores
+            .session_store_factory()
+            .create_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("create the probe's inner store");
+        let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &root));
+        let store: Arc<dyn lash::persistence::RuntimePersistence> = probe.clone();
+
+        let marks = poll_marks(store, session_id, input_id, Instant::now()).await;
+
+        assert!(!marks.timed_out, "the probe answers every mark");
+        let claim = marks.claim_ms.expect("the held row's claim mark");
+        let applied = marks.applied_ms.expect("the binding's applied mark");
+        let settled = marks.settled_ms.expect("the terminal's settled mark");
+        assert!(
+            claim < applied && applied < settled,
+            "claim {claim}, applied {applied}, settled {settled}"
+        );
+        assert_eq!(probe.applications_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(probe.root_of_input_calls.load(Ordering::SeqCst), 3);
+        assert_eq!(probe.root_terminal_calls.load(Ordering::SeqCst), 2);
     }
 }
