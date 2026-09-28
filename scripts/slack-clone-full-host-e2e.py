@@ -81,6 +81,7 @@ class Journey:
         self.root_ts = ""
         self.kill_claim_owner = ""
         self.kill_drive_epoch = 0
+        self.kill_drive_admission = ""
         self.kill_started = 0.0
 
     def gate(
@@ -204,7 +205,7 @@ class Journey:
             "nodes": "SELECT session_id, node_id, parent_node_id, generation, node_json FROM graph_nodes "
             "WHERE tombstoned = 0 ORDER BY session_id, generation",
             "turns": "SELECT session_id, turn_id, result_json FROM runtime_turn_commits ORDER BY committed_at_ms",
-            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id, drive_epoch "
+            "meta": "SELECT session_id, relation_kind, parent_session_id, source_session_id, source_node_id, drive_epoch, drive_admission_id "
             "FROM session_meta ORDER BY session_id",
             "lineage": "SELECT session_id, ancestor_session_id, fork_node_id, fork_generation "
             "FROM fork_lineage ORDER BY session_id, ancestor_session_id",
@@ -676,6 +677,7 @@ class Journey:
             (row for row in killed_session["meta"] if row["session_id"] == f"channel:{self.channel}"),
             None,
         )
+        self.kill_drive_admission = killed_meta["drive_admission_id"] if killed_meta else ""
         self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"] and killed_meta is not None and self.kill_drive_epoch == killed_meta["drive_epoch"] and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
@@ -693,26 +695,44 @@ class Journey:
         deferred_lines = re.findall(rf"(?:recovered|settled deferred) event {re.escape(self.kill_event)}[^\n]*Deferred \{{[^\n]*(?:session_admission_contended|turn_not_settled)[^\n]*", recovery_log)
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: (?:Turn|Transcript)[^\n]*", recovery_log)
         handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
+        # Post-lease the engine's own drive outlives the killed bot: boot
+        # recovery settles the dead incarnation's claim itself and logs
+        # `recovered event <id> (...): Replied`; a platform redelivery that
+        # reaches `ingest` first still logs `handled <id>: Replied`.
+        recovered_replied = re.search(rf"recovered event {re.escape(self.kill_event)} \([^)]*\): Replied \{{[^\n]*source: (?:Turn|Transcript)", recovery_log)
         after_session = self.session_snapshot()
         channel_meta = next(r for r in after_session["meta"] if r["session_id"] == f"channel:{self.channel}")
         reply_matches_platform = recovered["reply_ts"] is not None and any(
             str(r["ts"] // 1_000_000) + "." + str(r["ts"] % 1_000_000).zfill(6) == recovered["reply_ts"]
             for r in bot_rows
         )
-        fencing_advanced = channel_meta["drive_epoch"] > self.kill_drive_epoch
+        # The interim claim fence is (drive epoch, owner incarnation): a new
+        # boot re-claims the dead incarnation's row under the *same* sealed
+        # admission, so the epoch legitimately stays put. Fencing holds when
+        # the epoch advanced (a later admission sealed over the dead claim) or
+        # the session's sealed admission is still the one the killed input's
+        # claim was taken under — never regressed, never cleared.
+        fencing_held = (
+            channel_meta["drive_epoch"] > self.kill_drive_epoch
+            or (
+                channel_meta["drive_epoch"] == self.kill_drive_epoch
+                and channel_meta["drive_admission_id"]
+                and channel_meta["drive_admission_id"] == self.kill_drive_admission
+            )
+        )
         if deferred_lines:
             recovery_path = "fast"
             path_ok = settled is not None
             path_note = f"fast path: deferral then settle-from-turn for {self.kill_event}"
         else:
             recovery_path = "direct"
-            path_ok = handled is not None
-            path_note = f"direct handled-Replied for {self.kill_event}"
+            path_ok = recovered_replied is not None or handled is not None
+            path_note = f"direct settle for {self.kill_event}"
         self.gate(
             "05-recovered",
             "bot",
             f"dead incarnation {self.kill_claim_owner} drive epoch {self.kill_drive_epoch} recovered via {path_note}",
-            path_ok and fencing_advanced and reply_matches_platform,
+            path_ok and fencing_held and reply_matches_platform,
             "05-recovered-four-layers.json + bot log",
         )
         self.gate("05-recovered", "trace", "restart recovery completes exactly one replacement turn", len(self.turn_traces()) == before_turns + 1, "05-recovered-four-layers.json")

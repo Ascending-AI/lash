@@ -302,6 +302,15 @@ impl crate::obligation::ObligationStatementSet for ProcessObligationStatements {
     }
 }
 
+/// A stalled start obligation as an operator lists it: the obligation's id,
+/// attempts, stall reason, last error and settled instant, then the row's key.
+pub const START_OBLIGATION_STALLED_COLUMNS: &str = "start_obligation_id, start_obligation_attempts, start_obligation_stall_reason, start_obligation_last_error, start_obligation_settled_at_ms, process_id";
+
+/// A start obligation's standing as its claim reads it back: the state and
+/// the attempts taken since it was armed.
+pub const START_OBLIGATION_STANDING_COLUMNS: &str =
+    "start_obligation_state, start_obligation_attempts";
+
 crate::statements! {
     /// `processes` start-obligation statements (ADR 0109): a registered process owes its first engine run. Both backends issue
     /// them verbatim; every settling write compares the state and, while
