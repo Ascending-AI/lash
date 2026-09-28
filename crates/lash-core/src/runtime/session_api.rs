@@ -81,6 +81,24 @@ impl LashRuntime {
     pub(in crate::runtime) fn install_resident_state(&mut self, state: crate::RuntimeSessionState) {
         self.state = state;
         self.reapply_tool_state_preservation_marker();
+        self.publish_resident_authority();
+    }
+
+    /// Install a root's recorded [`ResolvedRun`](crate::ResolvedRun) as the
+    /// resident execution view. The view's config carries its own authority,
+    /// which can differ from the resident one (a replay after a config
+    /// change, a recovered follow-on's inherited shape, a refresh the root
+    /// re-installs its record over), so the install publishes it to the live
+    /// plugin session just as a whole-state swap does (FIG-4022). This and
+    /// [`Self::install_resident_state`] are the only writers of the resident
+    /// authority.
+    pub(in crate::runtime) fn install_resolved_run(&mut self, resolved: &crate::ResolvedRun) {
+        crate::runtime::state::adopt_resolved_run(&mut self.state, resolved);
+        self.publish_resident_authority();
+    }
+
+    /// Publish the resident authority to the live plugin session.
+    fn publish_resident_authority(&self) {
         let Some(session) = self.session.as_ref() else {
             return;
         };

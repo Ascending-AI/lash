@@ -119,7 +119,7 @@ impl LashRuntime {
     /// Preserve the sticky config before installing the recorded execution
     /// view. A replay may name a config that differs from the current head.
     fn apply_turn_config(&mut self, resolved: &crate::ResolvedRun) {
-        crate::runtime::state::adopt_resolved_run(&mut self.state, resolved);
+        self.install_resolved_run(resolved);
         debug_assert_eq!(
             self.state.config_revision, resolved.base.config_revision,
             "a root's resident config revision moved inside the root"
@@ -367,5 +367,75 @@ impl RuntimeEffectLocalRunner for ResolveTurnConfigRunner {
         Ok(RuntimeEffectOutcome::ResolveTurnConfig {
             resolved: Box::new(resolved),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::runtime::LashRuntime;
+
+    /// FIG-4022: a root's recorded execution view can carry an authority
+    /// other than the resident one (a replay after a config change, a
+    /// recovered follow-on's inherited shape). Installing it must publish
+    /// that authority to the live plugin session at once, not at the next
+    /// commit's whole-state swap.
+    #[tokio::test]
+    async fn installing_a_root_execution_view_publishes_its_authority_to_live_plugins() {
+        let mut runtime = Box::pin(
+            LashRuntime::builder(
+                crate::RuntimeHostConfig::new(
+                    crate::testing::memory_store_backend().await,
+                    crate::CommitBudget::bounded(1024 * 1024, 512),
+                    crate::QueuedWorkBatchingConfig::new(1),
+                ),
+                crate::testing::runtime_lease_owner(),
+            )
+            .with_session_id("root-view-authority")
+            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_policy(crate::SessionPolicy {
+                model: crate::ModelSpec::builder("test-model")
+                    .context_window_tokens(1024)
+                    .build()
+                    .expect("model"),
+                ..crate::SessionPolicy::new(crate::TurnBudget::Unbounded)
+            })
+            .build(),
+        )
+        .await
+        .expect("runtime");
+        let head_revision = runtime.state.head_revision;
+        let tool_access = crate::SessionToolAccess::ambient()
+            .with_hidden_tools(["hidden-by-root-view"])
+            .expect("valid hidden tool");
+        let subagent = crate::SubagentSessionContext {
+            parent_session_id: crate::SessionId::from("root-view-parent"),
+            capability: "root-view-capability".to_string(),
+            depth: 1,
+            max_depth: 3,
+        };
+        let mut view = crate::store::persisted_session_config_from_state(&runtime.state);
+        assert_ne!(view.tool_access, tool_access);
+        assert_ne!(view.subagent.as_ref(), Some(&subagent));
+        view.tool_access = tool_access.clone();
+        view.subagent = Some(subagent.clone());
+
+        runtime.apply_turn_config(&crate::ResolvedRun::snapshot(view));
+
+        let plugins = runtime.plugin_session().expect("live plugin session");
+        assert_eq!(
+            runtime.state.head_revision, head_revision,
+            "nothing committed"
+        );
+        assert_eq!(runtime.state.authority.tool_access, tool_access);
+        assert_eq!(
+            plugins.tool_access(),
+            tool_access,
+            "the live plugin session must see the root view's tool access"
+        );
+        assert_eq!(
+            plugins.subagent_context(),
+            Some(subagent),
+            "the live plugin session must see the root view's subagent context"
+        );
     }
 }

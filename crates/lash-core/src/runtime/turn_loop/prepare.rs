@@ -55,7 +55,7 @@ impl LashRuntime {
                 .map_err(session_head_refresh_error)?;
         }
         if let Some(resolved) = resolved_run {
-            crate::runtime::state::adopt_resolved_run(&mut self.state, &resolved);
+            self.install_resolved_run(&resolved);
         }
         Ok(())
     }
