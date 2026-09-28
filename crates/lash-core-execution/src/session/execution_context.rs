@@ -48,6 +48,7 @@ impl RecordedTurnCancel {
 pub struct RuntimeExecutionContext<'run> {
     pub(super) session_id: SessionId,
     pub(super) dispatch: Arc<ToolDispatchContext<'run>>,
+    pub(super) tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
     /// The catalog the live registry resolves to, when the dispatch catalog
     /// is a turn's recorded surface: what a code cell's journaled binding set
     /// is judged against, tool by tool (FIG-3587). `None` means the dispatch
@@ -506,6 +507,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         Self {
             session_id,
             dispatch,
+            tool_children: None,
             process_env_store,
             attachment_store,
             chronological_projection,
@@ -545,6 +547,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         Some(RuntimeExecutionContext {
             session_id: self.session_id.clone(),
             dispatch: Arc::new(self.dispatch.to_static()?),
+            tool_children: self.tool_children.clone(),
             live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
             fleet_format: self.fleet_format,
@@ -825,6 +828,14 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_parent_invocation(mut self, metadata: crate::RuntimeInvocation) -> Self {
         self.parent_invocation = Some(metadata);
+        self
+    }
+
+    pub fn with_tool_children(
+        mut self,
+        tool_children: Option<Arc<crate::runtime::effect::ToolChildHost>>,
+    ) -> Self {
+        self.tool_children = tool_children;
         self
     }
 

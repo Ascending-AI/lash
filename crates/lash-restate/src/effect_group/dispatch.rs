@@ -186,6 +186,429 @@ pub trait EffectGroupDispatch {
     async fn retire(group_key: String) -> HandlerResult<Json<()>>;
 }
 
+impl EffectGroupDispatchImpl {
+    async fn run_child(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        request: &EffectGroupChildRequest,
+    ) -> HandlerResult<Json<()>> {
+        // The generation sentinel leads the journal (FIG-3795 §4.4): a child
+        // runs on its dispatcher's lane, the build that opened its group.
+        let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
+        crate::sentinel::check_generation(&self.route.name(), &recorded, &self.build_generation)?;
+        // FIG-3619: the owning session's generation is checked before
+        // anything else this invocation does — before admission, before its
+        // membership record, before an effect key is derived, and so before
+        // its effect can be dispatched. A session's state generation moves
+        // independently of the build that opened the group, so a child can
+        // still land on a session another build moved on. A refused child
+        // settles with the typed refusal, which resolves the opener's rank
+        // wait instead of stranding it; its effect never runs.
+        if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), request).await? {
+            request.shape.validate_wire()?;
+            return record_child_settlement(
+                &ctx,
+                self.route.namespace(),
+                request,
+                EffectGroupChildRunOutcome::Completed {
+                    outcome: Err(refusal),
+                },
+            )
+            .await;
+        }
+        request.shape.validate_wire()?;
+        let own_id = ctx.invocation_id().to_string();
+        let admission_request = EffectGroupAdmissionRequest {
+            position: request.position,
+            invocation_id: own_id,
+        };
+        let Json(first) = self
+            .route
+            .namespace()
+            .effect_group_state(&ctx, request.group_key.clone())
+            .admit_child(Json(admission_request.clone()))
+            .call()
+            .await?;
+        let admission = match first {
+            EffectGroupAdmissionResponse::Admitted => EffectGroupAdmissionResponse::Admitted,
+            EffectGroupAdmissionResponse::AttachExpired => {
+                // §8: the index retains a different invocation id for this
+                // position — the original's retention expired and the
+                // idempotency-keyed dispatch minted this successor. The child
+                // settles with the typed failure rather than running under an
+                // identity the group never recorded.
+                return record_child_settlement(
+                    &ctx,
+                    self.route.namespace(),
+                    request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(request)),
+                    },
+                )
+                .await;
+            }
+            EffectGroupAdmissionResponse::CancelDecided => {
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Refused => {
+                release_unadmitted_wait(
+                    ctx,
+                    self.authority_id.clone(),
+                    self.route.namespace().clone(),
+                    request,
+                )
+                .await?;
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Retired => {
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::NotYetRecorded => {
+                let key = group_wait_key(
+                    &request.shape.wait_scope,
+                    &request.group_key,
+                    EffectGroupWaitKind::Admit(request.position),
+                )?;
+                let replay_key = key.key_id.clone();
+                let address = RestateDurableWaitAddress::for_key(&key);
+                let Json(_) = self
+                    .route
+                    .namespace()
+                    .durable_wait_workflow(&ctx, address.workflow_key)
+                    .await_resolution(Json(
+                        RestateDurableWaitAwaitRequest {
+                            key,
+                            deadline: None,
+                        }
+                        .into(),
+                    ))
+                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
+                    .call()
+                    .await?;
+                // ADMIT is notification only. Authorization always comes from
+                // this one fresh, mapping-exact call after the wake.
+                let Json(fresh) = self
+                    .route
+                    .namespace()
+                    .effect_group_state(&ctx, request.group_key.clone())
+                    .admit_child(Json(admission_request))
+                    .call()
+                    .await?;
+                fresh
+            }
+        };
+        match admission {
+            EffectGroupAdmissionResponse::Admitted => {}
+            EffectGroupAdmissionResponse::AttachExpired => {
+                return record_child_settlement(
+                    &ctx,
+                    self.route.namespace(),
+                    request,
+                    EffectGroupChildRunOutcome::Completed {
+                        outcome: Err(attach_expired_error(request)),
+                    },
+                )
+                .await;
+            }
+            EffectGroupAdmissionResponse::CancelDecided => {
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Refused => {
+                release_unadmitted_wait(
+                    ctx,
+                    self.authority_id.clone(),
+                    self.route.namespace().clone(),
+                    request,
+                )
+                .await?;
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::Retired => {
+                return Ok(Json(()));
+            }
+            EffectGroupAdmissionResponse::NotYetRecorded => {
+                return Err(TerminalError::new(format!(
+                    "ADMIT notification for {} child {} did not produce a decisive fresh admission",
+                    request.group_key, request.position
+                ))
+                .into());
+            }
+        }
+
+        // The child's durable membership, written before anything of it can
+        // run: the §4 boundary inside the child's own settle resolves its
+        // group from this record — the Restate twin of the SQL tiers'
+        // `group_key` column — never from a caller's assertion. A revoked
+        // scope index refuses the record, and a child whose scope is gone
+        // settles nowhere.
+        let child_replay_key = request.envelope.invocation.replay_key().to_string();
+        let Json(membership_admitted) = self
+            .route
+            .namespace()
+            .durable_wait_registry(
+                &ctx,
+                durable_wait_index_key_for_scope(request.envelope.invocation.execution_scope()),
+            )
+            .record_group_child(Json(RestateDurableWaitGroupChildRequest {
+                replay_key: child_replay_key.clone(),
+                group_key: request.group_key.clone(),
+            }))
+            .header(LASH_REPLAY_KEY_HEADER.to_string(), child_replay_key)
+            .call()
+            .await?;
+        if !membership_admitted {
+            return Ok(Json(()));
+        }
+
+        let cancel_key = group_wait_key(
+            &request.shape.wait_scope,
+            &request.group_key,
+            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
+        )?;
+        // The child's durable cancel fact (ADR 0105 §4, FIG-3904). No child
+        // races it at handler level: a wait child races it as a journaled
+        // arm, a tool child peeks it at its step boundaries and watches it
+        // inside each attempt, and an atomic child watches it inside its
+        // recorded body.
+        let child_cancel = GroupChildCancel::new(
+            self.ingress.clone(),
+            self.route.namespace().clone(),
+            cancel_key,
+        );
+
+        if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
+            // ADR 0099 §2: a tool child is a handler-level invocation driver,
+            // not a recorded body. Its replayable work — retries, deferred
+            // completion, intent orchestration, completion-key derivation —
+            // runs as journaled steps of *this* invocation; only the atomic
+            // `ToolAttempt` executions it emits enter `ctx.run`. Resolving the
+            // driver uses the same `GroupExecutors` answer first dispatch and
+            // recovery both take (ADR 0065): there is no second route and no
+            // caller closure.
+            let Some(executor) = self.executors.executor_for(&request.envelope) else {
+                return Err(std::io::Error::other(format!(
+                    "no executor currently routes effect group {} tool child {}; retry on a carrying deployment",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let Some(driver) = executor.tool_child_driver() else {
+                return Err(TerminalError::new(format!(
+                    "effect group {} tool child {} resolved to an executor with no handler-level driver",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .in_namespace(self.route.namespace().clone())
+                .with_build_generation(self.build_generation.clone())
+                .with_group_child_cancel(child_cancel);
+            // The child's own admitted controller, bound to its recorded
+            // identity: the recorded pair — claim scope and the incarnation
+            // it was admitted under — never the dispatching scope and never
+            // fresh admission (ADR 0099 §3), and every semantic effect it
+            // serves is admitted through the index under the binding's child
+            // (ADR 0099 §4, FIG-3470). A `ToolInvocation` that reached group
+            // dispatch without retained membership is a shape error — never
+            // run unbound.
+            let Some(membership) = request.envelope.group.as_deref().cloned() else {
+                return Err(TerminalError::new(format!(
+                    "effect group {} tool child {} carries no retained membership; \
+                     a child without one has no identity to bind a controller to",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let binding = lash_core::GroupChildBinding {
+                child: request.envelope.invocation.address.clone(),
+                membership,
+            };
+            let scoped = controller
+                .scoped_effect_controller_for_group_child(
+                    child.scope.admitted_scope.clone(),
+                    binding,
+                )
+                .map_err(TerminalError::from_error)?;
+            // Routed through the host's stack before its first effect. A
+            // failed route is the child's outcome, as any failure of its
+            // drive is, so the opener's rank wait always learns of it.
+            let routed = self.executors.route_handler_child_controller(scoped);
+            let address = request.envelope.invocation.address.clone();
+            // The drive runs to its own end: the child's cancel ends it at a
+            // journaled peek, a journaled wait arm or an attempt's recorded
+            // outcome, each of which a replay takes as the first execution
+            // did, and never by dropping it mid-journal.
+            let driven = match routed {
+                Ok(scoped) => driver.drive(child, address, scoped).await,
+                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
+            };
+            let outcome = child_run_outcome(driven);
+            // A child that parks settles nothing, so its opener's rank wait
+            // cannot learn of it (FIG-3725).
+            if let EffectGroupChildRunOutcome::Completed {
+                outcome: Err(refusal),
+            } = &outcome
+                && refusal.turn_failure_cause() == lash_core::TurnFailureCause::Parked
+            {
+                return self
+                    .end_parked_child(controller.context(), request, child, refusal, &outcome)
+                    .await;
+            }
+            refuse_unrecorded_abort(request, &outcome)?;
+            // The outcome is journaled once, as the execution that first
+            // reached it built it. Its recorded steps replay the same, but
+            // what the driver builds beside them does not have to: a child
+            // whose opener was live lent its stream to that opener, while one
+            // that ran on a pinned or deployment-built context carries a
+            // recorded stream. A replay finds its context wherever it can, so
+            // it settles the recorded value rather than its own (FIG-3985).
+            let Json(outcome) =
+                controller
+                    .context()
+                    .run(move || async move {
+                        Ok::<_, restate_sdk::errors::HandlerError>(Json(outcome))
+                    })
+                    .name(format!(
+                        "lash:effect-group:settled:{}:{}",
+                        request.group_key, request.position
+                    ))
+                    .await?;
+            return record_child_settlement(
+                controller.context(),
+                self.route.namespace(),
+                request,
+                outcome,
+            )
+            .await;
+        }
+
+        if matches!(
+            request.envelope.command,
+            RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. }
+        ) {
+            // A timer or durable-wait child is this invocation's own durable
+            // wait (FIG-3397): a `ctx` timer or the Restate durable-wait
+            // promise, journaled on the child's invocation — never a
+            // wall-clock wait inside a recorded `ctx.run` body (ADR 0042).
+            // The resolver answers wait *options*; the ctx-bound controller
+            // is what reads them. The group index fenced the retained member
+            // at open and this invocation is that member, so the wait runs as
+            // a plain effect on the child's own journal rather than
+            // re-carrying the membership the controller's command arms refuse.
+            // It runs under the group's recorded opener, routed through the
+            // host's stack like every other child kind, so a layer over that
+            // host sees the wait (FIG-3780).
+            let Some(executor) = self.executors.executor_for(&request.envelope) else {
+                return Err(std::io::Error::other(format!(
+                    "no executor currently routes effect group {} child {}; retry on a carrying deployment",
+                    request.group_key, request.position
+                ))
+                .into());
+            };
+            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
+                .in_namespace(self.route.namespace().clone())
+                .with_build_generation(self.build_generation.clone())
+                .with_group_child_cancel(child_cancel);
+            let envelope = RuntimeEffectEnvelope {
+                group: None,
+                ..request.envelope.clone()
+            };
+            let routed = lash_core::ScopedEffectController::borrowed(
+                &controller,
+                request.shape.opener.clone(),
+            )
+            .and_then(|scoped| self.executors.route_handler_child_controller(scoped));
+            // The wait races the child's cancel fact as a journaled arm, so
+            // a replay takes the arm its live run took.
+            let outcome = child_run_outcome(match routed {
+                Ok(scoped) => scoped.execute_effect(envelope, executor).await,
+                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
+            });
+            refuse_unrecorded_abort(request, &outcome)?;
+            // A cancelled wait child does not release its own promise: the
+            // index handler that decided the cancel, the close or the
+            // retirement, released it before it resolved this cancel wait
+            // (ADR 0099 §12, FIG-3630).
+            return record_child_settlement(
+                controller.context(),
+                self.route.namespace(),
+                request,
+                outcome,
+            )
+            .await;
+        }
+
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let run_cancellation = cancellation.clone();
+        let envelope = request.envelope.clone();
+        let executors = Arc::clone(&self.executors);
+        let group_key = request.group_key.clone();
+        let position = request.position;
+        let mut run = Box::pin(
+            ctx.run(move || async move {
+                let Some(executor) = executors.executor_for(&envelope) else {
+                    return Err(std::io::Error::other(format!(
+                        "no executor currently routes effect group {group_key} child {position}; retry on a carrying deployment"
+                    ))
+                    .into());
+                };
+                let outcome = tokio::select! {
+                    biased;
+                    _ = run_cancellation.cancelled() => EffectGroupChildRunOutcome::Cancelled,
+                    outcome = executor.execute(envelope) => {
+                        EffectGroupChildRunOutcome::Completed { outcome }
+                    }
+                };
+                if let EffectGroupChildRunOutcome::Completed {
+                    outcome: Err(error),
+                } = &outcome
+                    && is_engine_retried_fault(error)
+                {
+                    // Failing the run step is what keeps the fault out of
+                    // its journal: the step's retry policy runs it again.
+                    return Err(std::io::Error::other(format!(
+                        "effect group {group_key} child {position} aborted with a live fault, \
+                         which is never its recorded outcome; the step retries: {error}"
+                    ))
+                    .into());
+                }
+                Ok(Json(outcome))
+            })
+            .name(format!(
+                "lash:effect-group:{}:{}",
+                request.group_key, request.position
+            ))
+            .retry_policy(self.infinite_retry_policy.clone()),
+        );
+        // The body's cancel is watched live on the shared ladder: a transient
+        // fault of the watch retries, and a watch that gives up leaves the
+        // body to run to its own end, so no fault of the watch ever drops it.
+        // Whatever the body returns is its recorded outcome.
+        let watch = child_cancel.watch();
+        let watched =
+            lash_core::retry_cancel_watch("an effect-group child's cancel", || watch.cancelled());
+        tokio::pin!(watched);
+        let Json(outcome) = tokio::select! {
+            biased;
+            outcome = &mut run => outcome?,
+            watched = &mut watched => {
+                match watched {
+                    Ok(()) => cancellation.cancel(),
+                    Err(lost) => tracing::warn!(
+                        error = %lost,
+                        group_key = %request.group_key,
+                        position = request.position,
+                        "an atomic effect-group child lost its cancel watch; its body runs to its own end"
+                    ),
+                }
+                run.await?
+            }
+        };
+
+        record_child_settlement(&ctx, self.route.namespace(), request, outcome).await
+    }
+}
+
 impl EffectGroupDispatch for EffectGroupDispatchImpl {
     async fn run(
         &self,
@@ -415,402 +838,11 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<EffectGroupChildRequest>,
     ) -> HandlerResult<Json<()>> {
-        // The generation sentinel leads the journal (FIG-3795 §4.4): a child
-        // runs on its dispatcher's lane, the build that opened its group.
-        let recorded = crate::sentinel::record_generation!(&ctx, &self.build_generation)?;
-        crate::sentinel::check_generation(&self.route.name(), &recorded, &self.build_generation)?;
-        // FIG-3619: the owning session's generation is checked before
-        // anything else this invocation does — before admission, before its
-        // membership record, before an effect key is derived, and so before
-        // its effect can be dispatched. A session's state generation moves
-        // independently of the build that opened the group, so a child can
-        // still land on a session another build moved on. A refused child
-        // settles with the typed refusal, which resolves the opener's rank
-        // wait instead of stranding it; its effect never runs.
-        if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), &request).await? {
-            request.shape.validate_wire()?;
-            return record_child_settlement(
-                &ctx,
-                self.route.namespace(),
-                &request,
-                EffectGroupChildRunOutcome::Completed {
-                    outcome: Err(refusal),
-                },
-            )
-            .await;
+        let result = self.run_child(ctx, &request).await;
+        if result.is_ok() {
+            self.executors.release_child(&request.envelope);
         }
-        request.shape.validate_wire()?;
-        let own_id = ctx.invocation_id().to_string();
-        let admission_request = EffectGroupAdmissionRequest {
-            position: request.position,
-            invocation_id: own_id,
-        };
-        let Json(first) = self
-            .route
-            .namespace()
-            .effect_group_state(&ctx, request.group_key.clone())
-            .admit_child(Json(admission_request.clone()))
-            .call()
-            .await?;
-        let admission = match first {
-            EffectGroupAdmissionResponse::Admitted => EffectGroupAdmissionResponse::Admitted,
-            EffectGroupAdmissionResponse::AttachExpired => {
-                // §8: the index retains a different invocation id for this
-                // position — the original's retention expired and the
-                // idempotency-keyed dispatch minted this successor. The child
-                // settles with the typed failure rather than running under an
-                // identity the group never recorded.
-                return record_child_settlement(
-                    &ctx,
-                    self.route.namespace(),
-                    &request,
-                    EffectGroupChildRunOutcome::Completed {
-                        outcome: Err(attach_expired_error(&request)),
-                    },
-                )
-                .await;
-            }
-            EffectGroupAdmissionResponse::CancelDecided => {
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::Refused => {
-                release_unadmitted_wait(
-                    ctx,
-                    self.authority_id.clone(),
-                    self.route.namespace().clone(),
-                    &request,
-                )
-                .await?;
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::Retired => {
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::NotYetRecorded => {
-                let key = group_wait_key(
-                    &request.shape.wait_scope,
-                    &request.group_key,
-                    EffectGroupWaitKind::Admit(request.position),
-                )?;
-                let replay_key = key.key_id.clone();
-                let address = RestateDurableWaitAddress::for_key(&key);
-                let Json(_) = self
-                    .route
-                    .namespace()
-                    .durable_wait_workflow(&ctx, address.workflow_key)
-                    .await_resolution(Json(
-                        RestateDurableWaitAwaitRequest {
-                            key,
-                            deadline: None,
-                        }
-                        .into(),
-                    ))
-                    .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
-                    .call()
-                    .await?;
-                // ADMIT is notification only. Authorization always comes from
-                // this one fresh, mapping-exact call after the wake.
-                let Json(fresh) = self
-                    .route
-                    .namespace()
-                    .effect_group_state(&ctx, request.group_key.clone())
-                    .admit_child(Json(admission_request))
-                    .call()
-                    .await?;
-                fresh
-            }
-        };
-        match admission {
-            EffectGroupAdmissionResponse::Admitted => {}
-            EffectGroupAdmissionResponse::AttachExpired => {
-                return record_child_settlement(
-                    &ctx,
-                    self.route.namespace(),
-                    &request,
-                    EffectGroupChildRunOutcome::Completed {
-                        outcome: Err(attach_expired_error(&request)),
-                    },
-                )
-                .await;
-            }
-            EffectGroupAdmissionResponse::CancelDecided => {
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::Refused => {
-                release_unadmitted_wait(
-                    ctx,
-                    self.authority_id.clone(),
-                    self.route.namespace().clone(),
-                    &request,
-                )
-                .await?;
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::Retired => {
-                return Ok(Json(()));
-            }
-            EffectGroupAdmissionResponse::NotYetRecorded => {
-                return Err(TerminalError::new(format!(
-                    "ADMIT notification for {} child {} did not produce a decisive fresh admission",
-                    request.group_key, request.position
-                ))
-                .into());
-            }
-        }
-
-        // The child's durable membership, written before anything of it can
-        // run: the §4 boundary inside the child's own settle resolves its
-        // group from this record — the Restate twin of the SQL tiers'
-        // `group_key` column — never from a caller's assertion. A revoked
-        // scope index refuses the record, and a child whose scope is gone
-        // settles nowhere.
-        let child_replay_key = request.envelope.invocation.replay_key().to_string();
-        let Json(membership_admitted) = self
-            .route
-            .namespace()
-            .durable_wait_registry(
-                &ctx,
-                durable_wait_index_key_for_scope(request.envelope.invocation.execution_scope()),
-            )
-            .record_group_child(Json(RestateDurableWaitGroupChildRequest {
-                replay_key: child_replay_key.clone(),
-                group_key: request.group_key.clone(),
-            }))
-            .header(LASH_REPLAY_KEY_HEADER.to_string(), child_replay_key)
-            .call()
-            .await?;
-        if !membership_admitted {
-            return Ok(Json(()));
-        }
-
-        let cancel_key = group_wait_key(
-            &request.shape.wait_scope,
-            &request.group_key,
-            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
-        )?;
-        // The child's durable cancel fact (ADR 0105 §4, FIG-3904). No child
-        // races it at handler level: a wait child races it as a journaled
-        // arm, a tool child peeks it at its step boundaries and watches it
-        // inside each attempt, and an atomic child watches it inside its
-        // recorded body.
-        let child_cancel = GroupChildCancel::new(
-            self.ingress.clone(),
-            self.route.namespace().clone(),
-            cancel_key,
-        );
-
-        if let RuntimeEffectCommand::ToolInvocation { request: child } = &request.envelope.command {
-            // ADR 0099 §2: a tool child is a handler-level invocation driver,
-            // not a recorded body. Its replayable work — retries, deferred
-            // completion, intent orchestration, completion-key derivation —
-            // runs as journaled steps of *this* invocation; only the atomic
-            // `ToolAttempt` executions it emits enter `ctx.run`. Resolving the
-            // driver uses the same `GroupExecutors` answer first dispatch and
-            // recovery both take (ADR 0065): there is no second route and no
-            // caller closure.
-            let Some(executor) = self.executors.executor_for(&request.envelope) else {
-                return Err(std::io::Error::other(format!(
-                    "no executor currently routes effect group {} tool child {}; retry on a carrying deployment",
-                    request.group_key, request.position
-                ))
-                .into());
-            };
-            let Some(driver) = executor.tool_child_driver() else {
-                return Err(TerminalError::new(format!(
-                    "effect group {} tool child {} resolved to an executor with no handler-level driver",
-                    request.group_key, request.position
-                ))
-                .into());
-            };
-            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
-                .in_namespace(self.route.namespace().clone())
-                .with_build_generation(self.build_generation.clone())
-                .with_group_child_cancel(child_cancel);
-            // The child's own admitted controller, bound to its recorded
-            // identity: the recorded pair — claim scope and the incarnation
-            // it was admitted under — never the dispatching scope and never
-            // fresh admission (ADR 0099 §3), and every semantic effect it
-            // serves is admitted through the index under the binding's child
-            // (ADR 0099 §4, FIG-3470). A `ToolInvocation` that reached group
-            // dispatch without retained membership is a shape error — never
-            // run unbound.
-            let Some(membership) = request.envelope.group.as_deref().cloned() else {
-                return Err(TerminalError::new(format!(
-                    "effect group {} tool child {} carries no retained membership; \
-                     a child without one has no identity to bind a controller to",
-                    request.group_key, request.position
-                ))
-                .into());
-            };
-            let binding = lash_core::GroupChildBinding {
-                child: request.envelope.invocation.address.clone(),
-                membership,
-            };
-            let scoped = controller
-                .scoped_effect_controller_for_group_child(
-                    child.scope.admitted_scope.clone(),
-                    binding,
-                )
-                .map_err(TerminalError::from_error)?;
-            // Routed through the host's stack before its first effect. A
-            // failed route is the child's outcome, as any failure of its
-            // drive is, so the opener's rank wait always learns of it.
-            let routed = self.executors.route_handler_child_controller(scoped);
-            let address = request.envelope.invocation.address.clone();
-            // The drive runs to its own end: the child's cancel ends it at a
-            // journaled peek, a journaled wait arm or an attempt's recorded
-            // outcome, each of which a replay takes as the first execution
-            // did, and never by dropping it mid-journal.
-            let driven = match routed {
-                Ok(scoped) => driver.drive(child, address, scoped).await,
-                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
-            };
-            let outcome = child_run_outcome(driven);
-            // A child that parks settles nothing, so its opener's rank wait
-            // cannot learn of it (FIG-3725).
-            if let EffectGroupChildRunOutcome::Completed {
-                outcome: Err(refusal),
-            } = &outcome
-                && refusal.turn_failure_cause() == lash_core::TurnFailureCause::Parked
-            {
-                return self
-                    .end_parked_child(controller.context(), &request, child, refusal, &outcome)
-                    .await;
-            }
-            refuse_unrecorded_abort(&request, &outcome)?;
-            return record_child_settlement(
-                controller.context(),
-                self.route.namespace(),
-                &request,
-                outcome,
-            )
-            .await;
-        }
-
-        if matches!(
-            request.envelope.command,
-            RuntimeEffectCommand::Sleep { .. } | RuntimeEffectCommand::AwaitEvent { .. }
-        ) {
-            // A timer or durable-wait child is this invocation's own durable
-            // wait (FIG-3397): a `ctx` timer or the Restate durable-wait
-            // promise, journaled on the child's invocation — never a
-            // wall-clock wait inside a recorded `ctx.run` body (ADR 0042).
-            // The resolver answers wait *options*; the ctx-bound controller
-            // is what reads them. The group index fenced the retained member
-            // at open and this invocation is that member, so the wait runs as
-            // a plain effect on the child's own journal rather than
-            // re-carrying the membership the controller's command arms refuse.
-            // It runs under the group's recorded opener, routed through the
-            // host's stack like every other child kind, so a layer over that
-            // host sees the wait (FIG-3780).
-            let Some(executor) = self.executors.executor_for(&request.envelope) else {
-                return Err(std::io::Error::other(format!(
-                    "no executor currently routes effect group {} child {}; retry on a carrying deployment",
-                    request.group_key, request.position
-                ))
-                .into());
-            };
-            let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone())
-                .in_namespace(self.route.namespace().clone())
-                .with_build_generation(self.build_generation.clone())
-                .with_group_child_cancel(child_cancel);
-            let envelope = RuntimeEffectEnvelope {
-                group: None,
-                ..request.envelope.clone()
-            };
-            let routed = lash_core::ScopedEffectController::borrowed(
-                &controller,
-                request.shape.opener.clone(),
-            )
-            .and_then(|scoped| self.executors.route_handler_child_controller(scoped));
-            // The wait races the child's cancel fact as a journaled arm, so
-            // a replay takes the arm its live run took.
-            let outcome = child_run_outcome(match routed {
-                Ok(scoped) => scoped.execute_effect(envelope, executor).await,
-                Err(error) => Err(lash_core::RuntimeEffectControllerError::from(error)),
-            });
-            refuse_unrecorded_abort(&request, &outcome)?;
-            // A cancelled wait child does not release its own promise: the
-            // index handler that decided the cancel, the close or the
-            // retirement, released it before it resolved this cancel wait
-            // (ADR 0099 §12, FIG-3630).
-            return record_child_settlement(
-                controller.context(),
-                self.route.namespace(),
-                &request,
-                outcome,
-            )
-            .await;
-        }
-
-        let cancellation = tokio_util::sync::CancellationToken::new();
-        let run_cancellation = cancellation.clone();
-        let envelope = request.envelope.clone();
-        let executors = Arc::clone(&self.executors);
-        let group_key = request.group_key.clone();
-        let position = request.position;
-        let mut run = Box::pin(
-            ctx.run(move || async move {
-                let Some(executor) = executors.executor_for(&envelope) else {
-                    return Err(std::io::Error::other(format!(
-                        "no executor currently routes effect group {group_key} child {position}; retry on a carrying deployment"
-                    ))
-                    .into());
-                };
-                let outcome = tokio::select! {
-                    biased;
-                    _ = run_cancellation.cancelled() => EffectGroupChildRunOutcome::Cancelled,
-                    outcome = executor.execute(envelope) => {
-                        EffectGroupChildRunOutcome::Completed { outcome }
-                    }
-                };
-                if let EffectGroupChildRunOutcome::Completed {
-                    outcome: Err(error),
-                } = &outcome
-                    && is_engine_retried_fault(error)
-                {
-                    // Failing the run step is what keeps the fault out of
-                    // its journal: the step's retry policy runs it again.
-                    return Err(std::io::Error::other(format!(
-                        "effect group {group_key} child {position} aborted with a live fault, \
-                         which is never its recorded outcome; the step retries: {error}"
-                    ))
-                    .into());
-                }
-                Ok(Json(outcome))
-            })
-            .name(format!(
-                "lash:effect-group:{}:{}",
-                request.group_key, request.position
-            ))
-            .retry_policy(self.infinite_retry_policy.clone()),
-        );
-        // The body's cancel is watched live on the shared ladder: a transient
-        // fault of the watch retries, and a watch that gives up leaves the
-        // body to run to its own end, so no fault of the watch ever drops it.
-        // Whatever the body returns is its recorded outcome.
-        let watch = child_cancel.watch();
-        let watched =
-            lash_core::retry_cancel_watch("an effect-group child's cancel", || watch.cancelled());
-        tokio::pin!(watched);
-        let Json(outcome) = tokio::select! {
-            biased;
-            outcome = &mut run => outcome?,
-            watched = &mut watched => {
-                match watched {
-                    Ok(()) => cancellation.cancel(),
-                    Err(lost) => tracing::warn!(
-                        error = %lost,
-                        group_key = %request.group_key,
-                        position = request.position,
-                        "an atomic effect-group child lost its cancel watch; its body runs to its own end"
-                    ),
-                }
-                run.await?
-            }
-        };
-
-        record_child_settlement(&ctx, self.route.namespace(), &request, outcome).await
+        result
     }
 
     async fn retire(
@@ -829,6 +861,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             EffectGroupRetireResponse::Retired { cleanup }
             | EffectGroupRetireResponse::AlreadyRetired { cleanup } => cleanup,
             EffectGroupRetireResponse::Tombstone | EffectGroupRetireResponse::UnknownGroup => {
+                self.executors.release_group(&group_key);
                 return Ok(Json(()));
             }
         };
@@ -935,7 +968,10 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             .await?;
         match finished {
             EffectGroupFinishRetirementResponse::Finished
-            | EffectGroupFinishRetirementResponse::AlreadyFinished => Ok(Json(())),
+            | EffectGroupFinishRetirementResponse::AlreadyFinished => {
+                self.executors.release_group(&group_key);
+                Ok(Json(()))
+            }
             other => Err(TerminalError::new(format!(
                 "effect group {group_key} retirement could not reduce the index to its tombstone: {other:?}"
             ))

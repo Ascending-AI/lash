@@ -57,7 +57,9 @@
 //! Incorporation consumes the record; it never re-presents, so a changed
 //! presentation environment on replay cannot change what the child settled.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use lash_sansio::sync::MutexExt;
 use tokio_util::sync::CancellationToken;
@@ -93,6 +95,13 @@ use crate::{
 #[derive(Clone)]
 pub struct ToolChildHost {
     openers: Arc<LiveOpenerRegistry>,
+    /// Only a handler-driven host can drop an opener at group formation's
+    /// awaits. In-process hosts keep their live opener until the group ends.
+    pin_handler_groups: Arc<AtomicBool>,
+    /// A group's local context survives a handler suspension until that
+    /// child's invocation completes. The recorded membership is the key, so
+    /// another group cannot borrow it even if its opener has the same scope.
+    pinned_children: Arc<std::sync::Mutex<BTreeMap<(String, usize), LiveOpenerContext>>>,
     /// **Weak**, because this value is installed *on* the host: the host owns
     /// its controller, the controller owns this resolver, and a strong
     /// reference back would make the three a cycle no drop ever breaks. A
@@ -146,6 +155,8 @@ impl ToolChildHost {
     ) -> Arc<Self> {
         Arc::new(Self {
             openers: Arc::new(LiveOpenerRegistry::new()),
+            pin_handler_groups: Arc::new(AtomicBool::new(false)),
+            pinned_children: Arc::new(std::sync::Mutex::new(BTreeMap::new())),
             host: Arc::downgrade(host),
             process_env_store: Arc::new(std::sync::Mutex::new(process_env_store)),
             clock: Arc::new(std::sync::Mutex::new(clock)),
@@ -185,6 +196,34 @@ impl ToolChildHost {
     #[must_use]
     pub fn openers(&self) -> &Arc<LiveOpenerRegistry> {
         &self.openers
+    }
+
+    /// Called by a handler-driven engine when it installs this host. Its
+    /// child invocation, rather than the opener, releases each local pin.
+    pub fn enable_handler_group_pinning(&self) {
+        self.pin_handler_groups.store(true, Ordering::Release);
+    }
+
+    /// Retain this opener's context for the tool positions of a group before
+    /// formation takes its first await. A handler may suspend at that await.
+    pub fn pin_open_tool_group(
+        &self,
+        group_key: &str,
+        opener: &EffectOpener,
+        positions: impl IntoIterator<Item = usize>,
+    ) {
+        if !self.pin_handler_groups.load(Ordering::Acquire) {
+            return;
+        }
+        let Some(context) = self.openers.context_for(opener) else {
+            return;
+        };
+        let mut pinned = self.pinned_children.lock_recover();
+        for position in positions {
+            pinned
+                .entry((group_key.to_string(), position))
+                .or_insert_with(|| context.clone());
+        }
     }
 
     /// Installs the deployment's builder of a child's context for when its
@@ -230,14 +269,32 @@ impl ToolChildHost {
 
     /// Where a tool child finds the context it runs under: its opener's, lent
     /// by the registry, when the opener is live here; otherwise the
-    /// deployment's, when a source is installed; otherwise nowhere, the
-    /// routing fact "not mine".
-    fn child_opener(&self, opener: &crate::EffectOpener) -> Option<ChildOpenerContext> {
-        match self.openers.context_for(opener) {
-            Some(live) => Some(ChildOpenerContext::Live(live)),
-            None => (!matches!(self.context_source(), InstalledContextSource::None))
-                .then_some(ChildOpenerContext::Deployment),
+    /// deployment's, when a source is installed; otherwise the context this
+    /// process pinned for the child's group before its handler suspended;
+    /// otherwise nowhere, the routing fact "not mine".
+    ///
+    /// The pin is the last resort. A live opener is the one path whose events
+    /// reach the opener's stream as they happen, and an installed source
+    /// builds from the deployment that runs now: a pin holds the plugins of
+    /// whichever deployment opened the group, which a redeploy may since have
+    /// replaced with a drifted tool (FIG-3725).
+    fn child_opener(
+        &self,
+        opener: &crate::EffectOpener,
+        envelope: &RuntimeEffectEnvelope,
+    ) -> Option<ChildOpenerContext> {
+        if let Some(live) = self.openers.context_for(opener) {
+            return Some(ChildOpenerContext::Live(live));
         }
+        if !matches!(self.context_source(), InstalledContextSource::None) {
+            return Some(ChildOpenerContext::Deployment);
+        }
+        let membership = envelope.group.as_deref()?;
+        self.pinned_children
+            .lock_recover()
+            .get(&(membership.group_key.clone(), membership.position))
+            .cloned()
+            .map(ChildOpenerContext::Pinned)
     }
 
     /// The controller a deployment-built context's controller slots are lent,
@@ -274,6 +331,23 @@ impl ToolChildHost {
                 refusal: None,
                 _keepalive: None,
             }),
+            ChildOpenerContext::Pinned(pinned) => {
+                // The old handler's stream and cancellation token ended with
+                // its registration. Keep its plugin objects, but record the
+                // child's stream and observe the durable turn gate as a
+                // deployment-built context does.
+                let mut dispatch = pinned.dispatch().as_ref().clone();
+                let recorder = ChildStreamRecorder::start();
+                recorder.attach(&mut dispatch);
+                let refusal = SessionServicesRefusal::default();
+                refusal.attach(&mut dispatch);
+                Ok(ResolvedChildContext {
+                    context: LiveOpenerContext::deployment_built(dispatch),
+                    recorder: Some(recorder),
+                    refusal: Some(refusal),
+                    _keepalive: None,
+                })
+            }
             ChildOpenerContext::Deployment => {
                 // What the opener's context had and no deployment can
                 // rebuild: the child waits for its opener rather than run
@@ -408,6 +482,37 @@ impl std::fmt::Debug for ToolChildHost {
 }
 
 impl super::group_executors::GroupExecutors for ToolChildHost {
+    fn pin_group(&self, group: &super::group::RuntimeEffectGroup) {
+        let mut pinned = self.pinned_children.lock_recover();
+        for child in group.children() {
+            let RuntimeEffectCommand::ToolInvocation { request } = &child.command else {
+                continue;
+            };
+            let Some(membership) = child.group.as_deref() else {
+                continue;
+            };
+            if let Some(context) = self.openers.context_for(&request.scope.opener) {
+                pinned
+                    .entry((membership.group_key.clone(), membership.position))
+                    .or_insert(context);
+            }
+        }
+    }
+
+    fn release_child(&self, envelope: &RuntimeEffectEnvelope) {
+        if let Some(membership) = envelope.group.as_deref() {
+            self.pinned_children
+                .lock_recover()
+                .remove(&(membership.group_key.clone(), membership.position));
+        }
+    }
+
+    fn release_group(&self, group_key: &str) {
+        self.pinned_children
+            .lock_recover()
+            .retain(|(key, _), _| key != group_key);
+    }
+
     /// Every tool child is this resolver's, whether or not its opener is live
     /// in this process: the process whose opener is live runs it. Every other
     /// command routes exactly when [`executor_for`](Self::executor_for) answers.
@@ -458,7 +563,7 @@ impl super::group_executors::GroupExecutors for ToolChildHost {
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
         match &envelope.command {
             RuntimeEffectCommand::ToolInvocation { request } => {
-                let opener = self.child_opener(&request.scope.opener)?;
+                let opener = self.child_opener(&request.scope.opener, envelope)?;
                 Some(RuntimeEffectLocalExecutor::owned_runner(
                     Box::new(ToolChildRunner {
                         host: self.clone(),
@@ -591,6 +696,9 @@ impl RuntimeEffectLocalRunner for BoundToolChildRunner {
 enum ChildOpenerContext {
     /// Its opener is live here and lends this context.
     Live(LiveOpenerContext),
+    /// The same process pinned the opener's plugin context before Restate
+    /// suspended the handler that opened the group.
+    Pinned(LiveOpenerContext),
     /// Its opener is not live here; the deployment's context source builds
     /// one at execution (FIG-3712).
     Deployment,
