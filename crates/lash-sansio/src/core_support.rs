@@ -81,6 +81,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-workflow-source/v3",
     "lash-workflow-source/v4",
     "lash.agent-frame-key/v2",
+    "lashlang-dispatched-ordinals/v1",
     "lashlang-process-start/v2",
     "lashlang-process-start/v3",
 ];

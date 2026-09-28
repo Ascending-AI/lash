@@ -365,29 +365,28 @@ enum Frontier {
     Positional,
 }
 
-/// Lowercase hex SHA-256, byte-identical to `lash_core_ids::stable_hash::sha256_hex`.
-/// `lash_core::stable_hash` is exported only under `testing`, so a production
-/// build cannot reach it.
-fn sha256_hex(bytes: &[u8]) -> String {
-    use sha2::Digest as _;
-    format!("{:x}", sha2::Sha256::digest(bytes))
-}
-
 /// A running hash of the ordinals a run dispatched, in dispatch order.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct DispatchedOrdinalsDigest(String);
 
 impl DispatchedOrdinalsDigest {
+    fn hash(preimage: &[u8]) -> Self {
+        Self(lash_sansio::core_support::blake3_domain_hash_hex(
+            "lashlang-dispatched-ordinals/v1",
+            preimage,
+        ))
+    }
+
     /// The digest of a run that has dispatched nothing yet.
     pub fn empty() -> Self {
-        Self(sha256_hex(b"lashlang-dispatched-ordinals/v1"))
+        Self::hash(&[])
     }
 
     fn extend(&self, ordinal: u64) -> Self {
         let mut preimage = Vec::with_capacity(self.0.len() + 8);
         preimage.extend_from_slice(self.0.as_bytes());
         preimage.extend_from_slice(&ordinal.to_be_bytes());
-        Self(sha256_hex(&preimage))
+        Self::hash(&preimage)
     }
 
     /// The digest's text, as the seal envelope carries it.
