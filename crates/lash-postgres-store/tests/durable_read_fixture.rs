@@ -676,6 +676,16 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("discard an earlier refresh's session ingress");
+    // The fixture may carry the previous root table. Its columns must be
+    // current before the authoritative DDL creates the new partial index.
+    sqlx::raw_sql(
+        "ALTER TABLE lash_session_roots DROP COLUMN IF EXISTS claim_result_json;
+         ALTER TABLE lash_session_roots ADD COLUMN IF NOT EXISTS admission_json TEXT;
+         ALTER TABLE lash_session_roots ADD COLUMN IF NOT EXISTS admitted_generation TEXT;",
+    )
+    .execute(&pool)
+    .await
+    .expect("refresh the refusal fixture root admission columns");
     sqlx::raw_sql(schema_session_roots_ddl())
         .execute(&pool)
         .await
@@ -774,11 +784,6 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("stamp the refusal fixture with the current component generation");
-    // A root's row records its claim result (FIG-3840).
-    sqlx::query("ALTER TABLE lash_session_roots ADD COLUMN IF NOT EXISTS claim_result_json TEXT")
-        .execute(&pool)
-        .await
-        .expect("add the root claim-result column to the refusal fixture");
     upgrade_prior_fixture_frame_identity(&pool).await;
     refresh_prior_fixture_node_bodies(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")

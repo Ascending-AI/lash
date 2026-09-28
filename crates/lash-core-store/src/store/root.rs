@@ -377,6 +377,9 @@ impl RootTerminal {
 /// bindings of accepted inputs to the roots that drive them.
 #[async_trait::async_trait]
 pub trait RootStore: Send + Sync {
+    /// The root whose admission has no terminal evidence, if one exists.
+    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError>;
+
     /// Claim the next-turn prefix an input root drives, in one transaction
     /// fenced by `request.lease` (FIG-3840).
     ///
@@ -394,14 +397,13 @@ pub trait RootStore: Send + Sync {
     /// the earliest open command, and the rows after it wait for the next
     /// boundary, where that command applies first.
     ///
-    /// While the head is undelivered, every later call for the same root,
-    /// under any lease generation, returns the recorded drive unchanged and
-    /// claims nothing: a worker that dies between this commit and the
-    /// journal's record of its outcome leaves its successor exactly the
-    /// composition, base and generation it committed, never a prefix
-    /// recomputed over inputs that arrived since. Once the head is settled,
-    /// cancelled or pruned the record is not replayed, and the call claims
-    /// nothing and returns `None`.
+    /// Every later call for the same root, under any lease generation,
+    /// returns the recorded drive unchanged and claims nothing: a worker
+    /// that dies between this commit and the journal's record of its outcome
+    /// leaves its successor exactly the composition, base and generation it
+    /// committed, never a prefix recomputed over inputs that arrived since.
+    /// A different root is refused while this admission lacks terminal
+    /// evidence.
     async fn claim_root_inputs(
         &self,
         _request: &RootInputClaimRequest,
@@ -459,6 +461,7 @@ pub struct RootInputClaimRequest {
     pub base: SessionHeadRef,
     pub turn_index: u64,
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
+    pub admitted_generation: crate::build_generation::BuildGeneration,
 }
 
 /// An in-memory root ledger for store doubles that keep no SQL rows. It

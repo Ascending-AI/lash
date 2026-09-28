@@ -19,12 +19,8 @@ pub(crate) async fn claim_root_inputs_sqlite(
                 let roots = crate::session_roots::session_roots_sql();
                 let existing: Option<Option<String>> = tx
                     .query_row(
-                        roots.roots.select_claim_result.sql(),
-                        params![
-                            request.session_id.as_str(),
-                            request.root.as_str(),
-                            request.head.as_str()
-                        ],
+                        roots.roots.select_admission.sql(),
+                        params![request.session_id.as_str(), request.root.as_str()],
                         |row| row.get(0),
                     )
                     .optional()
@@ -37,6 +33,20 @@ pub(crate) async fn claim_root_inputs_sqlite(
                         }
                     })?;
                     return Ok(TxOutcome::Commit(Some(drive)));
+                }
+                let unfinished: Option<String> = tx
+                    .query_row(
+                        roots.roots.select_unfinished.sql(),
+                        [request.session_id.as_str()],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?;
+                if let Some(unfinished) = unfinished {
+                    return Err(StoreError::UnfinishedRootConflict {
+                        session_id: request.session_id.clone(),
+                        root: unfinished.into(),
+                    });
                 }
                 let claim = match claim_pending_turn_inputs_sqlite_conn(
                     tx,
@@ -86,8 +96,13 @@ pub(crate) async fn claim_root_inputs_sqlite(
                 let json = encode_json(&drive)?;
                 let changed = tx
                     .execute(
-                        roots.roots.write_claim_result.sql(),
-                        params![request.session_id.as_str(), request.root.as_str(), json],
+                        roots.roots.write_admission.sql(),
+                        params![
+                            request.session_id.as_str(),
+                            request.root.as_str(),
+                            json,
+                            request.admitted_generation.as_str()
+                        ],
                     )
                     .map_err(sqlite_error)?;
                 if changed != 1 {

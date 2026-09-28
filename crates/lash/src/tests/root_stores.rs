@@ -7,6 +7,20 @@ use super::*;
 /// transaction.
 #[async_trait]
 impl lash_core::store::RootStore for SnapshotStore {
+    async fn unfinished_root(
+        &self,
+        session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        Ok(self
+            .root_claim_results
+            .lock_recover()
+            .keys()
+            .find_map(|(session, root)| {
+                (session == session_id && self.roots.terminal(session, root).is_none())
+                    .then(|| root.clone())
+            }))
+    }
+
     async fn claim_root_inputs(
         &self,
         request: &lash_core::store::RootInputClaimRequest,
@@ -14,16 +28,15 @@ impl lash_core::store::RootStore for SnapshotStore {
         let key = (request.session_id.clone(), request.root.clone());
         let recorded = self.root_claim_results.lock_recover().get(&key).cloned();
         if let Some(result) = recorded {
-            // Replayed only while the claim's head is undelivered, as the SQL
-            // stores do.
-            let undelivered =
-                lash_core::TurnInputStore::list_pending_turn_inputs(self, &request.session_id)
-                    .await?
-                    .iter()
-                    .any(|read| read.input.input_id == request.head);
-            if undelivered {
-                return Ok(Some(result));
-            }
+            return Ok(Some(result));
+        }
+        if let Some(root) =
+            lash_core::store::RootStore::unfinished_root(self, &request.session_id).await?
+        {
+            return Err(lash_core::StoreError::UnfinishedRootConflict {
+                session_id: request.session_id.clone(),
+                root,
+            });
         }
         let Some(claim) = lash_core::TurnInputStore::claim_next_turn_inputs(
             self,
@@ -103,6 +116,13 @@ impl lash_core::store::RootStore for SnapshotStore {
 // The reuse test fails before any turn runs, so this double holds no root.
 #[async_trait]
 impl lash_core::store::RootStore for BoundSessionStore {
+    async fn unfinished_root(
+        &self,
+        _session_id: &SessionId,
+    ) -> std::result::Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        unreachable!("test should fail before reading unfinished roots")
+    }
+
     async fn claim_root_inputs(
         &self,
         _request: &lash_core::store::RootInputClaimRequest,

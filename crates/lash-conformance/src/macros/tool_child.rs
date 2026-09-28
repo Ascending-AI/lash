@@ -173,6 +173,8 @@ macro_rules! drive_admission_tests {
     (an_intent_whose_engine_half_keeps_failing_stalls_at_its_ceiling_and_unwedges_its_session, "s8c-3"),
     (a_refused_follow_on_drive_keeps_the_intents_obligation_due, "s8c-4"),
             (one_authorized_drive_per_session, "drive-one-authorized"),
+            (one_unfinished_root_per_session, "root-one-unfinished"),
+            (a_root_admission_is_idempotent_across_new_rows_and_fences, "root-admission-idempotent"),
             (one_drive_claims_many_items, "drive-many-items"),
             (claim_identity_is_idempotent_within_ownership, "drive-claim-idempotent"),
             (replay_cannot_mint_ownership, "drive-replay-ownership"),

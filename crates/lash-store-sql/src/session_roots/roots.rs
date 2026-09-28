@@ -24,22 +24,20 @@ crate::statements! {
         insert_open = "INSERT INTO session_roots (session_id, root) VALUES (?1, ?2)
              ON CONFLICT (session_id, root) DO NOTHING";
 
-        /// The recorded result of root `?2`'s claim (NULL until its claim
-        /// transaction commits), while the claim's head input `?3` is still
-        /// undelivered. Once the head settles, is cancelled or is pruned,
-        /// there is nothing left to replay and no row comes back.
-        select_claim_result = "SELECT claim_result_json FROM session_roots
-             WHERE session_id = ?1 AND root = ?2
-               AND EXISTS (
-                   SELECT 1 FROM pending_turn_inputs
-                   WHERE session_id = ?1
-                     AND input_id = ?3
-                     AND {{nonterminal_turn_input_state(state)}}
-               )";
+        /// The admission is the answer of record for this root. A retry must
+        /// never widen it by looking at rows that arrived after admission.
+        select_admission = "SELECT admission_json FROM session_roots
+             WHERE session_id = ?1 AND root = ?2";
 
-        /// Record the claim after opening its root, in the claim transaction.
-        write_claim_result = "UPDATE session_roots SET claim_result_json = ?3
-             WHERE session_id = ?1 AND root = ?2 AND claim_result_json IS NULL";
+        /// Record the admission in the same transaction as its row claims.
+        write_admission = "UPDATE session_roots
+             SET admission_json = ?3, admitted_generation = ?4
+             WHERE session_id = ?1 AND root = ?2 AND admission_json IS NULL";
+
+        /// The one admitted root without terminal evidence for session `?1`.
+        select_unfinished = "SELECT root FROM session_roots
+             WHERE session_id = ?1 AND admission_json IS NOT NULL
+               AND terminal_kind IS NULL";
 
         /// The terminal evidence of root `?2` of session `?1`: all four
         /// columns NULL while the root has none.

@@ -690,6 +690,17 @@ pub(crate) async fn delete_session_roots_conn(
 
 #[async_trait::async_trait]
 impl RootStore for PostgresSessionStore {
+    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError> {
+        self.bind_session_id(session_id)?;
+        let sql = session_roots_sql();
+        let root: Option<String> = sqlx::query_scalar(sql.roots.select_unfinished.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(store_sqlx_error)?;
+        Ok(root.map(TurnId::from))
+    }
+
     async fn claim_root_inputs(
         &self,
         request: &lash_core_execution::store::RootInputClaimRequest,

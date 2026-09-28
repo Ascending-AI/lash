@@ -13,14 +13,12 @@ pub(crate) async fn claim_root_inputs_postgres(
         .await?;
     ensure_session_execution_lease_tx(&mut tx, &request.session_id, &request.lease).await?;
     let roots = crate::session_roots::session_roots_sql();
-    let existing: Option<Option<String>> =
-        sqlx::query_scalar(roots.roots.select_claim_result.sql())
-            .bind(request.session_id.as_str())
-            .bind(request.root.as_str())
-            .bind(request.head.as_str())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+    let existing: Option<Option<String>> = sqlx::query_scalar(roots.roots.select_admission.sql())
+        .bind(request.session_id.as_str())
+        .bind(request.root.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
     if let Some(Some(json)) = existing {
         let drive = serde_json::from_str(&json).map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "RootClaimResult",
@@ -28,6 +26,17 @@ pub(crate) async fn claim_root_inputs_postgres(
         })?;
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(Some(drive));
+    }
+    let unfinished: Option<String> = sqlx::query_scalar(roots.roots.select_unfinished.sql())
+        .bind(request.session_id.as_str())
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    if let Some(unfinished) = unfinished {
+        return Err(StoreError::UnfinishedRootConflict {
+            session_id: request.session_id.clone(),
+            root: unfinished.into(),
+        });
     }
     let claim = match claim_pending_turn_inputs_postgres_tx(
         &mut tx,
@@ -88,10 +97,11 @@ pub(crate) async fn claim_root_inputs_postgres(
     };
     let json =
         serde_json::to_string(&drive).map_err(|error| StoreError::Backend(error.to_string()))?;
-    let changed = sqlx::query(roots.roots.write_claim_result.sql())
+    let changed = sqlx::query(roots.roots.write_admission.sql())
         .bind(request.session_id.as_str())
         .bind(request.root.as_str())
         .bind(json)
+        .bind(request.admitted_generation.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?

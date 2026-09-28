@@ -740,7 +740,6 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     terminal_cause_json text,
     terminal_head_revision bigint,
     terminal_at_ms bigint,
-    claim_result_json text,
     obligation_id text,
     obligation_state text,
     obligation_attempts integer DEFAULT 0 NOT NULL,
@@ -749,6 +748,8 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     obligation_stall_reason text,
     obligation_last_error text,
     obligation_settled_at_ms bigint,
+    admission_json text,
+    admitted_generation text,
     CONSTRAINT ck_session_roots_obligation CHECK ((((obligation_state IS NULL) AND (obligation_id IS NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'due'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'claimed'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NOT NULL) AND (obligation_claim_token IS NOT NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NULL)) OR ((obligation_state = 'delivered'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason IS NULL) AND (obligation_settled_at_ms IS NOT NULL)) OR ((obligation_state = 'stalled'::text) AND (obligation_id IS NOT NULL) AND (obligation_due_at_ms IS NULL) AND (obligation_claim_token IS NULL) AND (obligation_stall_reason = ANY (ARRAY['attempts_exhausted'::text, 'refused'::text, 'undecodable'::text])) AND (obligation_settled_at_ms IS NOT NULL)))),
     CONSTRAINT ck_session_roots_terminal CHECK ((((terminal_kind IS NULL) AND (terminal_cause_json IS NULL) AND (terminal_head_revision IS NULL) AND (terminal_at_ms IS NULL)) OR ((terminal_kind = ANY (ARRAY['answered'::text, 'failed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL))))
 );
@@ -2440,6 +2441,13 @@ CREATE INDEX idx_lash_session_meta_state_version ON lash_durable_read_fixture.la
 
 
 --
+-- Name: idx_lash_session_roots_admitted_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_admitted_generation ON lash_durable_read_fixture.lash_session_roots USING btree (admitted_generation) WHERE ((admission_json IS NOT NULL) AND (terminal_kind IS NULL));
+
+
+--
 -- Name: idx_lash_session_roots_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2458,6 +2466,13 @@ CREATE UNIQUE INDEX idx_lash_session_roots_obligation_id ON lash_durable_read_fi
 --
 
 CREATE INDEX idx_lash_session_roots_obligation_stalled ON lash_durable_read_fixture.lash_session_roots USING btree (obligation_id) WHERE (obligation_state = 'stalled'::text);
+
+
+--
+-- Name: idx_lash_session_roots_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_open ON lash_durable_read_fixture.lash_session_roots USING btree (session_id, root) WHERE (terminal_kind IS NULL);
 
 
 --
@@ -2563,6 +2578,13 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 --
 
 CREATE UNIQUE INDEX lash_queued_runs_pending ON lash_durable_read_fixture.lash_queued_runs USING btree (session_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: ux_lash_session_roots_unfinished; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX ux_lash_session_roots_unfinished ON lash_durable_read_fixture.lash_session_roots USING btree (session_id) WHERE ((admission_json IS NOT NULL) AND (terminal_kind IS NULL));
 
 
 --

@@ -1825,6 +1825,8 @@ mod root_control {
         ((lock, storage, attachments, double), "pg-root-control", host, stores, runner)
     }; [
     (a_terminal_root_never_reparks, "s7b-0"),
+    (one_unfinished_root_per_session, "root-one-unfinished"),
+    (a_root_admission_is_idempotent_across_new_rows_and_fences, "root-admission-idempotent"),
     (a_diverged_root_parks_once_holds_claims_blocks_admission_and_completes_after_restore, "s7b-15"),
     (an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
     (a_parked_roots_fence_stays_current_until_a_verb, "s7b-14"),

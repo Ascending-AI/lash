@@ -513,7 +513,8 @@ CREATE TABLE IF NOT EXISTS lash_session_ingress_sequence (
 CREATE TABLE IF NOT EXISTS lash_session_roots (
     session_id TEXT NOT NULL,
     root TEXT NOT NULL,
-    claim_result_json TEXT,
+    admission_json TEXT,
+    admitted_generation TEXT,
     terminal_kind TEXT,
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,
@@ -535,6 +536,12 @@ CREATE TABLE IF NOT EXISTS lash_session_roots (
 -- and the stalled listing.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_session_roots_obligation_id
     ON lash_session_roots(obligation_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_lash_session_roots_unfinished
+    ON lash_session_roots(session_id)
+    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
+CREATE INDEX IF NOT EXISTS idx_lash_session_roots_admitted_generation
+    ON lash_session_roots(admitted_generation)
+    WHERE admission_json IS NOT NULL AND terminal_kind IS NULL;
 CREATE INDEX IF NOT EXISTS idx_lash_session_roots_obligation_due
     ON lash_session_roots(obligation_due_at_ms, obligation_id)
     WHERE obligation_state IN ('due', 'claimed');

@@ -262,7 +262,7 @@ case "${suite}" in
         //crates/lash-restate:lash-restate__unit_test
       python3 scripts/check_law_execution_receipts.py \
         --deferred pg-store \
-        --receipts-root bazel-testlogs/crates/lash-restate/lash-restate__unit_test
+        --receipts bazel-testlogs/crates/lash-restate/lash-restate__unit_test/test.outputs/law-receipts.txt
     else
       receipts="$(mktemp -d)/law-receipts.txt"
       LASH_LAW_RECEIPTS="${receipts}" \

@@ -4,6 +4,11 @@ use crate::{BatchId, InputId, NodeId};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
+    #[error("session {session_id} already has unfinished root {root}")]
+    UnfinishedRootConflict {
+        session_id: crate::SessionId,
+        root: crate::TurnId,
+    },
     #[error("selected queued run cannot claim the complete request: {unclaimed_batch_ids:?}")]
     SelectedQueuedRunIncomplete {
         unclaimed_batch_ids: Vec<crate::BatchId>,
@@ -858,6 +863,7 @@ impl StoreError {
             Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
             Self::SelectedQueuedRunIncomplete { .. } => "SelectedQueuedRunIncomplete",
             Self::QueuedRunConflict { .. } => "QueuedRunConflict",
+            Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
             Self::QueuedRunConfigurationChanged { .. } => "QueuedRunConfigurationChanged",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",

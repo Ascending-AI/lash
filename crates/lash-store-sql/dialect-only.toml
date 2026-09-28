@@ -3683,12 +3683,6 @@ touches = ["pending_turn_inputs"]
 reason = "A root verb changes only nonterminal bound inputs. The binding and current lifecycle state must be read in one statement so historical settled bindings cannot be reactivated."
 
 [[cross_family]]
-statement = "session_root.select_claim_result"
-owner = "crates/lash-store-sql/src/session_roots/roots.rs"
-touches = ["pending_turn_inputs"]
-reason = "The recorded result of a root's claim is replayable only while the claim's head input is undelivered, and that lifecycle is the turn-ingress family's fact. The record and the head's liveness must be read in one statement inside the claim transaction so a settle or prune cannot slip between the replay check and the redrive it feeds (FIG-3840)."
-
-[[cross_family]]
 statement = "session_meta.select_drive_epoch"
 owner = "crates/lash-store-sql/src/session/meta.rs"
 touches = ["control_intents"]

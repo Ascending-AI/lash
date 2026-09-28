@@ -734,7 +734,8 @@ CREATE TABLE lash_durable_read_fixture.lash_session_root_inputs (
 CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     session_id text NOT NULL,
     root text NOT NULL,
-    claim_result_json text,
+    admission_json text,
+    admitted_generation text,
     terminal_kind text,
     terminal_cause_json text,
     terminal_head_revision bigint,
@@ -2455,6 +2456,13 @@ CREATE INDEX idx_lash_session_meta_state_version ON lash_durable_read_fixture.la
 
 
 --
+-- Name: idx_lash_session_roots_admitted_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_session_roots_admitted_generation ON lash_durable_read_fixture.lash_session_roots USING btree (admitted_generation) WHERE ((admission_json IS NOT NULL) AND (terminal_kind IS NULL));
+
+
+--
 -- Name: idx_lash_session_roots_obligation_due; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2585,6 +2593,13 @@ CREATE INDEX idx_lash_wake_deliveries_pending ON lash_durable_read_fixture.lash_
 --
 
 CREATE UNIQUE INDEX lash_queued_runs_pending ON lash_durable_read_fixture.lash_queued_runs USING btree (session_id) WHERE (status = 'pending'::text);
+
+
+--
+-- Name: ux_lash_session_roots_unfinished; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX ux_lash_session_roots_unfinished ON lash_durable_read_fixture.lash_session_roots USING btree (session_id) WHERE ((admission_json IS NOT NULL) AND (terminal_kind IS NULL));
 
 
 --

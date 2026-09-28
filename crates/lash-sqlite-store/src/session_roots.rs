@@ -736,6 +736,26 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 
 #[async_trait::async_trait]
 impl RootStore for crate::Store {
+    async fn unfinished_root(&self, session_id: &SessionId) -> Result<Option<TurnId>, StoreError> {
+        self.bind_session(session_id)?;
+        let session_id = session_id.clone();
+        self.conn
+            .call(move |conn| {
+                let sql = session_roots_sql();
+                Ok(conn
+                    .query_row(
+                        sql.roots.select_unfinished.sql(),
+                        [session_id.as_str()],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()
+                    .map(|root| root.map(TurnId::from))
+                    .map_err(sqlite_error))
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn claim_root_inputs(
         &self,
         request: &lash_core_execution::store::RootInputClaimRequest,

@@ -70,7 +70,8 @@ ALTER TABLE lash_turn_park_events ADD CONSTRAINT ck_turn_park_events_kind CHECK 
 CREATE TABLE IF NOT EXISTS lash_session_roots (
     session_id TEXT NOT NULL,
     root TEXT NOT NULL,
-    claim_result_json TEXT,
+    admission_json TEXT,
+    admitted_generation TEXT,
     terminal_kind TEXT,
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,

@@ -257,6 +257,13 @@ impl DriveEpochStore for FacadeStore {
 
 #[async_trait]
 impl RootStore for FacadeStore {
+    async fn unfinished_root(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Option<lash::TurnId>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
     async fn root_terminal(
         &self,
         _session_id: &SessionId,

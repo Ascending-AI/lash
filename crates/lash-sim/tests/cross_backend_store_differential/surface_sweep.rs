@@ -873,6 +873,9 @@ impl BackendRunner {
                     },
                     turn_index: 1,
                     generation: None,
+                    admitted_generation: lash_core::engine::BuildGeneration::for_test(
+                        "surface-root",
+                    ),
                 };
                 // A replay that differs, a refusal or a widened prefix is a
                 // law violation on this backend, never an answer to compare.
@@ -932,8 +935,8 @@ impl BackendRunner {
                 "enqueued".to_string()
             }
             SurfaceMethod::ClaimRootInputsAfterHeadSettled => {
-                // The head left the queue: the recorded claim is not replayed,
-                // and the late input alone never makes a claim for this root.
+                // The row may have settled, but the root's admission remains
+                // the answer of record and cannot widen to the later row.
                 let lease = self.lease(LeaseSlot::Successor).clone();
                 let request = lash_core::store::RootInputClaimRequest {
                     session_id: session_id.clone(),
@@ -950,14 +953,17 @@ impl BackendRunner {
                     },
                     turn_index: 1,
                     generation: None,
+                    admitted_generation: lash_core::engine::BuildGeneration::for_test(
+                        "surface-root",
+                    ),
                 };
-                let drive = store.claim_root_inputs(&request).await?;
-                assert!(
-                    drive.is_none(),
-                    "{}: a root whose head settled replays nothing: {drive:?}",
-                    self.name
-                );
-                "none".to_string()
+                let Some(drive) = store.claim_root_inputs(&request).await? else {
+                    panic!("{}: recorded root admission disappeared", self.name);
+                };
+                let encoded = serde_json::to_value(drive)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                assert_eq!(self.surface.root_claim.as_ref(), Some(&encoded));
+                "recorded".to_string()
             }
             SurfaceMethod::ClaimReadyQueuedWork => {
                 let outcome = store

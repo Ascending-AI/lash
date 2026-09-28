@@ -149,6 +149,7 @@ impl LashRuntime {
                         // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
                         turn_index: self.state.turn_index + 1,
                         generation: crate::runtime::turn_loop::generation_fence::current(self),
+                        admitted_generation: admitted.admitted_generation().clone(),
                         trace: ClaimTrace {
                             sink: self.host.core.tracing.trace_sink.clone(),
                             base: self.host.core.tracing.trace_context.clone(),
@@ -657,6 +658,7 @@ struct RootInputClaimRunner {
     turn_index: usize,
     /// The executable generation the root is admitted under (FIG-3571).
     generation: Option<crate::ExecutableGeneration>,
+    admitted_generation: crate::engine::BuildGeneration,
     trace: ClaimTrace,
 }
 
@@ -779,6 +781,7 @@ impl RootInputClaimRunner {
             base: self.base.clone(),
             turn_index: self.turn_index as u64,
             generation: self.generation.clone(),
+            admitted_generation: self.admitted_generation.clone(),
         };
         if let Some(drive) = self.store.claim_root_inputs(&request).await? {
             if let crate::AcceptedTurnInputDrive::Claimed { claim, .. } = &drive {

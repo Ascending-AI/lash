@@ -245,6 +245,7 @@ impl Fixture {
                 },
                 turn_index: state.turn_index as u64 + 1,
                 generation: None,
+                admitted_generation: lash_core::engine::BuildGeneration::for_test("root-control"),
             })
             .await
             .expect("claim the root's input")
