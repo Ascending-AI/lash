@@ -16,11 +16,14 @@ use crate::crash_matrix::world::CrashWorld;
 use crate::crash_matrix::{CrashPoint, Seam};
 
 /// The journal commands of a text-only root's `LashTurn` invocation the
-/// mid-journal cut draws from: after the input command (0) come the build
-/// generation, the root start, the seal, the claim, the turn config, the
-/// model call and its checkpoint with their calls, the scope close, the
-/// state write and the output — 19 more.
-const ROOT_JOURNAL_CUTS: u64 = 19;
+/// mid-journal cut draws from: after the input command (0) come the root
+/// start, the seal, the claim, the head, the turn config, the start gate's
+/// peek, the environment sync, the model call's two steps, the post-model
+/// gate's peek, the checkpoint, the gate's teardown peek and settlement, the
+/// terminal's one-way publication, the scope close, the state write and the
+/// output — 17 more. A cut past the journal's end never fires, so this
+/// follows the journal's length.
+const ROOT_JOURNAL_CUTS: u64 = 17;
 
 pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String> {
     let world = CrashWorld::new(seed, standard_core(), false).await?;
@@ -33,7 +36,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
         ..Expected::default()
     };
     let mut origin_ms = None;
-    let notes = vec![format!("inputs={inputs} target=in-{target}")];
+    let mut notes = vec![format!("inputs={inputs} target=in-{target}")];
     for index in 0..inputs {
         let root = format!("in-{index}");
         expected.inputs.push(AcceptedInput {
@@ -73,6 +76,7 @@ pub(super) async fn stage(point: CrashPoint, seed: u64) -> Result<Staged, String
             }
             CrashPoint::MidJournalStep => {
                 let index = 1 + world.draw(0..ROOT_JOURNAL_CUTS) as usize;
+                notes.push(format!("cut=command {index}"));
                 world.crash_on(
                     CrashRule::new(EngineCut::BeforeCommand { index })
                         .service(TURN_DRIVER_SERVICE)
