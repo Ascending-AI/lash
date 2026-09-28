@@ -36,10 +36,8 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         store.clone() as Arc<dyn lash_core::RuntimePersistence>,
     )
     .await;
-    runtime
-        .state
-        .token_ledger
-        .push(lash_core::TokenLedgerEntry {
+    runtime.edit_resident_state_for_test(|state| {
+        state.token_ledger.push(lash_core::TokenLedgerEntry {
             source: "turn".to_string(),
             model: "mock-model".to_string(),
             usage: lash_core::TokenUsage {
@@ -48,6 +46,7 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
             },
             usage_disposition: Default::default(),
         });
+    });
     let handler = double
         .open_handler(AdmittedScope::turn(
             SessionId::from("root"),
@@ -997,11 +996,11 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
         store.clone(),
     )
     .await;
-    runtime
-        .state
-        .set_execution_state_snapshot(Some(b"old-frame-root".to_vec().into()));
-    let old_frame = runtime.state.current_frame_node_id.clone();
-    let mut replacement = runtime.state.clone();
+    runtime.edit_resident_state_for_test(|state| {
+        state.set_execution_state_snapshot(Some(b"old-frame-root".to_vec().into()));
+    });
+    let old_frame = runtime.state().current_frame_node_id.clone();
+    let mut replacement = runtime.state().clone();
     lash_core::runtime::state::open_agent_frame_in_state_with_clock(
         &mut replacement,
         lash_core::testing::runtime_internals::OpenAgentFrameRequest::new(
@@ -1022,7 +1021,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
     *store.read.lock_recover() = Some(
         lash_core::testing::runtime_internals::PersistedSessionRead {
             session_id: replacement.session_id.clone(),
-            head_revision: runtime.state.head_revision + 1,
+            head_revision: runtime.state().head_revision + 1,
             config,
             current_frame_node_id: replacement.current_frame_node_id.clone(),
             pending_follow_on: None,
@@ -1033,7 +1032,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             turn_failure_settlements: Vec::new(),
         },
     );
-    let old_head_revision = runtime.state.head_revision;
+    let old_head_revision = runtime.state().head_revision;
     // A refused adoption leaves the resident session whole at its old head,
     // so no new head is ever paired with the previous frame's execution, and
     // a retry reads the durable head again rather than trusting a half-adopted
@@ -1051,11 +1050,11 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             "attempt {attempt}: {refused:?}"
         );
         assert_eq!(store.loads.load(Ordering::SeqCst), attempt);
-        assert_eq!(runtime.state.head_revision, old_head_revision);
-        assert_eq!(runtime.state.current_frame_node_id, old_frame);
+        assert_eq!(runtime.state().head_revision, old_head_revision);
+        assert_eq!(runtime.state().current_frame_node_id, old_frame);
         assert_eq!(
             runtime
-                .state
+                .state()
                 .execution_state_hydration()
                 .unwrap()
                 .map(|state| state.root.to_vec()),
@@ -1202,14 +1201,14 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         // The resident ledger matches the durable journal exactly: the lost
         // reply's usage is not folded in a second time.
         let resident_input = runtime
-            .state
+            .state()
             .token_ledger
             .iter()
             .map(|entry| entry.usage.input_tokens)
             .sum::<i64>();
         assert_eq!(resident_input, 17);
         let resident_output = runtime
-            .state
+            .state()
             .token_ledger
             .iter()
             .map(|entry| entry.usage.output_tokens)

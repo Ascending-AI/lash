@@ -1058,7 +1058,7 @@ async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member(
     runtime.stamp_live_plugin_state();
     assert!(
         runtime
-            .state
+            .state()
             .tool_state_snapshot()
             .is_some_and(|snapshot| snapshot.contains(&lash_core::ToolId::from(ALPHA_ID))),
         "precondition: the inherited snapshot names the tool"
@@ -1204,7 +1204,7 @@ async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
     );
     assert_eq!(
         runtime
-            .state
+            .state()
             .tool_state_snapshot()
             .expect("stamped snapshot")
             .generation(),

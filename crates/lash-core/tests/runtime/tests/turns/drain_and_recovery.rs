@@ -366,7 +366,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
             .expect("queued work after commit")
             .is_empty()
     );
-    let wake_history = active_conversation_messages(&runtime.state)
+    let wake_history = active_conversation_messages(runtime.state())
         .into_iter()
         .find(|message| {
             message.role == lash_core::MessageRole::Event
@@ -391,7 +391,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
             && caused_by.as_ref() == Some(&process_caused_by)
     ));
     assert!(
-        active_conversation_messages(&runtime.state)
+        active_conversation_messages(runtime.state())
             .iter()
             .all(|message| {
                 !((message.role == lash_core::MessageRole::System

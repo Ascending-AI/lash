@@ -8,6 +8,12 @@ impl LashRuntime {
         &self.state.session_id
     }
 
+    /// The resident runtime state, read-only. Writes go through the install
+    /// helpers, which publish the resident authority (FIG-4024).
+    pub fn state(&self) -> &RuntimeSessionState {
+        &self.state
+    }
+
     /// Whether this open declared it will not run a turn (FIG-3353). The host
     /// configuration is the per-open authority: `RuntimeSessionState` carries
     /// a copy so cloned states and store-level stamping self-guard, but every
@@ -95,6 +101,17 @@ impl LashRuntime {
     pub(in crate::runtime) fn install_resolved_run(&mut self, resolved: &crate::ResolvedRun) {
         crate::runtime::state::adopt_resolved_run(&mut self.state, resolved);
         self.publish_resident_authority();
+    }
+
+    /// Test hook: applies `edit` to a copy of the resident state and installs
+    /// it through [`Self::install_resident_state`], so the edited authority is
+    /// published to the live plugin session. No durable publication and no
+    /// plugin or tool-state hydration.
+    #[cfg(any(test, feature = "testing"))]
+    pub fn edit_resident_state_for_test(&mut self, edit: impl FnOnce(&mut RuntimeSessionState)) {
+        let mut state = self.state.clone();
+        edit(&mut state);
+        self.install_resident_state(state);
     }
 
     /// Publish the resident authority to the live plugin session.

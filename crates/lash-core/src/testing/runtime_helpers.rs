@@ -261,7 +261,9 @@ fn mock_provider_with_kind(kind: &'static str, calls: Vec<MockCall>) -> TestProv
 pub fn set_runtime_provider(runtime: &mut LashRuntime, provider: crate::ProviderHandle) {
     runtime.host.core.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider.clone()));
-    runtime.state.policy.provider_id = provider.kind().to_string();
+    runtime.edit_resident_state_for_test(|state| {
+        state.policy.provider_id = provider.kind().to_string();
+    });
 }
 
 /// Serve `providers` beside the provider the runtime's resolver serves for
@@ -283,7 +285,7 @@ pub fn serve_runtime_providers(
             .with(provider)
             .expect("each served provider has its own id");
     }
-    let current = runtime.state.policy.recorded_provider_id().to_string();
+    let current = runtime.state().policy.recorded_provider_id().to_string();
     if !served.contains(&current)
         && let Ok(binding) = runtime
             .host

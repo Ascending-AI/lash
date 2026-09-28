@@ -509,9 +509,9 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
         !protocol_dirty.load(Ordering::SeqCst),
         "protocol session must match the rolled-back runtime state"
     );
-    assert_eq!(runtime.state.session_graph.nodes.len(), 1);
+    assert_eq!(runtime.state().session_graph.nodes.len(), 1);
     assert!(matches!(
-        runtime.state.session_graph.nodes[0].payload,
+        runtime.state().session_graph.nodes[0].payload,
         lash_core::SessionNodePayload::FrameOpen { .. }
     ));
 }
@@ -551,7 +551,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
     .expect("storeless runtime");
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
-    let before = runtime.state.session_graph.clone();
+    let before = runtime.state().session_graph.clone();
 
     let result = Box::pin(
         runtime.append_session_nodes(lash_core::AppendSessionNodesRequest {
@@ -574,7 +574,7 @@ async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
     assert!(!protocol_dirty.load(Ordering::SeqCst));
     assert!(!restore_called.load(Ordering::SeqCst));
     assert_eq!(
-        serde_json::to_value(&runtime.state.session_graph).expect("encode storeless graph"),
+        serde_json::to_value(&runtime.state().session_graph).expect("encode storeless graph"),
         serde_json::to_value(&before).expect("encode original storeless graph")
     );
 }
@@ -677,7 +677,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     )
     .await
     .expect("head advance");
-    let state_after_advance = runtime.state.clone();
+    let state_after_advance = runtime.state().clone();
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
 
@@ -702,17 +702,18 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
         "the protocol session must match the refreshed durable runtime state"
     );
     assert_eq!(
-        runtime.state.head_revision, state_after_advance.head_revision,
+        runtime.state().head_revision,
+        state_after_advance.head_revision,
         "receipt replay must not advance the durable head"
     );
     assert_eq!(
-        serde_json::to_value(&runtime.state.session_graph).expect("encode rolled-back graph"),
+        serde_json::to_value(&runtime.state().session_graph).expect("encode rolled-back graph"),
         serde_json::to_value(&state_after_advance.session_graph).expect("encode expected graph"),
         "resident graph must converge with durable history after receipt replay"
     );
     assert_eq!(
         runtime
-            .state
+            .state()
             .session_graph
             .nodes
             .iter()
@@ -768,7 +769,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     Box::pin(runtime.append_session_nodes(request.clone()))
         .await
         .expect("first append");
-    let state_before_retry = runtime.state.clone();
+    let state_before_retry = runtime.state().clone();
     protocol_dirty.store(false, Ordering::SeqCst);
     restore_called.store(false, Ordering::SeqCst);
     store.fail_load_session_on_call(store.load_session_count() + 1);
@@ -786,11 +787,11 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     assert!(restore_called.load(Ordering::SeqCst));
     assert!(!protocol_dirty.load(Ordering::SeqCst));
     assert_eq!(
-        runtime.state.head_revision,
+        runtime.state().head_revision,
         state_before_retry.head_revision
     );
     assert_eq!(
-        serde_json::to_value(&runtime.state.session_graph).expect("encode restored graph"),
+        serde_json::to_value(&runtime.state().session_graph).expect("encode restored graph"),
         serde_json::to_value(&state_before_retry.session_graph).expect("encode expected graph")
     );
 }

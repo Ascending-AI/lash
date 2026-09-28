@@ -41,7 +41,7 @@ async fn append_history(runtime: &mut LashRuntime, depth: usize) {
     )
     .await
     .expect("append freshness history");
-    assert_eq!(runtime.state.session_graph.nodes.len(), depth);
+    assert_eq!(runtime.state().session_graph.nodes.len(), depth);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -77,11 +77,11 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         "changed-frame-model",
     )
     .await;
-    assert_eq!(runtime.state.effective_policy().model, changed_model);
+    assert_eq!(runtime.state().effective_policy().model, changed_model);
 
-    let resident_policy_before_refusal = runtime.state.effective_policy().clone();
-    let resident_protocol_options_before_refusal = runtime.state.protocol_turn_options.clone();
-    let resident_frame_before_refusal = runtime.state.current_frame_node_id.clone();
+    let resident_policy_before_refusal = runtime.state().effective_policy().clone();
+    let resident_protocol_options_before_refusal = runtime.state().protocol_turn_options.clone();
+    let resident_frame_before_refusal = runtime.state().current_frame_node_id.clone();
     let durable_head_before_refusal = store
         .load_session_head_meta()
         .await
@@ -103,15 +103,15 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         lash_core::RuntimeErrorCode::HistoricalAgentFrameSwitchUnsupported
     );
     assert_eq!(
-        runtime.state.effective_policy(),
+        runtime.state().effective_policy(),
         &resident_policy_before_refusal
     );
     assert_eq!(
-        runtime.state.protocol_turn_options,
+        runtime.state().protocol_turn_options,
         resident_protocol_options_before_refusal
     );
     assert_eq!(
-        runtime.state.current_frame_node_id,
+        runtime.state().current_frame_node_id,
         resident_frame_before_refusal
     );
     let durable_head_after_refusal = store
@@ -213,7 +213,7 @@ async fn freshness_hydrates_when_revision_changed() {
         .expect("refresh revision change");
 
     assert_eq!(store.load_session_count() - full_loads_before, 1);
-    assert_eq!(runtime.state.head_revision, head.head_revision);
+    assert_eq!(runtime.state().head_revision, head.head_revision);
 }
 
 /// FIG-1875 (head-authoritative adoption): a resident refresh adopts the
@@ -253,7 +253,7 @@ async fn resident_refresh_adopts_the_durable_head_prompt() {
         .expect("refresh resident graph");
 
     assert_eq!(
-        runtime.state.effective_policy().prompt,
+        runtime.state().effective_policy().prompt,
         head_prompt,
         "adoption is head-authoritative: the durable head's prompt wins"
     );
@@ -288,7 +288,7 @@ async fn prompt_helper_composes_with_reloaded_prompt_on_invalidated_resident_pat
     .await;
 
     assert_eq!(
-        runtime.state.effective_policy().prompt,
+        runtime.state().effective_policy().prompt,
         lash_core::PromptLayer::new()
             .with_contribution(lash_core::PromptContribution::guidance(
                 "Durable base",
@@ -342,7 +342,7 @@ async fn resident_refresh_adopts_the_durable_head_model() {
         .expect("refresh resident graph");
 
     assert_eq!(
-        runtime.state.effective_policy().model,
+        runtime.state().effective_policy().model,
         head_model,
         "adoption is head-authoritative: the durable head's model wins"
     );
@@ -362,7 +362,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
             .expect("live plugin session")
             .subagent_context()
     };
-    assert_eq!(runtime.state.authority.subagent, None);
+    assert_eq!(runtime.state().authority.subagent, None);
     assert_eq!(live_subagent(&runtime), None);
 
     let head_subagent = lash_core::SubagentSessionContext {
@@ -381,7 +381,7 @@ async fn resident_refresh_publishes_the_durable_head_subagent_context_to_live_pl
         .expect("refresh resident graph");
 
     assert_eq!(
-        runtime.state.authority.subagent.as_ref(),
+        runtime.state().authority.subagent.as_ref(),
         Some(&head_subagent),
         "adoption is head-authoritative: the durable head's subagent context wins"
     );
@@ -432,7 +432,7 @@ async fn resident_refresh_adopts_the_durable_head_provider_id() {
         .expect("refresh resident graph");
 
     assert_eq!(
-        runtime.state.effective_policy().provider_id,
+        runtime.state().effective_policy().provider_id,
         "advanced-durable-provider",
         "adoption is head-authoritative: the durable head's provider id wins"
     );
@@ -443,7 +443,7 @@ async fn freshness_hydrates_when_leaf_changed() {
     let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    let frame_node_id = runtime.state.session_graph.nodes[0].node_id.clone();
+    let frame_node_id = runtime.state().session_graph.nodes[0].node_id.clone();
     let mut head = store
         .load_session_head_meta()
         .await
@@ -461,7 +461,7 @@ async fn freshness_hydrates_when_leaf_changed() {
 
     assert_eq!(store.load_session_count() - full_loads_before, 1);
     assert_eq!(
-        runtime.state.session_graph.leaf_node_id.as_deref(),
+        runtime.state().session_graph.leaf_node_id.as_deref(),
         Some(frame_node_id.as_str())
     );
 }
@@ -491,10 +491,10 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
         .expect("refresh checkpoint-ref-only change");
 
     assert_eq!(store.load_session_count() - full_loads_before, 1);
-    assert_eq!(runtime.state.head_revision, original_revision);
-    assert_eq!(runtime.state.session_graph.leaf_node_id, original_leaf);
+    assert_eq!(runtime.state().head_revision, original_revision);
+    assert_eq!(runtime.state().session_graph.leaf_node_id, original_leaf);
     assert_eq!(
-        runtime.state.checkpoint_ref.as_ref(),
+        runtime.state().checkpoint_ref.as_ref(),
         Some(&changed_checkpoint_ref)
     );
 }
@@ -505,9 +505,9 @@ async fn freshness_skips_hydration_when_nothing_changed() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let resident_head = (
-        runtime.state.head_revision,
-        runtime.state.session_graph.leaf_node_id.clone(),
-        runtime.state.checkpoint_ref.clone(),
+        runtime.state().head_revision,
+        runtime.state().session_graph.leaf_node_id.clone(),
+        runtime.state().checkpoint_ref.clone(),
     );
     let full_loads_before = store.load_session_count();
 
@@ -519,9 +519,9 @@ async fn freshness_skips_hydration_when_nothing_changed() {
     assert_eq!(store.load_session_count() - full_loads_before, 0);
     assert_eq!(
         (
-            runtime.state.head_revision,
-            runtime.state.session_graph.leaf_node_id.clone(),
-            runtime.state.checkpoint_ref.clone(),
+            runtime.state().head_revision,
+            runtime.state().session_graph.leaf_node_id.clone(),
+            runtime.state().checkpoint_ref.clone(),
         ),
         resident_head
     );
@@ -695,12 +695,12 @@ async fn live_policy_override_then_invalidation_reload_yields_the_head_values() 
         .expect("reload invalidated resident session state");
 
     assert_eq!(
-        runtime.state.effective_policy().model,
+        runtime.state().effective_policy().model,
         head_model,
         "the invalidation reload must adopt the head's model"
     );
     assert_eq!(
-        runtime.state.effective_policy().prompt,
+        runtime.state().effective_policy().prompt,
         head_prompt,
         "the invalidation reload must adopt the head's prompt"
     );
@@ -793,8 +793,8 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let base = store.load_session_head_meta().await.unwrap().unwrap();
-    runtime.state.policy.prompt = reopen_prompt("seed");
-    let retry = runtime.state.clone();
+    runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt("seed"));
+    let retry = runtime.state().clone();
     runtime
         .settle_reopen_seeded_config(&base.config)
         .await
@@ -812,13 +812,13 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
     )
     .await;
     let newer = store.load_session_head_meta().await.unwrap().unwrap();
-    runtime.state = retry;
+    runtime.edit_resident_state_for_test(|state| *state = retry);
     runtime
         .settle_reopen_seeded_config(&base.config)
         .await
         .unwrap();
-    assert_eq!(runtime.state.policy.prompt, reopen_prompt("newer"));
-    assert_eq!(runtime.state.head_revision, newer.head_revision);
+    assert_eq!(runtime.state().policy.prompt, reopen_prompt("newer"));
+    assert_eq!(runtime.state().head_revision, newer.head_revision);
     let after = store.load_session_head_meta().await.unwrap().unwrap();
     assert_eq!(after.head_revision, newer.head_revision);
     assert_eq!(after.config, newer.config);
@@ -830,20 +830,20 @@ async fn reopen_seed_same_base_replay_is_idempotent() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let base = store.load_session_head_meta().await.unwrap().unwrap();
-    runtime.state.policy.prompt = reopen_prompt("seed");
-    let retry = runtime.state.clone();
+    runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt("seed"));
+    let retry = runtime.state().clone();
     runtime
         .settle_reopen_seeded_config(&base.config)
         .await
         .unwrap();
     let committed = store.load_session_head_meta().await.unwrap().unwrap();
-    runtime.state = retry;
+    runtime.edit_resident_state_for_test(|state| *state = retry);
     runtime
         .settle_reopen_seeded_config(&base.config)
         .await
         .unwrap();
-    assert_eq!(runtime.state.policy.prompt, reopen_prompt("seed"));
-    assert_eq!(runtime.state.head_revision, committed.head_revision);
+    assert_eq!(runtime.state().policy.prompt, reopen_prompt("seed"));
+    assert_eq!(runtime.state().head_revision, committed.head_revision);
     let after = store.load_session_head_meta().await.unwrap().unwrap();
     assert_eq!(after.head_revision, committed.head_revision);
     assert_eq!(after.config, committed.config);
@@ -856,7 +856,7 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
     Box::pin(append_history(&mut runtime, 2)).await;
     for label in ["a", "b", "a", "b"] {
         let base = store.load_session_head_meta().await.unwrap().unwrap();
-        runtime.state.policy.prompt = reopen_prompt(label);
+        runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt(label));
         runtime
             .settle_reopen_seeded_config(&base.config)
             .await
@@ -864,7 +864,7 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
         let head = store.load_session_head_meta().await.unwrap().unwrap();
         assert!(head.head_revision > base.head_revision);
         assert_eq!(head.config.prompt, Some(reopen_prompt(label)));
-        assert_eq!(runtime.state.head_revision, head.head_revision);
+        assert_eq!(runtime.state().head_revision, head.head_revision);
     }
 }
 
@@ -883,7 +883,7 @@ async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted
     let double = kernel_double(SEED + 19, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    let model = runtime.state.effective_policy().model.id.clone();
+    let model = runtime.state().effective_policy().model.id.clone();
 
     // Durable holes committed outside this handle: two billed attempts whose
     // usage never arrived, carried by one accumulating `(source, model)` row.
@@ -932,7 +932,7 @@ async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted
 
     // An external writer lands the usage holes on the durable head.
     let advanced = advance_session_head(store.as_ref(), &[durable_holes], |_| {}).await;
-    let head_before_adopt = runtime.state.head_revision;
+    let head_before_adopt = runtime.state().head_revision;
 
     runtime
         .refresh_session_graph_from_store()
@@ -940,10 +940,10 @@ async fn checkpoint_adopt_rehydrates_outstanding_usage_attempts_from_the_adopted
         .expect("adopt the advanced durable head");
 
     assert!(
-        runtime.state.head_revision > head_before_adopt,
+        runtime.state().head_revision > head_before_adopt,
         "the adopt must actually advance the head, or the adopt path never ran"
     );
-    assert_eq!(runtime.state.head_revision, advanced.head_revision);
+    assert_eq!(runtime.state().head_revision, advanced.head_revision);
     assert_eq!(
         runtime.unreported_usage_attempts(),
         [lash_core::facade_support::UnreportedUsageAttempt {

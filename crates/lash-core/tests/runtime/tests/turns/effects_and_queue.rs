@@ -139,7 +139,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         "opaque replay from the prior frame must not enter the follow-on request"
     );
     let follow_frame = runtime
-        .state
+        .state()
         .current_frame_node_id
         .as_deref()
         .expect("follow-on frame is active");
@@ -1206,7 +1206,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         message.role != lash_core::llm::types::LlmRole::User || !message.is_blank()
     }));
     assert!(
-        active_conversation_messages(&runtime.state)
+        active_conversation_messages(runtime.state())
             .iter()
             .all(|message| {
                 !(message.role == lash_core::MessageRole::User

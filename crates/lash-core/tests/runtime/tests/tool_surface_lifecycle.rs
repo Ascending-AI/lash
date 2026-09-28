@@ -251,7 +251,7 @@ fn plugin_catalog_names(runtime: &LashRuntime) -> Vec<String> {
     runtime
         .plugin_session()
         .expect("live plugin session")
-        .tool_catalog(&runtime.state.session_id)
+        .tool_catalog(&runtime.state().session_id)
         .expect("live plugin tool catalog")
         .into_iter()
         .filter_map(|entry| {
@@ -455,7 +455,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     );
 
     runtime.stamp_live_plugin_state();
-    runtime.state.authority = Box::default();
+    runtime.edit_resident_state_for_test(|state| *state.authority = Default::default());
     let parked = Box::pin(runtime.park())
         .await
         .expect("persist broader authority");
@@ -665,7 +665,7 @@ async fn updated_tool_access_survives_park_and_resume() {
         .await
         .expect("resume updated authority");
 
-    assert_eq!(resumed.state.authority.tool_access, narrowed);
+    assert_eq!(resumed.state().authority.tool_access, narrowed);
     assert!(
         !catalog_names(&resumed).contains(&hidden.name.to_string()),
         "the resumed tool surface must use the updated persisted authority"
@@ -704,12 +704,12 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
         "restating the resident value must not commit"
     );
 
-    runtime.state.authority.tool_access = lash_core::SessionToolAccess::ambient();
+    runtime.edit_resident_state_for_test(|state| state.authority.tool_access = Default::default());
     runtime.invalidate_resident_session_state();
     Box::pin(runtime.set_tool_access(narrowed.clone()))
         .await
         .expect("reload before comparing authority");
-    assert_eq!(runtime.state.authority.tool_access, narrowed);
+    assert_eq!(runtime.state().authority.tool_access, narrowed);
     assert_eq!(
         *store.runtime_commit_count.lock_recover(),
         commits_after_change,

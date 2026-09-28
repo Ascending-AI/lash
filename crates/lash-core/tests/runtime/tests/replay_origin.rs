@@ -76,7 +76,7 @@ async fn runtime_with_foreign_replay(
         test_host_config_with_trace_path(backend, trace_path.to_path_buf()),
     ))
     .await;
-    append_message(&mut runtime.state, foreign_replay_message());
+    runtime.edit_resident_state_for_test(|state| append_message(state, foreign_replay_message()));
     runtime
 }
 

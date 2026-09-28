@@ -89,7 +89,7 @@ impl TestTurnDrive for LashRuntime {
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let controller = opts.scoped_effect_controller();
         let request = DriveRequest {
-            session: self.state.session_id.clone(),
+            session: self.state().session_id.clone(),
             request: DriveRequestId::new(opts.execution_scope_id()),
             build_generation: self.host.core.backend().build_generation().clone(),
         };
@@ -159,7 +159,7 @@ impl TestTurnDrive for LashRuntime {
         let acceptance = crate::TurnInputAcceptanceReceipt::from(&accepted);
         let aborted = |error: RuntimeError| error.with_turn_input_acceptance(acceptance.clone());
         let request = DriveRequest {
-            session: self.state.session_id.clone(),
+            session: self.state().session_id.clone(),
             request: DriveRequestId::new(format!("turn:{turn_id}")),
             build_generation: self.host.core.backend().build_generation().clone(),
         };
@@ -265,7 +265,7 @@ impl TestTurnDrive for LashRuntime {
     ) -> Result<Option<AgentFrameRun>, RuntimeError> {
         let controller = opts.scoped_effect_controller();
         let request = DriveRequest {
-            session: self.state.session_id.clone(),
+            session: self.state().session_id.clone(),
             request: DriveRequestId::new(request),
             build_generation: self.host.core.backend().build_generation().clone(),
         };

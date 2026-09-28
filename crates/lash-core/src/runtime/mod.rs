@@ -485,7 +485,12 @@ pub struct LashRuntime {
     pub session: Option<Session>,
     pub host: RuntimeHost,
     pub services: RuntimeServices,
-    pub state: RuntimeSessionState,
+    /// The resident runtime state. Private so every write either mutates it
+    /// in place inside the runtime or goes through
+    /// [`Self::install_resident_state`] / [`Self::install_resolved_run`],
+    /// which publish the resident authority to the live plugin session
+    /// (FIG-4024). Read it through [`Self::state`].
+    state: RuntimeSessionState,
     pub runtime_lease_owner: crate::LeaseOwnerIdentity,
     pub runtime_lease_executor_id: String,
     /// Session-scoped token cost ledger. Shared by ALL

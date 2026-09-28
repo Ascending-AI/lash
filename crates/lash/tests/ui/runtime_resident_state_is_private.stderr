@@ -1,0 +1,11 @@
+error[E0616]: field `state` of struct `LashRuntime` is private
+ --> tests/ui/runtime_resident_state_is_private.rs:5:13
+  |
+5 |     runtime.state = state;
+  |             ^^^^^ private field
+
+error[E0616]: field `state` of struct `LashRuntime` is private
+ --> tests/ui/runtime_resident_state_is_private.rs:6:13
+  |
+6 |     runtime.state.authority = Default::default();
+  |             ^^^^^ private field

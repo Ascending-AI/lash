@@ -164,7 +164,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
     assert_eq!(durable.head_revision, 1);
     drop(turn);
     handler.close().await.expect("close the turn's handler");
-    assert_eq!(runtime.state.turn_index, 1);
+    assert_eq!(runtime.state().turn_index, 1);
     assert_eq!(
         *runtime.resident_session.validity(),
         ResidentSessionState::Valid
@@ -863,7 +863,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         committed_turns: AtomicUsize::new(0),
     }));
     let initial_frame_node_id = runtime
-        .state
+        .state()
         .current_frame_node_id
         .clone()
         .expect("runtime initializes the current frame");
@@ -888,7 +888,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         "unexpected no-op switch outcome: {switched:?}"
     );
     assert_eq!(
-        runtime.state.current_frame_node_id.as_deref(),
+        runtime.state().current_frame_node_id.as_deref(),
         Some(initial_frame_node_id.as_str())
     );
 
