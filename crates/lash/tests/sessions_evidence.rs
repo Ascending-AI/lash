@@ -239,13 +239,6 @@ fn drain_area_witnesses() {
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::Plugin)
     });
-    // W0084: lash::runtime::RuntimeErrorCode::TurnInputSettlementSuperseded [variant]
-    variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
-        matches!(
-            value,
-            lash::runtime::RuntimeErrorCode::TurnInputSettlementSuperseded
-        )
-    });
     // W0093: lash::runtime::RuntimeErrorCode::ProcessPanicked [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(value, lash::runtime::RuntimeErrorCode::ProcessPanicked)
@@ -973,24 +966,24 @@ fn drain_area_witnesses() {
     type_witness::<lash::SessionId>();
     // W0290: lash::plugins::TurnDriverPreamble [type_alias]
     type_witness::<lash::plugins::TurnDriverPreamble>();
-    // W0291: lash::persistence::TurnInputClaimMode [enum]
-    type_witness::<lash::persistence::TurnInputClaimMode>();
-    // W0292: lash::persistence::TurnInputClaimMode::ActiveTurn [variant]
-    variant_witness(|value: &lash::persistence::TurnInputClaimMode| {
+    // W0291: lash::persistence::TurnInputAdmissionMode [enum]
+    type_witness::<lash::persistence::TurnInputAdmissionMode>();
+    // W0292: lash::persistence::TurnInputAdmissionMode::ActiveTurn [variant]
+    variant_witness(|value: &lash::persistence::TurnInputAdmissionMode| {
         matches!(
             value,
-            lash::persistence::TurnInputClaimMode::ActiveTurn { .. }
+            lash::persistence::TurnInputAdmissionMode::ActiveTurn { .. }
         )
     });
-    // W0293: lash::persistence::TurnInputClaimMode::ActiveTurn::turn_id [field]
-    field_witness(|value: &lash::persistence::TurnInputClaimMode| {
-        if let lash::persistence::TurnInputClaimMode::ActiveTurn { turn_id, .. } = value {
+    // W0293: lash::persistence::TurnInputAdmissionMode::ActiveTurn::turn_id [field]
+    field_witness(|value: &lash::persistence::TurnInputAdmissionMode| {
+        if let lash::persistence::TurnInputAdmissionMode::ActiveTurn { turn_id, .. } = value {
             let _ = turn_id;
         }
     });
-    // W0294: lash::persistence::TurnInputClaimMode::NextTurn [variant]
-    variant_witness(|value: &lash::persistence::TurnInputClaimMode| {
-        matches!(value, lash::persistence::TurnInputClaimMode::NextTurn)
+    // W0294: lash::persistence::TurnInputAdmissionMode::NextTurn [variant]
+    variant_witness(|value: &lash::persistence::TurnInputAdmissionMode| {
+        matches!(value, lash::persistence::TurnInputAdmissionMode::NextTurn)
     });
     // W0295: lash::process::WaitKind [enum]
     type_witness::<lash::process::WaitKind>();
@@ -1559,8 +1552,8 @@ fn drain_area_witnesses() {
     let _ = lash::runtime::ExecutionScope::from_journal_key;
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]
     let _ = lash::durability::CanonicalRuntimeEffectEnvelope::json;
-    // W0509: lash::QueuedWorkClaimRefusal::as_str [function]
-    let _ = lash::QueuedWorkClaimRefusal::as_str;
+    // W0509: lash::AdmissionRefusal::as_str [function]
+    let _ = lash::AdmissionRefusal::as_str;
     // W0510: lash::runtime::AssembledTurn::turn_cancel_input_outcome [field]
     field_witness(|value: &lash::runtime::AssembledTurn| {
         let _ = &value.turn_cancel_input_outcome;

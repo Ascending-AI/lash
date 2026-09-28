@@ -6,7 +6,7 @@
 use super::drive_admission::{DriveParts, on_tier};
 use lash_core::engine::*;
 use lash_core::store::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -210,7 +210,7 @@ impl Fixture {
         let parts = DriveParts::new(prefix, name, host, stores, 8).await;
         let root = TurnId::from(format!("{name}-root"));
         let input = parts.enqueue("first", Some(root.as_str())).await;
-        let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
             &parts.store,
             &parts.session_id,
             "parked-execution",
@@ -231,9 +231,7 @@ impl Fixture {
         let admission = parts
             .store
             .admit_root(&lash_core::store::AdmitRootRequest {
-                session_id: parts.session_id.clone(),
-                lease: lease.fence(),
-                owner: lease.owner.clone(),
+                fence: lease.clone(),
                 root: root.clone(),
                 head: lash_core::store::AdmittedHead::Input(input.clone()),
                 max_inputs: 1,
@@ -266,7 +264,7 @@ impl Fixture {
             .expect("park");
         parts
             .store
-            .supersede_claim_epoch_for_test(&lease.completion())
+            .supersede_drive_epoch_for_test(&lease)
             .await
             .expect("execution stopped while the park holds the root");
         assert!(matches!(
@@ -276,7 +274,7 @@ impl Fixture {
                 .await
                 .expect("held inputs")[0]
                 .status,
-            crate::PendingTurnInputReadStatus::Pending
+            crate::PendingTurnInputReadStatus::Admitted { root: ref holder } if *holder == root
         ));
         Self {
             parts,
@@ -597,6 +595,79 @@ pub async fn a_terminal_root_never_reparks(
             .expect("park read")
             .is_none()
     );
+}
+
+/// The root the fixture's input is bound to, if any.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the store answers its own reads"
+)]
+async fn input_holder(f: &Fixture) -> Option<TurnId> {
+    f.parts
+        .store
+        .list_pending_turn_inputs(&f.parts.session_id)
+        .await
+        .expect("list inputs")
+        .into_iter()
+        .find(|read| read.input.input_id == f.input)
+        .and_then(|read| match read.status {
+            crate::PendingTurnInputReadStatus::Admitted { root } => Some(root),
+            _ => None,
+        })
+}
+
+/// FIG-3927 N2, the verb paths: a parked root's cancel, its fork, the end
+/// of its lost run and its session's close each end the root, and after each
+/// no row is still bound to it. A fork hands the rows to its new root.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn no_row_stays_bound_after_a_roots_verb_close_or_lost_end(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let cancelled = Fixture::new(prefix, "unbound-cancel", &host, &stores).await;
+    assert_eq!(
+        input_holder(&cancelled).await,
+        Some(cancelled.root.clone()),
+        "the parked root holds its input"
+    );
+    cancelled.verb(RootVerb::Cancel).await.expect("cancel");
+    assert_eq!(input_holder(&cancelled).await, None, "cancel");
+
+    let forked = Fixture::new(prefix, "unbound-fork", &host, &stores).await;
+    let intent = forked.verb(RootVerb::Fork).await.expect("fork");
+    let holder = input_holder(&forked).await;
+    assert!(
+        holder.is_none() || holder == Some(forked_root(&forked.root, intent.id)),
+        "fork: the input is open or bound to the new root, got {holder:?}"
+    );
+
+    let lost = Fixture::new(prefix, "unbound-lost", &host, &stores).await;
+    lost.factory
+        .end_lost_root(
+            &RootRef {
+                session: lost.parts.session_id.clone(),
+                root: lost.root.clone(),
+            },
+            stores.clock().timestamp_ms(),
+        )
+        .await
+        .expect("end the lost root")
+        .expect("the root had no terminal");
+    assert_eq!(input_holder(&lost).await, None, "lost-run end");
+
+    let closed = Fixture::new(prefix, "unbound-close", &host, &stores).await;
+    closed
+        .factory
+        .begin_session_close(&closed.parts.session_id, stores.clock().timestamp_ms())
+        .await
+        .expect("close")
+        .expect("the session exists");
+    assert_eq!(input_holder(&closed).await, None, "session close");
 }
 
 pub async fn cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next(
@@ -1220,7 +1291,7 @@ pub async fn a_parked_roots_fence_stays_current_until_a_verb(
     assert!(f.parts.epoch().await.epoch > before.epoch);
 }
 
-pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_completes_after_restore(
+pub async fn a_diverged_root_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1235,7 +1306,7 @@ pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_comple
         .expect("held");
     assert!(matches!(
         held[0].status,
-        crate::PendingTurnInputReadStatus::Pending
+        crate::PendingTurnInputReadStatus::Admitted { root: ref holder } if *holder == f.root
     ));
     let again = f
         .parts

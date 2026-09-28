@@ -200,4 +200,4 @@ pub fn response_synthesized_from_aborted_stream(
     crate::runtime::response_synthesized_from_aborted_stream(events)
 }
 
-pub use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
+pub use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;

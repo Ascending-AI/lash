@@ -83,9 +83,9 @@ pub struct RuntimeControlConfig {
     pub process_tool_visibility_filter: Option<Arc<dyn crate::ProcessToolVisibilityFilter>>,
     /// Lease timing capability for every durable single-writer *lease* lane this
     /// runtime renews on a cadence: session execution leases,
-    /// and durable effect-replay leases. Queued-work and turn-input claims are
-    /// not leases and carry no TTL; they pin a session execution lease generation
-    /// for claimability and handoff (ADR 0029). Defaults to
+    /// and durable effect-replay leases. Queued work and turn inputs are not
+    /// leased and carry no TTL: a root admits them under its drive fence and
+    /// holds them until its own commit settles them (FIG-3927). Defaults to
     /// [`crate::LeaseTimings::default`] (30s TTL / 10s renew).
     pub lease_timings: crate::LeaseTimings,
     /// What an open does when a persisted tool id no registered source

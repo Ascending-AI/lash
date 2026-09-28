@@ -3,53 +3,34 @@
 //! The state struct, its checkpoint components and the durable-head adoption
 //! rules live in `lash-core-store`; this module re-exports them at their
 //! original path and keeps the one commit helper that needs the runtime's
-//! session-execution lease.
+//! drive fence.
 
 pub use lash_core_store::session_state::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[allow(clippy::too_many_arguments)]
+/// Commit `commit` from a service that runs either inside a running turn's
+/// drive (`drive_fence`) or as a lane-less host service (`None`). The
+/// explicit context selects the authority, never scheduling or elapsed time.
 pub(crate) async fn commit_in_lane_context(
-    held_session_execution_lease: Option<&super::drive_claim::BorrowedDriveAuthority>,
+    drive_fence: Option<&crate::store::DriveFence>,
     store: std::sync::Arc<dyn crate::RuntimePersistence>,
-    commit: crate::RuntimeCommit,
-    runtime_lease_owner: &crate::LeaseOwnerIdentity,
-    runtime_lease_executor_id: &str,
-    lease_timings: crate::store::LeaseTimings,
-    clock: std::sync::Arc<dyn crate::Clock>,
+    mut commit: crate::RuntimeCommit,
     resident_graph_head_stale: &AtomicBool,
 ) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
-    // Dual-context sites run either under the parent turn's held lane or as
-    // lane-less host services. Select authority from the explicit context,
-    // never from scheduling or elapsed time.
-    if let Some(lease) = held_session_execution_lease {
-        let result = super::drive_claim::commit_runtime_state_with_borrowed_drive(
-            lease,
-            store,
-            commit,
-            runtime_lease_owner,
-        )
-        .await;
-        if result.is_ok() {
-            // The guard remains current, but this service committed from a
-            // snapshot outside the owning runtime. Force a deliberate head
-            // reload before its next physical turn; planner CAS is not the
-            // graph-freshness discovery mechanism.
-            resident_graph_head_stale.store(true, Ordering::Release);
-        }
-        result
-    } else {
-        super::drive_claim::commit_runtime_state_without_session_lease(
-            store,
-            commit,
-            runtime_lease_owner,
-            runtime_lease_executor_id,
-            lease_timings,
-            clock,
-        )
-        .await
+    let Some(fence) = drive_fence else {
+        return crate::store::commit_runtime_state_verified(store.as_ref(), commit).await;
+    };
+    commit.drive_fence = Some(Box::new(fence.clone()));
+    let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit).await;
+    if result.is_ok() {
+        // The drive remains current, but this service committed from a
+        // snapshot outside the owning runtime. Force a deliberate head
+        // reload before its next physical turn; planner CAS is not the
+        // graph-freshness discovery mechanism.
+        resident_graph_head_stale.store(true, Ordering::Release);
     }
+    result
 }
 
 #[cfg(test)]

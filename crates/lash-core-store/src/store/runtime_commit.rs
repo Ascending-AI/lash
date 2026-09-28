@@ -1,8 +1,8 @@
 //! Runtime commit envelope and result types.
 
 use super::{
-    BlobRef, ClaimAuthority, GraphAppend, HydratedSessionCheckpoint, OperationId,
-    RealizedNodeTimestamp, SessionCheckpoint, StoreError, commit_identity,
+    BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
+    SessionCheckpoint, StoreError, commit_identity,
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
 use crate::SessionId;
@@ -100,20 +100,9 @@ pub struct RuntimeCommit {
     pub commit_budget: super::CommitBudget,
     pub session_id: SessionId,
     pub expected_head_revision: u64,
-    /// Current execution-lane authority required by a borrowed-lane commit.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
-    /// enforce this transaction predicate before consulting a durable receipt.
-    ///
-    /// This is a transaction predicate, not semantic commit content: backends
-    /// validate it with the ordinary owner/generation/current-token/expiry
-    /// fence before receipt replay or mutation, and never rotate or release the
-    /// matching lease row.
-    #[serde(skip)]
-    pub session_execution_lease_fence: Option<ClaimAuthority>,
     /// The drive fence of the admission this commit's root was sealed under
-    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate like the lease
-    /// fence, never commit content: the backend refuses the commit
+    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate, never commit
+    /// content: the backend refuses the commit
     /// [`StoreError::StaleDriveFence`](super::StoreError::StaleDriveFence)
     /// unless it is still the session's current drive fence, checked in the
     /// commit's own transaction before anything is written. `None` for a
@@ -164,29 +153,24 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
     pub turn_commit: RuntimeTurnCommitStamp,
-    pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    /// Turn input the interrupted turn claimed at its terminal checkpoint and
-    /// withheld for a follow-on turn that its cancellation means never runs
-    /// (FIG-3531). The model never saw it, so it is never completed: in the
-    /// same transaction the backend releases each claim under its own fence,
-    /// and the cancellation's undelivered disposition then settles and
-    /// records the rows exactly as it does an unclaimed active-turn row.
-    /// Whole claims rather than completions: the release needs the claim
-    /// identity and the rows it covers. Meaningful only beside
-    /// `interrupted_turn_input_turn_id`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub undelivered_turn_input_claims: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
-    /// Queued work — process wakes — the interrupted turn claimed at its
-    /// terminal checkpoint and withheld for a follow-on turn that its
-    /// cancellation means never runs (FIG-3543, ADR 0101 §10). The model never
-    /// saw it, so it is never completed and never dropped: in the same
-    /// transaction the backend releases each claim, which leaves every row at
-    /// its queue position with its redelivery floor untouched, and records
-    /// each wake on the cancellation as deferred. Meaningful only beside
-    /// `interrupted_turn_input_turn_id`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub undelivered_queue_claims: Vec<crate::QueuedWorkClaim>,
+    /// What this commit does with the rows its root admitted (FIG-3927):
+    /// completions, releases and drops, each predicated on the row still
+    /// being bound to the root. Requires [`Self::drive_fence`].
+    ///
+    /// A cancelled turn hands the work it withheld from its terminal
+    /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
+    /// input is released or dropped by the undelivered disposition, withheld
+    /// wakes are always released, and the backend records each row on the
+    /// cancellation's outcome beside `interrupted_turn_input_turn_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress: Option<super::IngressSettlement>,
+    /// The session-command batches this commit applied (design §2.7). The
+    /// command lane takes no admission: each row must still exist and be
+    /// open, or the whole commit is refused
+    /// [`StoreError::SessionCommandWithdrawn`](super::StoreError::SessionCommandWithdrawn).
+    /// Requires [`Self::drive_fence`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_commands: Option<crate::QueuedWorkCompletion>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces

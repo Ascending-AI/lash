@@ -25,24 +25,23 @@ pub use effect::await_event_identity;
 pub use lash_core_execution::runtime::effect;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_execution::runtime::effect;
-mod claim_settlement;
 #[doc(hidden)]
 mod environment;
 mod error;
 mod observation_publisher;
+mod turn_settlement;
 use lash_core_execution::runtime::host;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::input_normalization as io;
 pub mod drive;
-pub(crate) mod drive_claim;
 mod durable_queue;
 mod lifecycle;
 pub mod process_start;
 pub mod process_terminal;
 pub mod recovery_lease;
-use claim_settlement::TurnClaimSettlement;
+use turn_settlement::TurnIngressSettlement;
 #[cfg(feature = "testing")]
 pub mod logical_turn;
 #[cfg(not(feature = "testing"))]
@@ -147,7 +146,7 @@ use crate::{
 };
 use crate::{Effect, TurnMachine};
 
-use drive_claim::*;
+use crate::store::DriveFence;
 use host::*;
 use session_manager::*;
 use turn_boundary::*;
@@ -194,7 +193,7 @@ pub use effect::TurnCancelWait;
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
+    CausalRef, CheckpointAdmittedSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
@@ -343,24 +342,23 @@ pub use turn_input_ingress::ingress_message_id;
 #[cfg(not(feature = "testing"))]
 pub use turn_input_ingress::ingress_message_id;
 pub use turn_input_ingress::{
-    PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt,
-    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData,
-    TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData, TurnInputIngress,
-    TurnInputSettlementClaim, TurnInputState, TurnInputStateKind,
+    AdmittedTurnInputs, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    QueuedCheckpointTurnInput, TurnInputAcceptanceReceipt, TurnInputAdmissionMode,
+    TurnInputApplication, TurnInputCheckpointBoundary, TurnInputCompletion,
+    TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
 };
 pub use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
-    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, PROCESS_WAKE_MERGE_KEY,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy, TurnWorkPayload,
+    process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 pub use usage::{
     LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
@@ -524,7 +522,6 @@ pub struct LashRuntime {
     /// replays (ADR 0069 §6). A superseded one cedes the turn at commit under
     /// any generation: if its rows were reclaimed while the turn was down,
     /// another driver answered them, so committing would answer them twice.
-    pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
     /// Set while an engine runs one admitted root as an attempt of its own
     /// ([`run_admitted_root`](crate::drive::run_admitted_root)): the engine retries
     /// that attempt on a live fault, under the same root (FIG-3897). The

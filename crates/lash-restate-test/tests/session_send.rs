@@ -309,7 +309,7 @@ async fn a_held_drive_admits_nothing_until_released() {
     assert!(
         pending.iter().any(|read| {
             read.input.input_id == held.receipt().input_id
-                && matches!(read.status, lash::PendingTurnInputReadStatus::Pending)
+                && matches!(read.status, lash::PendingTurnInputReadStatus::Open)
         }),
         "the held drive admitted nothing: {pending:?}"
     );

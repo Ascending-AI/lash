@@ -21,43 +21,55 @@ fn squeezed(sql: &str) -> String {
     sql.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The four claim-identity columns `ck_pending_turn_inputs_claim_identity_all_or_none`
-/// makes all-or-none, plus the generation every release zeroes with them.
-const CLAIM_RELEASE_ASSIGNMENTS: [&str; 5] = [
-    "claim_id = NULL",
-    "claim_owner_id = NULL",
-    "claim_owner_incarnation_id = NULL",
-    "claim_token = NULL",
-    "claim_session_lease_generation = 0",
-];
-
 #[test]
-fn every_release_statement_clears_the_whole_claim_identity() {
-    // `ck_pending_turn_inputs_claim_identity_all_or_none` refuses a row that
-    // carries some of the identity and not the rest, so a release that clears
-    // `claim_token` alone is a constraint failure at run time rather than a
-    // compile error here. Every statement in this family that lets go of a
-    // claim spells all five assignments; this is what holds the spelling
-    // together now that it is no longer one interpolated constant.
+fn every_release_statement_clears_the_whole_admission() {
+    // `ck_pending_turn_inputs_admission_all_or_none` and its batch twin refuse
+    // a row that names a root without the step that bound it, or the other
+    // way round, so a release that clears one column alone is a constraint
+    // failure at run time rather than a compile error here. Every statement
+    // in this family that lets go of an admission clears both.
     let mut releases = 0;
     for statement in statements() {
         let sql = squeezed(statement.neutral());
-        if !sql.contains("claim_token = NULL") {
+        let clears_root = sql.contains("admitted_root = NULL");
+        let clears_step = sql.contains("admitted_by = NULL");
+        if !clears_root && !clears_step {
             continue;
         }
         releases += 1;
-        for assignment in CLAIM_RELEASE_ASSIGNMENTS {
-            assert!(
-                sql.contains(assignment),
-                "`{}` releases a claim without `{assignment}`",
-                statement.name(),
-            );
-        }
+        assert!(
+            clears_root && clears_step,
+            "`{}` releases half an admission",
+            statement.name(),
+        );
     }
     assert!(
-        releases >= 4,
+        releases >= 5,
         "expected the family's release statements to be found, saw {releases}",
     );
+}
+
+#[test]
+fn every_admission_write_is_predicated_on_the_rows_binding() {
+    // A row is bound only while open, and settled or released only by the
+    // root that holds it (FIG-3927). The predicate is the write's backstop,
+    // so every statement that sets or clears a binding must carry one.
+    for statement in statements() {
+        let sql = squeezed(statement.neutral());
+        let writes_binding = sql.contains("SET") && sql.contains("admitted_root =");
+        let deletes_admitted = sql.starts_with("DELETE") && sql.contains("admitted_root");
+        if !(writes_binding || deletes_admitted) {
+            continue;
+        }
+        let where_clause = sql.rsplit_once("WHERE").map_or("", |(_, tail)| tail);
+        assert!(
+            where_clause.contains("admitted_root IS NULL")
+                || where_clause.contains("admitted_root = ?")
+                || where_clause.contains("nonterminal"),
+            "`{}` writes a binding without predicating the row's own",
+            statement.name(),
+        );
+    }
 }
 
 #[test]

@@ -1,8 +1,8 @@
 //! One verdict function per fencing decision.
 //!
-//! Every fencing decision lash makes — "is this lease still mine?", "is this
-//! row claimable by my generation?", "did the head move?" — has exactly one
-//! answer, and that answer lives here. A backend contributes only two things:
+//! Every fencing decision lash makes — "did the head move?", "is this wake
+//! delivery still mine?" — has exactly one answer, and that answer lives here
+//! (the admission verdicts live in [`admission_plan`](super::admission_plan)). A backend contributes only two things:
 //! the locked read that produces the facts, and the write that acts on the
 //! verdict. Neither backend decides.
 //!
@@ -25,7 +25,7 @@
 //!    never success. That is [`require_fenced_write_applied`].
 //!
 //! Where a predicate is the *only* guard — the PostgreSQL concurrent-first-commit
-//! upsert, `FOR UPDATE SKIP LOCKED` pops, the read side of the turn-input claim
+//! upsert, `FOR UPDATE SKIP LOCKED` pops, the read side of an admission scan
 //! whose predicate is also its `LIMIT` filter, the batch forms, and SQLite's
 //! `INDEXED BY` scans — it stays and is named as such at its call site.
 //!
@@ -62,18 +62,12 @@ pub const FENCED_WRITE_DISAGREEMENT_EVENT: &str = "fencing.backstop_disagreed_wi
 /// backstop predicate disagreed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FencedWrite {
-    /// Turn-input claim acquisition (`D2`).
-    TurnInputClaimAcquisition,
-    /// Turn-input claim settlement on commit (`D3`).
-    TurnInputClaimSettlement,
-    /// Unclaimed turn-input settlement on commit (`D3`).
-    UnclaimedTurnInputSettlement,
+    /// An admission binding a row to its root (FIG-3927).
+    IngressAdmission,
+    /// A root's commit settling or releasing a row it admitted (FIG-3927).
+    IngressSettlement,
     /// Session-head publication (`D4`).
     SessionHeadPublication,
-    /// Queued-work claim acquisition (`D5`).
-    QueuedWorkClaimAcquisition,
-    /// Queued-work claim settlement on commit (`D5`).
-    QueuedWorkClaimSettlement,
     /// Wake-delivery settlement out of the enqueuing claim (`D8`).
     WakeDeliverySettlement,
 }
@@ -82,12 +76,9 @@ impl FencedWrite {
     /// Stable label for diagnostics and tests.
     pub fn label(self) -> &'static str {
         match self {
-            Self::TurnInputClaimAcquisition => "turn_input_claim.acquire",
-            Self::TurnInputClaimSettlement => "turn_input_claim.settle",
-            Self::UnclaimedTurnInputSettlement => "turn_input_claim.settle_unclaimed",
+            Self::IngressAdmission => "ingress.admit",
+            Self::IngressSettlement => "ingress.settle",
             Self::SessionHeadPublication => "session_head.publish",
-            Self::QueuedWorkClaimAcquisition => "queued_work_claim.acquire",
-            Self::QueuedWorkClaimSettlement => "queued_work_claim.settle",
             Self::WakeDeliverySettlement => "wake_delivery.settle",
         }
     }
@@ -132,8 +123,8 @@ pub fn fenced_write_applied(
 ///
 /// A disagreement is never silent, never retried and never turned into
 /// success. It is also never turned into a *different* answer for the caller:
-/// the runtime already knows how to act on a lost lease or a superseded claim
-/// (stand down, abandon the claim), and routing that through a new generic
+/// the runtime already knows how to act on a stale fence or a refused
+/// settlement (stand down, commit nothing), and routing that through a new generic
 /// store error would change behaviour in the most safety-sensitive path in the
 /// repository for the sake of diagnosability. So `lost_fence` supplies exactly
 /// the domain refusal this site returned before the verdict layer existed, and
@@ -153,191 +144,6 @@ pub fn require_fenced_write_applied<E>(
     } else {
         Err(lost_fence())
     }
-}
-
-// ---------------------------------------------------------------------------
-// D2 / D5 — "is this work row claimable by my lease generation?"
-// ---------------------------------------------------------------------------
-
-/// The claim columns a locked work row carries.
-///
-/// `claim_session_lease_generation` is retained even on an unclaimed row, so it
-/// is only meaningful together with `claim_token`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct WorkRowClaimFacts<'a> {
-    pub claim_token: Option<&'a str>,
-    pub claim_session_lease_generation: u64,
-    pub claim_owner_incarnation_id: Option<&'a str>,
-}
-
-/// The one answer to "may my generation take this row?".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum WorkRowClaimability {
-    /// Unclaimed, or claimed under a superseded generation: take it.
-    Claimable,
-    /// Already claimed by this incarnation under the claiming drive epoch.
-    HeldByThisGeneration,
-}
-
-impl WorkRowClaimability {
-    pub fn is_claimable(self) -> bool {
-        matches!(self, Self::Claimable)
-    }
-}
-
-/// Shared spelling of the SQL predicate
-/// `claim_token IS NULL OR claim_session_lease_generation <> :generation`.
-fn generation_claimability(
-    facts: WorkRowClaimFacts<'_>,
-    claiming_generation: u64,
-    claiming_incarnation_id: &str,
-) -> WorkRowClaimability {
-    if facts.claim_token.is_none()
-        || facts.claim_session_lease_generation != claiming_generation
-        || facts.claim_owner_incarnation_id != Some(claiming_incarnation_id)
-    {
-        WorkRowClaimability::Claimable
-    } else {
-        WorkRowClaimability::HeldByThisGeneration
-    }
-}
-
-/// The one verdict for "is this pending turn input claimable by my generation?"
-/// (`D2`).
-///
-/// The backend applies this to each locked candidate row before its conditional
-/// `UPDATE`. The *read*-side copy of this predicate cannot move: it is also the
-/// `ORDER BY … LIMIT` filter, so dropping it would select the wrong rows.
-pub fn turn_input_claimability(
-    facts: WorkRowClaimFacts<'_>,
-    claiming_generation: u64,
-    claiming_incarnation_id: &str,
-) -> WorkRowClaimability {
-    generation_claimability(facts, claiming_generation, claiming_incarnation_id)
-}
-
-/// The one verdict for "is this queued-work batch claimable by my generation?"
-/// (`D5`).
-///
-/// Written here for the turn-ingress family lane, which converts the
-/// queued-work call sites.
-pub fn queued_work_batch_claimability(
-    facts: WorkRowClaimFacts<'_>,
-    claiming_generation: u64,
-    claiming_incarnation_id: &str,
-) -> WorkRowClaimability {
-    generation_claimability(facts, claiming_generation, claiming_incarnation_id)
-}
-
-// ---------------------------------------------------------------------------
-// D3 — "is this turn-input claim still mine?"
-// ---------------------------------------------------------------------------
-
-/// The settlement columns a locked pending-turn-input row carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TurnInputSettlementFacts<'a> {
-    pub claim_id: Option<&'a str>,
-    pub claim_token: Option<&'a str>,
-    pub claim_session_lease_generation: u64,
-    pub state: &'a str,
-}
-
-/// The one verdict for turn-input settlement authority (`D3`).
-///
-/// One predicate, two regimes (ADR 0069 §5): a claimed settlement requires the
-/// row to still carry this claim's id and lease token; an unclaimed settlement
-/// requires the row to still be unclaimed and not already terminal. The claim
-/// fields only *strengthen* the predicate, so one verdict serves both.
-pub fn require_settleable_turn_input(
-    completed: &crate::TurnInputCompletion,
-    input_id: &crate::InputId,
-    observed: Option<TurnInputSettlementFacts<'_>>,
-) -> Result<(), StoreError> {
-    let owns_row = match completed.claim.as_ref() {
-        Some(claim) => observed.is_some_and(|row| {
-            row.claim_id == Some(claim.claim_id.as_str())
-                && row.claim_token == Some(claim.lease_token.as_str())
-        }),
-        None => observed.is_some_and(|row| {
-            row.claim_id.is_none() && unclaimed_turn_input_is_settleable(row.state)
-        }),
-    };
-    if owns_row {
-        return Ok(());
-    }
-    let superseding_claim_id = observed
-        .and_then(|row| row.claim_id)
-        .map(|claim_id| claim_id.to_string().into_boxed_str());
-    Err(match completed.claim.as_ref() {
-        Some(claim) => StoreError::TurnInputClaimSuperseded {
-            session_id: completed.session_id.clone(),
-            claim_id: claim.claim_id.clone(),
-            row_id: Some(input_id.as_str().to_string().into_boxed_str()),
-            superseding_session_lease_generation: observed.and_then(|row| {
-                row.claim_id
-                    .map(|_| Box::new(row.claim_session_lease_generation))
-            }),
-            superseding_claim_id,
-        },
-        None => StoreError::UnclaimedTurnInputSettlementSuperseded {
-            session_id: completed.session_id.clone(),
-            input_id: input_id.clone(),
-            observed_state: observed.map(|row| row.state.to_string().into_boxed_str()),
-            superseding_claim_id,
-        },
-    })
-}
-
-/// Whether an unclaimed pending-turn-input row is still open for settlement.
-///
-/// The terminal set comes from the state enum, so it cannot drift from the SQL
-/// backstop spelled by
-/// [`terminal_turn_input_states_sql`](crate::store_backend_support::terminal_turn_input_states_sql).
-pub fn unclaimed_turn_input_is_settleable(state: &str) -> bool {
-    !crate::TurnInputStateKind::from_wire_str(state)
-        .is_some_and(crate::TurnInputStateKind::is_terminal)
-}
-
-// ---------------------------------------------------------------------------
-// D5 — "is this queued-work claim still mine?"
-// ---------------------------------------------------------------------------
-
-/// The settlement columns a locked queued-work batch row carries.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct QueuedWorkSettlementFacts<'a> {
-    pub claim_id: Option<&'a str>,
-    pub claim_token: Option<&'a str>,
-    pub claim_session_lease_generation: u64,
-}
-
-/// The one verdict for queued-work settlement authority (`D5`).
-///
-/// Written here for the turn-ingress family lane, which converts the
-/// queued-work call sites.
-pub fn require_settleable_queued_work(
-    completed: &crate::QueuedWorkCompletion,
-    batch_id: &str,
-    observed: Option<QueuedWorkSettlementFacts<'_>>,
-) -> Result<(), StoreError> {
-    let owns_row = observed.is_some_and(|row| {
-        row.claim_id == Some(completed.claim_id.as_str())
-            && row.claim_token == Some(completed.lease_token.as_str())
-    });
-    if owns_row {
-        return Ok(());
-    }
-    Err(StoreError::QueuedWorkClaimSuperseded {
-        session_id: completed.session_id.clone(),
-        claim_id: completed.claim_id.clone(),
-        row_id: Some(batch_id.to_string().into_boxed_str()),
-        superseding_claim_id: observed
-            .and_then(|row| row.claim_id)
-            .map(|claim_id| claim_id.to_string().into_boxed_str()),
-        superseding_session_lease_generation: observed.and_then(|row| {
-            row.claim_id
-                .map(|_| Box::new(row.claim_session_lease_generation))
-        }),
-    })
 }
 
 // ---------------------------------------------------------------------------

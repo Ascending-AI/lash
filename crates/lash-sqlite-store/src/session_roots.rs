@@ -11,7 +11,7 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
     RootTerminalWriteDecision, UnfinishedRoot, close_admission, decide_root_terminal_write,
     root_binding_conflict, scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
@@ -101,6 +101,11 @@ pub(crate) fn root_terminal_conn(
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RootAlreadyTerminal`].
+///
+/// Every way a root ends goes through here, so here is where it lets go of
+/// the rows it still holds (FIG-3927): after whatever settlement its caller
+/// wrote, every row still bound to the root is released open at its own
+/// position. No row stays bound to a root that has terminal evidence.
 pub(crate) fn write_root_terminal_conn(
     tx: &Connection,
     terminal: &RootTerminal,
@@ -109,7 +114,7 @@ pub(crate) fn write_root_terminal_conn(
     if decide_root_terminal_write(stored.as_ref(), terminal)?
         == RootTerminalWriteDecision::AlreadyWritten
     {
-        return Ok(());
+        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root);
     }
     let sql = session_roots_sql();
     crate::conn::cached_execute(
@@ -119,22 +124,22 @@ pub(crate) fn write_root_terminal_conn(
     )
     .map_err(sqlite_error)?;
     let columns = terminal.to_stored()?;
-    let written = tx
-        .execute(
-            sql.roots.write_terminal.sql(),
-            params![
-                terminal.session_id.as_str(),
-                terminal.root.as_str(),
-                columns.kind,
-                columns.cause_json,
-                columns
-                    .head_revision
-                    .map(|revision| sql_i64("terminal head revision", revision))
-                    .transpose()?,
-                sql_i64("terminal instant", columns.at_ms)?,
-            ],
-        )
-        .map_err(sqlite_error)?;
+    let written = crate::conn::cached_execute(
+        tx,
+        sql.roots.write_terminal.sql(),
+        params![
+            terminal.session_id.as_str(),
+            terminal.root.as_str(),
+            columns.kind,
+            columns.cause_json,
+            columns
+                .head_revision
+                .map(|revision| sql_i64("terminal head revision", revision))
+                .transpose()?,
+            sql_i64("terminal instant", columns.at_ms)?,
+        ],
+    )
+    .map_err(sqlite_error)?;
     if written != 1 {
         return Err(StoreError::Backend(format!(
             "root `{}` of session `{}` gained terminal evidence inside its own write",
@@ -152,6 +157,138 @@ pub(crate) fn write_root_terminal_conn(
         &scope_close_obligation_id(&terminal.session_id, &terminal.root),
         columns.at_ms,
     )?;
+    release_root_rows_conn(tx, &terminal.session_id, &terminal.root)
+}
+
+/// Release every row of either admission table `root` still holds, in the
+/// caller's transaction: active-turn input is re-deferred to the next turn
+/// (FIG-1573), and each row owes its session a drive again.
+///
+/// Open input addressed to a turn the root ends ([`RootEndedTurns`]: its own
+/// physical turns and the turns its admission's members were accepted
+/// under) names a turn that will never run, so the root's disposition
+/// applies to it here (FIG-3946): the undelivered disposition of the root's
+/// cancellation request if it has one, else `Defer`. `Defer` re-opens the
+/// row as next-turn input at its own position; `Drop` withdraws it. Either
+/// is recorded on the request's outcome. The terminal write is where a
+/// root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
+/// to, or addressed to a turn of, a root with terminal evidence.
+///
+/// An input the root's admission took as its own (`session_root_inputs`)
+/// that is still open is unbound from the root too, so a later root can
+/// admit it: a terminal root answers nothing more.
+fn release_root_rows_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<(), StoreError> {
+    let verbs = &session_roots_sql().verbs;
+    let own = {
+        let mut stmt = tx
+            .prepare_cached(verbs.bound_inputs.sql())
+            .map_err(sqlite_error)?;
+        stmt.query_map(params![session_id.as_str(), root.as_str()], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?
+    };
+    for input in own {
+        crate::conn::cached_execute(tx, verbs.unbind.sql(), params![session_id.as_str(), input])
+            .map_err(sqlite_error)?;
+    }
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let deferred = lash_core_execution::TurnInputState::DeferredNextTurn;
+    let deferred_ingress = crate::encode_json(&deferred.ingress())?;
+    crate::conn::cached_execute(
+        tx,
+        sql.pending_inputs.release_root.sql(),
+        params![
+            session_id.as_str(),
+            root.as_str(),
+            deferred.as_str(),
+            deferred_ingress.as_str(),
+        ],
+    )
+    .map_err(sqlite_error)?;
+    crate::conn::cached_execute(
+        tx,
+        sql.queued_batches.release_root.sql(),
+        params![session_id.as_str(), root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    let ended = RootEndedTurns::new(root, root_admission_conn(tx, session_id, root)?.as_ref());
+    let open_rows = {
+        let mut stmt = tx
+            .prepare_cached(sql.pending_inputs_sqlite.select_pending_active.sql())
+            .map_err(sqlite_error)?;
+        let rows = stmt
+            .query_map(
+                params![session_id.as_str()],
+                crate::pending_turn_inputs::pending_turn_input_row_from_sql,
+            )
+            .map_err(sqlite_error)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
+    };
+    let mut addressed = Vec::new();
+    for row in open_rows {
+        let ingress = crate::pending_turn_inputs::decode_turn_input_ingress(row.ingress_json)?;
+        if ingress
+            .active_turn_id()
+            .is_some_and(|turn| ended.contains(turn))
+        {
+            addressed.push((row.input_id, row.input_json));
+        }
+    }
+    if addressed.is_empty() {
+        return Ok(());
+    }
+    let request =
+        crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session_id, root)?;
+    let disposition = request.as_ref().map_or(
+        lash_core_execution::TurnCancelDisposition::Defer,
+        |record| record.request.undelivered,
+    );
+    for (input_id, input_json) in addressed {
+        match disposition {
+            lash_core_execution::TurnCancelDisposition::Defer => crate::conn::cached_execute(
+                tx,
+                sql.pending_inputs.defer_to_next_turn.sql(),
+                params![
+                    session_id.as_str(),
+                    input_id.as_str(),
+                    deferred.as_str(),
+                    deferred_ingress.as_str(),
+                ],
+            ),
+            lash_core_execution::TurnCancelDisposition::Drop => crate::conn::cached_execute(
+                tx,
+                sql.pending_inputs.cancel.sql(),
+                params![
+                    session_id.as_str(),
+                    input_id.as_str(),
+                    lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                ],
+            ),
+        }
+        .map_err(sqlite_error)?;
+        if request.is_some() {
+            crate::persistence::turn_cancel::append_turn_cancel_outcome_conn(
+                tx,
+                session_id,
+                root,
+                lash_core_execution::TurnCancelAffectedInput {
+                    input_id: input_id.into(),
+                    payload: crate::persistence::turn_cancel::decode_stored_json(
+                        &input_json,
+                        "turn input",
+                    )?,
+                    disposition,
+                },
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -180,24 +317,10 @@ pub(crate) fn end_lost_root_conn(
     if !exists {
         return Ok(None);
     }
-    let request: Option<String> = tx
-        .query_row(
-            crate::turn_ingress::turn_ingress_sql()
-                .cancel_requests_sqlite
-                .select_record
-                .sql(),
-            params![session.as_str(), root.as_str()],
-            |row| row.get(0),
-        )
-        .optional()
-        .map_err(sqlite_error)?;
-    let cancelled_by = request
-        .map(|json| {
-            serde_json::from_str::<lash_core_execution::TurnCancelRequestRecord>(&json)
-                .map(|record| record.request.request_id)
-                .map_err(|error| StoreError::Backend(format!("turn cancellation: {error}")))
-        })
-        .transpose()?;
+    let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, root)?;
+    let cancelled_by = record
+        .as_ref()
+        .map(|record| record.request.request_id.clone());
     let cause = RootTerminalCause::SubstrateLost {
         cancelled_by: cancelled_by.clone(),
     };
@@ -218,8 +341,9 @@ pub(crate) fn end_lost_root_conn(
         params![session.as_str()],
     )
     .map_err(sqlite_error)?;
-    write_root_terminal_conn(tx, &terminal)?;
 
+    // The root's own input is dropped and its batches removed first; the
+    // terminal write then releases whatever else the root still held.
     let sql = &session_roots_sql().verbs;
     let mut inputs = {
         let mut stmt = tx
@@ -249,10 +373,10 @@ pub(crate) fn end_lost_root_conn(
         crate::conn::cached_execute(tx, sql.delete_batch.sql(), params![session.as_str(), batch])
             .map_err(sqlite_error)?;
     }
-    for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
-        crate::conn::cached_execute(tx, statement, params![session.as_str()])
-            .map_err(sqlite_error)?;
-    }
+    // The terminal write applies the root's cancel request's `undelivered`
+    // disposition to open input addressed to a turn the root ends
+    // (FIG-3927 §2.4, FIG-3946).
+    write_root_terminal_conn(tx, &terminal)?;
     Ok(Some(terminal))
 }
 
@@ -284,13 +408,13 @@ pub(crate) fn unfinished_root_conn(
     .transpose()
 }
 
-/// The queued-work batches `root`'s recorded admission took, read on `conn`:
-/// none for a root with no admission or an input-headed one.
-pub(crate) fn admitted_batches_conn(
+/// `root`'s recorded admission, read on `conn`: `None` for a root with no
+/// admission.
+fn root_admission_conn(
     conn: &Connection,
     session_id: &SessionId,
     root: &TurnId,
-) -> Result<Vec<String>, StoreError> {
+) -> Result<Option<RootAdmission>, StoreError> {
     let json: Option<Option<String>> = conn
         .query_row(
             session_roots_sql().roots.select_admission.sql(),
@@ -299,13 +423,30 @@ pub(crate) fn admitted_batches_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some(Some(json)) = json else {
+    json.flatten()
+        .map(|json| decode_root_admission(&json))
+        .transpose()
+}
+
+/// The queued-work batches `root`'s recorded admission took, read on `conn`:
+/// none for a root with no admission or an input-headed one.
+pub(crate) fn admitted_batches_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Result<Vec<String>, StoreError> {
+    let Some(admission) = root_admission_conn(conn, session_id, root)? else {
         return Ok(Vec::new());
     };
-    Ok(decode_root_admission(&json)?
+    Ok(admission
         .queued
         .iter()
-        .flat_map(|claim| claim.batches.iter().map(|batch| batch.batch_id.to_string()))
+        .flat_map(|queued| {
+            queued
+                .batches
+                .iter()
+                .map(|batch| batch.batch_id.to_string())
+        })
         .collect())
 }
 
@@ -457,7 +598,7 @@ pub(crate) fn open_verbs_by_session_conn(
     session_id: &SessionId,
 ) -> Result<Vec<ControlIntent>, StoreError> {
     let mut statement = conn
-        .prepare(
+        .prepare_cached(
             session_roots_sql()
                 .intents
                 .select_open_verbs_by_session
@@ -533,17 +674,17 @@ pub(crate) fn write_intent_state_conn(
 ) -> Result<bool, StoreError> {
     let (state_code, state_json) = stored_intent_state(&next.state)?;
     let (_, prior_json) = stored_intent_state(&prior.state)?;
-    let changed = tx
-        .execute(
-            session_roots_sql().intents.update_state.sql(),
-            params![
-                sql_i64("control intent id", next.id.sequence())?,
-                state_code,
-                state_json,
-                prior_json,
-            ],
-        )
-        .map_err(sqlite_error)?;
+    let changed = crate::conn::cached_execute(
+        tx,
+        session_roots_sql().intents.update_state.sql(),
+        params![
+            sql_i64("control intent id", next.id.sequence())?,
+            state_code,
+            state_json,
+            prior_json,
+        ],
+    )
+    .map_err(sqlite_error)?;
     if changed == 1 {
         // A session close's acknowledgement owes its physical delete
         // (ADR 0109 §4), armed in this transaction.
@@ -582,18 +723,18 @@ pub(crate) fn settle_intent_claimed_conn(
     };
     let (state_code, state_json) = stored_intent_state(&state)?;
     let (_, prior_json) = stored_intent_state(&stored.state)?;
-    let changed = tx
-        .execute(
-            sql.intents.update_state_claimed.sql(),
-            params![
-                intent_id,
-                state_code,
-                state_json,
-                prior_json,
-                claim.as_str()
-            ],
-        )
-        .map_err(sqlite_error)?;
+    let changed = crate::conn::cached_execute(
+        tx,
+        sql.intents.update_state_claimed.sql(),
+        params![
+            intent_id,
+            state_code,
+            state_json,
+            prior_json,
+            claim.as_str()
+        ],
+    )
+    .map_err(sqlite_error)?;
     if changed != 1 {
         // The write transaction is exclusive: nothing else can move the row
         // between the read and the write.
@@ -643,7 +784,7 @@ pub(crate) fn begin_session_close_conn(
     let mut roots = std::collections::BTreeSet::new();
     {
         let mut statement = tx
-            .prepare(sql.roots.select_open_roots.sql())
+            .prepare_cached(sql.roots.select_open_roots.sql())
             .map_err(sqlite_error)?;
         let open = statement
             .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
@@ -721,16 +862,16 @@ pub(crate) fn begin_session_close_conn(
             return Err(StoreError::Contended);
         }
     }
-    let closed = tx
-        .execute(
-            crate::session_sql::session_sql().meta.begin_close.sql(),
-            params![
-                session_id.as_str(),
-                sql_i64("control intent id", intent.id.sequence())?,
-                close_admission(intent.id).as_str(),
-            ],
-        )
-        .map_err(sqlite_error)?;
+    let closed = crate::conn::cached_execute(
+        tx,
+        crate::session_sql::session_sql().meta.begin_close.sql(),
+        params![
+            session_id.as_str(),
+            sql_i64("control intent id", intent.id.sequence())?,
+            close_admission(intent.id).as_str(),
+        ],
+    )
+    .map_err(sqlite_error)?;
     if closed != 1 {
         return Err(StoreError::Contended);
     }
@@ -782,9 +923,18 @@ impl RootStore for crate::Store {
         &self,
         request: &lash_core_execution::store::AdmitRootRequest,
     ) -> Result<Option<RootAdmission>, StoreError> {
-        self.bind_session(&request.session_id)?;
+        self.bind_session(request.session_id())?;
         crate::persistence::admit_root_sqlite(self, request).await
     }
+
+    async fn admit_at_checkpoint(
+        &self,
+        request: &lash_core_execution::store::CheckpointAdmissionRequest,
+    ) -> Result<lash_core_execution::store::CheckpointAdmission, StoreError> {
+        self.bind_session(request.session_id())?;
+        crate::persistence::admit_at_checkpoint_sqlite(self, request).await
+    }
+
     async fn root_terminal(
         &self,
         session_id: &SessionId,
@@ -803,8 +953,8 @@ impl RootStore for crate::Store {
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        // Queued-run members are bound when S8 folds queued runs into the
-        // logical-root record; until then a claim's binding is the answer.
+        // An input's root is its binding: the admission that took it, or
+        // the fork that rebound it.
         self.root_binding(session_id, input).await
     }
 

@@ -8,7 +8,7 @@ use crate::backend_fixture::TestBackend;
 mod law;
 
 #[tokio::test]
-async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() {
+async fn sqlite_a_partial_admission_rolls_back_through_both_entry_points() {
     for entry in law::ENTRIES {
         let backend = TestBackend::open(SUBSTRATE).await;
         let store = backend
@@ -27,31 +27,30 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
         let case = law::prepare(store as Arc<dyn RuntimePersistence>, entry).await;
         let conn = backend.raw(SqliteDatabase::DurableCore);
         let second = case.ids[1].replace('\'', "''");
-        conn.execute_batch(&format!("CREATE TRIGGER lose_second_claim BEFORE UPDATE OF claim_token ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
+        conn.execute_batch(&format!("CREATE TRIGGER lose_second_bind BEFORE UPDATE OF admitted_root ON queued_work_batches WHEN OLD.batch_id = '{second}' BEGIN SELECT RAISE(IGNORE); END;")).unwrap();
         assert!(
-            case.claim().await.is_none(),
-            "{entry:?}: a partial claim must return no rows"
+            case.admit().await.is_err(),
+            "{entry:?}: a partial admission is refused"
         );
-        let owned: i64 = conn
+        let bound: i64 = conn
             .query_row(
-                "SELECT count(*) FROM queued_work_batches WHERE claim_token IS NOT NULL",
+                "SELECT count(*) FROM queued_work_batches WHERE admitted_root IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(owned, 0, "{entry:?}: the first row must roll back");
-        conn.execute_batch("DROP TRIGGER lose_second_claim")
-            .unwrap();
+        assert_eq!(bound, 0, "{entry:?}: the first row's bind must roll back");
+        conn.execute_batch("DROP TRIGGER lose_second_bind").unwrap();
         assert_eq!(
-            case.claim().await.unwrap().batches.len(),
+            case.admit().await.unwrap().len(),
             2,
-            "{entry:?}: both rows remain claimable"
+            "{entry:?}: both rows remain admissible"
         );
     }
 }
 
 #[tokio::test]
-async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generation() {
+async fn sqlite_an_admission_holds_its_rows_across_a_displaced_fence() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let store = backend
         .session_store_factory()
@@ -66,7 +65,7 @@ async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generati
         })
         .await
         .unwrap();
-    law::claimability_verdict_holds_over_a_displaced_generation(
+    law::an_admission_holds_its_rows_across_a_displaced_fence(
         store as Arc<dyn RuntimePersistence>,
         "sqlite",
     )

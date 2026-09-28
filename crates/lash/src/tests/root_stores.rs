@@ -27,16 +27,17 @@ impl lash_core::store::RootStore for SnapshotStore {
         &self,
         request: &lash_core::store::AdmitRootRequest,
     ) -> std::result::Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
-        let key = (request.session_id.clone(), request.root.clone());
+        let session_id = request.session_id();
+        let key = (session_id.clone(), request.root.clone());
         let recorded = self.root_claim_results.lock_recover().get(&key).cloned();
         if let Some(admission) = recorded {
             return Ok(Some(admission));
         }
         if let Some(unfinished) =
-            lash_core::store::RootStore::unfinished_root(self, &request.session_id).await?
+            lash_core::store::RootStore::unfinished_root(self, session_id).await?
         {
             return Err(lash_core::StoreError::UnfinishedRootConflict {
-                session_id: request.session_id.clone(),
+                session_id: session_id.clone(),
                 root: unfinished.root,
             });
         }
@@ -44,34 +45,49 @@ impl lash_core::store::RootStore for SnapshotStore {
         let lash_core::store::AdmittedHead::Input(head) = &request.head else {
             return Ok(None);
         };
-        let Some(claim) = lash_core::TurnInputStore::claim_next_turn_inputs(
-            self,
-            &request.session_id,
-            &request.lease,
-            &request.owner,
-            request.max_inputs,
-        )
-        .await?
-        else {
-            return Ok(None);
+        // The open next-turn prefix, one run spec wide, bound to the root.
+        let inputs = {
+            let pending = self.pending_turn_inputs.lock_recover();
+            let mut admitted = self.admitted_inputs.lock_recover();
+            let open = pending
+                .iter()
+                .filter(|input| {
+                    input.session_id == *session_id
+                        && input.state == lash_core::TurnInputState::DeferredNextTurn
+                        && !admitted.contains_key(&input.input_id)
+                })
+                .collect::<Vec<_>>();
+            let spec = open.first().map(|input| input.run_spec.clone());
+            let inputs = open
+                .into_iter()
+                .take_while(|input| Some(&input.run_spec) == spec.as_ref())
+                .take(request.max_inputs)
+                .cloned()
+                .collect::<Vec<_>>();
+            if !inputs.iter().any(|input| input.input_id == *head) {
+                return Ok(None);
+            }
+            for input in &inputs {
+                admitted.insert(input.input_id.clone(), request.root.clone());
+            }
+            inputs
         };
-        if !claim.inputs.iter().any(|input| input.input_id == *head) {
-            lash_core::TurnInputStore::abandon_turn_input_claim(self, &claim).await?;
-            return Ok(None);
-        }
         let mut base = request.base.clone();
         base.generation = lash_core::SessionCommitStore::read_session_state_version(self).await?;
-        lash_core::SessionCommitStore::retain_admission_base(self, &request.lease, &base).await?;
-        let input_ids = claim
-            .inputs
+        lash_core::SessionCommitStore::retain_admission_base(self, &request.fence, &base).await?;
+        let input_ids = inputs
             .iter()
             .map(|input| input.input_id.clone())
             .collect::<Vec<_>>();
-        self.roots
-            .bind(&request.session_id, &request.root, &input_ids)?;
+        self.roots.bind(session_id, &request.root, &input_ids)?;
         let admission = lash_core::store::RootAdmission {
             head: request.head.clone(),
-            inputs: Some(Box::new(claim)),
+            inputs: Some(Box::new(lash_core::runtime::AdmittedTurnInputs {
+                session_id: session_id.clone(),
+                mode: lash_core::TurnInputAdmissionMode::NextTurn,
+                inputs,
+                applications: Vec::new(),
+            })),
             queued: None,
             base,
             turn_index: request.turn_index,
@@ -81,6 +97,15 @@ impl lash_core::store::RootStore for SnapshotStore {
             .lock_recover()
             .insert(key, admission.clone());
         Ok(Some(admission))
+    }
+
+    // Checkpoints probe for addressed input and ready work on every turn;
+    // this double's tests address none, so every checkpoint admits nothing.
+    async fn admit_at_checkpoint(
+        &self,
+        _request: &lash_core::store::CheckpointAdmissionRequest,
+    ) -> std::result::Result<lash_core::store::CheckpointAdmission, lash_core::StoreError> {
+        Ok(lash_core::store::CheckpointAdmission::default())
     }
 
     async fn root_terminal(
@@ -164,6 +189,6 @@ impl lash_core::store::RootStore for BoundSessionStore {
         _root: &lash_core::TurnId,
         _inputs: &[lash_core::InputId],
     ) -> std::result::Result<(), lash_core::StoreError> {
-        unreachable!("test should fail before a root claims input on the reused child store")
+        unreachable!("test should fail before a root admits input on the reused child store")
     }
 }

@@ -3,8 +3,8 @@
 //! rows cannot split request metadata from the payloads it reports.
 
 use lash_core_execution::{
-    PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
-    TurnInputCheckpointBoundary, TurnInputIngress, TurnInputStore,
+    IngressStore, PendingTurnInputDraft, StoreMaintenance, TurnCancelDisposition, TurnInput,
+    TurnInputCheckpointBoundary, TurnInputIngress,
     facade_support::{TurnAddress, TurnCancelRequest},
 };
 use lash_postgres_store::PostgresStorage;

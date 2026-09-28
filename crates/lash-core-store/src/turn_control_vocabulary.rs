@@ -211,7 +211,7 @@ impl TurnCancelClosureAuthorization {
         terminal_key: AwaitEventKey,
         proposed_base: TurnCancelClosureProposal,
         observed_intent: TurnCancelIntentSnapshot,
-        fence: &crate::ClaimAuthority,
+        fence: &crate::store::DriveFence,
     ) -> Result<Self, RuntimeError> {
         address.validate()?;
         admitted_scope.validate()?;
@@ -222,7 +222,7 @@ impl TurnCancelClosureAuthorization {
                 "turn cancellation closure requires a non-empty binding id",
             ));
         }
-        if fence.session_id != address.session_id {
+        if *fence.session() != address.session_id {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::SessionExecutionLeaseLost,
                 "turn cancellation closure fence belongs to another session",
@@ -257,7 +257,7 @@ impl TurnCancelClosureAuthorization {
             terminal_key,
             proposed_base,
             observed_intent,
-            authorizing_fencing_token: fence.fencing_token,
+            authorizing_fencing_token: fence.epoch(),
         })
     }
 

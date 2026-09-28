@@ -48,22 +48,22 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn admit_session_state(
         &self,
-        lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        require_drive_fence_tx(&mut tx, fence).await?;
         let version =
-            read_session_state_version_tx(&mut tx, &lease.session_id, true, self.fleet_format)
+            read_session_state_version_tx(&mut tx, fence.session(), true, self.fleet_format)
                 .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::SessionStateAdmission {
-            session_id: lease.session_id.clone(),
+            session_id: fence.session().clone(),
             version,
-            lease_fencing_token: lease.fencing_token,
+            drive_epoch: fence.epoch(),
         })
     }
 
@@ -84,7 +84,7 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn retain_admission_base(
         &self,
-        lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         base: &lash_core_execution::store::SessionHeadRef,
     ) -> Result<(), StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -92,9 +92,9 @@ impl SessionCommitStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        require_drive_fence_tx(&mut tx, fence).await?;
         sqlx::query(session_sql().meta.retain_admission_base.sql())
-            .bind(lease.session_id.as_str())
+            .bind(fence.session().as_str())
             .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
             .execute(&mut *tx)
             .await
@@ -105,7 +105,7 @@ impl SessionCommitStore for PostgresSessionStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         follow_on_turn_id: &lash_core_execution::TurnId,
     ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -113,18 +113,19 @@ impl SessionCommitStore for PostgresSessionStore {
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        require_drive_fence_tx(&mut tx, fence).await?;
+        let session_id = fence.session();
         let not_pending = || StoreError::FollowOnNotPending {
-            session_id: lease.session_id.clone(),
+            session_id: session_id.clone(),
             follow_on_turn_id: follow_on_turn_id.clone(),
         };
-        let pending = super::claim_support::pending_follow_on_tx(&mut tx, &lease.session_id, true)
+        let pending = pending_follow_on_tx(&mut tx, session_id, true)
             .await?
             .filter(|pending| pending.is_turn(follow_on_turn_id))
             .ok_or_else(not_pending)?;
         let raised = pending.raised()?;
         let updated = sqlx::query(session_sql().head.raise_pending_follow_on.sql())
-            .bind(lease.session_id.as_str())
+            .bind(session_id.as_str())
             .bind(
                 lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
                     &raised,
@@ -299,15 +300,10 @@ impl SessionCommitStore for PostgresSessionStore {
         // alone cannot serialize create-versus-delete. This session-keyed lock
         // is the common authority for every history commit and deletion.
         ensure_session_not_deleted_tx(&mut tx, &commit.session_id).await?;
-        if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
-            ensure_session_execution_lease_tx(&mut tx, &commit.session_id, fence).await?;
-        }
         // A root's commit is fenced by the admission its root was sealed
         // under: a successor's seal refuses it before anything is read or
         // written (ADR 0105 §2).
-        if let Some(fence) = commit.drive_fence.as_ref() {
-            super::drive_epoch::require_fence_tx(&mut tx, &commit.session_id, fence).await?;
-        }
+        super::drive_epoch::require_commit_fences_tx(&mut tx, commit).await?;
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -656,7 +652,7 @@ impl SessionCommitStore for PostgresSessionStore {
         // The head row is locked above, so the fact read here is the one this
         // commit publishes over (ADR 0101 §3).
         let existing_pending_follow_on =
-            super::claim_support::pending_follow_on_tx(&mut tx, &commit.session_id, true).await?;
+            pending_follow_on_tx(&mut tx, &commit.session_id, true).await?;
         let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
             published_leaf,
@@ -669,18 +665,6 @@ impl SessionCommitStore for PostgresSessionStore {
             plan.actual_head_revision(),
             plan.next_head_revision(),
         )?;
-        // Settlement authority is decided here, under `FOR UPDATE` row
-        // locks, and returns as shared plans; the plans' ordered writes
-        // execute below, at the same point in the commit the hand-written
-        // bodies ran (FIG-1065).
-        let mut queued_work_plans = Vec::with_capacity(commit.completed_queue_claims.len());
-        for completed in &commit.completed_queue_claims {
-            queued_work_plans.push(plan_queued_work_settlement_tx(&mut tx, completed).await?);
-        }
-        let mut turn_input_plans = Vec::with_capacity(commit.completed_turn_input_claims.len());
-        for completed in &commit.completed_turn_input_claims {
-            turn_input_plans.push(plan_turn_input_settlement_tx(&mut tx, completed).await?);
-        }
         for entry in &commit.usage_deltas {
             let entry_ordinal = i64::try_from(entry.identity.entry_ordinal).map_err(|_| {
                 StoreError::Backend(
@@ -807,127 +791,10 @@ impl SessionCommitStore for PostgresSessionStore {
         {
             retire_unreachable_ancestry_tx(&mut tx, old_leaf_node_id).await?;
         }
-        complete_queued_work_claims_tx(&mut tx, &queued_work_plans).await?;
-        complete_turn_input_claims_tx(&mut tx, &turn_input_plans).await?;
-        let mut turn_cancel_input_outcome = lash_core_execution::TurnCancelInputOutcome::default();
-        if let Some(turn_id) = commit.interrupted_turn_input_turn_id.as_ref() {
-            let cancellation = commit.interrupted_turn_input_cancellation.as_ref();
-            let disposition = cancellation.map_or(
-                lash_core_execution::TurnCancelDisposition::Defer,
-                |evidence| evidence.undelivered,
-            );
-            if let Some(evidence) = commit
-                .turn_cancel_closure_settlement
-                .as_ref()
-                .and_then(lash_core_execution::TurnCancelClosureSettlement::base_cancellation)
-            {
-                let observed = commit
-                    .interrupted_turn_cancel_intent
-                    .as_ref()
-                    .ok_or_else(|| {
-                        StoreError::Backend(
-                            "interrupted turn commit omitted cancellation intent predicate"
-                                .to_string(),
-                        )
-                    })?;
-                if !reconcile_turn_cancel_winner_tx(
-                    &mut tx,
-                    &commit.session_id,
-                    turn_id,
-                    observed,
-                    evidence,
-                )
-                .await?
-                {
-                    return Err(StoreError::TurnCancelIntentChanged {
-                        session_id: commit.session_id.clone(),
-                        turn_id: turn_id.clone(),
-                    });
-                }
-            }
-            // Withheld claims are released first, under their own fence, so
-            // the disposition below settles them exactly as it settles an
-            // unclaimed row (FIG-3531).
-            release_undelivered_turn_input_claims_tx(
-                &mut tx,
-                &commit.undelivered_turn_input_claims,
-            )
-            .await?;
-            let sql = crate::turn_ingress::turn_ingress_sql();
-            let rows = sqlx::query(sql.pending_inputs_postgres.select_pending_active.sql())
-                .bind(commit.session_id.as_str())
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            let mut inputs = Vec::new();
-            for row in rows {
-                let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-                if input
-                    .state
-                    .active_turn_id()
-                    .is_some_and(|active| active == turn_id)
-                {
-                    inputs.push((input.input_id, input.input));
-                }
-            }
-            let deferred_ingress =
-                encode_json(&lash_core_execution::TurnInputState::DeferredNextTurn.ingress())?;
-            for (input_id, payload) in inputs {
-                // Two dispositions, two named statements: deferring rewrites
-                // the ingress so the row stops naming a turn that is over,
-                // dropping is the cancel this table already has.
-                match disposition {
-                    lash_core_execution::TurnCancelDisposition::Defer => {
-                        sqlx::query(sql.pending_inputs.defer_to_next_turn.sql())
-                            .bind(commit.session_id.as_str())
-                            .bind(&*input_id)
-                            .bind(
-                                lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
-                                    .as_str(),
-                            )
-                            .bind(&deferred_ingress)
-                    }
-                    lash_core_execution::TurnCancelDisposition::Drop => {
-                        sqlx::query(sql.pending_inputs.cancel.sql())
-                            .bind(commit.session_id.as_str())
-                            .bind(&*input_id)
-                            .bind(
-                                lash_core_execution::runtime::TurnInputStateKind::Cancelled
-                                    .as_str(),
-                            )
-                    }
-                }
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-                let affected = lash_core_execution::TurnCancelAffectedInput {
-                    input_id,
-                    payload,
-                    disposition,
-                };
-                if cancellation.is_some() {
-                    append_turn_cancel_outcome_tx(
-                        &mut tx,
-                        &commit.session_id,
-                        turn_id,
-                        affected.clone(),
-                    )
-                    .await?;
-                    turn_cancel_input_outcome.affected_inputs.push(affected);
-                }
-            }
-            // Withheld wakes are deferred whatever the disposition, which
-            // governs host-authored input only (FIG-3543).
-            for affected in
-                defer_undelivered_queue_claims_tx(&mut tx, &commit.undelivered_queue_claims).await?
-            {
-                if cancellation.is_some() {
-                    append_turn_cancel_wake_tx(&mut tx, &commit.session_id, turn_id, &affected)
-                        .await?;
-                    turn_cancel_input_outcome.affected_wakes.push(affected);
-                }
-            }
-        }
+        // Every row the commit names is settled under the root that admitted
+        // it, each verdict taken under the row's lock (FIG-3927).
+        let turn_cancel_input_outcome =
+            super::ingress_settlement::settle_commit_ingress_tx(&mut tx, commit).await?;
         commit_attachment_refs_tx(
             &mut tx,
             &commit.session_id,
@@ -977,27 +844,25 @@ impl SessionCommitStore for PostgresSessionStore {
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
-            if commit.turn_commit.operation.key == "session-command" {
-                for batch_id in commit
-                    .completed_queue_claims
-                    .iter()
-                    .flat_map(|completion| &completion.batch_ids)
-                {
-                    let marker =
-                        lash_core_execution::store_backend_support::session_command_batch_completion_key(
-                            &commit.session_id,
-                            batch_id,
-                        )?;
-                    sqlx::query(session_sql().turn_commits.insert_marker.sql())
-                        .bind(commit.session_id.as_str())
-                        .bind(marker)
-                        .bind(receipt.turn_commit_hash)
-                        .bind(&result_json)
-                        .bind(now as i64)
-                        .execute(&mut *tx)
-                        .await
-                        .map_err(store_sqlx_error)?;
-                }
+            for batch_id in commit
+                .applied_commands
+                .iter()
+                .flat_map(|completion| &completion.batch_ids)
+            {
+                let marker =
+                    lash_core_execution::store_backend_support::session_command_batch_completion_key(
+                        &commit.session_id,
+                        batch_id,
+                    )?;
+                sqlx::query(session_sql().turn_commits.insert_marker.sql())
+                    .bind(commit.session_id.as_str())
+                    .bind(marker)
+                    .bind(receipt.turn_commit_hash)
+                    .bind(&result_json)
+                    .bind(now as i64)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
             }
         }
         if let Some(settlement) = commit.turn_cancel_closure_settlement.as_ref() {
@@ -1143,72 +1008,6 @@ impl SessionCommitStore for PostgresSessionStore {
         .map(super::turn_park::decode_turn_park_row)
         .transpose()
     }
-}
-
-/// Release the turn-input claims a cancelled turn withheld from its terminal
-/// checkpoint (FIG-3531), each under its own fence, inside the commit
-/// transaction.
-///
-/// Each row returns to the open spelling its ingress carries —
-/// `pending_active` for the active-turn rows a terminal checkpoint claims — so
-/// the cancellation's disposition, which runs next, settles and records it
-/// exactly as it does an unclaimed row. A claim this turn no longer holds
-/// matches no row and is left to its new holder.
-async fn release_undelivered_turn_input_claims_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    claims: &[lash_core_execution::TurnInputClaim],
-) -> Result<(), StoreError> {
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    for claim in claims {
-        sqlx::query(sql.pending_inputs_postgres.abandon_claim.sql())
-            .bind(claim.session_id.as_str())
-            .bind(&claim.claim_id)
-            .bind(&claim.lease_token)
-            .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
-            .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
-    Ok(())
-}
-
-/// Defer the process wakes a cancelled turn withheld from its terminal
-/// checkpoint (FIG-3543, ADR 0101 §10), inside the commit transaction, and
-/// return the record of each.
-///
-/// A held wake is deferred whatever the cancellation's disposition, which
-/// governs host-authored input only: its claim is released under its own
-/// fence, so the row keeps its `enqueue_seq` and owes its session a drive
-/// again, and its process's redelivery floor is left where it was. A claim
-/// this turn no longer holds matches no row and is left to its new holder.
-async fn defer_undelivered_queue_claims_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    claims: &[lash_core_execution::runtime::QueuedWorkClaim],
-) -> Result<Vec<lash_core_execution::TurnCancelAffectedWake>, StoreError> {
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    let mut deferred = Vec::new();
-    for claim in claims {
-        sqlx::query(sql.queued_batches.abandon_claim.sql())
-            .bind(claim.session_id.as_str())
-            .bind(&claim.claim_id)
-            .bind(&claim.lease_token)
-            .bind(
-                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(
-                    claim,
-                ),
-            )
-            .bind(
-                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
-                    claim,
-                ),
-            )
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        deferred.extend(lash_core_execution::store_backend_support::deferred_wake_records(claim));
-    }
-    Ok(deferred)
 }
 
 impl PostgresSessionStore {

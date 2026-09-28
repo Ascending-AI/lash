@@ -47,6 +47,11 @@ lash_conformance::effect_layer_group_child_tests!({ turn_crash_runner_fixture().
 // committed root back (FIG-3748).
 lash_conformance::turn_crash_after_commit_redrive_tests!({ turn_crash_runner_fixture().await });
 
+// FIG-3927 N9's crash cells: a final commit whose reply was lost replays its
+// receipt, and a checkpoint admission crashed before its record redelivers
+// the rows it bound.
+lash_conformance::turn_crash_admission_cells_tests!({ turn_crash_runner_fixture().await });
+
 lash_conformance::turn_crash_direct_acceptance_tests!({ turn_crash_runner_fixture().await });
 
 // Every closure cut recovers through the session drive, the one inside the

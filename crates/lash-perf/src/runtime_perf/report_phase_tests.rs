@@ -506,13 +506,11 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "pool wait value must be absent when it is unobservable"
     );
     for counter in [
-        "durable_contention.claim_attempts",
-        "durable_contention.claim_refusals",
-        "durable_contention.successful_claims",
+        "durable_contention.root_admission_attempts",
+        "durable_contention.root_admission_refusals",
+        "durable_contention.root_admissions",
         "durable_contention.epoch_checks",
-        "durable_contention.abandons",
-        "durable_contention.reclaims",
-        "durable_contention.reclaim_conflicts",
+        "durable_contention.resumes",
         "durable_contention.store_contention_retries",
         "durable_contention.epoch_probe_current",
         "durable_contention.cas_failures",
@@ -524,8 +522,8 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         );
     }
     let completed = result.extra_counters["durable_contention.completed_batches"];
-    let claim_attempts = result.extra_counters["durable_contention.claim_attempts"];
-    let claim_refusals = result.extra_counters["durable_contention.claim_refusals"];
+    let admission_attempts = result.extra_counters["durable_contention.root_admission_attempts"];
+    let admission_refusals = result.extra_counters["durable_contention.root_admission_refusals"];
     let cas_failures = result.extra_counters["durable_contention.cas_failures"];
     let admission_waits = *result
         .extra_counters
@@ -554,46 +552,37 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         admission_depth_max,
         admission_depth.iter().copied().fold(0.0, f64::max) as u64
     );
-    assert!(
-        workers == 1 || admission_waits > 0,
-        "multiple workers must queue at commit admission: admission_waits={admission_waits}"
-    );
-    assert!(
-        workers == 1 || admission_depth_max > 0,
-        "multiple workers must report nonzero commit queue depth: queue_depth_max={admission_depth_max}"
-    );
     assert_eq!(
         cas_failures, 0,
         "same-process commit admission must eliminate receipt/head CAS losses"
     );
+    // The session admits one root at a time (FIG-3927), so workers contend
+    // at root admission rather than at the commit queue.
     assert!(
-        workers == 1 || claim_attempts > completed,
-        "multiple workers must poll concurrently: claim_attempts={claim_attempts}, completed_batches={completed}"
+        workers == 1 || admission_attempts > completed,
+        "multiple workers must poll concurrently: root_admission_attempts={admission_attempts}, completed_batches={completed}"
     );
     assert!(
-        workers == 1 || claim_refusals + cas_failures > 0,
-        "multiple workers must witness contention: claim_refusals={claim_refusals}, cas_failures={cas_failures}"
+        workers == 1 || admission_refusals + cas_failures > 0,
+        "multiple workers must witness contention: root_admission_refusals={admission_refusals}, cas_failures={cas_failures}"
     );
 
-    let successful_claims = result.extra_counters["durable_contention.successful_claims"];
+    let root_admissions = result.extra_counters["durable_contention.root_admissions"];
     let epoch_checks = result.extra_counters["durable_contention.epoch_checks"];
-    let abandons = result.extra_counters["durable_contention.abandons"];
-    let reclaims = result.extra_counters["durable_contention.reclaims"];
-    let reclaim_conflicts = result.extra_counters["durable_contention.reclaim_conflicts"];
+    let resumes = result.extra_counters["durable_contention.resumes"];
     assert_eq!(
-        abandons,
-        reclaims + reclaim_conflicts,
-        "every abandon must end in a reclaim or reclaim conflict"
+        root_admissions, completed,
+        "every root admission ends in exactly one completed batch"
     );
     assert_eq!(
         epoch_checks,
-        successful_claims / 3,
-        "epoch checks must follow every third successful claim"
+        root_admissions / 3,
+        "epoch checks must follow every third root admission"
     );
     assert_eq!(
-        abandons,
-        successful_claims / 2,
-        "abandons must follow every second successful claim"
+        resumes,
+        root_admissions / 2,
+        "resumes must follow every second root admission"
     );
     assert_eq!(
         result.extra_counters["durable_contention.epoch_probe_current"], workers as u64,
@@ -874,7 +863,7 @@ async fn high_traffic_sqlite_knee_smoke_reports_each_step() {
     assert!(
         result
             .extra_counters
-            .contains_key("knee.step.1.wait.claim_scan.micros")
+            .contains_key("knee.step.1.wait.admission_scan.micros")
     );
     let durable_samples = result
         .extra_counters

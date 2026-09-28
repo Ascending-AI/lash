@@ -114,7 +114,7 @@ pub(super) fn corrupt_graph_node_case() -> GeneratedCase {
 }
 
 /// A corrupt pending-turn-input row must refuse both its list paths and the
-/// read-modify-write claim, with no residue.
+/// root admission that binds it, with no residue.
 pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::CorruptPendingTurnInputRefusals,
@@ -128,29 +128,33 @@ pub(super) fn corrupt_pending_turn_input_case() -> GeneratedCase {
             seed(CorruptTarget::PendingTurnInputJson),
             drive(SurfaceMethod::ListPendingTurnInputs),
             drive(SurfaceMethod::ListTurnInputApplications),
-            drive(SurfaceMethod::ClaimNextTurnInputs),
+            drive(SurfaceMethod::AdmitRoot {
+                lease: LeaseSlot::First,
+            }),
             restore(CorruptTarget::PendingTurnInputJson),
         ],
     }
 }
 
 /// A corrupt queued-work payload must refuse every queued-work list path and
-/// the read-modify-write claim, with no residue.
+/// the root admission that binds it, with no residue. The admission's head is
+/// read before the corruption is seeded.
 pub(super) fn corrupt_queued_work_case() -> GeneratedCase {
     GeneratedCase {
         name: CaseName::CorruptQueuedWorkRefusals,
         operations: vec![
             seed_graph(),
-            StoreOperation::EnqueueClaimableQueuedWork,
+            StoreOperation::EnqueueAdmittableQueuedWork,
             StoreOperation::AcquireSessionLease {
                 slot: LeaseSlot::First,
                 owner: "corrupt-queued-work-owner",
             },
+            drive(SurfaceMethod::ListPendingQueuedWork),
             seed(CorruptTarget::QueuedWorkItemPayloadJson),
             drive(SurfaceMethod::ListQueuedWork),
             drive(SurfaceMethod::ListPendingQueuedWork),
             drive(SurfaceMethod::PendingSessionWorkOrdering),
-            drive(SurfaceMethod::ClaimReadyQueuedWork),
+            drive(SurfaceMethod::AdmitListedQueuedHead),
             restore(CorruptTarget::QueuedWorkItemPayloadJson),
         ],
     }

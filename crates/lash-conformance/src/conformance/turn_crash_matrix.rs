@@ -8,8 +8,8 @@
 //! crash matrix is generated from that trace: every operation has a boundary
 //! crash, every durable write has an inside-call lost-response crash, and the
 //! scripted provider contributes its own mid-stream crash points. Recovery
-//! replays the recorded drive admission and fences stale claim settlement by
-//! drive epoch and owner incarnation.
+//! replays the recorded drive admission and the root's recorded admissions,
+//! and a stale drive fence refuses settlement.
 //!
 //! Trace drift covers the operations explicitly decorated by this module.
 //! Durable-store methods that [`SeamStore`] passes through undecorated are
@@ -48,7 +48,7 @@
 //!
 //! Integrator class: conformance-suite embedders (ADR 0051 class 4).
 
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -63,11 +63,11 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
 use crate::{
-    CheckpointKind, ClaimAuthority, LeaseOwnerIdentity, PendingTurnInputDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, RuntimeEffectController, RuntimePersistence, SessionHeadMeta,
-    StoreError, TurnInputClaim,
+    DriveFence, PendingTurnInputDraft, RuntimeEffectController, RuntimePersistence,
+    SessionHeadMeta, StoreError,
 };
 
+mod admission_crash_cells;
 mod after_commit_redrive;
 mod cancel_closure;
 mod cold_process;
@@ -84,6 +84,10 @@ mod seam_controllers;
 use recovery::run_crash_matrix_case;
 use reference_turn::ReferenceTurn;
 
+pub use admission_crash_cells::{
+    a_checkpoint_admission_crashed_before_its_record_redelivers_its_rows,
+    a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles_nothing_twice,
+};
 pub use after_commit_redrive::turn_crash_after_commit_redrive_replays_the_committed_receipt;
 pub use cancel_closure::turn_cancel_closure_recovers_from_a_crash_at_every_cut;
 use cold_process::ColdProcessTurnAction;
@@ -101,7 +105,7 @@ use expectations::{
     durable_recovery_rulings, error_return_rulings, turn_crash_matrix_outcomes,
     validate_durable_recovery_rulings, validate_error_return_rulings, validate_outcome_table,
 };
-pub use held_turn_input::held_turn_input_visibility_survives_claim_holder_crash;
+pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
 use invocation_effect_host::InvocationEffectHost;
 pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 use pretty_assertions::assert_eq;
@@ -151,9 +155,8 @@ impl TurnSeamOperation {
             self,
             Self::Store(
                 StoreOperation::AdmitRoot
-                    | StoreOperation::ClaimNextTurnInputs
-                    | StoreOperation::ClaimReadyQueuedWork { .. }
-                    | StoreOperation::ClaimCheckpointWork { .. }
+                    | StoreOperation::OpenSessionCommandRun
+                    | StoreOperation::AdmitAtCheckpoint { .. }
                     | StoreOperation::CommitFinalHead { .. }
                     | StoreOperation::AuthorizeTurnCancelClosure
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
@@ -168,15 +171,10 @@ impl TurnSeamOperation {
 enum StoreOperation {
     LoadSession,
     LoadSessionHeadMeta,
-    ClaimLeadingSessionCommand,
+    OpenSessionCommandRun,
     UnfinishedRoot,
     AdmitRoot,
-    ClaimNextTurnInputs,
-    DeferOrphanedActiveTurnInputs,
-    ClaimReadyQueuedWork {
-        boundary: String,
-    },
-    ClaimCheckpointWork {
+    AdmitAtCheckpoint {
         checkpoint: String,
     },
     CommitFinalHead {
@@ -582,8 +580,14 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
             TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
-                settles_queue: !commit.completed_queue_claims.is_empty(),
-                settles_turn_input: !commit.completed_turn_input_claims.is_empty(),
+                settles_queue: commit
+                    .ingress
+                    .as_ref()
+                    .is_some_and(|ingress| !ingress.completed_batches.is_empty()),
+                settles_turn_input: commit
+                    .ingress
+                    .as_ref()
+                    .is_some_and(|ingress| !ingress.completed_inputs.is_empty()),
             })
         };
         self.control
@@ -593,7 +597,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &ClaimAuthority,
+        session_execution_lease: &DriveFence,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError> {
         self.control
@@ -605,122 +609,27 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             .await
     }
 
-    async fn claim_next_turn_inputs(
+    async fn open_session_command_run(
         &self,
-        session_id: &SessionId,
-        fence: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<TurnInputClaim>, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimNextTurnInputs);
+        fence: &DriveFence,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError> {
         self.control
             .around(
-                operation,
-                self.inner
-                    .claim_next_turn_inputs(session_id, fence, owner, max_inputs),
+                TurnSeamOperation::Store(StoreOperation::OpenSessionCommandRun),
+                self.inner.open_session_command_run(fence),
             )
             .await
     }
 
-    async fn orphaned_active_turn_ids(
+    async fn admit_at_checkpoint(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &crate::ClaimAuthority,
-        scope: crate::OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<crate::TurnId>, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs);
-        self.control
-            .around(
-                operation,
-                self.inner
-                    .orphaned_active_turn_ids(session_id, session_execution_lease, scope),
-            )
-            .await
-    }
-
-    async fn repair_orphaned_active_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &crate::ClaimAuthority,
-        turn_id: &crate::TurnId,
-        observed: &crate::TurnCancelIntentSnapshot,
-        settlement: Option<&crate::TurnCancelClosureSettlement>,
-    ) -> Result<crate::TurnCancelRepairResult, StoreError> {
-        let operation = if settlement.is_some() {
-            TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
-        } else {
-            TurnSeamOperation::Store(StoreOperation::DeferOrphanedActiveTurnInputs)
-        };
-        self.control
-            .around(
-                operation,
-                self.inner.repair_orphaned_active_turn_inputs(
-                    session_id,
-                    session_execution_lease,
-                    turn_id,
-                    observed,
-                    settlement,
-                ),
-            )
-            .await
-    }
-
-    async fn claim_leading_ready_session_command(
-        &self,
-        session_id: &SessionId,
-        fence: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimLeadingSessionCommand);
-        self.control
-            .around(
-                operation,
-                self.inner
-                    .claim_leading_ready_session_command(session_id, fence, owner),
-            )
-            .await
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        session_id: &SessionId,
-        fence: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimReadyQueuedWork {
-            boundary: format!("{boundary:?}").to_ascii_lowercase(),
+        request: &crate::store::CheckpointAdmissionRequest,
+    ) -> Result<crate::store::CheckpointAdmission, StoreError> {
+        let operation = TurnSeamOperation::Store(StoreOperation::AdmitAtCheckpoint {
+            checkpoint: format!("{:?}", request.checkpoint).to_ascii_lowercase(),
         });
         self.control
-            .around(
-                operation,
-                self.inner
-                    .claim_ready_queued_work(session_id, fence, owner, boundary, policy),
-            )
-            .await
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        session_id: &SessionId,
-        fence: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: CheckpointKind,
-        max_inputs: usize,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
-        let operation = TurnSeamOperation::Store(StoreOperation::ClaimCheckpointWork {
-            checkpoint: format!("{checkpoint:?}").to_ascii_lowercase(),
-        });
-        self.control
-            .around(
-                operation,
-                self.inner.claim_checkpoint_work(
-                    session_id, fence, owner, turn_id, checkpoint, max_inputs, policy,
-                ),
-            )
+            .around(operation, self.inner.admit_at_checkpoint(request))
             .await
     }
 }
@@ -1421,9 +1330,9 @@ const DRAIN_TURN_EFFECT_EXECUTIONS: usize = 0;
 /// Residual pending inputs a recovered turn is allowed to leave behind.
 ///
 /// The only tolerated residue is a row deferred to the next turn: when the
-/// session-execution lease lapses by wall clock, `claim_checkpoint_work` raises
+/// session-execution lease lapses by wall clock, `admit_at_checkpoint` raises
 /// [`StoreError::SessionExecutionLeaseExpired`], the runtime skips the advisory
-/// checkpoint claim, and the commit defers the undelivered active-turn input to
+/// checkpoint admission, and the commit defers the undelivered active-turn input to
 /// the next turn instead of dropping or double-applying it. That deferral is a
 /// designed outcome, so the matrix drains it with one more turn and holds the
 /// exactly-once law on the drained input rather than on the intermediate row.

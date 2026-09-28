@@ -1,4 +1,4 @@
-//! The held pending-turn-input visibility law of the turn-crash matrix.
+//! The admitted pending-turn-input visibility law of the turn-crash matrix.
 //!
 //! Split out of `turn_crash_matrix.rs` to keep that file under the line
 //! budget; the law keeps its previous path through the parent's re-export.
@@ -6,19 +6,18 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
-/// A crashed claim holder leaves its accepted input visible as held until the
-/// matching session lease lapses, after which ordinary successor reclaim
-/// redelivers it exactly once.
+/// A crashed worker leaves the input its root admitted visible as
+/// `Admitted{root}`, and the successor that resumes the root delivers it
+/// exactly once (FIG-3927).
 ///
 /// The crash is an aborted real runtime task at the provider mid-stream seam.
-/// [`SeamStore`] suppresses the dropped guard's best-effort lease release to
-/// model process loss, so the first read necessarily observes the still-live
-/// abandoned lease rather than an orderly shutdown.
+/// Nothing a worker crash does releases a row: only the root's commit or
+/// terminal answers it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
+pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
@@ -62,7 +61,7 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
     task.abort();
     let abort = task
         .await
-        .expect_err("the claim-holder task must be aborted");
+        .expect_err("the admitting worker task must be aborted");
     assert!(
         abort.is_cancelled(),
         "the task loss must be an actual abort"
@@ -70,57 +69,52 @@ pub async fn held_turn_input_visibility_survives_claim_holder_crash<F, I>(
 
     let reader = make(scenario);
     super::super::bind_conformance_session(&reader, &identity.session_id).await;
-    let drive_epoch = reader
-        .drive_epoch(&identity.session_id)
-        .await
-        .expect("read the crashed drive epoch")
-        .epoch;
-    let during_live_lease = reader
+    let during_crash = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
-        .expect("list inputs while the crashed holder's lease is live");
+        .expect("list inputs after the holder's worker died");
     assert_eq!(
-        during_live_lease.len(),
+        during_crash.len(),
         2,
         "both open rows must remain visible after the holder task aborts"
     );
-    let held = during_live_lease
+    let admitted_status = crate::PendingTurnInputReadStatus::Admitted {
+        root: identity.turn_id.clone(),
+    };
+    let admitted = during_crash
         .iter()
-        .filter(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Held { .. }))
+        .filter(|read| read.status == admitted_status)
         .collect::<Vec<_>>();
-    assert_eq!(held.len(), 1, "exactly the claimed next-turn row is held");
     assert_eq!(
-        pending_input_text(held[0]),
+        admitted.len(),
+        1,
+        "exactly the admitted next-turn row is bound to the root"
+    );
+    assert_eq!(
+        pending_input_text(admitted[0]),
         "durable next-turn input",
-        "the held row must be the input claimed before provider execution"
+        "the admitted row must be the input the root took before provider execution"
     );
-    assert_eq!(
-        held[0].status,
-        crate::PendingTurnInputReadStatus::Held { drive_epoch },
-        "the held read must carry the exact matching lease expiry"
-    );
-    let pending = during_live_lease
+    let open = during_crash
         .iter()
-        .filter(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Pending))
+        .filter(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Open))
         .collect::<Vec<_>>();
-    assert_eq!(pending.len(), 1, "the unclaimed active row remains pending");
+    assert_eq!(open.len(), 1, "the unadmitted active row remains open");
     assert_eq!(
-        pending_input_text(pending[0]),
+        pending_input_text(open[0]),
         "active checkpoint input",
-        "the status split must reflect actual claim ownership"
+        "the status split must reflect the root's actual admission"
     );
 
     let successor_invocation = invocation.redrive();
-    let after_expiry = reader
+    let before_successor = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
-        .expect("list inputs after lease expiry and generation turnover");
-    assert_eq!(after_expiry.len(), 2, "both rows remain recoverable");
-    assert!(
-        after_expiry
-            .iter()
-            .all(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Pending)),
-        "an expired, released, or mismatched generation is pending, never held"
+        .expect("list inputs before the successor drives");
+    assert_eq!(
+        serde_json::to_value(&before_successor).expect("encode the reads"),
+        serde_json::to_value(&during_crash).expect("encode the reads"),
+        "a worker crash releases nothing: the admission holds until the root settles it"
     );
 
     let successor_control = SeamControl::default();

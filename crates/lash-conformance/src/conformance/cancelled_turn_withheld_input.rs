@@ -42,8 +42,8 @@ enum Stop {
     Durable(Box<crate::TurnCancelRequest>),
 }
 
-/// Stops the running turn the moment its terminal checkpoint has claimed
-/// active-turn input: the claim is taken and withheld, and the Stop lands
+/// Stops the running turn the moment its terminal checkpoint has admitted
+/// active-turn input: the admission is taken and withheld, and the Stop lands
 /// before the turn commits.
 struct StopAfterTerminalClaim {
     inner: Arc<dyn crate::RuntimePersistence>,
@@ -68,22 +68,11 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn claim_checkpoint_work(
+    async fn admit_at_checkpoint(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &crate::ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        turn_id: &TurnId,
-        checkpoint: crate::CheckpointKind,
-        max_inputs: usize,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<
-        (
-            Option<crate::TurnInputClaim>,
-            Option<crate::QueuedWorkClaim>,
-        ),
-        crate::StoreError,
-    > {
+        request: &crate::store::CheckpointAdmissionRequest,
+    ) -> Result<crate::store::CheckpointAdmission, crate::StoreError> {
+        let checkpoint = request.checkpoint;
         if matches!(checkpoint, crate::CheckpointKind::BeforeCompletion) {
             let arriving = self.arriving_wake.lock().expect("arriving wake").take();
             if let Some(draft) = arriving {
@@ -95,20 +84,9 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
                 *self.arrived_wake.lock().expect("arrived wake") = Some(batch);
             }
         }
-        let claims = self
-            .inner
-            .claim_checkpoint_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-                policy,
-            )
-            .await?;
+        let claims = self.inner.admit_at_checkpoint(request).await?;
         let claimed = claims
-            .0
+            .inputs
             .as_ref()
             .map(|claim| {
                 claim
@@ -119,7 +97,7 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
             })
             .unwrap_or_default();
         let claimed_batches = claims
-            .1
+            .queued
             .as_ref()
             .map(|claim| {
                 claim
@@ -147,13 +125,13 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
                 // settles that gate first-writer-wins against its own
                 // completion seal: without a rendezvous the seal can win
                 // and the stop lands on the follow-on turn instead. This
-                // claim is still open, so the commit cannot run — hold it
+                // admission is still open, so the commit cannot run — hold it
                 // until the gate carries the stop.
                 Some(Stop::Local(token)) => {
                     token.cancel();
                     let control = ActiveTurnControl::new(
                         self.effect_host.as_ref(),
-                        crate::TurnAddress::new(session_id, turn_id),
+                        crate::TurnAddress::new(request.fence.session(), &request.turn_id),
                     )
                     .await
                     .expect("the running turn's cancellation gate");

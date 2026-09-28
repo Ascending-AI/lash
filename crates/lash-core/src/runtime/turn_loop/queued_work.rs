@@ -17,7 +17,7 @@ pub enum EmptyQueuedDrainReason {
     /// The session has no durable store, so no queue exists to drain.
     NoDurableQueue,
     /// The queue was reachable and the claim state machine refused it.
-    ClaimRefused(crate::QueuedWorkClaimRefusal),
+    AdmissionRefused(crate::AdmissionRefusal),
 }
 
 impl EmptyQueuedDrainReason {
@@ -26,7 +26,7 @@ impl EmptyQueuedDrainReason {
         match self {
             Self::ExecutionLaneBusy => "execution_lane_busy",
             Self::NoDurableQueue => "no_durable_queue",
-            Self::ClaimRefused(refusal) => refusal.as_str(),
+            Self::AdmissionRefused(refusal) => refusal.as_str(),
         }
     }
 }
@@ -147,8 +147,8 @@ impl LashRuntime {
             return Ok(match (run.outcome, run.run, run.empty_drain) {
                 (_, Some(run), _) => match run.into_final_turn() {
                     Some(turn) => QueuedTurnDrain::Ran(turn),
-                    None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
-                        crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                    None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                        crate::AdmissionRefusal::AdmissionRaceLost,
                     )),
                 },
                 (_, None, Some(reason)) => QueuedTurnDrain::Empty(reason),
@@ -157,14 +157,14 @@ impl LashRuntime {
                     QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ExecutionLaneBusy)
                 }
                 // The root's rows were answered by another driver.
-                (_, None, _) => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
-                    crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                (_, None, _) => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                    crate::AdmissionRefusal::AdmissionRaceLost,
                 )),
             });
         }
         match outcome.stop {
             crate::engine::DriveStop::Idle => Ok(QueuedTurnDrain::Empty(
-                EmptyQueuedDrainReason::ClaimRefused(self.idle_drain_refusal().await?),
+                EmptyQueuedDrainReason::AdmissionRefused(self.idle_drain_refusal().await?),
             )),
             crate::engine::DriveStop::Parked(park) => Err(RuntimeError::new(
                 RuntimeErrorCode::QueuedRunPending,
@@ -187,22 +187,22 @@ impl LashRuntime {
     /// Why an idle drive ran nothing: no work at all, or work that appeared
     /// after admission read the queue and is therefore another claim's to
     /// take.
-    async fn idle_drain_refusal(&self) -> Result<crate::QueuedWorkClaimRefusal, RuntimeError> {
+    async fn idle_drain_refusal(&self) -> Result<crate::AdmissionRefusal, RuntimeError> {
         let Some(store) = self
             .session
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            return Ok(crate::QueuedWorkClaimRefusal::Empty);
+            return Ok(crate::AdmissionRefusal::Empty);
         };
         let pending = store
-            .list_pending_queued_work(&self.state.session_id)
+            .list_open_queued_work(&self.state.session_id)
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         Ok(if pending.is_empty() {
-            crate::QueuedWorkClaimRefusal::Empty
+            crate::AdmissionRefusal::Empty
         } else {
-            crate::QueuedWorkClaimRefusal::ClaimRaceLost
+            crate::AdmissionRefusal::AdmissionRaceLost
         })
     }
 }

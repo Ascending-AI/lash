@@ -72,6 +72,10 @@ struct SnapshotStore {
     /// tests never enqueue input of their own.
     pending_turn_inputs: std::sync::Mutex<Vec<lash_core::PendingTurnInput>>,
     pending_turn_input_seq: std::sync::Mutex<u64>,
+    /// The root each admitted pending input is bound to (FIG-3927). A row is
+    /// open until a root admits it and stays listed until its root's commit
+    /// settles or releases it.
+    admitted_inputs: std::sync::Mutex<HashMap<lash_core::InputId, lash_core::TurnId>>,
 }
 
 impl SnapshotStore {
@@ -130,6 +134,38 @@ impl SnapshotStore {
             usage_delta_identities: std::sync::Mutex::new(std::collections::HashSet::new()),
             pending_turn_inputs: std::sync::Mutex::new(Vec::new()),
             pending_turn_input_seq: std::sync::Mutex::new(0),
+            admitted_inputs: std::sync::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Settle the rows `commit` names under its root, and release every row
+    /// still bound to the root its terminal ends (FIG-3927).
+    fn settle_ingress(&self, commit: &lash_core::store::RuntimeCommit) {
+        let mut pending = self.pending_turn_inputs.lock_recover();
+        let mut admitted = self.admitted_inputs.lock_recover();
+        if let Some(ingress) = commit.ingress.as_ref() {
+            let settled = ingress
+                .completed_inputs
+                .iter()
+                .flat_map(|completion| completion.input_ids.iter())
+                .chain(ingress.dropped.iter().filter_map(|row| match row {
+                    lash_core::store::IngressRowId::Input(input_id) => Some(input_id),
+                    lash_core::store::IngressRowId::Batch(_) => None,
+                }))
+                .cloned()
+                .collect::<Vec<_>>();
+            pending.retain(|input| !settled.contains(&input.input_id));
+            for input_id in &settled {
+                admitted.remove(input_id);
+            }
+            for row in &ingress.released {
+                if let lash_core::store::IngressRowId::Input(input_id) = row {
+                    admitted.remove(input_id);
+                }
+            }
+        }
+        if let Some(terminal) = commit.root_terminal.as_deref() {
+            admitted.retain(|_, root| *root != terminal.root);
         }
     }
 
@@ -163,11 +199,11 @@ lash_core::impl_current_fleet_format!(SnapshotStore);
 impl lash_core::SessionCommitStore for SnapshotStore {
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &lash_core::ClaimAuthority,
+        fence: &lash_core::store::DriveFence,
         follow_on_turn_id: &lash_core::TurnId,
     ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
         Err(lash_core::store::StoreError::FollowOnNotPending {
-            session_id: lease.session_id.clone(),
+            session_id: fence.session().clone(),
             follow_on_turn_id: follow_on_turn_id.clone(),
         })
     }
@@ -347,6 +383,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         // session reopen) must advance the durable head revision; only receipt
         // replay may return a non-advancing receipt.
         let next_head_revision = read.as_ref().map_or(0, |read| read.head_revision) + 1;
+        self.settle_ingress(&commit);
         if let Some(write) = commit.root_terminal.as_deref().cloned() {
             self.roots.write_terminal(write.into_terminal(
                 commit.session_id.clone(),
@@ -425,120 +462,6 @@ impl lash_core::store::DriveEpochStore for SnapshotStore {
         session_id: &SessionId,
     ) -> std::result::Result<lash_core::store::StoredDriveEpoch, lash_core::StoreError> {
         Ok(self.drive_epochs.epoch(session_id))
-    }
-}
-
-#[async_trait]
-impl lash_core::QueuedWorkStore for SnapshotStore {
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        _batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> std::result::Result<
-        lash_core::runtime::QueuedWorkEnqueueOutcome,
-        lash_core::store::StoreError,
-    > {
-        Err(lash_core::store::StoreError::Backend(
-            "queued work is not supported by SnapshotStore".to_string(),
-        ))
-    }
-
-    async fn claim_leading_ready_session_command(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<lash_core::QueuedWorkClaimOutcome, lash_core::store::StoreError> {
-        Ok(lash_core::QueuedWorkClaimOutcome::Refused(
-            lash_core::QueuedWorkClaimRefusal::Empty,
-        ))
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &lash_core::TurnId,
-        _checkpoint: lash_core::CheckpointKind,
-        _max_inputs: usize,
-        _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        (
-            Option<lash_core::runtime::TurnInputClaim>,
-            Option<lash_core::runtime::QueuedWorkClaim>,
-        ),
-        lash_core::store::StoreError,
-    > {
-        Ok((None, None))
-    }
-
-    async fn abandon_queued_work_claim(
-        &self,
-        _claim: &lash_core::runtime::QueuedWorkClaim,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
-    async fn cancel_queued_work_batch(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkBatch>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
-    }
-
-    async fn queued_work_batch_completed(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> std::result::Result<bool, lash_core::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn pending_session_work_ordering(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<
-        lash_core::store::PendingSessionWorkOrdering,
-        lash_core::store::StoreError,
-    > {
-        Ok(lash_core::store::PendingSessionWorkOrdering {
-            session_command: None,
-            turn_input: None,
-        })
-    }
-
-    async fn list_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
-    {
-        Ok(Vec::new())
-    }
-
-    async fn list_pending_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
-    {
-        Ok(Vec::new())
     }
 }
 
@@ -707,11 +630,11 @@ lash_core::impl_current_fleet_format!(BoundSessionStore);
 impl lash_core::SessionCommitStore for BoundSessionStore {
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &lash_core::ClaimAuthority,
+        fence: &lash_core::store::DriveFence,
         follow_on_turn_id: &lash_core::TurnId,
     ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
         Err(lash_core::store::StoreError::FollowOnNotPending {
-            session_id: lease.session_id.clone(),
+            session_id: fence.session().clone(),
             follow_on_turn_id: follow_on_turn_id.clone(),
         })
     }
@@ -808,118 +731,6 @@ impl lash_core::store::DriveEpochStore for BoundSessionStore {
         session_id: &SessionId,
     ) -> std::result::Result<lash_core::store::StoredDriveEpoch, lash_core::StoreError> {
         Ok(self.drive_epochs.epoch(session_id))
-    }
-}
-
-#[async_trait]
-impl lash_core::QueuedWorkStore for BoundSessionStore {
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        _batch: lash_core::runtime::QueuedWorkBatchDraft,
-    ) -> std::result::Result<
-        lash_core::runtime::QueuedWorkEnqueueOutcome,
-        lash_core::store::StoreError,
-    > {
-        unreachable!("BoundSessionStore does not serve queued work")
-    }
-
-    async fn claim_leading_ready_session_command(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkClaim>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _boundary: lash_core::runtime::QueuedWorkClaimBoundary,
-        _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<lash_core::QueuedWorkClaimOutcome, lash_core::store::StoreError> {
-        Ok(lash_core::QueuedWorkClaimOutcome::Refused(
-            lash_core::QueuedWorkClaimRefusal::Empty,
-        ))
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &lash_core::ClaimAuthority,
-        _owner: &lash_core::LeaseOwnerIdentity,
-        _turn_id: &lash_core::TurnId,
-        _checkpoint: lash_core::CheckpointKind,
-        _max_inputs: usize,
-        _policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> std::result::Result<
-        (
-            Option<lash_core::runtime::TurnInputClaim>,
-            Option<lash_core::runtime::QueuedWorkClaim>,
-        ),
-        lash_core::store::StoreError,
-    > {
-        Ok((None, None))
-    }
-
-    async fn abandon_queued_work_claim(
-        &self,
-        _claim: &lash_core::runtime::QueuedWorkClaim,
-    ) -> std::result::Result<(), lash_core::store::StoreError> {
-        Ok(())
-    }
-
-    async fn cancel_queued_work_batch(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> std::result::Result<
-        Option<lash_core::runtime::QueuedWorkBatch>,
-        lash_core::store::StoreError,
-    > {
-        Ok(None)
-    }
-
-    async fn queued_work_batch_completed(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> std::result::Result<bool, lash_core::store::StoreError> {
-        Ok(false)
-    }
-
-    async fn pending_session_work_ordering(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<
-        lash_core::store::PendingSessionWorkOrdering,
-        lash_core::store::StoreError,
-    > {
-        Ok(lash_core::store::PendingSessionWorkOrdering {
-            session_command: None,
-            turn_input: None,
-        })
-    }
-
-    async fn list_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
-    {
-        Ok(Vec::new())
-    }
-
-    async fn list_pending_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> std::result::Result<Vec<lash_core::runtime::QueuedWorkBatch>, lash_core::store::StoreError>
-    {
-        Ok(Vec::new())
     }
 }
 

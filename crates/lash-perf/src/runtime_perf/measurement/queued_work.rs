@@ -14,7 +14,6 @@ pub(super) async fn run_once_queued_work_claim_stress(
     let scenario = RuntimePerfScenario::QueuedWorkClaimStress;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-queued-work-other";
-    let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "queued-work-stress");
     let mut run = RunRecorder::start(scenario, chat_turns);
 
     let (store, _runtime, mut commit_state) = run
@@ -46,10 +45,10 @@ pub(super) async fn run_once_queued_work_claim_stress(
     .await?;
 
     let mut enqueued_batches = QUEUED_WORK_SEED_OTHER_SESSION_BATCHES;
-    let mut command_claims = 0usize;
-    let mut join_claims = 0usize;
-    let mut join_batches_claimed = 0usize;
-    let mut exclusive_claims = 0usize;
+    let mut command_runs = 0usize;
+    let mut join_admissions = 0usize;
+    let mut join_batches_admitted = 0usize;
+    let mut exclusive_admissions = 0usize;
     let mut completed_batches = 0usize;
 
     for turn_index in 0..chat_turns {
@@ -58,14 +57,14 @@ pub(super) async fn run_once_queued_work_claim_stress(
             async {
                 let mut phase_profile = BTreeMap::new();
 
-                let (lease, phase) =
+                let (fence, phase) =
                     measure_runtime_perf_async_phase("queued_work.seal_drive_epoch", async {
-                        seal_perf_claim(store.as_ref(), &session_id).await
+                        seal_perf_drive(store.as_ref(), &session_id).await
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
 
-                let (_, phase) =
+                let (heads, phase) =
                     measure_runtime_perf_async_phase("queued_work.enqueue_mixed_batch", async {
                         enqueue_queued_work_stress_turn(store.as_ref(), &session_id, turn_index)
                             .await
@@ -74,39 +73,34 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 phase_profile.insert(phase.0, phase.1);
                 enqueued_batches += QUEUED_WORK_JOIN_BATCHES_PER_TURN + 2;
 
-                let (command_claim, phase) =
-                    measure_runtime_perf_async_phase("queued_work.claim_session_command", async {
+                let (commands, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.open_session_command_run",
+                    async {
                         store
-                            .claim_leading_ready_session_command(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                            )
-                            .await?
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("queued-work stress expected command claim")
-                            })
-                    })
-                    .await?;
+                            .open_session_command_run(&fence)
+                            .await
+                            .map_err(anyhow::Error::from)
+                    },
+                )
+                .await?;
                 phase_profile.insert(phase.0, phase.1);
-                command_claims += 1;
-                if command_claim.batches.len() != 1
-                    || command_claim.exclusive_session_command().is_none()
-                {
+                command_runs += 1;
+                let run_work = lash_core::runtime::AdmittedQueuedWork {
+                    session_id: session_id.clone(),
+                    batches: commands,
+                };
+                if run_work.exclusive_session_command().is_none() {
                     anyhow::bail!(
-                        "queued-work stress command claim did not contain one session command"
+                        "queued-work stress command run did not contain one session command"
                     );
                 }
 
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "queued_work.complete_session_command",
                     async {
-                        let result = store
-                            .commit_runtime_state(queued_work_stress_commit(
-                                &commit_state,
-                                vec![command_claim.completion()],
-                            ))
-                            .await?;
+                        let mut commit = queued_work_stress_commit(&commit_state, &fence);
+                        commit.applied_commands = Some(run_work.completion());
+                        let result = store.commit_runtime_state(commit).await?;
                         commit_state.apply_persisted_commit_result(result);
                         Ok::<(), anyhow::Error>(())
                     },
@@ -115,85 +109,71 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 phase_profile.insert(phase.0, phase.1);
                 completed_batches += 1;
 
-                let (join_claim, phase) =
-                    measure_runtime_perf_async_phase("queued_work.claim_join_turn_work", async {
-                        store
-                            .claim_ready_queued_work(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                QueuedWorkClaimBoundary::Idle,
-                                lash_core::testing::queued_work_claim_policy(
-                                    QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                                ),
-                            )
-                            .await?
-                            .claim()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("queued-work stress expected join claim")
-                            })
+                let join_root = lash_core::TurnId::from(format!("queued-work-join-{turn_index}"));
+                let (join, phase) =
+                    measure_runtime_perf_async_phase("queued_work.admit_join_turn_work", async {
+                        admit_perf_root(
+                            store.as_ref(),
+                            &fence,
+                            &join_root,
+                            AdmittedHead::Batch(heads.join.clone()),
+                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("queued-work stress expected the join admission")
+                        })
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
-                if join_claim.batches.len() != QUEUED_WORK_JOIN_BATCHES_PER_TURN {
+                let join_batch_ids = join.batch_ids();
+                if join_batch_ids.len() != QUEUED_WORK_JOIN_BATCHES_PER_TURN {
                     anyhow::bail!(
                         "queued-work stress expected {} joined batches, got {}",
                         QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                        join_claim.batches.len()
+                        join_batch_ids.len()
                     );
                 }
-                join_claims += 1;
-                join_batches_claimed += join_claim.batches.len();
-                let join_batch_ids = join_claim
-                    .batches
-                    .iter()
-                    .map(|batch| batch.batch_id.clone())
-                    .collect::<Vec<_>>();
+                join_admissions += 1;
+                join_batches_admitted += join_batch_ids.len();
 
-                let (_, phase) =
-                    measure_runtime_perf_async_phase("queued_work.abandon_join_claim", async {
-                        store
-                            .abandon_queued_work_claim(&join_claim)
-                            .await
-                            .map_err(anyhow::Error::from)
+                // An interrupted drive: a successor seals, then resumes the
+                // unfinished root, reading back exactly its recorded admission.
+                let (fence, phase) =
+                    measure_runtime_perf_async_phase("queued_work.supersede_join_drive", async {
+                        seal_perf_drive(store.as_ref(), &session_id).await
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
 
-                let (join_claim, phase) =
-                    measure_runtime_perf_async_phase("queued_work.reclaim_ready", async {
-                        store
-                            .claim_ready_queued_work(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                QueuedWorkClaimBoundary::Idle,
-                                lash_core::testing::queued_work_claim_policy(64),
-                            )
-                            .await?
-                            .claim()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("queued-work stress expected the join reclaim")
-                            })
+                let (join, phase) =
+                    measure_runtime_perf_async_phase("queued_work.resume_join_admission", async {
+                        admit_perf_root(
+                            store.as_ref(),
+                            &fence,
+                            &join_root,
+                            AdmittedHead::Batch(heads.join.clone()),
+                            64,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("queued-work stress expected the join resume")
+                        })
                     })
                     .await?;
                 phase_profile.insert(phase.0, phase.1);
-                if join_claim
-                    .batches
-                    .iter()
-                    .map(|batch| batch.batch_id.as_str())
-                    .ne(join_batch_ids.iter().map(lash_core::BatchId::as_str))
-                {
-                    anyhow::bail!("queued-work stress reclaim returned different batches");
+                if join.batch_ids() != join_batch_ids {
+                    anyhow::bail!("queued-work stress resume returned different batches");
                 }
 
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "queued_work.complete_join_turn_work",
                     async {
                         let result = store
-                            .commit_runtime_state(queued_work_stress_commit(
-                                &commit_state,
-                                vec![join_claim.completion()],
+                            .commit_runtime_state(finishing_perf_root(
+                                queued_work_stress_commit(&commit_state, &fence),
+                                &join_root,
+                                &join,
                             ))
                             .await?;
                         commit_state.apply_persisted_commit_result(result);
@@ -202,45 +182,44 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                completed_batches += join_claim.batches.len();
+                completed_batches += join_batch_ids.len();
 
-                let (exclusive_claim, phase) = measure_runtime_perf_async_phase(
-                    "queued_work.claim_exclusive_turn_work",
+                let exclusive_root =
+                    lash_core::TurnId::from(format!("queued-work-exclusive-{turn_index}"));
+                let (exclusive, phase) = measure_runtime_perf_async_phase(
+                    "queued_work.admit_exclusive_turn_work",
                     async {
-                        store
-                            .claim_ready_queued_work(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                QueuedWorkClaimBoundary::Idle,
-                                lash_core::testing::queued_work_claim_policy(
-                                    QUEUED_WORK_JOIN_BATCHES_PER_TURN,
-                                ),
-                            )
-                            .await?
-                            .claim()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("queued-work stress expected exclusive claim")
-                            })
+                        admit_perf_root(
+                            store.as_ref(),
+                            &fence,
+                            &exclusive_root,
+                            AdmittedHead::Batch(heads.exclusive.clone()),
+                            QUEUED_WORK_JOIN_BATCHES_PER_TURN,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("queued-work stress expected the exclusive admission")
+                        })
                     },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                if exclusive_claim.batches.len() != 1 {
+                if exclusive.batch_ids().len() != 1 {
                     anyhow::bail!(
                         "queued-work stress expected one exclusive batch, got {}",
-                        exclusive_claim.batches.len()
+                        exclusive.batch_ids().len()
                     );
                 }
-                exclusive_claims += 1;
+                exclusive_admissions += 1;
 
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "queued_work.complete_exclusive_turn_work",
                     async {
                         let result = store
-                            .commit_runtime_state(queued_work_stress_commit(
-                                &commit_state,
-                                vec![exclusive_claim.completion()],
+                            .commit_runtime_state(finishing_perf_root(
+                                queued_work_stress_commit(&commit_state, &fence),
+                                &exclusive_root,
+                                &exclusive,
                             ))
                             .await?;
                         commit_state.apply_persisted_commit_result(result);
@@ -254,7 +233,7 @@ pub(super) async fn run_once_queued_work_claim_stress(
                 let (pending, phase) =
                     measure_runtime_perf_async_phase("queued_work.list_pending", async {
                         store
-                            .list_pending_queued_work(&session_id)
+                            .list_open_queued_work(&session_id)
                             .await
                             .map_err(anyhow::Error::from)
                     })
@@ -305,13 +284,16 @@ pub(super) async fn run_once_queued_work_claim_stress(
         active_path_messages: completed_batches,
         extra_counters: BTreeMap::from([
             ("enqueued_batches".to_string(), enqueued_batches as u64),
-            ("command_claims".to_string(), command_claims as u64),
-            ("join_claims".to_string(), join_claims as u64),
+            ("command_runs".to_string(), command_runs as u64),
+            ("join_admissions".to_string(), join_admissions as u64),
             (
-                "join_batches_claimed".to_string(),
-                join_batches_claimed as u64,
+                "join_batches_admitted".to_string(),
+                join_batches_admitted as u64,
             ),
-            ("exclusive_claims".to_string(), exclusive_claims as u64),
+            (
+                "exclusive_admissions".to_string(),
+                exclusive_admissions as u64,
+            ),
             ("completed_batches".to_string(), completed_batches as u64),
             (
                 "remaining_measured_batches".to_string(),
@@ -330,7 +312,7 @@ async fn enqueue_queued_work_stress_turn(
     store: &RuntimePerfStore,
     session_id: &SessionId,
     turn_index: usize,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<StressTurnHeads> {
     store
         .enqueue_queued_work(
             QueuedWorkBatchDraft::new(
@@ -344,6 +326,7 @@ async fn enqueue_queued_work_stress_turn(
         )
         .await?;
 
+    let mut join = None;
     for batch_index in 0..QUEUED_WORK_JOIN_BATCHES_PER_TURN {
         let wake = queued_work_stress_wake(
             session_id,
@@ -353,7 +336,8 @@ async fn enqueue_queued_work_stress_turn(
         );
         let draft = lash_core::runtime::process_wake_batch_draft(wake)
             .with_merge_key("runtime-perf-queued-work-stress");
-        store.enqueue_queued_work(draft).await?;
+        let batch = store.enqueue_queued_work(draft).await?;
+        join.get_or_insert(batch.batch_id);
     }
 
     let wake = queued_work_stress_wake(
@@ -362,10 +346,21 @@ async fn enqueue_queued_work_stress_turn(
         ((turn_index + 1) * 10_000) as u64,
         lash_core::store::FleetFormatStore::fleet_format(store),
     );
-    store
+    let exclusive = store
         .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
-        .await?;
-    Ok(())
+        .await?
+        .batch_id;
+    Ok(StressTurnHeads {
+        join: join.ok_or_else(|| anyhow::anyhow!("queued-work stress enqueued no join batch"))?,
+        exclusive,
+    })
+}
+
+/// The turn-lane heads one stress turn enqueued: the first of its joinable
+/// wakes and its exclusive wake.
+struct StressTurnHeads {
+    join: lash_core::BatchId,
+    exclusive: lash_core::BatchId,
 }
 
 pub(super) fn queued_work_stress_wake(
@@ -411,7 +406,6 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     let scenario = RuntimePerfScenario::TurnInputIngressInterrupt;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let other_session_id = "runtime-perf-turn-input-other";
-    let owner = lash_core::LeaseOwnerIdentity::opaque("runtime-perf", "turn-input-ingress");
     let mut run = RunRecorder::start(scenario, chat_turns);
 
     let (store, mut commit_state, _restate, turn_control) = run
@@ -449,9 +443,9 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
 
     let mut active_enqueued = 0usize;
     let mut next_enqueued = 0usize;
-    let mut active_claims = 0usize;
-    let mut next_claims = 0usize;
-    let mut abandoned_claims = 0usize;
+    let mut active_admissions = 0usize;
+    let mut next_admissions = 0usize;
+    let mut resumed_admissions = 0usize;
     let mut completed_inputs = 0usize;
     let mut deferred_inputs = 0usize;
 
@@ -462,9 +456,9 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 let mut phase_profile = BTreeMap::new();
                 let turn_id = lash_core::TurnId::from(format!("turn-input-ingress-{turn_index}"));
 
-                let (lease, phase) = measure_runtime_perf_async_phase(
+                let (fence, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.seal_drive_epoch",
-                    async { seal_perf_claim(store.as_ref(), &session_id).await },
+                    async { seal_perf_drive(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
@@ -530,58 +524,44 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 phase_profile.insert(phase.0, phase.1);
                 next_enqueued += TURN_INPUT_INGRESS_NEXT_PER_TURN;
 
-                let (initial_active_claim, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.claim_active_initial",
+                let active_step = format!("turn-input-ingress-{turn_index}:after-work");
+                let (active, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.admit_active_inputs",
                     async {
-                        store
-                            .claim_active_turn_inputs(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                &turn_id,
-                                lash_core::CheckpointKind::AfterWork,
-                                1,
-                            )
+                        admit_perf_checkpoint(store.as_ref(), &fence, &turn_id, &active_step)
                             .await?
-                            .ok_or_else(|| anyhow::anyhow!("expected initial active input claim"))
+                            .inputs
+                            .ok_or_else(|| anyhow::anyhow!("expected an active input admission"))
                     },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                active_claims += 1;
+                active_admissions += 1;
 
-                let (_, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.abandon_active_claim",
-                    async {
-                        store
-                            .abandon_turn_input_claim(&initial_active_claim)
-                            .await
-                            .map_err(anyhow::Error::from)
-                    },
+                // An interrupted drive: a successor seals, then re-runs the
+                // checkpoint step, reading back exactly the rows it admitted.
+                let (fence, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.supersede_active_drive",
+                    async { seal_perf_drive(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                abandoned_claims += 1;
 
                 let (active_claim, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.reclaim_active_inputs",
+                    "turn_input_ingress.resume_active_admission",
                     async {
-                        store
-                            .claim_active_turn_inputs(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                &turn_id,
-                                lash_core::CheckpointKind::AfterWork,
-                                TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
-                            )
+                        admit_perf_checkpoint(store.as_ref(), &fence, &turn_id, &active_step)
                             .await?
-                            .ok_or_else(|| anyhow::anyhow!("expected active input claim"))
+                            .inputs
+                            .ok_or_else(|| anyhow::anyhow!("expected the resumed active admission"))
                     },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                active_claims += 1;
+                resumed_admissions += 1;
+                if active_claim.input_ids() != active.input_ids() {
+                    anyhow::bail!("turn-input ingress resume returned different active inputs");
+                }
                 if active_claim.inputs.len() != TURN_INPUT_INGRESS_ACCEPTED_PER_TURN {
                     anyhow::bail!(
                         "turn-input ingress expected {} active inputs, got {}",
@@ -590,7 +570,7 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                     );
                 }
                 let active_turn_input = active_claim.materialize_turn_input();
-                // Position-independent on purpose: a claim aggregates many inputs and
+                // Position-independent on purpose: an admission aggregates many inputs and
                 // only the first carries the attachment, so the attachment is not the
                 // last item. Assert survival, not placement.
                 if !active_turn_input.items.iter().any(|item| {
@@ -601,20 +581,23 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         } if bytes == &vec![1, 2, 3, turn_index as u8]
                     )
                 }) {
-                    anyhow::bail!("turn-input ingress active claim lost attachment bytes");
+                    anyhow::bail!("turn-input ingress active admission lost attachment bytes");
                 }
 
                 // The deferral's completion gate is settled through the
                 // effect host that owns the turn-control promises; the phase
                 // measures the store's complete-and-defer commit.
+                let mut completing = RuntimeCommit::persisted_state_for_test(&commit_state, &[])
+                    .deferring_interrupted_turn_inputs(turn_id.clone(), None);
+                let mut settlement = lash_core::store::IngressSettlement::new(turn_id.clone());
+                settlement.completed_inputs.push(active_claim.completion());
+                completing.ingress = Some(settlement);
                 let deferral =
                     lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                         store.as_ref(),
                         &turn_control,
-                        &lease.fence(),
-                        RuntimeCommit::persisted_state_for_test(&commit_state, &[])
-                            .completing_turn_input_claim(active_claim.completion())
-                            .deferring_interrupted_turn_inputs(turn_id.clone(), None),
+                        &fence,
+                        completing,
                     )
                     .await?;
                 let (_, phase) = Box::pin(measure_runtime_perf_async_phase(
@@ -631,69 +614,78 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                 deferred_inputs +=
                     TURN_INPUT_INGRESS_ACTIVE_PER_TURN - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN;
 
-                let (next_claim, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.claim_next_turn_inputs",
+                let next_head = store
+                    .list_pending_turn_inputs(&session_id)
+                    .await?
+                    .into_iter()
+                    .find(|read| {
+                        matches!(read.status, lash_core::PendingTurnInputReadStatus::Open)
+                            && matches!(read.input.ingress(), lash_core::TurnInputIngress::NextTurn)
+                    })
+                    .map(|read| read.input.input_id)
+                    .ok_or_else(|| anyhow::anyhow!("expected an open next-turn input"))?;
+                let next_root =
+                    lash_core::TurnId::from(format!("turn-input-ingress-next-{turn_index}"));
+                let (next, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.admit_next_turn_inputs",
                     async {
-                        store
-                            .claim_next_turn_inputs(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                TURN_INPUT_INGRESS_ACTIVE_PER_TURN
-                                    + TURN_INPUT_INGRESS_NEXT_PER_TURN,
-                            )
-                            .await?
-                            .ok_or_else(|| anyhow::anyhow!("expected next-turn input claim"))
+                        admit_perf_root(
+                            store.as_ref(),
+                            &fence,
+                            &next_root,
+                            AdmittedHead::Input(next_head.clone()),
+                            1,
+                        )
+                        .await?
+                        .ok_or_else(|| anyhow::anyhow!("expected a next-turn input admission"))
                     },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                next_claims += 1;
+                next_admissions += 1;
                 let expected_next = TURN_INPUT_INGRESS_ACTIVE_PER_TURN
                     - TURN_INPUT_INGRESS_ACCEPTED_PER_TURN
                     + TURN_INPUT_INGRESS_NEXT_PER_TURN;
-                if next_claim.inputs.len() != expected_next {
+                if next.input_ids().len() != expected_next {
                     anyhow::bail!(
                         "turn-input ingress expected {expected_next} next-turn inputs, got {}",
-                        next_claim.inputs.len()
+                        next.input_ids().len()
                     );
                 }
 
-                let (_, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.abandon_next_claim",
-                    async {
-                        store
-                            .abandon_turn_input_claim(&next_claim)
-                            .await
-                            .map_err(anyhow::Error::from)
-                    },
+                let (fence, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.supersede_next_drive",
+                    async { seal_perf_drive(store.as_ref(), &session_id).await },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                abandoned_claims += 1;
 
-                let (next_claim, phase) = measure_runtime_perf_async_phase(
-                    "turn_input_ingress.reclaim_next_turn_inputs",
+                let (next_admission, phase) = measure_runtime_perf_async_phase(
+                    "turn_input_ingress.resume_next_admission",
                     async {
-                        store
-                            .claim_next_turn_inputs(
-                                &session_id,
-                                &lease.fence(),
-                                &owner,
-                                TURN_INPUT_INGRESS_ACTIVE_PER_TURN
-                                    + TURN_INPUT_INGRESS_NEXT_PER_TURN,
-                            )
-                            .await?
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("expected reclaimed next-turn input claim")
-                            })
+                        admit_perf_root(
+                            store.as_ref(),
+                            &fence,
+                            &next_root,
+                            AdmittedHead::Input(next_head.clone()),
+                            1,
+                        )
+                        .await?
+                        .ok_or_else(|| anyhow::anyhow!("expected the resumed next-turn admission"))
                     },
                 )
                 .await?;
                 phase_profile.insert(phase.0, phase.1);
-                next_claims += 1;
+                resumed_admissions += 1;
+                if next_admission.input_ids() != next.input_ids() {
+                    anyhow::bail!("turn-input ingress resume returned different next-turn inputs");
+                }
+                let next_claim = next_admission
+                    .inputs
+                    .as_deref()
+                    .ok_or_else(|| anyhow::anyhow!("expected admitted next-turn inputs"))?;
                 let next_turn_input = next_claim.materialize_turn_input();
-                // Position-independent: see the active-claim assertion above.
+                // Position-independent: see the active-admission assertion above.
                 if !next_turn_input.items.iter().any(|item| {
                     matches!(
                         item,
@@ -702,17 +694,21 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
                         } if bytes == &vec![4, 5, 6, turn_index as u8]
                     )
                 }) {
-                    anyhow::bail!("turn-input ingress next claim lost attachment bytes");
+                    anyhow::bail!("turn-input ingress next admission lost attachment bytes");
                 }
 
                 let (_, phase) = measure_runtime_perf_async_phase(
                     "turn_input_ingress.complete_next_turn_inputs",
                     async {
+                        let mut commit =
+                            RuntimeCommit::persisted_state_for_test(&commit_state, &[]);
+                        commit.drive_fence = Some(Box::new(fence.clone()));
                         let result = store
-                            .commit_runtime_state(
-                                RuntimeCommit::persisted_state_for_test(&commit_state, &[])
-                                    .completing_turn_input_claim(next_claim.completion()),
-                            )
+                            .commit_runtime_state(finishing_perf_root(
+                                commit,
+                                &next_root,
+                                &next_admission,
+                            ))
                             .await?;
                         commit_state.apply_persisted_commit_result(result);
                         Ok::<(), anyhow::Error>(())
@@ -780,9 +776,9 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
         extra_counters: BTreeMap::from([
             ("active_enqueued".to_string(), active_enqueued as u64),
             ("next_enqueued".to_string(), next_enqueued as u64),
-            ("active_claims".to_string(), active_claims as u64),
-            ("next_claims".to_string(), next_claims as u64),
-            ("abandoned_claims".to_string(), abandoned_claims as u64),
+            ("active_admissions".to_string(), active_admissions as u64),
+            ("next_admissions".to_string(), next_admissions as u64),
+            ("resumed_admissions".to_string(), resumed_admissions as u64),
             ("completed_inputs".to_string(), completed_inputs as u64),
             ("deferred_inputs".to_string(), deferred_inputs as u64),
             (
@@ -795,15 +791,77 @@ pub(super) async fn run_once_turn_input_ingress_interrupt(
     }))
 }
 
+/// A head-preserving commit over `state` under `fence`.
 fn queued_work_stress_commit(
     state: &RuntimeSessionState,
-    completed_queue_claims: Vec<QueuedWorkCompletion>,
+    fence: &lash_core::store::DriveFence,
 ) -> RuntimeCommit {
     RuntimeCommit {
         graph: GraphAppend::PreserveHead,
-        completed_queue_claims,
+        drive_fence: Some(Box::new(fence.clone())),
         ..RuntimeCommit::persisted_state_for_test(state, &[])
     }
+}
+
+/// Admit `root` headed by `head` under `fence`, composing at most
+/// `max_batches` joined wakes and every input its head's run takes.
+async fn admit_perf_root(
+    store: &RuntimePerfStore,
+    fence: &lash_core::store::DriveFence,
+    root: &lash_core::TurnId,
+    head: AdmittedHead,
+    max_batches: usize,
+) -> anyhow::Result<Option<lash_core::store::RootAdmission>> {
+    let mut request =
+        lash_core::testing::store_fixtures::admit_root_request_for_test(fence, root, head);
+    request.policy = lash_core::testing::queued_work_claim_policy(max_batches);
+    request.max_inputs = TURN_INPUT_INGRESS_ACTIVE_PER_TURN + TURN_INPUT_INGRESS_NEXT_PER_TURN;
+    Ok(store.admit_root(&request).await?)
+}
+
+/// `commit` as `root`'s final commit: it completes every row `admission`
+/// bound and writes the root's terminal.
+pub(super) fn finishing_perf_root(
+    mut commit: RuntimeCommit,
+    root: &lash_core::TurnId,
+    admission: &lash_core::store::RootAdmission,
+) -> RuntimeCommit {
+    let mut settlement = lash_core::store::IngressSettlement::new(root.clone());
+    settlement
+        .completed_batches
+        .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+    settlement
+        .completed_inputs
+        .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+    commit.ingress = Some(settlement);
+    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+        turn: lash_core::store::PhysicalTurn::derive_turn_id(root, 0),
+        root: root.clone(),
+        stop: None,
+    }));
+    commit
+}
+
+/// Admit what root `turn_id`'s `AfterWork` checkpoint step `step` takes
+/// under `fence`.
+async fn admit_perf_checkpoint(
+    store: &RuntimePerfStore,
+    fence: &lash_core::store::DriveFence,
+    turn_id: &lash_core::TurnId,
+    step: &str,
+) -> anyhow::Result<lash_core::store::CheckpointAdmission> {
+    Ok(store
+        .admit_at_checkpoint(&lash_core::store::CheckpointAdmissionRequest {
+            fence: fence.clone(),
+            root: turn_id.clone(),
+            turn_id: turn_id.clone(),
+            checkpoint: lash_core::CheckpointKind::AfterWork,
+            step: step.to_string(),
+            max_inputs: TURN_INPUT_INGRESS_ACCEPTED_PER_TURN,
+            policy: lash_core::testing::queued_work_claim_policy(QUEUED_WORK_JOIN_BATCHES_PER_TURN),
+        })
+        .await?)
 }
 
 async fn runtime_perf_commit_state(
@@ -827,7 +885,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn queued_work_claim_stress_advances_its_commit_cursor() {
+    async fn queued_work_admission_stress_advances_its_commit_cursor() {
         Box::pin(run_once_queued_work_claim_stress(1))
             .await
             .expect("queued-work stress scenario");

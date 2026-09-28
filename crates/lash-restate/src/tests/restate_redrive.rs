@@ -2438,29 +2438,24 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
     );
 }
 
-fn journaled_drive_claim(session_lease_generation: u64) -> lash_core::TurnInputClaim {
+/// The inputs an execution under `live_generation` would compose: the
+/// enqueue instant stands in for everything a live read could observe.
+fn journaled_drive_inputs(live_generation: u64) -> lash_core::AdmittedTurnInputs {
     let session_id = SessionId::from("session");
-    lash_core::TurnInputClaim {
+    lash_core::AdmittedTurnInputs {
         session_id: session_id.clone(),
-        claim_id: format!("claim-generation-{session_lease_generation}"),
-        owner: lash_core::LeaseOwnerIdentity::opaque("drive-owner", "drive-incarnation"),
-        lease_token: format!("token-generation-{session_lease_generation}"),
-        fencing_token: session_lease_generation,
-        session_lease_generation,
-        data: lash_core::TurnInputClaimData {
-            mode: lash_core::TurnInputClaimMode::NextTurn,
-            inputs: vec![lash_core::PendingTurnInput {
-                input_id: lash_core::InputId::from("in_7"),
-                session_id,
-                enqueue_seq: 7,
-                source_key: None,
-                state: lash_core::TurnInputState::DeferredNextTurn,
-                enqueued_at_ms: 0,
-                input: lash_core::TurnInput::text("deploy staging"),
-                run_spec: None,
-            }],
-            applications: Vec::new(),
-        },
+        mode: lash_core::TurnInputAdmissionMode::NextTurn,
+        inputs: vec![lash_core::PendingTurnInput {
+            input_id: lash_core::InputId::from("in_7"),
+            session_id,
+            enqueue_seq: 7,
+            source_key: None,
+            state: lash_core::TurnInputState::DeferredNextTurn,
+            enqueued_at_ms: live_generation,
+            input: lash_core::TurnInput::text("deploy staging"),
+            run_spec: None,
+        }],
+        applications: Vec::new(),
     }
 }
 
@@ -2497,7 +2492,7 @@ async fn execute_drive(
                                 head: lash_core::store::AdmittedHead::Input(
                                     lash_core::InputId::from("in_7"),
                                 ),
-                                inputs: Some(Box::new(journaled_drive_claim(live_generation))),
+                                inputs: Some(Box::new(journaled_drive_inputs(live_generation))),
                                 queued: None,
                                 // What this execution would read from the live
                                 // head: a replay must not see it (FIG-3682).
@@ -2530,11 +2525,10 @@ async fn execute_drive(
 }
 
 /// FIG-3532: the initial drive set of an accepted turn input is a journaled
-/// Restate run. A replay under a later lease generation returns the drive the
-/// first execution journaled, with its original claim token, and never runs the
-/// live claim again.
+/// Restate run. A replay under a later drive epoch returns the admission the
+/// first execution journaled and never runs the live admission again.
 #[tokio::test]
-async fn accepted_turn_input_drive_replays_the_journaled_claim() {
+async fn accepted_turn_input_drive_replays_the_journaled_admission() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let local_runs = Arc::new(AtomicUsize::new(0));
     let first = execute_drive(&context, 3, &local_runs).await;
@@ -2545,7 +2539,7 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
     assert_eq!(
         local_runs.load(Ordering::SeqCst),
         1,
-        "replay returns the journaled drive without claiming live rows"
+        "replay returns the journaled drive without admitting live rows"
     );
     // The admission's base head and turn index are the first execution's,
     // never re-read from the replaying execution's live head (FIG-3682).
@@ -2560,14 +2554,17 @@ async fn accepted_turn_input_drive_replays_the_journaled_claim() {
     let (Some(first), Some(replayed)) = (first.inputs, replayed.inputs) else {
         panic!("both executions admit their input");
     };
-    assert_eq!(replayed.session_lease_generation, 3);
-    assert_eq!(replayed.lease_token, first.lease_token);
+    assert_eq!(replayed.inputs[0].enqueued_at_ms, 3);
     assert_eq!(replayed.inputs[0].input_id, first.inputs[0].input_id);
+    assert_eq!(
+        replayed.inputs[0].enqueued_at_ms,
+        first.inputs[0].enqueued_at_ms
+    );
 }
 
-/// FIG-3532: nothing about the lease that performs the claim enters the drive
-/// envelope, so the journaled entry hashes identically for every lease
-/// generation that replays it.
+/// FIG-3532: nothing about the drive that performs the admission enters the
+/// drive envelope, so the journaled entry hashes identically for every drive
+/// epoch that replays it.
 #[test]
 fn accepted_turn_input_drive_envelope_hash_is_independent_of_lease_generation() {
     let envelope = drive_envelope();

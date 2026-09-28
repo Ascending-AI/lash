@@ -16,7 +16,7 @@ mod tools;
 mod trace;
 
 pub(in crate::runtime) use crate::runtime::turn_loop::{
-    queued_work_trace_payload, send_queued_work_started_event,
+    ingress_admitted_trace_payload, send_queued_work_started_event,
 };
 pub(super) use events::{emit_semantic_response_parts, send_turn_input_applications};
 use handlers::foreground_exec_graph_key;
@@ -49,21 +49,24 @@ pub(super) struct RuntimeTurnDriver<'a> {
     pub(super) protocol_turn_options: crate::ProtocolTurnOptions,
     pub(super) turn_context: crate::TurnContext,
     pub(super) turn_causes: Vec<crate::TurnCause>,
-    pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
-    pub(super) pending_checkpoint_turn_input_claim: Option<crate::TurnInputClaim>,
-    /// FIG-3157: work claimed at a terminal checkpoint and withheld from its
+    pub(super) pending_queued: Vec<crate::AdmittedQueuedWork>,
+    pub(super) pending_turn_inputs: Vec<crate::AdmittedTurnInputs>,
+    pub(super) pending_checkpoint_turn_inputs: Option<crate::AdmittedTurnInputs>,
+    /// FIG-3157: work admitted at a terminal checkpoint and withheld from its
     /// delivery, so the committed finish stays this turn's answer. It is never
     /// settled as this turn's completed work. A finished turn's logical run
     /// drives it in a follow-on turn. When this turn is cancelled that
-    /// follow-on never runs for turn input: the final commit settles withheld
-    /// turn input through the cancellation's undelivered disposition, like an
-    /// unclaimed active-turn row (FIG-3531). Withheld queued work keeps its
-    /// own cancellation path, which is tracked separately.
+    /// follow-on never runs: the final commit hands withheld turn input to the
+    /// cancellation's undelivered disposition (FIG-3531) and releases withheld
+    /// wakes (FIG-3543).
     pub(super) withheld_terminal_work: super::logical_turn::WithheldTerminalWork,
     pub(super) checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer,
-    pub(super) session_execution_lease: Option<crate::ClaimAuthority>,
-    pub(super) runtime_lease_owner: crate::LeaseOwnerIdentity,
+    /// The fence of the drive admission the turn's root runs under: the
+    /// authority its checkpoint admissions present (FIG-3927). `None` for a
+    /// turn that runs under no admitted root, which admits nothing.
+    pub(super) drive_fence: Option<DriveFence>,
+    /// The logical root the turn's checkpoint admissions bind rows to.
+    pub(super) drive_root: Option<crate::TurnId>,
     pub(super) turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
     pub(super) turn_control: Arc<ActiveTurnControl>,
     /// Names the reply the protocol driver materialized, for the boundary's

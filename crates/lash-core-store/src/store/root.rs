@@ -6,8 +6,10 @@
 //! switch's follow-on, an S4 follow-on, a redrive) all derive from it, and
 //! exactly one of them ends it. The evidence of that end is root-addressed and
 //! written in the transaction that makes it true: the head commit of the
-//! root's final physical turn, or the settlement of a queued run that ended
-//! without one. Once written it is never replaced: a second, different
+//! root's final physical turn, or the root verb, close or lost-run end that
+//! ended it without one. That transaction also releases every row still
+//! bound to the root, so no row stays admitted to a root with terminal
+//! evidence (FIG-3927). Once written it is never replaced: a second, different
 //! terminal is refused with [`StoreError::RootAlreadyTerminal`] and the first
 //! stands (ADR 0105 law L-S6), while rewriting the same terminal is a no-op.
 //!
@@ -23,7 +25,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::control_intent::ControlIntentId;
-use super::{SessionHeadRef, StoreError};
+use super::{DriveFence, SessionHeadRef, StoreError};
 use crate::{BatchId, InputId, SessionId, TurnId};
 use lash_sansio::TurnStop;
 
@@ -335,17 +337,22 @@ pub trait RootStore: Send + Sync {
     ) -> Result<Option<UnfinishedRoot>, StoreError>;
 
     /// Admit the turn-lane run headed by `request.head` to `request.root`, in
-    /// one transaction fenced by `request.lease` (FIG-3840, FIG-3927).
+    /// one transaction fenced by `request.fence` (FIG-3840, FIG-3927).
     ///
-    /// The first call composes from the session's open rows: an input head
-    /// takes the accepted next-turn prefix (up to `request.max_inputs`), a
-    /// batch head the ready queued-work prefix under `request.policy`. When
-    /// the prefix reaches the head, the same transaction reads the session's
-    /// state generation into the base, retains that base, binds the admitted
-    /// inputs to the root and records the [`RootAdmission`] on the root
+    /// The first call composes from the session's open rows (no root admitted
+    /// them): an input head takes the next-turn prefix (up to
+    /// `request.max_inputs`), a batch head the ready queued-work prefix under
+    /// `request.policy`, each stopping at the other table's earliest open row
+    /// ([`TurnLaneStop`](super::TurnLaneStop)). When the prefix reaches the
+    /// head, the same transaction binds every member to the root
+    /// (`admitted_root`, `admitted_by = 'admit'`) and delivers its ingress
+    /// obligation, reads the session's state generation into the base, retains
+    /// that base, binds the admitted inputs' answer-of-record to the root and
+    /// records the [`RootAdmission`] on the root
     /// (`session_roots.admission_json`, with `admitted_generation`). A
     /// composition that misses the head takes nothing and returns `None`, as
-    /// does an empty lane.
+    /// does an empty lane. While the head owes a follow-on, nothing is
+    /// admitted and the call returns `None`.
     ///
     /// The root's admission chose the turn lane at a boundary whose command
     /// lane was empty (ADR 0101 §4), so a session command enqueued since
@@ -353,19 +360,40 @@ pub trait RootStore: Send + Sync {
     /// before the earliest open command, and the rows after it wait for the
     /// next boundary, where that command applies first.
     ///
-    /// Every later call for the same root, under any lease generation,
-    /// returns the recorded admission unchanged and takes nothing: a worker
-    /// that dies between this commit and the journal's record of its outcome
-    /// leaves its successor exactly the composition, base and generation it
-    /// committed, never a prefix recomputed over rows that arrived since. A
-    /// different root is refused ([`StoreError::UnfinishedRootConflict`])
-    /// while an admitted root lacks terminal evidence.
+    /// Every later call for the same root, under any fence, returns the
+    /// recorded admission unchanged and takes nothing: a worker that dies
+    /// between this commit and the journal's record of its outcome leaves its
+    /// successor exactly the composition, base and generation it committed,
+    /// never a prefix recomputed over rows that arrived since. A different
+    /// root is refused ([`StoreError::UnfinishedRootConflict`]) while an
+    /// admitted root lacks terminal evidence, and a stale fence is refused
+    /// [`StoreError::StaleDriveFence`] before anything is read.
     async fn admit_root(
         &self,
         _request: &AdmitRootRequest,
     ) -> Result<Option<RootAdmission>, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "admit_root",
+        })
+    }
+
+    /// Admit the rows a running root's checkpoint delivers, in one
+    /// transaction fenced by `request.fence` (FIG-3927).
+    ///
+    /// Rows already bound to `(request.root, request.step)` are returned
+    /// exactly, in `enqueue_seq` order, and nothing else is taken: a
+    /// re-execution of the checkpoint step reads its own admission back. A
+    /// first execution applies the follow-on block (except the follow-on's
+    /// own checkpoint), composes the addressed active-turn inputs the
+    /// checkpoint's boundary admits and the queued work the boundary admits,
+    /// binds them to the root with `admitted_by = request.step`, and delivers
+    /// their obligations.
+    async fn admit_at_checkpoint(
+        &self,
+        _request: &CheckpointAdmissionRequest,
+    ) -> Result<CheckpointAdmission, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "admit_at_checkpoint",
         })
     }
 
@@ -376,8 +404,8 @@ pub trait RootStore: Send + Sync {
         root: &TurnId,
     ) -> Result<Option<RootTerminal>, StoreError>;
 
-    /// The root that took accepted input `input`: the root its claim bound it
-    /// to. `None` while it is pending.
+    /// The root that took accepted input `input`: the root its admission bound
+    /// it to. `None` while it is pending.
     async fn root_of_input(
         &self,
         session_id: &SessionId,
@@ -393,8 +421,8 @@ pub trait RootStore: Send + Sync {
     ) -> Result<Option<TurnId>, StoreError>;
 
     /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s
-    /// record if it has none. The recorded claim step binds the rows it
-    /// claimed. A binding to another root is refused and nothing is written.
+    /// record if it has none. The root's admission binds the rows it
+    /// admitted. A binding to another root is refused and nothing is written.
     async fn bind_root_inputs(
         &self,
         session_id: &SessionId,
@@ -426,14 +454,15 @@ pub struct UnfinishedRoot {
 /// root drives exactly this composition from exactly this base.
 ///
 /// A composition is one family: an input head admits turn inputs, a batch
-/// head queued work.
+/// head queued work. The members carry their payloads, so a replay drives
+/// them from the journal without reading the store.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RootAdmission {
     pub head: AdmittedHead,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub inputs: Option<Box<crate::turn_input_vocabulary::TurnInputClaim>>,
+    pub inputs: Option<Box<crate::AdmittedTurnInputs>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub queued: Option<Box<crate::QueuedWorkClaim>>,
+    pub queued: Option<Box<crate::AdmittedQueuedWork>>,
     /// The session head the root was admitted on (FIG-3682).
     pub base: SessionHeadRef,
     pub turn_index: u64,
@@ -447,8 +476,59 @@ impl RootAdmission {
     pub fn input_ids(&self) -> Vec<InputId> {
         self.inputs
             .iter()
-            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .flat_map(|admitted| admitted.input_ids())
             .collect()
+    }
+
+    /// The queued-work batches the admission drives, in `enqueue_seq` order.
+    pub fn batch_ids(&self) -> Vec<BatchId> {
+        self.queued
+            .iter()
+            .flat_map(|admitted| admitted.batch_ids())
+            .collect()
+    }
+}
+
+/// The turns a root's terminal write ends (FIG-3946): the root's own
+/// physical turns, and the turn each member of its admission was accepted
+/// under (the member's source key). A member composed into this root never
+/// runs as a root of its own, so open input still addressed to its turn is
+/// answered by this root's terminal or by nothing.
+#[derive(Clone, Debug)]
+pub struct RootEndedTurns {
+    root: TurnId,
+    members: std::collections::BTreeSet<String>,
+}
+
+impl RootEndedTurns {
+    /// The turns `root` ends, given its recorded admission, if it has one.
+    pub fn new(root: &TurnId, admission: Option<&RootAdmission>) -> Self {
+        let members = admission
+            .into_iter()
+            .flat_map(|admission| {
+                let inputs = admission
+                    .inputs
+                    .iter()
+                    .flat_map(|admitted| admitted.inputs.iter())
+                    .filter_map(|input| input.source_key.clone());
+                let batches = admission
+                    .queued
+                    .iter()
+                    .flat_map(|admitted| admitted.batches.iter())
+                    .filter_map(|batch| batch.source_key.clone());
+                inputs.chain(batches).collect::<Vec<_>>()
+            })
+            .collect();
+        Self {
+            root: root.clone(),
+            members,
+        }
+    }
+
+    /// Whether `turn` is one of the physical turns of a turn this root ends.
+    pub fn contains(&self, turn: &TurnId) -> bool {
+        let (logical, _) = super::PhysicalTurn::split_turn_id(turn);
+        logical == self.root || self.members.contains(logical.as_str())
     }
 }
 
@@ -466,12 +546,9 @@ pub enum RootAdmissionAnswer {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RootAdmissionRefusal {
-    /// The head row is held by a claim of the live drive epoch that is not
-    /// this root's.
-    HeldByLiveClaim,
     /// The head row is no longer open: another root settled it, the host
     /// cancelled it, or `vacuum()` pruned it after either.
-    SettledOrRemoved,
+    HeadGone,
 }
 
 /// A root's admission request ([`RootStore::admit_root`]). `base` is the
@@ -481,17 +558,71 @@ pub enum RootAdmissionRefusal {
 /// given.
 #[derive(Clone, Debug)]
 pub struct AdmitRootRequest {
-    pub session_id: SessionId,
-    pub lease: crate::ClaimAuthority,
-    pub owner: crate::LeaseOwnerIdentity,
+    /// The fence of the drive admission the root runs under: the one
+    /// authority the admission's write checks.
+    pub fence: DriveFence,
     pub root: TurnId,
     pub head: AdmittedHead,
     pub max_inputs: usize,
-    pub policy: crate::QueuedWorkClaimPolicy,
+    pub policy: crate::TurnLaneAdmissionPolicy,
     pub base: SessionHeadRef,
     pub turn_index: u64,
     pub generation: Option<crate::executable_generation::ExecutableGeneration>,
     pub admitted_generation: crate::build_generation::BuildGeneration,
+}
+
+impl AdmitRootRequest {
+    /// The session the admission binds rows of.
+    pub fn session_id(&self) -> &SessionId {
+        self.fence.session()
+    }
+}
+
+/// A checkpoint's admission request ([`RootStore::admit_at_checkpoint`]).
+#[derive(Clone, Debug)]
+pub struct CheckpointAdmissionRequest {
+    /// The fence of the drive admission the root runs under.
+    pub fence: DriveFence,
+    /// The logical root whose physical turn reached the checkpoint.
+    pub root: TurnId,
+    /// The physical turn at the checkpoint: active-turn input addresses it.
+    pub turn_id: TurnId,
+    pub checkpoint: crate::CheckpointKind,
+    /// The checkpoint step's replay key: the admission's `admitted_by`, so a
+    /// re-execution of the step reads its own rows back.
+    pub step: String,
+    pub max_inputs: usize,
+    pub policy: crate::TurnLaneAdmissionPolicy,
+}
+
+impl CheckpointAdmissionRequest {
+    /// The session the admission binds rows of.
+    pub fn session_id(&self) -> &SessionId {
+        self.fence.session()
+    }
+}
+
+/// What a checkpoint's admission bound to its root: both families, each in
+/// `enqueue_seq` order.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CheckpointAdmission {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<crate::AdmittedTurnInputs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queued: Option<crate::AdmittedQueuedWork>,
+}
+
+impl CheckpointAdmission {
+    /// Whether the checkpoint admitted nothing.
+    pub fn is_empty(&self) -> bool {
+        self.inputs
+            .as_ref()
+            .is_none_or(|inputs| inputs.inputs.is_empty())
+            && self
+                .queued
+                .as_ref()
+                .is_none_or(|queued| queued.batches.is_empty())
+    }
 }
 
 /// An in-memory root ledger for store doubles that keep no SQL rows. It

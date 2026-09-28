@@ -36,11 +36,8 @@ pub(crate) struct PendingTurnInputRow {
     pub(crate) state: String,
     pub(crate) input_json: String,
     pub(crate) enqueued_at_ms: u64,
-    pub(crate) claim_id: Option<String>,
-    pub(crate) claim_fencing_token: u64,
-    pub(crate) claim_owner: Option<LeaseOwnerIdentity>,
-    pub(crate) claim_token: Option<String>,
-    pub(crate) claim_session_lease_generation: u64,
+    /// The root whose admission holds the row; `None` while it is open.
+    pub(crate) admitted_root: Option<String>,
     pub(crate) run_spec_hash: Option<String>,
 }
 
@@ -56,43 +53,8 @@ pub(crate) fn pending_turn_input_row_from_sql(
         state: row.get(5)?,
         input_json: row.get(6)?,
         enqueued_at_ms: u64_from_sql("PendingTurnInput", "enqueued_at_ms", row.get(7)?)?,
-        claim_id: row.get(8)?,
-        claim_fencing_token: u64_from_sql("PendingTurnInput", "claim_fencing_token", row.get(9)?)?,
-        claim_owner: lease_owner_from_columns(row.get(10)?, row.get(11)?).map_err(|error| {
-            rusqlite::Error::FromSqlConversionFailure(
-                10,
-                rusqlite::types::Type::Text,
-                Box::new(error),
-            )
-        })?,
-        claim_token: row.get(12)?,
-        claim_session_lease_generation: u64_from_sql(
-            "PendingTurnInput",
-            "claim_session_lease_generation",
-            row.get(13)?,
-        )?,
-        run_spec_hash: row.get(14)?,
-    })
-}
-
-/// One `list_undelivered` row: the input and the expiry of the live lease its
-/// claim is pinned to.
-pub(crate) struct PendingTurnInputReadRow {
-    row: PendingTurnInputRow,
-    drive_epoch: Option<u64>,
-}
-
-pub(crate) fn pending_turn_input_read_row_from_sql(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<PendingTurnInputReadRow> {
-    let input = pending_turn_input_row_from_sql(row)?;
-    let drive_epoch = row
-        .get::<_, Option<i64>>(15)?
-        .map(|value| u64_from_sql("PendingTurnInputRead", "drive_epoch", value))
-        .transpose()?;
-    Ok(PendingTurnInputReadRow {
-        row: input,
-        drive_epoch,
+        admitted_root: row.get(8)?,
+        run_spec_hash: row.get(10)?,
     })
 }
 
@@ -115,12 +77,16 @@ pub(crate) fn pending_turn_input_from_row(
 }
 
 pub(crate) fn pending_turn_input_read_from_row(
-    read: PendingTurnInputReadRow,
+    row: PendingTurnInputRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
-    let input = pending_turn_input_from_row(read.row)?;
-    Ok(match read.drive_epoch {
-        Some(drive_epoch) => lash_core_execution::PendingTurnInputRead::held(input, drive_epoch),
-        None => lash_core_execution::PendingTurnInputRead::pending(input),
+    let admitted_root = row.admitted_root.clone();
+    let input = pending_turn_input_from_row(row)?;
+    Ok(match admitted_root {
+        Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
+            input,
+            lash_core_execution::TurnId::from(root),
+        ),
+        None => lash_core_execution::PendingTurnInputRead::open(input),
     })
 }
 
@@ -167,22 +133,4 @@ pub(crate) fn load_pending_turn_input_row_by_target_conn(
             .optional()
             .map_err(sqlite_error),
     }
-}
-
-pub(crate) fn pending_turn_input_claim_diagnostics_from_row(
-    row: &PendingTurnInputRow,
-    state: lash_core_execution::TurnInputState,
-) -> Option<lash_core_execution::PendingTurnInputClaimDiagnostics> {
-    row.claim_token
-        .is_some()
-        .then(|| lash_core_execution::PendingTurnInputClaimDiagnostics {
-            state,
-            claim_id: row.claim_id.clone(),
-            claim_owner: row.claim_owner.clone(),
-            claim_session_lease_generation: row
-                .claim_token
-                .as_ref()
-                .map(|_| row.claim_session_lease_generation),
-            claim_fencing_token: row.claim_fencing_token,
-        })
 }

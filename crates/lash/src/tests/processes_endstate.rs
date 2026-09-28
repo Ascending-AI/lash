@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 
 use lashlang::testing::ast_builders as b;
 
@@ -646,7 +646,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-owner",
@@ -670,12 +670,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         &physical_scope,
     )?;
     store
-        .validate_turn_cancellation_binding(
-            &session_id,
-            &lease.fence(),
-            &binding_id,
-            &physical_scope,
-        )
+        .validate_turn_cancellation_binding(&session_id, &lease, &binding_id, &physical_scope)
         .await?;
     let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
     let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
@@ -707,10 +702,10 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         terminal_key,
         lash_core::TurnCancelClosureProposal::CompletionSealed,
         lash_core::TurnCancelIntentSnapshot::Absent,
-        &lease.fence(),
+        &lease,
     )?;
     store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await?;
 
     let refusal = core
@@ -731,17 +726,22 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     );
 
     let settlement = authority.settle_authorized_closure(&authorization).await?;
-    store
-        .repair_orphaned_active_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &turn_id,
-            &lash_core::TurnCancelIntentSnapshot::Absent,
-            Some(&settlement),
-        )
-        .await?
-        .into_applied()
-        .expect("the exact current owner consumes the closure authorization");
+    // The exact current owner's commit consumes the closure authorization.
+    let state = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .deferring_interrupted_turn_inputs(
+            turn_id.clone(),
+            settlement.effective_cancellation().cloned(),
+        );
+    commit.interrupted_turn_cancel_intent = Some(lash_core::TurnCancelIntentSnapshot::Absent);
+    commit.turn_cancel_closure_settlement = Some(settlement);
+    commit.drive_fence = Some(Box::new(lease.clone()));
+    store.commit_runtime_state(commit).await?;
     let report = core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
@@ -759,7 +759,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let late_lease = late_store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &late_session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-late-owner",
@@ -780,7 +780,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     late_store
         .validate_turn_cancellation_binding(
             &late_session_id,
-            &late_lease.fence(),
+            &late_lease,
             &late_binding_id,
             &late_scope,
         )
@@ -814,10 +814,10 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             .await?,
         lash_core::TurnCancelClosureProposal::CompletionSealed,
         lash_core::TurnCancelIntentSnapshot::Absent,
-        &late_lease.fence(),
+        &late_lease,
     )?;
     let late_result = late_store
-        .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+        .authorize_turn_cancel_closure(&late_lease, &late_authorization)
         .await;
     assert!(
         matches!(

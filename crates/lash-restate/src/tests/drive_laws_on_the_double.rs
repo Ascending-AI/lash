@@ -71,6 +71,19 @@ lash_conformance::frame_switch_redrive_tests!({
     (harness, prefix, effect_host, stores, turn_runner)
 });
 
+// FIG-3552, FIG-3927: a row admitted to one root is answered only by that
+// root, whatever path the drives after its worker's death take.
+lash_conformance::root_answers_its_rows_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-root-rows-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
+
 // FIG-3748: a queued drive crashed after its first commit replays that
 // root from its journal, and the input queued behind it runs once.
 lash_conformance::queued_after_commit_redrive_tests!({

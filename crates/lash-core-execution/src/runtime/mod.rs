@@ -52,7 +52,7 @@ pub use effect::await_event_identity;
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
+    CausalRef, CheckpointAdmittedSet, CommandJournalGuard, CompletionKeyPreparation, EffectAddress,
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
     EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
     ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
@@ -174,13 +174,13 @@ pub use turn_control::{
 pub use turn_queue::SessionCommandSettlement;
 pub use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
-    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, PROCESS_WAKE_MERGE_KEY,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy, TurnWorkPayload,
+    process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 pub use usage::{
     LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,

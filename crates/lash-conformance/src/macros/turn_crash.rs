@@ -62,6 +62,22 @@ macro_rules! turn_crash_after_commit_redrive_tests {
     };
 }
 
+/// Register FIG-3927 N9's turn crash cells: a final commit whose reply was
+/// lost replays its receipt and settles nothing twice (b), and a checkpoint
+/// admission whose worker died after the store bound its rows, and before
+/// the journal recorded the step, redelivers exactly those rows (c).
+#[macro_export]
+macro_rules! turn_crash_admission_cells_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
+            (a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles_nothing_twice,
+                "turn-crash-final-commit-reply-lost"));
+        $crate::__turn_crash_runner_register!([$(#[$attr])*] $fixture;
+            (a_checkpoint_admission_crashed_before_its_record_redelivers_its_rows,
+                "turn-crash-checkpoint-admission"));
+    };
+}
+
 /// Register the engine-neutral layer law: a layer over the tier's effect
 /// host observes the effects of the group children its turns open. The
 /// fixture is the runner fixture of [`turn_crash_runner_tests!`].

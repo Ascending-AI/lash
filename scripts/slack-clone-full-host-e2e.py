@@ -79,7 +79,7 @@ class Journey:
         self.room_event = ""
         self.kill_event = ""
         self.root_ts = ""
-        self.kill_claim_owner = ""
+        self.kill_admitted_root = ""
         self.kill_drive_epoch = 0
         self.kill_drive_admission = ""
         self.kill_started = 0.0
@@ -200,8 +200,8 @@ class Journey:
 
     def session_snapshot(self) -> dict[str, Any]:
         tables = {
-            "pending": "SELECT input_id, session_id, source_key, state, input_json, claim_id, "
-            "claim_owner_incarnation_id, claim_session_lease_generation FROM pending_turn_inputs ORDER BY enqueue_seq",
+            "pending": "SELECT input_id, session_id, source_key, state, input_json, admitted_root, "
+            "admitted_by FROM pending_turn_inputs ORDER BY enqueue_seq",
             "nodes": "SELECT session_id, node_id, parent_node_id, generation, node_json FROM graph_nodes "
             "WHERE tombstoned = 0 ORDER BY session_id, generation",
             "turns": "SELECT session_id, turn_id, result_json FROM runtime_turn_commits ORDER BY committed_at_ms",
@@ -433,7 +433,7 @@ class Journey:
             len(channel_pending) == 1
             and channel_pending[0]["source_key"] == mention_turn
             and all(
-                pending["state"] == "completed" and pending["claim_id"] is None
+                pending["state"] == "completed"
                 for pending in channel_pending
             )
         )
@@ -629,9 +629,9 @@ class Journey:
         accepted = self.wait_ledger("FIG1341-KILL-MID-TURN", "accepted")
         self.kill_event = accepted["event_id"]
         # Accepted is committed before the separate input-id write. Re-read
-        # that identity and its durable claim before killing; the first ledger
+        # that identity and its root binding before killing; the first ledger
         # snapshot can still have input_id=None even after the provider starts.
-        def claimed_admission() -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+        def admitted_input() -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
             ledger = next(
                 (r for r in self.ledger_rows() if r["event_id"] == self.kill_event),
                 None,
@@ -647,11 +647,11 @@ class Journey:
                 for r in self.session_snapshot()["pending"]
                 if r["input_id"] == ledger["input_id"]
             ]
-            if len(pending) == 1 and pending[0]["claim_owner_incarnation_id"]:
+            if len(pending) == 1 and pending[0]["admitted_root"]:
                 return ledger, pending
             return None
 
-        self.poll("accepted admission claim before kill", claimed_admission, timeout=15)
+        self.poll("accepted input admitted to its root before kill", admitted_input, timeout=15)
         self.poll("provider entered kill gate", lambda: (self.args.state_dir / "provider" / "kill-provider-entered").exists())
         self.kill_bot_group()
         for page in self.pages.values():
@@ -661,7 +661,7 @@ class Journey:
 
         try:
             killed_ledger, pending = self.poll(
-                "killed admission durability", claimed_admission, timeout=15
+                "killed admission durability", admitted_input, timeout=15
             )
         except AssertionError as error:
             if not str(error).startswith(
@@ -670,15 +670,15 @@ class Journey:
                 raise
             print(error, file=sys.stderr)
             killed_ledger, pending = {}, []
-        self.kill_claim_owner = pending[0]["claim_owner_incarnation_id"] if pending else ""
-        self.kill_drive_epoch = pending[0]["claim_session_lease_generation"] if pending else 0
+        self.kill_admitted_root = pending[0]["admitted_root"] if pending else ""
         killed_session = self.session_snapshot()
         killed_meta = next(
             (row for row in killed_session["meta"] if row["session_id"] == f"channel:{self.channel}"),
             None,
         )
+        self.kill_drive_epoch = killed_meta["drive_epoch"] if killed_meta else 0
         self.kill_drive_admission = killed_meta["drive_admission_id"] if killed_meta else ""
-        self.gate("05-killed", "bot", "ledger is accepted and the claimed admission remains durable", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["claim_owner_incarnation_id"] and killed_meta is not None and self.kill_drive_epoch == killed_meta["drive_epoch"] and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
+        self.gate("05-killed", "bot", "ledger is accepted and the admitted input stays bound to its root", killed_ledger.get("stage") == "accepted" and len(pending) == 1 and pending[0]["admitted_root"] and killed_meta is not None and self.kill_drive_epoch > 0, "05-killed-four-layers.json")
         self.gate("05-killed", "trace", "interrupted turn emitted no turn_completed", len(self.turn_traces()) == before_turns, "05-killed-four-layers.json")
         self.screenshot("05-killed")
         self.write_extract("05-killed")
@@ -696,7 +696,7 @@ class Journey:
         settled = re.search(rf"settled deferred event {re.escape(self.kill_event)}: Replied \{{[^\n]*source: (?:Turn|Transcript)[^\n]*", recovery_log)
         handled = re.search(rf"handled {re.escape(self.kill_event)}: Replied \{{", recovery_log)
         # Post-lease the engine's own drive outlives the killed bot: boot
-        # recovery settles the dead incarnation's claim itself and logs
+        # recovery settles the dead incarnation's root itself and logs
         # `recovered event <id> (...): Replied`; a platform redelivery that
         # reaches `ingest` first still logs `handled <id>: Replied`.
         recovered_replied = re.search(rf"recovered event {re.escape(self.kill_event)} \([^)]*\): Replied \{{[^\n]*source: (?:Turn|Transcript)", recovery_log)
@@ -706,12 +706,12 @@ class Journey:
             str(r["ts"] // 1_000_000) + "." + str(r["ts"] % 1_000_000).zfill(6) == recovered["reply_ts"]
             for r in bot_rows
         )
-        # The interim claim fence is (drive epoch, owner incarnation): a new
-        # boot re-claims the dead incarnation's row under the *same* sealed
-        # admission, so the epoch legitimately stays put. Fencing holds when
-        # the epoch advanced (a later admission sealed over the dead claim) or
-        # the session's sealed admission is still the one the killed input's
-        # claim was taken under — never regressed, never cleared.
+        # The input stays bound to its root across the kill, and a new boot
+        # resumes that root under the *same* sealed admission, so the epoch
+        # legitimately stays put. Fencing holds when the epoch advanced (a
+        # later admission sealed over the dead drive) or the session's sealed
+        # admission is still the one the killed input's root was admitted
+        # under — never regressed, never cleared.
         fencing_held = (
             channel_meta["drive_epoch"] > self.kill_drive_epoch
             or (
@@ -731,7 +731,7 @@ class Journey:
         self.gate(
             "05-recovered",
             "bot",
-            f"dead incarnation {self.kill_claim_owner} drive epoch {self.kill_drive_epoch} recovered via {path_note}",
+            f"root {self.kill_admitted_root} at drive epoch {self.kill_drive_epoch} recovered via {path_note}",
             path_ok and fencing_held and reply_matches_platform,
             "05-recovered-four-layers.json + bot log",
         )

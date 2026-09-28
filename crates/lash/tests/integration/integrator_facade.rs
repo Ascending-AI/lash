@@ -18,7 +18,7 @@ use lash::persistence::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     LiveReplayOutcome, LiveReplaySubscription, ProcessWakeSource, QueuedCheckpointTurnInput,
     QueuedCheckpointWork, SessionCursorError, SessionNodePayload, SessionNodeProjection,
-    SessionNodeRecord, TurnInputClaimMode,
+    SessionNodeRecord, TurnInputAdmissionMode,
     queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey},
 };
 use lash::plugins::{

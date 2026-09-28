@@ -46,7 +46,7 @@ lash_conformance::tool_access_persistence_tests!({
 });
 
 #[test]
-fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
+fn queued_work_checks_reject_illegal_vocabulary() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
     connection
         .execute_batch(crate::schema::SCHEMA)
@@ -77,51 +77,17 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
          ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0)",
         "ck_queued_work_batches_delivery_policy",
     );
-    assert_rejected(
-        "INSERT INTO queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             enqueued_at_ms, claim_id
-         ) VALUES (1,
-             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
-             'claim'
-         )",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
-    );
-    assert_rejected(
-        "INSERT INTO queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             enqueued_at_ms, claim_token
-         ) VALUES (1,
-             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
-             'token'
-         )",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
-    );
 }
 
 #[test]
-fn pending_turn_input_claim_identity_must_be_all_or_none() {
+fn ingress_admission_binding_must_be_all_or_none() {
     let connection = rusqlite::Connection::open_in_memory().expect("open SQLite CHECK witness");
     connection
         .execute_batch(crate::schema::SCHEMA)
         .expect("apply SQLite schema to CHECK witness");
-    // Any strict subset of the four-column claim identity must be rejected —
-    // including a claim id/token pair with no owner, the state the widened
-    // CHECK exists to make unrepresentable.
-    for fields in [
-        "claim_id",
-        "claim_owner_id",
-        "claim_owner_incarnation_id",
-        "claim_token",
-        "claim_id, claim_token",
-        "claim_id, claim_owner_id, claim_token",
-        "claim_owner_id, claim_owner_incarnation_id",
-    ] {
-        let values = fields
-            .split(',')
-            .map(|_| "'half'")
-            .collect::<Vec<_>>()
-            .join(", ");
+    // A row is open or admitted to a root by a recorded step: a root without
+    // its step, or a step without its root, is unrepresentable (FIG-3927).
+    for (fields, values) in [("admitted_root", "'root'"), ("admitted_by", "'admit'")] {
         let error = connection
             .execute(
                 &format!(
@@ -133,14 +99,50 @@ fn pending_turn_input_claim_identity_must_be_all_or_none() {
                 ),
                 [],
             )
-            .expect_err("a partially populated pending-input claim must be rejected");
+            .expect_err("a half-bound pending input must be rejected");
         assert!(
             error
                 .to_string()
-                .contains("ck_pending_turn_inputs_claim_identity_all_or_none"),
+                .contains("ck_pending_turn_inputs_admission_all_or_none"),
+            "SQLite reported the wrong CHECK: {error}"
+        );
+        let error = connection
+            .execute(
+                &format!(
+                    "INSERT INTO queued_work_batches (enqueue_seq,
+                         batch_id, session_id, delivery_policy, work_kind, authority_json,
+                         enqueued_at_ms, {fields}
+                     ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary', 'turn',
+                               '{{}}', 0, {values})"
+                ),
+                [],
+            )
+            .expect_err("a half-bound batch must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("ck_queued_work_batches_admission_all_or_none"),
             "SQLite reported the wrong CHECK: {error}"
         );
     }
+    // A settled input is answered, so no root holds it.
+    let error = connection
+        .execute(
+            "INSERT INTO pending_turn_inputs (enqueue_seq,
+                 input_id, session_id, ingress_json, state, input_json,
+                 submitted_ingress_json, submission_digest, enqueued_at_ms,
+                 admitted_root, admitted_by
+             ) VALUES (1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
+                       'completed', '{}', '{}', 'digest', 0, 'root', 'admit')",
+            [],
+        )
+        .expect_err("a settled input still bound to a root must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("ck_pending_turn_inputs_settled_unadmitted"),
+        "SQLite reported the wrong CHECK: {error}"
+    );
 }
 
 /// FIG-3886: the `(session_id, source_key)` dedup on both admission tables
@@ -419,7 +421,7 @@ async fn durable_state(
     state
 }
 
-lash_conformance::checkpoint_claim_probe_tests!({
+lash_conformance::checkpoint_admission_probe_tests!({
     let store = Arc::new(
         crate::test_support::memory_store()
             .await
@@ -430,7 +432,7 @@ lash_conformance::checkpoint_claim_probe_tests!({
         (),
         store as Arc<dyn RuntimePersistence>,
         SessionId::from("sqlite-checkpoint-counter"),
-        move || counting_store.checkpoint_claim_counts(),
+        move || counting_store.checkpoint_admission_counts(),
         // An in-memory SQLite store needs no session teardown.
         async {},
     )

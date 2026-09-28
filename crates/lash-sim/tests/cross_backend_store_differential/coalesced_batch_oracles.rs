@@ -72,7 +72,7 @@ fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDra
     })
 }
 
-/// The row id a claimed literal-oracle batch carries in its one wake.
+/// The row id an admitted literal-oracle batch carries in its one wake.
 fn oracle_row_id(batch: &lash_core::runtime::QueuedWorkBatch) -> String {
     match batch.items.as_slice() {
         [
@@ -168,6 +168,108 @@ const BATCH_ORACLE_FIXTURES: &[BatchOracleFixture] = &[
     },
 ];
 
+/// The root the admission-gap oracle interrupts and redrives.
+const ADMISSION_GAP_ROOT: &str = "admission-gap-root";
+
+/// Admit `root` headed by the session's first open turn-work batch, composed
+/// under `max_rows`; `None` once no turn work is open.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
+)]
+async fn admit_oracle_root(
+    store: &Arc<dyn ConformancePersistence>,
+    fence: &lash_core::store::DriveFence,
+    root: &str,
+    max_rows: usize,
+) -> Option<lash_core::store::RootAdmission> {
+    let head = store
+        .list_open_queued_work(fence.session())
+        .await
+        .expect("list open literal-oracle rows")
+        .into_iter()
+        .filter(|batch| batch.work_class() == lash_core::store::QueuedWorkClass::TurnWork)
+        .min_by_key(|batch| batch.enqueue_seq)?;
+    let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+        fence,
+        &lash_core::TurnId::from(root),
+        lash_core::store::AdmittedHead::Batch(head.batch_id),
+    );
+    request.policy = lash_core::testing::queued_work_claim_policy(max_rows);
+    Some(
+        store
+            .admit_root(&request)
+            .await
+            .expect("admit literal-oracle root")
+            .expect("literal-oracle admission reaches its head"),
+    )
+}
+
+/// The literal row ids a root admission took, in admission order.
+fn admitted_row_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> {
+    admission
+        .queued
+        .iter()
+        .flat_map(|queued| queued.batches.iter().map(oracle_row_id))
+        .collect()
+}
+
+/// End `root` completing every row `admission` took, so the session's next
+/// root may be admitted.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
+)]
+async fn end_oracle_root(
+    store: &Arc<dyn ConformancePersistence>,
+    fence: &lash_core::store::DriveFence,
+    root: &str,
+    admission: &lash_core::store::RootAdmission,
+) {
+    let root = lash_core::TurnId::from(root);
+    let mut settlement = lash_core::store::IngressSettlement::new(root.clone());
+    if let Some(queued) = &admission.queued {
+        settlement.completed_batches.push(queued.completion());
+    }
+    let revision = store
+        .load_session_head_meta()
+        .await
+        .expect("load literal-oracle head")
+        .map_or(0, |head| head.head_revision);
+    let mut commit = lash_core::testing::store_fixtures::settling_commit_for_test(
+        runtime_commit(
+            fence.session(),
+            revision,
+            &append(Vec::new(), None),
+            None,
+            None,
+            HydratedSessionCheckpoint::default(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        fence,
+        settlement,
+    );
+    let turn = lash_core::store::PhysicalTurn::derive_turn_id(&root, 0);
+    // Each root's end is its own commit identity: the root's physical turn,
+    // as a driven root's final commit is stamped.
+    commit.turn_commit = RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
+        fence.session().clone(),
+        turn.clone(),
+        "literal-oracle-end",
+    ));
+    commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
+        commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+        turn,
+        root,
+        stop: None,
+    }));
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("end literal-oracle root");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with `kiln run //crates/lash-sim:cross_backend_store_differential__test -- --include-ignored`)"]
 async fn coalesced_batches_match_literal_oracles_on_every_backend() {
@@ -224,7 +326,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
         let fixture_root = sqlite_root.path().join(fixture.name);
         let fixture_nonce = format!("{run_nonce}-{}", fixture.name);
         let mut runners = runners_for_case(
-            CaseName::QueuedWorkClaimAndAbandon,
+            CaseName::QueuedWorkAdmissionReleased,
             &fixture_root,
             &postgres,
             &database_url,
@@ -245,31 +347,27 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 format!("literal-oracle-{}", runner.name),
                 format!("literal-oracle-{}:incarnation", runner.name),
             );
-            let lease = store
-                .seal_claim_epoch_for_test(
+            let fence = store
+                .seal_drive_epoch_for_test(
                     &runner.session_id,
                     &owner,
                     "coalesced-batch-oracle-executor",
                     SESSION_LEASE_TTL_MS,
                 )
                 .await
-                .expect("claim literal-oracle session lease")
+                .expect("seal literal-oracle drive")
                 .acquired()
-                .expect("literal-oracle session lease is free");
+                .expect("literal-oracle drive is free");
             let mut observed = Vec::new();
-            while let Some(claim) = store
-                .claim_ready_queued_work(
-                    &runner.session_id,
-                    &lease.fence(),
-                    &owner,
-                    QueuedWorkClaimBoundary::Idle,
-                    lash_core::testing::queued_work_claim_policy(fixture.max_rows),
-                )
-                .await
-                .expect("claim literal-oracle batch")
-                .claim()
-            {
-                observed.push(claim.batches.iter().map(oracle_row_id).collect::<Vec<_>>());
+            for index in 0.. {
+                let root = format!("literal-oracle-root-{index}");
+                let Some(admission) =
+                    admit_oracle_root(&store, &fence, &root, fixture.max_rows).await
+                else {
+                    break;
+                };
+                observed.push(admitted_row_ids(&admission));
+                end_oracle_root(&store, &fence, &root, &admission).await;
             }
             match fixture.name {
                 "max_rows_one" => assert_eq!(
@@ -310,9 +408,9 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 other => panic!("missing literal assertion for batch oracle {other}"),
             }
             store
-                .supersede_claim_epoch_for_test(&lease.completion())
+                .supersede_drive_epoch_for_test(&fence)
                 .await
-                .expect("release literal-oracle session lease");
+                .expect("release literal-oracle drive");
             runner.close_reopened_postgres_pool().await;
         }
     }
@@ -325,7 +423,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "compares three durable backends; requires Postgres (`just push-gate`, or LASH_POSTGRES_DATABASE_URL with `kiln run //crates/lash-sim:cross_backend_store_differential__test -- --include-ignored`)"]
-async fn interrupted_claim_identity_stands_over_a_later_row() {
+async fn interrupted_admission_identity_stands_over_a_later_row() {
     let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
         Ok(database_url) if !database_url.is_empty() => database_url,
         _ => {
@@ -335,7 +433,7 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
                 "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
             );
             eprintln!(
-                "SKIPPED interrupted-claim later-row literal oracle; compared_backends=[]; \
+                "SKIPPED interrupted-admission later-row literal oracle; compared_backends=[]; \
                  required_backends=[sqlite-memory,sqlite,postgres]"
             );
             return;
@@ -360,11 +458,11 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
         .expect("connect required Postgres later-row backend");
     let sqlite_root = tempfile::tempdir().expect("create later-row SQLite root");
     let mut runners = runners_for_case(
-        CaseName::QueuedWorkClaimAndAbandon,
+        CaseName::QueuedWorkAdmissionReleased,
         sqlite_root.path(),
         &postgres,
         &database_url,
-        &format!("{}-claim-gap", run_nonce()),
+        &format!("{}-admission-gap", run_nonce()),
     )
     .await;
 
@@ -374,124 +472,103 @@ async fn interrupted_claim_identity_stands_over_a_later_row() {
             store
                 .enqueue_queued_work(
                     oracle_wake_draft(&runner.session_id, source_key)
-                        .with_merge_key("claim-gap-key"),
+                        .with_merge_key("admission-gap-key"),
                 )
                 .await
-                .expect("enqueue claim-gap literal row");
+                .expect("enqueue admission-gap literal row");
         }
         let owner = LeaseOwnerIdentity::opaque(
-            format!("claim-gap-a-{}", runner.name),
-            format!("claim-gap-a-{}:incarnation", runner.name),
+            format!("admission-gap-a-{}", runner.name),
+            format!("admission-gap-a-{}:incarnation", runner.name),
         );
-        let lease = store
-            .seal_claim_epoch_for_test(
+        let fence = store
+            .seal_drive_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("claim first claim-gap session lease")
+            .expect("seal first admission-gap drive")
             .acquired()
-            .expect("first claim-gap session lease is free");
-        let claim = store
-            .claim_ready_queued_work(
-                &runner.session_id,
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(64),
-            )
+            .expect("first admission-gap drive is free");
+        let admission = admit_oracle_root(&store, &fence, ADMISSION_GAP_ROOT, 64)
             .await
-            .expect("claim original claim-gap composition")
-            .claim()
-            .expect("original claim-gap composition exists");
+            .expect("original admission-gap composition exists");
         assert_eq!(
-            claim.batches.iter().map(oracle_row_id).collect::<Vec<_>>(),
+            admitted_row_ids(&admission),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
-            "{} backend changed the initial literal claim-gap composition",
+            "{} backend changed the initial literal admission-gap composition",
             runner.name
         );
         store
-            .supersede_claim_epoch_for_test(&lease.completion())
+            .supersede_drive_epoch_for_test(&fence)
             .await
-            .expect("release first claim-gap session lease");
-        // The gap row arrives only after the interrupted claim exists, so a
-        // redrive must answer the claim's own members, never a re-merge.
+            .expect("supersede first admission-gap drive");
+        // The gap row arrives only after the interrupted admission exists, so
+        // a redrive must answer the admission's own members, never a
+        // re-merge.
         store
             .enqueue_queued_work(
-                oracle_wake_draft(&runner.session_id, "gap-w2").with_merge_key("claim-gap-key"),
+                oracle_wake_draft(&runner.session_id, "gap-w2").with_merge_key("admission-gap-key"),
             )
             .await
-            .expect("enqueue later claim-gap literal row");
+            .expect("enqueue later admission-gap literal row");
     }
 
     for runner in &mut runners {
         let store = runner.store();
         let owner = LeaseOwnerIdentity::opaque(
-            format!("claim-gap-b-{}", runner.name),
-            format!("claim-gap-b-{}:incarnation", runner.name),
+            format!("admission-gap-b-{}", runner.name),
+            format!("admission-gap-b-{}:incarnation", runner.name),
         );
-        let lease = store
-            .seal_claim_epoch_for_test(
+        let fence = store
+            .seal_drive_epoch_for_test(
                 &runner.session_id,
                 &owner,
                 "coalesced-batch-oracle-executor",
                 SESSION_LEASE_TTL_MS,
             )
             .await
-            .expect("claim successor claim-gap session lease")
+            .expect("seal successor admission-gap drive")
             .acquired()
-            .expect("successor claim-gap session lease is free");
+            .expect("successor admission-gap drive is free");
+        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+            &fence,
+            &lash_core::TurnId::from(ADMISSION_GAP_ROOT),
+            lash_core::store::AdmittedHead::Batch(lash_core::BatchId::from("unused-on-replay")),
+        );
+        request.policy = lash_core::testing::queued_work_claim_policy(64);
         let redriven = store
-            .claim_ready_queued_work(
-                &runner.session_id,
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(64),
-            )
+            .admit_root(&request)
             .await
-            .expect("redrive claim-gap composition")
-            .claim()
-            .expect("claim-gap composition remains reclaimable");
+            .expect("redrive admission-gap root")
+            .expect("the recorded admission-gap admission answers the redrive");
         assert_eq!(
-            redriven
-                .batches
-                .iter()
-                .map(oracle_row_id)
-                .collect::<Vec<_>>(),
+            admitted_row_ids(&redriven),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
-            "{} backend did not recover the literal claim identity",
+            "{} backend did not recover the literal admission identity",
             runner.name
         );
-        let later = store
-            .claim_ready_queued_work(
-                &runner.session_id,
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(64),
-            )
+        end_oracle_root(&store, &fence, ADMISSION_GAP_ROOT, &redriven).await;
+        let later = admit_oracle_root(&store, &fence, "admission-gap-later-root", 64)
             .await
-            .expect("claim the later claim-gap row")
-            .claim()
-            .expect("later claim-gap row remains separate");
+            .expect("later admission-gap row remains separate");
         assert_eq!(
-            later.batches.iter().map(oracle_row_id).collect::<Vec<_>>(),
+            admitted_row_ids(&later),
             vec!["gap-w2".to_string()],
             "{} backend did not preserve the literal later-row remainder",
             runner.name
         );
         store
-            .supersede_claim_epoch_for_test(&lease.completion())
+            .supersede_drive_epoch_for_test(&fence)
             .await
-            .expect("release successor claim-gap session lease");
+            .expect("release successor admission-gap drive");
         runner.close_reopened_postgres_pool().await;
     }
 
     eprintln!(
-        "PASSED interrupted-claim later-row literal oracle; \
+        "PASSED interrupted-admission later-row literal oracle; \
          compared_backends=[sqlite-memory,sqlite,postgres]"
     );
 }

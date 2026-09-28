@@ -136,7 +136,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
     let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_claim(1),
+            crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_admission(1),
         );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));

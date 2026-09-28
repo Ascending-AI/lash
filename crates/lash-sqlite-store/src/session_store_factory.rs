@@ -158,7 +158,7 @@ impl SqliteSessionStoreFactory {
     ///
     /// The raw SQLite handle stays private so callers receive only the
     /// canonical [`lash_core_execution::SessionReadView`], which has no mutating store
-    /// operations. This path does not mutate durable session, lease, claim, or
+    /// operations. This path does not mutate durable session, lease, admission, or
     /// graph state. SQLite may materialize its `-wal` and `-shm` wal-index
     /// sidecars while reading a cold WAL catalog. Consequently a catalog on
     /// read-only media is inspectable only when the required sidecars already

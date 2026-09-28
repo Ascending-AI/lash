@@ -2,8 +2,8 @@
 //!
 //! * head-revision CAS holds across two independent connections to the same
 //!   file database (the `BEGIN IMMEDIATE` fix),
-//! * a contended queued-work claim reports not-claimed instead of a false
-//!   success (the rows-affected check),
+//! * a contended queued-work admission has exactly one winner instead of a
+//!   false success (the rows-affected check),
 //! * a poisoned connection mutex recovers instead of bricking the store,
 //! * the unsupported-schema error reports the real expected/found versions,
 //! * concurrent first opens do not expose a schema-version-0 store,
@@ -20,14 +20,13 @@ use lash_sansio::SessionId;
 use std::future::Future;
 use std::sync::Arc;
 
-use lash_core_execution::runtime::{
-    ProcessWakeDelivery, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, RuntimeSubject,
-};
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
+use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft, RuntimeSubject};
+use lash_core_execution::store::RootStore as _;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
 use lash_core_execution::{
-    AttachmentRootSet, LeaseOwnerIdentity, PendingTurnInputDraft, PluginState, QueuedWorkStore,
-    RuntimeCommit, RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionStoreFactory,
-    StoreError, ToolState, TurnInput, TurnInputIngress, TurnInputStore,
+    AttachmentRootSet, IngressStore, LeaseOwnerIdentity, PluginState, RuntimeCommit,
+    RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionStoreFactory, StoreError,
+    ToolState,
 };
 use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
 
@@ -64,18 +63,36 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
-async fn sealed_claim_epoch(
+async fn sealed_drive_fence(
     store: &Store,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
-) -> lash_core_execution::ClaimAuthority {
+) -> lash_core_execution::store::DriveFence {
     store
-        .seal_claim_epoch_for_test(session_id, owner, executor_id, 0)
+        .seal_drive_epoch_for_test(session_id, owner, executor_id, 0)
         .await
-        .expect("seal drive epoch for claim")
+        .expect("seal drive epoch")
         .acquired()
         .expect("drive epoch sealed")
+}
+
+/// Admit `root` headed by the batch `head` under `fence`.
+async fn admit(
+    store: &Store,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &str,
+    head: &lash_core_execution::BatchId,
+) -> Result<Option<lash_core_execution::store::RootAdmission>, StoreError> {
+    store
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                fence,
+                &lash_core_execution::TurnId::from(root),
+                lash_core_execution::store::AdmittedHead::Batch(head.clone()),
+            ),
+        )
+        .await
 }
 
 fn commit_at(
@@ -278,280 +295,134 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
     lash_core_execution::runtime::process_wake_batch_draft(wake)
 }
 
-// The raw cross-backend dialect assertion is Postgres-gated. Keep the ordinary
-// SQLite lane independently sensitive to both production claim-id spellings.
+// Finding 2 (sequential): a batch admitted to one root is not won by a
+// second admission. One root takes the only ready batch; a second root headed
+// by the same batch is refused while the first is unfinished.
 #[tokio::test]
-async fn sqlite_claims_pin_both_production_claim_id_spellings() {
+async fn second_admission_of_an_admitted_batch_is_not_won() {
     let store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("memory backend")
         .open_store()
         .await
         .expect("store");
-    let session_id = "sqlite-claim-id-dialects";
-    let queued = store
-        .enqueue_queued_work(exclusive_draft(&SessionId::from(session_id), "work"))
-        .await
-        .expect("enqueue queued work");
-    let pending = store
-        .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-            session_id,
-            TurnInputIngress::next_turn(),
-            TurnInput::text("input"),
-        ))
-        .await
-        .expect("enqueue turn input");
-    let owner = lease_owner("sqlite-claim-id-owner");
-    let lease = sealed_claim_epoch(
-        &store,
-        &SessionId::from(session_id),
-        &owner,
-        "sqlite-claims-pin-both-production-claim-id-spellings-executor",
-    )
-    .await;
-
-    let queued_claim = store
-        .claim_ready_queued_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("claim queued work")
-        .claim()
-        .expect("queued work claim");
-    let turn_input_claim = store
-        .claim_next_turn_inputs(&SessionId::from(session_id), &lease.fence(), &owner, 1)
-        .await
-        .expect("claim turn input")
-        .expect("turn-input claim");
-
-    assert_eq!(
-        queued_claim.claim_id,
-        format!("qwc:{}:1", queued.enqueue_seq)
-    );
-    assert_eq!(
-        turn_input_claim.claim_id,
-        format!("tic:{}:1", pending.enqueue_seq)
-    );
-}
-
-// Finding 2 (sequential): when a batch is already held by a live claim, a
-// second claim must not "succeed" with a claim that doesn't actually own the
-// row. One caller claims the only ready batch; another caller in the same
-// incarnation then asks to claim and must
-// get `None`.
-#[tokio::test]
-async fn second_claim_on_held_batch_is_not_won() {
-    let store = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("memory backend")
-        .open_store()
-        .await
-        .expect("store");
-    store
+    let batch = store
         .enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
         .await
         .expect("enqueue");
-    let session_lease = sealed_claim_epoch(
+    let fence = sealed_drive_fence(
         &store,
         &SessionId::from("root"),
         &lease_owner("session-owner"),
-        "second-claim-on-held-batch-is-not-won-executor",
+        "second-admission-of-an-admitted-batch-is-not-won-executor",
     )
     .await;
-    let session_fence = session_lease.fence();
 
-    let claim_a = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_fence,
-            &session_fence.owner,
-            QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(10),
-        )
+    let admission_a = admit(&store, &fence, "root-a", &batch.batch_id)
         .await
-        .expect("claim a")
-        .claim()
-        .expect("owner a wins the only batch");
-    assert_eq!(claim_a.batches.len(), 1);
+        .expect("admit root a")
+        .expect("root a takes the only batch");
+    assert_eq!(admission_a.batch_ids(), vec![batch.batch_id.clone()]);
 
-    let claim_b = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_fence,
-            &session_fence.owner,
-            QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("claim b")
-        .claim();
+    let admission_b = admit(&store, &fence, "root-b", &batch.batch_id).await;
     assert!(
-        claim_b.is_none(),
-        "a batch already held by this incarnation must not be re-claimed, got {claim_b:?}"
+        matches!(admission_b, Err(StoreError::UnfinishedRootConflict { .. })),
+        "a batch admitted to an unfinished root must not be admitted again, got {admission_b:?}"
     );
 
-    // The held batch is hidden from the user-editable pending snapshot.
+    // The admitted batch is hidden from the user-editable pending snapshot.
     assert!(
         store
-            .list_pending_queued_work(&SessionId::from("root"))
+            .list_open_queued_work(&SessionId::from("root"))
             .await
-            .expect("list pending during owner-a's live claim")
+            .expect("list pending during root a's admission")
             .is_empty(),
-        "the batch held by owner A's live claim must be hidden from pending work"
+        "the batch admitted to root a must be hidden from pending work"
     );
-    let _ = claim_a;
 }
 
-#[tokio::test]
-async fn corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
-    for (case, prior_id, prior_token) in [
-        ("id-only", Some("prior-id"), None),
-        ("token-only", None, Some("prior-token")),
-    ] {
-        let path = unique_db_path(case);
-        let store = Store::open(&path).await.expect("open corruption fixture");
-        let session_id = SessionId::from(format!("corrupt-predecessor-{case}"));
-        let queued = store
-            .enqueue_queued_work(exclusive_draft(&session_id, case))
-            .await
-            .expect("enqueue corruption fixture");
-        let raw = rusqlite::Connection::open(&path).expect("open raw corruption fixture");
-        raw.execute_batch("PRAGMA ignore_check_constraints = ON")
-            .expect("enable controlled corruption");
-        raw.execute(
-            "UPDATE queued_work_batches
-             SET claim_id = ?2, claim_token = ?3,
-                 claim_fencing_token = 7, claim_session_lease_generation = 0
-             WHERE batch_id = ?1",
-            rusqlite::params![queued.batch_id.as_str(), prior_id, prior_token],
-        )
-        .expect("inject half predecessor pair");
-        drop(raw);
-
-        let owner = lease_owner(&format!("corrupt-owner-{case}"));
-        let executor_id = format!("corrupt-executor-{case}");
-        let lease = sealed_claim_epoch(&store, &session_id, &owner, &executor_id).await;
-        let error = store
-            .claim_ready_queued_work(
-                &session_id,
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core_execution::testing::queued_work_claim_policy(1),
-            )
-            .await
-            .expect_err("half predecessor pair must refuse the claim");
-        assert!(matches!(
-            error,
-            StoreError::QueuedWorkPredecessorClaimCorrupt { .. }
-        ));
-
-        let raw = rusqlite::Connection::open(&path).expect("reopen corruption fixture");
-        let persisted: (Option<String>, Option<String>, i64, i64) = raw
-            .query_row(
-                "SELECT claim_id, claim_token, claim_fencing_token,
-                        claim_session_lease_generation
-                 FROM queued_work_batches WHERE batch_id = ?1",
-                [queued.batch_id.as_str()],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-            )
-            .expect("read row after refusal");
-        assert_eq!(
-            persisted,
-            (
-                prior_id.map(str::to_string),
-                prior_token.map(str::to_string),
-                7,
-                0,
-            ),
-            "claim transaction changed the corrupt predecessor row"
-        );
-    }
-}
-
-// Finding 2 (concurrent): two callers in one executor on two connections race for the same
-// single ready batch. The claim is read-then-write, so without the
-// rows-affected check (and the `BEGIN IMMEDIATE` that serializes the read with
-// the write) both could believe they won. At most one claim may succeed, and a
-// successful claim must actually own the batch (provable by renewing it).
+// Finding 2 (concurrent): two callers under one fence on two connections
+// race to admit different roots headed by the same single ready batch. The
+// admission is read-then-write, so without the unfinished-root index and the
+// rows-affected check (and the `BEGIN IMMEDIATE` that serializes the read
+// with the write) both could believe they won. At most one admission may
+// succeed, and a successful one must actually own the batch.
 #[test]
-fn concurrent_claims_never_double_own_a_batch() {
-    let path = unique_db_path("claim-race");
-    block_on(async {
+fn concurrent_admissions_never_double_own_a_batch() {
+    let path = unique_db_path("admission-race");
+    let batch_id = block_on(async {
         let seed = Store::open(&path).await.expect("seed store");
         seed.enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
             .await
-            .expect("enqueue");
+            .expect("enqueue")
+            .batch_id
     });
-    let session_fence = {
-        let store = block_on(Store::open(&path)).expect("claim store");
+    let fence = {
+        let store = block_on(Store::open(&path)).expect("admission store");
         let owner = lease_owner("session-owner");
-        block_on(sealed_claim_epoch(
+        block_on(sealed_drive_fence(
             &store,
             &SessionId::from("root"),
             &owner,
-            "concurrent-claims-never-double-own-a-batch-executor",
+            "concurrent-admissions-never-double-own-a-batch-executor",
         ))
-        .fence()
     };
 
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run = |path: std::path::PathBuf,
-               session_fence: lash_core_execution::ClaimAuthority,
+               fence: lash_core_execution::store::DriveFence,
+               root: &'static str,
+               batch_id: lash_core_execution::BatchId,
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
                 let store = Store::open(&path).await.expect("open store");
                 barrier.wait();
-                store
-                    .claim_ready_queued_work(
-                        &SessionId::from("root"),
-                        &session_fence,
-                        &session_fence.owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        lash_core_execution::testing::queued_work_claim_policy(10),
-                    )
-                    .await
-                    .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
+                admit(&store, &fence, root, &batch_id).await
             })
         })
     };
 
-    let handle_a = run(path.clone(), session_fence.clone(), Arc::clone(&barrier));
-    let handle_b = run(path.clone(), session_fence, Arc::clone(&barrier));
+    let handle_a = run(
+        path.clone(),
+        fence.clone(),
+        "root-a",
+        batch_id.clone(),
+        Arc::clone(&barrier),
+    );
+    let handle_b = run(
+        path.clone(),
+        fence,
+        "root-b",
+        batch_id,
+        Arc::clone(&barrier),
+    );
     let result_a = handle_a.join().expect("thread a");
     let result_b = handle_b.join().expect("thread b");
 
     let mut winners = Vec::new();
     for result in [result_a, result_b] {
         match result {
-            Ok(Some(claim)) => winners.push(claim),
-            Ok(None) => {}
-            Err(err) => panic!("a contended claim must resolve cleanly, got error: {err:?}"),
+            Ok(Some(admission)) => winners.push(admission),
+            Ok(None) | Err(StoreError::UnfinishedRootConflict { .. } | StoreError::Contended) => {}
+            Err(err) => panic!("a contended admission must resolve cleanly, got error: {err:?}"),
         }
     }
-    assert!(
-        winners.len() <= 1,
-        "at most one owner may win the single batch, got {} winners",
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one root may win the single batch, got {} winners",
         winners.len()
     );
-    if let Some(claim) = winners.first() {
-        // A successful claim must really own the batch: while the winner's
-        // session-lease generation holds it, the batch is hidden from the
-        // user-editable pending snapshot.
-        let verify = block_on(Store::open(&path)).expect("verify store");
-        let pending = block_on(verify.list_pending_queued_work(&SessionId::from("root")))
-            .expect("list pending during the winning claim");
-        assert!(
-            pending.is_empty(),
-            "the winning claim must own its batch, hiding it from pending work"
-        );
-        let _ = claim;
-    }
+    // A successful admission really owns the batch: while its root is
+    // unfinished, the batch is hidden from the user-editable pending snapshot.
+    let verify = block_on(Store::open(&path)).expect("verify store");
+    let pending = block_on(verify.list_open_queued_work(&SessionId::from("root")))
+        .expect("list pending during the winning admission");
+    assert!(
+        pending.is_empty(),
+        "the winning admission must own its batch, hiding it from pending work"
+    );
 }
 
 // Finding 7: opening a database stamped with an unsupported schema version must

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::store::IngressSettlement;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -157,28 +157,28 @@ pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
 pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimePersistence>) {
     let first = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&SessionId::from("root"), "bulk first")
+            pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "bulk first")
                 .with_source_key("bulk:first"),
         )
         .await
         .expect("enqueue first bulk input");
     let second = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&SessionId::from("root"), "bulk second")
+            pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "bulk second")
                 .with_source_key("bulk:second"),
         )
         .await
         .expect("enqueue second bulk input");
     let third = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            &SessionId::from("root"),
+            &SessionId::from("pending-bulk-cancel"),
             "bulk third",
         ))
         .await
         .expect("enqueue third bulk input");
     let bulk = store
         .cancel_pending_turn_inputs(
-            &SessionId::from("root"),
+            &SessionId::from("pending-bulk-cancel"),
             &[
                 crate::PendingTurnInputCancelTarget::source_key("bulk:first"),
                 crate::PendingTurnInputCancelTarget::input_id(&third.input_id),
@@ -202,7 +202,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     ));
     assert_eq!(
         store
-            .list_pending_turn_inputs(&SessionId::from("root"))
+            .list_pending_turn_inputs(&SessionId::from("pending-bulk-cancel"))
             .await
             .expect("list after bulk cancellation")
             .iter()
@@ -213,7 +213,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
 
     let suffix_anchor = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&SessionId::from("root"), "suffix anchor")
+            pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "suffix anchor")
                 .with_source_key("suffix:anchor"),
         )
         .await
@@ -221,7 +221,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     let active_claimed = store
         .enqueue_pending_turn_input(
             pending_active_turn_input_draft(
-                &SessionId::from("root"),
+                &SessionId::from("pending-bulk-cancel"),
                 &TurnId::from("suffix-active-turn"),
                 crate::TurnInputCheckpointBoundary::AfterWork,
                 "suffix accepted active",
@@ -232,30 +232,41 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
         .expect("enqueue suffix claimed input");
     let suffix_later = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&SessionId::from("root"), "suffix later")
+            pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "suffix later")
                 .with_source_key("suffix:later"),
         )
         .await
         .expect("enqueue suffix later");
-    let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "suffix-cancel-owner")
-            .await;
-    let active_claim = store
-        .claim_active_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("suffix-cancel-owner"),
-            &crate::TurnId::from("suffix-active-turn"),
-            crate::CheckpointKind::AfterWork,
-            10,
-        )
-        .await
-        .expect("claim suffix active input")
-        .expect("suffix active input claim");
+    let fence = seal_drive_fence_for_test(
+        &store,
+        &SessionId::from("pending-bulk-cancel"),
+        "suffix-cancel-owner",
+    )
+    .await;
+    let active_admission = admit_at_checkpoint_for_test(
+        &store,
+        &fence,
+        &TurnId::from("suffix-active-turn"),
+        &TurnId::from("suffix-active-turn"),
+        crate::CheckpointKind::AfterWork,
+        "suffix-active-turn:step",
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("admit the suffix active input");
+    assert_eq!(
+        active_admission
+            .inputs
+            .as_ref()
+            .map(|inputs| inputs.input_ids())
+            .unwrap_or_default(),
+        vec![active_claimed.input_id.clone()]
+    );
 
     let suffix = store
         .cancel_pending_turn_input_suffix(
-            &SessionId::from("root"),
+            &SessionId::from("pending-bulk-cancel"),
             &crate::PendingTurnInputCancelTarget::source_key("suffix:anchor"),
         )
         .await
@@ -266,34 +277,34 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     assert_eq!(outcomes.len(), 3);
     expect_cancelled_pending_input(outcomes[0].clone(), &suffix_anchor.input_id);
     match &outcomes[1] {
-        crate::PendingTurnInputCancelOutcome::AlreadyClaimed { input, claim } => {
+        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { input, root } => {
             assert_eq!(input.input_id, active_claimed.input_id);
-            assert_eq!(
-                claim.as_ref().and_then(|claim| claim.claim_id.as_deref()),
-                Some(active_claim.claim_id.as_str())
-            );
+            assert_eq!(root.as_str(), "suffix-active-turn");
         }
-        other => panic!("expected already-claimed suffix outcome, got {other:?}"),
+        other => panic!("expected already-admitted suffix outcome, got {other:?}"),
     }
     expect_cancelled_pending_input(outcomes[2].clone(), &suffix_later.input_id);
 
     let suffix_by_id_anchor = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            &SessionId::from("root"),
+            &SessionId::from("pending-bulk-cancel"),
             "suffix by id anchor",
         ))
         .await
         .expect("enqueue suffix by id anchor");
     let suffix_by_id_later = store
         .enqueue_pending_turn_input(
-            pending_next_turn_input_draft(&SessionId::from("root"), "suffix by id later")
-                .with_source_key("suffix:id-later"),
+            pending_next_turn_input_draft(
+                &SessionId::from("pending-bulk-cancel"),
+                "suffix by id later",
+            )
+            .with_source_key("suffix:id-later"),
         )
         .await
         .expect("enqueue suffix by id later");
     let suffix_by_id = store
         .cancel_pending_turn_input_suffix(
-            &SessionId::from("root"),
+            &SessionId::from("pending-bulk-cancel"),
             &crate::PendingTurnInputCancelTarget::input_id(&suffix_by_id_anchor.input_id),
         )
         .await
@@ -308,7 +319,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     assert!(matches!(
         store
             .cancel_pending_turn_input_suffix(
-                &SessionId::from("root"),
+                &SessionId::from("pending-bulk-cancel"),
                 &crate::PendingTurnInputCancelTarget::source_key("suffix:missing"),
             )
             .await
@@ -317,7 +328,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     ));
     assert_eq!(
         store
-            .list_pending_turn_inputs(&SessionId::from("root"))
+            .list_pending_turn_inputs(&SessionId::from("pending-bulk-cancel"))
             .await
             .expect("list after suffix cancellation")
             .iter()
@@ -327,13 +338,16 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     );
 }
 
+/// A root's admission binds the next-turn prefix, a host cancel of a bound
+/// row answers `AlreadyAdmitted{root}`, reads name the root, a completion
+/// under a superseded fence is refused and changes nothing, and the live
+/// fence's completion settles every row to a tombstone no admission takes.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimePersistence>) {
+    let session = SessionId::from("root");
     let first = store
         .enqueue_pending_turn_input(
             crate::PendingTurnInputDraft::new(
@@ -346,168 +360,92 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         .await
         .expect("enqueue first next input");
     let second = store
-        .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            &SessionId::from("root"),
-            "second next",
-        ))
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(&session, "second next"))
         .await
         .expect("enqueue second next input");
-    let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "turn-input-owner").await;
-    let claim = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("turn-input-owner"),
-            10,
-        )
-        .await
-        .expect("claim next inputs")
-        .expect("next input claim");
+    let fence = seal_drive_fence_for_test(&store, &session, "turn-input-owner").await;
+    let root = "input-root";
+    let admission = admitted_root(
+        &store,
+        &fence,
+        root,
+        lash_core::store::AdmittedHead::Input(first.input_id.clone()),
+    )
+    .await;
     assert_eq!(
-        claim
+        admission.input_ids(),
+        vec![first.input_id.clone(), second.input_id.clone()]
+    );
+    let admitted = admission.inputs.as_ref().expect("the root admits inputs");
+    assert!(
+        admitted
             .inputs
             .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![first.input_id.as_str(), second.input_id.as_str()]
+            .any(|input| input.input.items.iter().any(|item| matches!(
+                item,
+                crate::InputItem::Attachment {
+                    source: crate::AttachmentSource::Inline { bytes, .. }
+                } if bytes == &[1, 2, 3]
+            )))
     );
-    assert!(matches!(
-        claim
-            .materialize_turn_input()
-            .items
-            .iter()
-            .find(|item| matches!(item, crate::InputItem::Attachment { .. })),
-        Some(crate::InputItem::Attachment {
-            source: crate::AttachmentSource::Inline { bytes, .. }
-        }) if bytes == &[1, 2, 3]
-    ));
     match store
-        .cancel_pending_turn_input(&SessionId::from("root"), &first.input_id)
+        .cancel_pending_turn_input(&session, &first.input_id)
         .await
-        .expect("cancel claimed input")
+        .expect("cancel an admitted input")
     {
-        crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
+        crate::PendingTurnInputCancelOutcome::AlreadyAdmitted {
             input,
-            claim: diagnostics,
+            root: holder,
         } => {
             assert_eq!(input.input_id, first.input_id);
-            assert_eq!(
-                diagnostics
-                    .as_ref()
-                    .and_then(|diagnostics| diagnostics.claim_id.as_deref()),
-                Some(claim.claim_id.as_str())
-            );
+            assert_eq!(holder.as_str(), root);
         }
-        other => panic!("live claimed pending input must not be cancellable, got {other:?}"),
+        other => panic!("an admitted input must not be cancellable, got {other:?}"),
     }
-    let live_epoch = store
-        .drive_epoch(&SessionId::from("root"))
+    let admitted_reads = store
+        .list_pending_turn_inputs(&session)
         .await
-        .expect("read the current drive epoch for claimed inputs")
-        .epoch;
-    let claimed_reads = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list claimed inputs");
+        .expect("list admitted inputs");
     assert_eq!(
-        claimed_reads
+        admitted_reads
             .iter()
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![first.input_id.as_str(), second.input_id.as_str()]
     );
-    assert!(claimed_reads.iter().all(|read| {
-        read.status
-            == crate::PendingTurnInputReadStatus::Held {
-                drive_epoch: live_epoch,
-            }
-    }));
-
-    store
-        .abandon_turn_input_claim(&claim)
-        .await
-        .expect("abandon pending input claim");
-    let abandoned_reads = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list after abandon");
-    assert_eq!(abandoned_reads.len(), 2);
-    assert!(
-        abandoned_reads
-            .iter()
-            .all(|read| matches!(read.status, crate::PendingTurnInputReadStatus::Pending))
-    );
-    let reclaimed = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("turn-input-owner"),
-            10,
-        )
-        .await
-        .expect("reclaim next inputs")
-        .expect("reclaimed next claim");
-    assert!(
-        reclaimed.fencing_token > claim.fencing_token,
-        "reclaiming abandoned pending inputs must advance the fencing token"
-    );
-    let reclaimed_reads = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list reclaimed inputs");
-    assert_eq!(reclaimed_reads.len(), 2);
-    assert!(reclaimed_reads.iter().all(|read| {
-        read.status
-            == crate::PendingTurnInputReadStatus::Held {
-                drive_epoch: live_epoch,
-            }
-    }));
-
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    let bound = crate::PendingTurnInputReadStatus::Admitted {
+        root: TurnId::from(root),
     };
-    let err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_turn_input_claim(claim.completion()),
-        )
+    assert!(admitted_reads.iter().all(|read| read.status == bound));
+
+    let successor = seal_drive_fence_for_test(&store, &session, "turn-input-successor").await;
+    let err = try_end_root(&store, &fence, completing_admission(root, &admission))
         .await
-        .expect_err("stale turn-input completion must fail");
-    assert!(matches!(err, StoreError::TurnInputClaimSuperseded { .. }));
+        .expect_err("a completion under a superseded fence must fail");
+    assert!(matches!(err, StoreError::StaleDriveFence { .. }));
     let reads_after_stale_completion = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
+        .list_pending_turn_inputs(&session)
         .await
-        .expect("list reclaimed live inputs");
+        .expect("list after the refused completion");
     assert_eq!(reads_after_stale_completion.len(), 2);
     assert!(
-        reads_after_stale_completion.iter().all(|read| {
-            read.status
-                == crate::PendingTurnInputReadStatus::Held {
-                    drive_epoch: live_epoch,
-                }
-        }),
-        "stale completion must not abandon the live reclaimed claim"
+        reads_after_stale_completion
+            .iter()
+            .all(|read| read.status == bound),
+        "a refused completion must leave the rows bound to their root"
     );
 
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_turn_input_claim(reclaimed.completion()),
-        )
-        .await
-        .expect("valid pending input completion commits");
+    end_root(&store, &successor, completing_admission(root, &admission)).await;
     assert!(
         store
-            .list_pending_turn_inputs(&SessionId::from("root"))
+            .list_pending_turn_inputs(&session)
             .await
-            .expect("list after valid completion")
+            .expect("list after the live completion")
             .is_empty()
     );
     assert!(matches!(
         store
-            .cancel_pending_turn_input(&SessionId::from("root"), &first.input_id)
+            .cancel_pending_turn_input(&session, &first.input_id)
             .await
             .expect("cancel completed input"),
         crate::PendingTurnInputCancelOutcome::AlreadyCompleted(input)
@@ -529,334 +467,196 @@ pub async fn pending_turn_input_claims_reclaim_complete_and_fence(
         completed_replay.state.kind(),
         crate::TurnInputStateKind::Completed
     );
-    let post_completion_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "post-completion-owner")
-            .await;
     assert!(
-        store
-            .claim_next_turn_inputs(
-                &SessionId::from("root"),
-                &post_completion_lease.fence(),
-                &lease_owner("post-completion-owner"),
-                10,
-            )
-            .await
-            .expect("claim after completing inputs")
-            .is_none(),
-        "completed pending input tombstones must not be claimable"
+        admit_root_for_test(
+            &store,
+            &successor,
+            &TurnId::from("after-completion-root"),
+            lash_core::store::AdmittedHead::Input(first.input_id.clone()),
+        )
+        .await
+        .expect("admit after completing inputs")
+        .is_none(),
+        "completed pending input tombstones must not be admitted"
     );
 }
 
-pub async fn turn_input_claims_supersede_across_session_lease_generations(
-    store: Arc<dyn RuntimePersistence>,
-    lease_timing: RuntimePersistenceLeaseTiming,
-) {
-    turn_input_claims_supersede_across_session_lease_generations_with_timing(store, &lease_timing)
-        .await;
-}
-
+/// FIG-905: a checkpoint executor can durably bind an active input and crash
+/// before its effect outcome journals the admission. The successor reruns
+/// the same checkpoint step under its newer fence and reads back exactly the
+/// rows that step bound; the predecessor's completion is refused, and the
+/// successor settles them.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_input_claims_supersede_across_session_lease_generations_with_timing(
-    store: Arc<dyn RuntimePersistence>,
-    _lease_timing: &RuntimePersistenceLeaseTiming,
-) {
-    // The DeferredNextTurn idle-retry shape: a failed turn releases its lease
-    // and the next idle acquisition re-claims the same next-turn input under a
-    // fresh generation, while the stale claim's completion is rejected. This was
-    // the latent unrenewed-claim bug (ADR 0029).
-    let input = store
-        .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            &SessionId::from("root"),
-            "generation next input",
-        ))
-        .await
-        .expect("enqueue next-turn input");
-
-    // (a) Same generation: a live next-turn claim is not re-claimable.
-    let lease_a =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-owner-a").await;
-    let claim_a = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease_a.fence(),
-            &lease_owner("tin-owner-a"),
-            10,
-        )
-        .await
-        .expect("first next-turn claim")
-        .expect("first next-turn claim exists");
-    assert_eq!(claim_a.inputs[0].input_id, input.input_id);
-    assert_eq!(claim_a.session_lease_generation, lease_a.fencing_token);
-    assert!(
-        store
-            .claim_next_turn_inputs(
-                &SessionId::from("root"),
-                &lease_a.fence(),
-                &lease_owner("tin-owner-a"),
-                10
-            )
-            .await
-            .expect("same-generation re-claim")
-            .is_none(),
-        "a live next-turn claim must not be re-claimable under its own generation"
-    );
-
-    // (b) Idle retry after lease release + re-acquire: the same next-turn input
-    // is re-claimable by the new generation and the stale completion is
-    // superseded.
-    let lease_b =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-owner-b").await;
-    let claim_b = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease_b.fence(),
-            &lease_owner("tin-owner-b"),
-            10,
-        )
-        .await
-        .expect("idle-retry next-turn claim")
-        .expect("idle-retry next-turn claim exists");
-    assert_eq!(claim_b.inputs[0].input_id, input.input_id);
-    assert!(claim_b.fencing_token > claim_a.fencing_token);
-
-    let stale_state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let stale_err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_turn_input_claim(claim_a.completion()),
-        )
-        .await
-        .expect_err("superseded next-turn completion must fail");
-    assert!(matches!(
-        stale_err,
-        StoreError::TurnInputClaimSuperseded { .. }
-    ));
-
-    // (c) TTL takeover mints a new generation without a release.
-    let dead_owner = lease_owner("tin-stale");
-    let dead_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-stale").await;
-    let claim_dead = store
-        .claim_next_turn_inputs(&SessionId::from("root"), &dead_lease, &dead_owner, 10)
-        .await
-        .expect("pre-supersession claim")
-        .expect("claim exists");
-    let taker = lease_owner("tin-taker");
-    let taker_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "tin-taker").await;
-    let claim_taker = store
-        .claim_next_turn_inputs(&SessionId::from("root"), &taker_lease.fence(), &taker, 10)
-        .await
-        .expect("post-takeover next-turn claim")
-        .expect("post-takeover next-turn claim exists");
-    assert_eq!(claim_taker.inputs[0].input_id, input.input_id);
-    let takeover_err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_turn_input_claim(claim_dead.completion()),
-        )
-        .await
-        .expect_err("pre-takeover next-turn completion must fail");
-    assert!(matches!(
-        takeover_err,
-        StoreError::TurnInputClaimSuperseded { .. }
-    ));
-}
-
-/// A checkpoint executor can durably move an active input to `accepted` and
-/// crash before its effect outcome journals the claim. The successor must be
-/// able to reacquire that same turn/input pair under its newer generation.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn active_turn_input_claim_reacquires_after_unrecorded_checkpoint(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn RuntimePersistence>) {
     const SESSION_ID: &str = "fig905-active-reacquire";
     const TURN_ID: &str = "fig905-active-reacquire:turn";
+    const STEP: &str = "fig905-active-reacquire:turn:checkpoint";
+    let session_id = SessionId::from(SESSION_ID);
+    let turn = crate::TurnId::from(TURN_ID);
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(SESSION_ID),
-            &crate::TurnId::from(TURN_ID),
+            &session_id,
+            &turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
             "accepted before checkpoint outcome",
         ))
         .await
         .expect("enqueue active input");
 
-    let predecessor = seal_claim_authority_for_test(
-        &store,
-        &SessionId::from(SESSION_ID),
-        "fig905-active-predecessor",
-    )
-    .await;
-    let predecessor_claim = store
-        .claim_active_turn_inputs(
-            &SessionId::from(SESSION_ID),
-            &predecessor.fence(),
-            &lease_owner("fig905-active-predecessor"),
-            &crate::TurnId::from(TURN_ID),
-            crate::CheckpointKind::AfterWork,
-            10,
-        )
-        .await
-        .expect("claim active input before simulated crash")
-        .expect("active input claim exists");
+    let predecessor =
+        seal_drive_fence_for_test(&store, &session_id, "fig905-active-predecessor").await;
+    let admit = |fence: lash_core::store::DriveFence| {
+        let store = Arc::clone(&store);
+        let turn = turn.clone();
+        async move {
+            admit_at_checkpoint_for_test(
+                &store,
+                &fence,
+                &turn,
+                &turn,
+                crate::CheckpointKind::AfterWork,
+                STEP,
+                10,
+                crate::testing::queued_work_claim_policy(10),
+            )
+            .await
+            .expect("admit at the checkpoint")
+        }
+    };
+    let bound = admit(predecessor.clone()).await;
+    let bound_inputs = bound
+        .inputs
+        .as_ref()
+        .expect("the checkpoint binds the input");
     assert_eq!(
-        predecessor_claim.inputs[0].state.kind(),
+        bound_inputs.inputs[0].state.kind(),
         crate::TurnInputStateKind::Accepted
     );
 
-    let successor = seal_claim_authority_for_test(
-        &store,
-        &SessionId::from(SESSION_ID),
-        "fig905-active-successor",
-    )
-    .await;
-    let (successor_claim, queued_claim) = store
-        .claim_checkpoint_work(
-            &SessionId::from(SESSION_ID),
-            &successor.fence(),
-            &lease_owner("fig905-active-successor"),
-            &crate::TurnId::from(TURN_ID),
-            crate::CheckpointKind::AfterWork,
-            10,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("reacquire accepted input after unrecorded checkpoint");
-    let successor_claim = successor_claim.expect("successor reacquires accepted input");
+    let successor = seal_drive_fence_for_test(&store, &session_id, "fig905-active-successor").await;
+    let rerun = admit(successor.clone()).await;
     assert!(
-        queued_claim.is_none(),
-        "accepted-only checkpoint fixture must not rely on queued work to open the claim path"
+        rerun.queued.is_none(),
+        "an accepted-only checkpoint fixture must not rely on queued work"
     );
-    assert_eq!(successor_claim.inputs[0].input_id, input.input_id);
-    assert!(successor_claim.session_lease_generation > predecessor_claim.session_lease_generation);
-    assert!(successor_claim.fencing_token > predecessor_claim.fencing_token);
+    assert_eq!(
+        rerun
+            .inputs
+            .as_ref()
+            .map(|inputs| inputs.input_ids())
+            .unwrap_or_default(),
+        vec![input.input_id.clone()],
+        "the rerun reads back the rows its step bound"
+    );
 
-    let stale_state = RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let stale_error = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_turn_input_claim(predecessor_claim.completion()),
-        )
+    let settlement = completing_checkpoint(IngressSettlement::new(turn.clone()), &rerun);
+    let stale_error = try_end_root(&store, &predecessor, settlement.clone())
         .await
-        .expect_err("reacquisition supersedes the unjournaled predecessor claim");
-    assert!(matches!(
-        stale_error,
-        StoreError::TurnInputClaimSuperseded { .. }
-    ));
-
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_turn_input_claim(successor_claim.completion()),
-        )
-        .await
-        .expect("successor settles reacquired active input");
+        .expect_err("the superseded predecessor's completion is refused");
+    assert!(matches!(stale_error, StoreError::StaleDriveFence { .. }));
+    end_root(&store, &successor, settlement).await;
 }
 
+/// FIG-1511, FIG-3927 §2.6: an input bound to a root stays bound across a
+/// drive supersession, and host cancellation refuses it. The root's terminal
+/// releases it: an accepted active-turn input names a turn that is over, so
+/// it is re-deferred open, cancellable and vacuumed, and a settlement that
+/// still names it is refused because no root holds it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn accepted_turn_input_with_superseded_drive_is_cancelled_and_vacuumed(
+pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_vacuumed(
     store: Arc<dyn RuntimePersistence>,
 ) {
     const SESSION_ID: &str = "fig1511-orphaned-accepted";
     const TURN_ID: &str = "fig1511-orphaned-accepted:turn";
     let session_id = SessionId::from(SESSION_ID);
+    let turn = TurnId::from(TURN_ID);
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
             &session_id,
-            &TurnId::from(TURN_ID),
+            &turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "accepted before lease owner crashed",
+            "accepted before the drive was superseded",
         ))
         .await
         .expect("enqueue active input");
-    let owner = lease_owner("fig1511-accepted-owner");
-    let lease = store
-        .seal_claim_epoch_for_test(&session_id, &owner, "fig1511-accepted-executor", 0)
-        .await
-        .expect("claim session lease")
-        .acquired()
-        .expect("session lease is free");
-    let claim = store
-        .claim_active_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &owner,
-            &TurnId::from(TURN_ID),
-            crate::CheckpointKind::AfterWork,
-            1,
-        )
-        .await
-        .expect("claim active input")
-        .expect("active input claim exists");
-    assert_eq!(claim.inputs[0].input_id, input.input_id);
+    let fence = seal_drive_fence_for_test(&store, &session_id, "fig1511-accepted-owner").await;
+    let admitted = admit_at_checkpoint_for_test(
+        &store,
+        &fence,
+        &turn,
+        &turn,
+        crate::CheckpointKind::AfterWork,
+        "fig1511:step",
+        1,
+        crate::testing::queued_work_claim_policy(1),
+    )
+    .await
+    .expect("admit the active input");
+    let inputs = admitted.inputs.clone().expect("the input is admitted");
+    assert_eq!(inputs.inputs[0].input_id, input.input_id);
     assert_eq!(
-        claim.inputs[0].state.kind(),
+        inputs.inputs[0].state.kind(),
         crate::TurnInputStateKind::Accepted
     );
 
-    match store
-        .cancel_pending_turn_input(&session_id, &input.input_id)
-        .await
-        .expect("cancel accepted input under live lease")
-    {
-        crate::PendingTurnInputCancelOutcome::AlreadyClaimed {
-            claim: Some(diagnostics),
-            ..
-        } => assert_eq!(
-            diagnostics.claim_id.as_deref(),
-            Some(claim.claim_id.as_str())
+    let successor = seal_drive_fence_for_test(&store, &session_id, "fig1511-successor").await;
+    assert!(
+        matches!(
+            store
+                .cancel_pending_turn_input(&session_id, &input.input_id)
+                .await
+                .expect("cancel the bound input after supersession"),
+            crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { ref root, .. }
+                if *root == turn
         ),
-        other => panic!("live accepted input must retain its real claim, got {other:?}"),
-    }
+        "a drive supersession does not release a root's rows"
+    );
 
-    store
-        .supersede_claim_epoch_for_test(&lease)
+    // The root ends without settling the input: its terminal releases it.
+    end_root(&store, &successor, IngressSettlement::new(turn.clone())).await;
+    let released = store
+        .list_pending_turn_inputs(&session_id)
         .await
-        .expect("seal successor drive after the first claimant stopped");
+        .expect("list the released input");
+    assert_eq!(released.len(), 1);
+    assert_eq!(released[0].status, crate::PendingTurnInputReadStatus::Open);
+    assert_eq!(
+        released[0].input.state.kind(),
+        crate::TurnInputStateKind::DeferredNextTurn
+    );
     expect_cancelled_pending_input(
         store
             .cancel_pending_turn_input(&session_id, &input.input_id)
             .await
-            .expect("cancel accepted input after drive supersession"),
+            .expect("cancel the released input"),
         &input.input_id,
     );
-    let stale_state = RuntimeSessionState {
-        session_id: session_id.clone(),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
+    let mut zombie = IngressSettlement::new(turn.clone());
+    zombie.completed_inputs.push(inputs.completion());
     let stale_error = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_turn_input_claim(claim.completion()),
-        )
+        .commit_runtime_state(settling_commit_for_test(
+            head_commit(&store, &session_id).await,
+            &successor,
+            zombie,
+        ))
         .await
-        .expect_err("cancelled input must reject its zombie claimant's settlement");
+        .expect_err("a cancelled input must refuse a settlement that still names it");
     assert!(matches!(
         stale_error,
-        StoreError::TurnInputClaimSuperseded {
+        StoreError::IngressRowNotAdmitted {
             session_id: ref refused_session_id,
-            claim_id: ref refused_claim_id,
-            row_id: Some(ref refused_input_id),
-            ..
-        } if refused_session_id == session_id
-            && refused_claim_id == &claim.claim_id
-            && refused_input_id.as_ref() == input.input_id.as_str()
+            ref root,
+            ref row,
+            admitted_root: None,
+        } if *refused_session_id == session_id
+            && *root == turn
+            && **row == lash_core::store::IngressRowId::Input(input.input_id.clone())
     ));
     let vacuum = store
         .vacuum()
@@ -929,7 +729,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     expect_cancelled_pending_input(cancelled_next, &next_cancel.input_id);
 
     let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
+        seal_drive_fence_for_test(&store, &SessionId::from("root"), "cancel-input-owner").await;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -939,7 +739,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
                 &authority,
-                &lease.fence(),
+                &lease,
                 RuntimeCommit::persisted_state_for_test(&state, &[])
                     .deferring_interrupted_turn_inputs(turn_id, None),
             )
@@ -976,17 +776,16 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
         .expect("cancel deferred input");
     expect_cancelled_pending_input(cancelled_deferred, &active_keep.input_id);
     assert!(
-        store
-            .claim_next_turn_inputs(
-                &SessionId::from("root"),
-                &lease.fence(),
-                &lease_owner("cancel-input-owner"),
-                10,
-            )
-            .await
-            .expect("claim after cancelling deferred input")
-            .is_none(),
-        "cancelled deferred input must not be claimable"
+        admit_root_for_test(
+            &store,
+            &lease,
+            &TurnId::from("after-cancel-root"),
+            lash_core::store::AdmittedHead::Input(active_keep.input_id.clone()),
+        )
+        .await
+        .expect("admit after cancelling deferred input")
+        .is_none(),
+        "cancelled deferred input must not be admitted"
     );
 }
 
@@ -1047,20 +846,21 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         .expect("enqueue other active input");
 
     let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
+        seal_drive_fence_for_test(&store, &SessionId::from("root"), "active-input-owner").await;
     let claim_turn_id = crate::TurnId::from(turn_id);
-    let claim = store
-        .claim_active_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("active-input-owner"),
-            &claim_turn_id,
-            crate::CheckpointKind::AfterWork,
-            1,
-        )
-        .await
-        .expect("claim active inputs")
-        .expect("active input claim");
+    let admitted = admit_at_checkpoint_for_test(
+        &store,
+        &lease,
+        &claim_turn_id,
+        &claim_turn_id,
+        crate::CheckpointKind::AfterWork,
+        "active-turn-1:step",
+        1,
+        crate::testing::queued_work_claim_policy(1),
+    )
+    .await
+    .expect("admit active inputs");
+    let claim = admitted.inputs.expect("active input admission");
     assert_eq!(
         claim
             .inputs
@@ -1068,10 +868,10 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
             .map(|input| input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![accepted.input_id.as_str()],
-        "AfterWork claims must include matching active inputs admitted at that boundary in order"
+        "AfterWork admissions must include matching active inputs admitted at that boundary in order"
     );
     assert!(matches!(
-        claim.materialize_turn_input().items.last(),
+        claim.inputs[0].input.items.last(),
         Some(crate::InputItem::Attachment {
             source: crate::AttachmentSource::Inline { bytes, .. }
         }) if bytes == &[9, 8, 7]
@@ -1081,23 +881,28 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let interrupt_result = store
+    store
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
                 &authority,
-                &lease.fence(),
-                RuntimeCommit::persisted_state_for_test(&state, &[])
-                    .completing_turn_input_claim(claim.completion())
-                    .deferring_interrupted_turn_inputs(turn_id, None),
+                &lease,
+                settling_commit_for_test(
+                    RuntimeCommit::persisted_state_for_test(&state, &[]),
+                    &lease,
+                    {
+                        let mut settlement = IngressSettlement::new(claim_turn_id.clone());
+                        settlement.completed_inputs.push(claim.completion());
+                        settlement
+                    },
+                )
+                .deferring_interrupted_turn_inputs(turn_id, None),
             )
             .await
             .expect("authorize active input deferral"),
         )
         .await
         .expect("interrupt commit completes accepted inputs and defers unaccepted inputs");
-    let mut state = state;
-    state.head_revision = interrupt_result.head_revision;
     let pending_after_interrupt = store
         .list_pending_turn_inputs(&SessionId::from("root"))
         .await
@@ -1140,34 +945,26 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
         "inputs for other active turns must not be deferred by this interrupt"
     );
 
-    let next_claim = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("active-input-owner"),
-            10,
-        )
-        .await
-        .expect("claim deferred next inputs")
-        .expect("deferred next input claim");
+    let next_claim = admitted_root(
+        &store,
+        &lease,
+        "deferred-root",
+        lash_core::store::AdmittedHead::Input(unaccepted.input_id.clone()),
+    )
+    .await;
     assert_eq!(
-        next_claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
+        next_claim.input_ids(),
         vec![
-            unaccepted.input_id.as_str(),
-            before_completion.input_id.as_str()
+            unaccepted.input_id.clone(),
+            before_completion.input_id.clone()
         ]
     );
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_turn_input_claim(next_claim.completion()),
-        )
-        .await
-        .expect("complete deferred next input");
+    end_root(
+        &store,
+        &lease,
+        completing_admission("deferred-root", &next_claim),
+    )
+    .await;
     assert!(
         store
             .list_pending_turn_inputs(&SessionId::from("root"))
@@ -1181,18 +978,15 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     );
 }
 
-/// A turn that cannot commit leaves no input pinned to it (FIG-1573).
+/// A turn that cannot commit leaves no input pinned to it (FIG-1573,
+/// FIG-3927 §2.6).
 ///
-/// The commit-time re-defer
-/// ([`RuntimeCommit::deferring_interrupted_turn_inputs`]) is the repair a turn
-/// carries for the active-turn-scoped inputs it did not deliver. A turn that
-/// never reaches its commit - killed, aborted, or fenced - owes the same repair,
-/// and only the store can perform it once the turn is gone. Both scopes are
-/// laws: naming the dead turn repairs exactly its rows, and the lane-generation
-/// scope repairs every row no live claim protects, except those pinned to a turn
-/// the caller names as still resumable. Nothing else may move, so a row pinned
-/// to a turn that can still deliver stays put, and a caller whose lane has been
-/// superseded repairs nothing at all.
+/// A turn that never reaches its commit - killed, aborted, or fenced - ends
+/// its root with a terminal, and the terminal write is the repair: every
+/// row still bound to the root is released, and every open active-turn input
+/// addressed to any of the root's physical turns is re-deferred to the next
+/// turn. Nothing else moves: a row pinned to another root's turn stays put,
+/// and a terminal under a superseded fence writes nothing at all.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1200,22 +994,46 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
 pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let dead_turn_id = "fig1573-dead-turn";
+    let session = SessionId::from("root");
+    let dead_root = TurnId::from("fig1573-dead-root");
+    let later_turn = lash_core::store::PhysicalTurn::derive_turn_id(&dead_root, 2);
     let other_turn_id = "fig1573-other-turn";
-    let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "fig1573-owner").await;
-    let orphaned = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from("root"),
-            &TurnId::from(dead_turn_id),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "pinned to a turn that cannot commit",
+    let head = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            &session,
+            "the dead root's head",
         ))
         .await
-        .expect("enqueue the orphaned input");
+        .expect("enqueue the head");
+    let stale = seal_drive_fence_for_test(&store, &session, "fig1573-owner").await;
+    let admission = admitted_root(
+        &store,
+        &stale,
+        dead_root.as_str(),
+        lash_core::store::AdmittedHead::Input(head.input_id.clone()),
+    )
+    .await;
+    assert_eq!(admission.input_ids(), vec![head.input_id.clone()]);
+    let mut orphaned = Vec::new();
+    for (turn, text) in [
+        (&dead_root, "pinned to the root's first turn"),
+        (&later_turn, "pinned to a later physical turn of the root"),
+    ] {
+        orphaned.push(
+            store
+                .enqueue_pending_turn_input(pending_active_turn_input_draft(
+                    &session,
+                    turn,
+                    crate::TurnInputCheckpointBoundary::AfterWork,
+                    text,
+                ))
+                .await
+                .expect("enqueue an input pinned to the dead root"),
+        );
+    }
     let other = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from("root"),
+            &session,
             &TurnId::from(other_turn_id),
             crate::TurnInputCheckpointBoundary::AfterWork,
             "pinned to a turn that can still deliver",
@@ -1223,39 +1041,55 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
         .await
         .expect("enqueue the untouched input");
 
-    let repaired = store
-        .repair_orphaned_active_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &TurnId::from(dead_turn_id),
-            &crate::TurnCancelIntentSnapshot::Absent,
-            None,
-        )
+    // A superseded caller repairs nothing: its terminal is refused whole.
+    let successor = seal_drive_fence_for_test(&store, &session, "fig1573-successor").await;
+    let refusal = try_end_root(&store, &stale, IngressSettlement::new(dead_root.clone()))
         .await
-        .expect("re-defer inputs pinned to the dead turn")
-        .into_applied()
-        .expect("unchanged absent intent");
-    assert_eq!(
-        repaired.len(),
-        1,
-        "naming a dead turn must repair exactly the rows pinned to it"
+        .expect_err("a superseded fence must be refused inside the terminal write");
+    assert!(
+        matches!(refusal, StoreError::StaleDriveFence { .. }),
+        "a superseded terminal must be refused by the drive fence: {refusal:?}"
     );
+    let untouched = store
+        .list_pending_turn_inputs(&session)
+        .await
+        .expect("list pending inputs after the refused terminal");
+    for input in &orphaned {
+        let row = untouched
+            .iter()
+            .find(|read| read.input.input_id == input.input_id)
+            .expect("the pinned row is still queued");
+        assert_eq!(
+            row.input.state.kind(),
+            crate::TurnInputStateKind::PendingActive,
+            "a refused terminal must leave the row exactly as it found it"
+        );
+    }
+
+    // The live fence's terminal releases the root's rows and re-defers every
+    // open input addressed to its turns.
+    end_root(
+        &store,
+        &successor,
+        IngressSettlement::new(dead_root.clone()),
+    )
+    .await;
     let pending = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
+        .list_pending_turn_inputs(&session)
         .await
-        .expect("list pending inputs after the turn-scoped repair");
-    let repaired_row = pending
-        .iter()
-        .find(|read| read.input.input_id == orphaned.input_id)
-        .expect("the repaired input is still queued");
-    assert_eq!(
-        repaired_row.input.state.kind(),
-        crate::TurnInputStateKind::DeferredNextTurn
-    );
-    assert_eq!(
-        repaired_row.input.ingress(),
-        crate::TurnInputIngress::NextTurn
-    );
+        .expect("list pending inputs after the terminal");
+    for input in orphaned.iter().chain(std::iter::once(&head)) {
+        let row = pending
+            .iter()
+            .find(|read| read.input.input_id == input.input_id)
+            .expect("the repaired input is still queued");
+        assert_eq!(row.status, crate::PendingTurnInputReadStatus::Open);
+        assert_eq!(
+            row.input.state.kind(),
+            crate::TurnInputStateKind::DeferredNextTurn
+        );
+        assert_eq!(row.input.ingress(), crate::TurnInputIngress::NextTurn);
+    }
     let untouched_row = pending
         .iter()
         .find(|read| read.input.input_id == other.input_id)
@@ -1267,225 +1101,24 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     assert_eq!(
         untouched_row.input.ingress().active_turn_id(),
         Some(&crate::TurnId::from(other_turn_id)),
-        "a row pinned to a turn that can still deliver must never be swept"
-    );
-    assert_eq!(
-        store
-            .repair_orphaned_active_turn_inputs(
-                &SessionId::from("root"),
-                &lease.fence(),
-                &TurnId::from(dead_turn_id),
-                &crate::TurnCancelIntentSnapshot::Absent,
-                None,
-            )
-            .await
-            .expect("repeat the turn-scoped repair")
-            .into_applied()
-            .expect("unchanged absent intent")
-            .len(),
-        0,
-        "the repair is idempotent: a repaired row is no longer pinned to any turn"
+        "a row pinned to another root's turn must never be swept"
     );
 
-    // The repaired row is next-turn work again, which is the whole point.
-    let claim = store
-        .claim_next_turn_inputs(
-            &SessionId::from("root"),
-            &lease.fence(),
-            &lease_owner("fig1573-owner"),
-            10,
-        )
-        .await
-        .expect("claim the repaired input as next-turn work")
-        .expect("the repaired input is claimable");
+    // The repaired rows are next-turn work again, which is the whole point.
+    let next = admitted_root(
+        &store,
+        &successor,
+        "fig1573-next-root",
+        lash_core::store::AdmittedHead::Input(head.input_id.clone()),
+    )
+    .await;
     assert_eq!(
-        claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![orphaned.input_id.as_str()]
-    );
-    // A turn the sweeping caller can still resume owns its pinned rows even
-    // though no live claim protects them: cold recovery replays that turn under
-    // the same turn id at a new generation, and its agent-frame follow-ons are
-    // the same execution continuing.
-    let follow_on = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from("root"),
-            &crate::TurnId::from(format!("{other_turn_id}:agent-frame:2")),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "pinned to a follow-on frame of the resumable turn",
-        ))
-        .await
-        .expect("enqueue the follow-on frame's input");
-    assert_eq!(
-        store
-            .orphaned_active_turn_ids(
-                &SessionId::from("root"),
-                &lease.fence(),
-                crate::OrphanedTurnInputScope::LaneGeneration {
-                    resumable_turn_id: Some(&TurnId::from(other_turn_id)),
-                },
-            )
-            .await
-            .expect("discover while naming a turn the caller can still resume")
-            .len(),
-        0,
-        "a row pinned to a resumable turn, or to one of its agent frames, must survive the sweep"
-    );
-    let after_exclusion = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list pending inputs after the excluded sweep");
-    for input_id in [other.input_id.as_str(), follow_on.input_id.as_str()] {
-        let row = after_exclusion
-            .iter()
-            .find(|read| read.input.input_id == input_id)
-            .expect("the excluded row is still queued");
-        assert_eq!(
-            row.input.state.kind(),
-            crate::TurnInputStateKind::PendingActive
-        );
-        assert!(row.input.ingress().active_turn_id().is_some());
-    }
-    // A row this caller's own live generation holds is never an orphan, even
-    // while the lane-generation scope is sweeping around it.
-    let repairable_turn_ids = store
-        .orphaned_active_turn_ids(
-            &SessionId::from("root"),
-            &lease.fence(),
-            crate::OrphanedTurnInputScope::LaneGeneration {
-                resumable_turn_id: None,
-            },
-        )
-        .await
-        .expect("discover around the caller's own live claim");
-    assert_eq!(
-        repairable_turn_ids.len(),
-        2,
-        "discovery identifies the unclaimed pinned turns and leaves the live claim alone"
-    );
-    for turn_id in repairable_turn_ids {
-        store
-            .repair_orphaned_active_turn_inputs(
-                &SessionId::from("root"),
-                &lease.fence(),
-                &turn_id,
-                &crate::TurnCancelIntentSnapshot::Absent,
-                None,
-            )
-            .await
-            .expect("repair one discovered orphan");
-    }
-    // Abandoning a next-turn claim restores the next-turn state, not the
-    // active-turn one: a plural abandon that restored `pending_active` would
-    // re-strand the row behind a turn id that no longer exists.
-    store
-        .abandon_turn_input_claims(std::slice::from_ref(&claim))
-        .await
-        .expect("abandon the next-turn claim");
-    let after_abandon = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list pending inputs after abandoning the claim");
-    let restored_row = after_abandon
-        .iter()
-        .find(|read| read.input.input_id == orphaned.input_id)
-        .expect("the abandoned input is still queued");
-    assert_eq!(
-        restored_row.input.state.kind(),
-        crate::TurnInputStateKind::DeferredNextTurn
-    );
-    assert_eq!(
-        restored_row.input.ingress(),
-        crate::TurnInputIngress::NextTurn
-    );
-    assert!(
-        after_abandon
-            .iter()
-            .all(|read| read.input.ingress().active_turn_id().is_none()
-                && read.input.state.kind() == crate::TurnInputStateKind::DeferredNextTurn),
-        "no input may stay pinned to a turn once no live claim protects it"
-    );
-
-    // A superseded caller repairs nothing: between its own check and its write
-    // the lane may have moved on, and the holder that displaced it owns those
-    // rows now.
-    let stale_fence = lease.fence();
-    let stranded = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from("root"),
-            &TurnId::from("fig1573-superseded-turn"),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "pinned while the lane changes hands",
-        ))
-        .await
-        .expect("enqueue the input a superseded caller must not touch");
-    let discovered = store
-        .orphaned_active_turn_ids(
-            &SessionId::from("root"),
-            &stale_fence,
-            crate::OrphanedTurnInputScope::LaneGeneration {
-                resumable_turn_id: None,
-            },
-        )
-        .await
-        .expect("stale owner discovers the orphan before takeover");
-    assert_eq!(discovered, vec![TurnId::from("fig1573-superseded-turn")]);
-    let successor =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "fig1573-successor").await;
-    assert!(
-        successor.fencing_token > stale_fence.fencing_token,
-        "a reclaimed lane must advance the generation"
-    );
-    let refusal = store
-        .repair_orphaned_active_turn_inputs(
-            &SessionId::from("root"),
-            &stale_fence,
-            &TurnId::from("fig1573-superseded-turn"),
-            &crate::TurnCancelIntentSnapshot::Absent,
-            None,
-        )
-        .await
-        .expect_err("a superseded fence must be refused inside the repair");
-    assert!(
-        matches!(refusal, StoreError::StaleDriveFence { .. }),
-        "a superseded repair must be refused by the drive fence: {refusal:?}"
-    );
-    let after_refusal = store
-        .list_pending_turn_inputs(&SessionId::from("root"))
-        .await
-        .expect("list pending inputs after the refused repair");
-    let untouched = after_refusal
-        .iter()
-        .find(|read| read.input.input_id == stranded.input_id)
-        .expect("the refused row is still queued");
-    assert_eq!(
-        untouched.input.state.kind(),
-        crate::TurnInputStateKind::PendingActive
-    );
-    assert_eq!(
-        untouched.input.ingress().active_turn_id(),
-        Some(&crate::TurnId::from("fig1573-superseded-turn")),
-        "a refused repair must leave the row exactly as it found it"
-    );
-    // The successor's own fence repairs it.
-    assert_eq!(
-        store
-            .repair_orphaned_active_turn_inputs(
-                &SessionId::from("root"),
-                &successor.fence(),
-                &TurnId::from("fig1573-superseded-turn"),
-                &crate::TurnCancelIntentSnapshot::Absent,
-                None,
-            )
-            .await
-            .expect("the live holder repairs the row the superseded caller could not")
-            .into_applied()
-            .expect("unchanged absent intent")
-            .len(),
-        1,
+        next.input_ids(),
+        vec![
+            head.input_id.clone(),
+            orphaned[0].input_id.clone(),
+            orphaned[1].input_id.clone(),
+        ]
     );
 }
 
@@ -1638,7 +1271,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         source_keyed_active_draft(
             dead_turn,
             crate::TurnInputCheckpointBoundary::AfterWork,
-            "deferred by orphan repair",
+            "deferred by its root's terminal",
             "host:fig3544-repair-defer",
         )
     };
@@ -1649,19 +1282,19 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     let first_repair_deferred = store
         .enqueue_pending_turn_input(repair_deferred())
         .await
-        .expect("admit the input orphan repair defers");
+        .expect("admit the input the root terminal defers");
 
-    let lease = seal_claim_authority_for_test(&store, &session_id, "fig3544-owner").await;
+    let lease = seal_drive_fence_for_test(&store, &session_id, "fig3544-owner").await;
     let state = RuntimeSessionState {
         session_id: session_id.clone(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
-    let deferred_commit = store
+    store
         .commit_runtime_state(
             lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 store.as_ref(),
                 &authority,
-                &lease.fence(),
+                &lease,
                 RuntimeCommit::persisted_state_for_test(&state, &[])
                     .deferring_interrupted_turn_inputs(ended_turn, None),
             )
@@ -1670,19 +1303,13 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         )
         .await
         .expect("the turn's final commit defers its undelivered input");
-    let repaired = store
-        .repair_orphaned_active_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &TurnId::from(dead_turn),
-            &crate::TurnCancelIntentSnapshot::Absent,
-            None,
-        )
-        .await
-        .expect("orphan repair defers the dead turn's input")
-        .into_applied()
-        .expect("unchanged absent intent");
-    assert_eq!(repaired.len(), 1, "orphan repair defers exactly one row");
+    // The dead turn's root ends: its terminal re-defers the input pinned to it.
+    end_root(
+        &store,
+        &lease,
+        IngressSettlement::new(TurnId::from(dead_turn)),
+    )
+    .await;
 
     let pending = store
         .list_pending_turn_inputs(&session_id)
@@ -1709,7 +1336,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
         (
             repair_deferred(),
             &first_repair_deferred,
-            "orphan-repair defer",
+            "root-terminal defer",
         ),
     ] {
         let replayed = store
@@ -1730,26 +1357,20 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     }
 
     // Settle both deferred rows into tombstones: replay still matches.
-    let next_claim = store
-        .claim_next_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &lease_owner("fig3544-owner"),
-            10,
-        )
-        .await
-        .expect("claim the deferred inputs")
-        .expect("the deferred inputs are claimable next-turn work");
-    assert_eq!(next_claim.inputs.len(), 2);
-    let mut state = state;
-    state.head_revision = deferred_commit.head_revision;
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_turn_input_claim(next_claim.completion()),
-        )
-        .await
-        .expect("complete the deferred inputs");
+    let next = admitted_root(
+        &store,
+        &lease,
+        "fig3544-next-root",
+        lash_core::store::AdmittedHead::Input(first_commit_deferred.input_id.clone()),
+    )
+    .await;
+    assert_eq!(next.input_ids().len(), 2);
+    end_root(
+        &store,
+        &lease,
+        completing_admission("fig3544-next-root", &next),
+    )
+    .await;
     for (retry, first) in [
         (commit_deferred(), &first_commit_deferred),
         (repair_deferred(), &first_repair_deferred),
@@ -1837,19 +1458,9 @@ pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimePersistence>)
         );
     }
 
-    let lease = seal_claim_authority_for_test(&store, &session_id, "fig3544-conflict-owner").await;
-    store
-        .repair_orphaned_active_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &TurnId::from(turn),
-            &crate::TurnCancelIntentSnapshot::Absent,
-            None,
-        )
-        .await
-        .expect("orphan repair defers the input")
-        .into_applied()
-        .expect("unchanged absent intent");
+    let lease = seal_drive_fence_for_test(&store, &session_id, "fig3544-conflict-owner").await;
+    // The turn's root ends: its terminal re-defers the input pinned to it.
+    end_root(&store, &lease, IngressSettlement::new(TurnId::from(turn))).await;
     assert_source_key_conflict(
         store
             .enqueue_pending_turn_input(

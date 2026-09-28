@@ -1,7 +1,7 @@
 //! The turn-running conformance laws on the in-process server double
-//! (FIG-3600 S5c): direct-turn acceptance (ADR 0069), restored-claim cede
-//! (FIG-3552), the cross-tier tool-batch laws (FIG-3400, FIG-3397, ADR 0099)
-//! and the session read-view, failure-evidence and fresh-admission laws —
+//! (FIG-3600 S5c): direct-turn acceptance (ADR 0069), the cross-tier
+//! tool-batch laws (FIG-3400, FIG-3397, ADR 0099) and the session read-view,
+//! failure-evidence and fresh-admission laws —
 //! each against `lash-restate-test`'s in-process Restate server.
 //!
 //! `cancelled_turn_withheld_input_tests!` is deliberately absent: the B0-cov
@@ -61,25 +61,6 @@ lash_conformance::direct_turn_acceptance_tests!(
         let store = law_session_store(backend.session_store_factory(), "root").await;
         let prefix: &'static str =
             Box::leak(format!("restate-direct-turn-{}", harness.run_nonce()).into_boxed_str());
-        (harness, prefix, backend, store)
-    }
-);
-
-// FIG-3552: a redrive whose journal-restored claim another driver answered
-// cedes instead of committing the same words again.
-lash_conformance::restored_claim_cede_tests!(
-    #[ignore = "parked: the laws drive their turns on a runtime over the deployment effect host, which refuses effects outside a handler (RestateEffectHostRequiresHandlerScope); FIG-3600 S5a-q3 or S8"]
-    {
-        let harness =
-            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
-        let backend = harness.backend_factory()().await;
-        let store = law_session_store(
-            backend.session_store_factory(),
-            lash_conformance::RESTORED_CLAIM_CEDE_SESSION_ID,
-        )
-        .await;
-        let prefix: &'static str =
-            Box::leak(format!("restate-restored-claim-{}", harness.run_nonce()).into_boxed_str());
         (harness, prefix, backend, store)
     }
 );

@@ -21,7 +21,7 @@
 
 use std::sync::Arc;
 
-use crate::{QueuedWorkAuthority, QueuedWorkClaimBoundary, QueuedWorkKind};
+use crate::{AdmissionBoundary, QueuedWorkAuthority, QueuedWorkKind};
 
 /// One claimable queued-work row offered to a [`QueuedDrainPolicy`].
 ///
@@ -54,7 +54,7 @@ pub struct QueuedDrainRequest<'a> {
     available_tokens: usize,
     max_context_tokens: usize,
     max_rows: usize,
-    boundary: QueuedWorkClaimBoundary,
+    boundary: AdmissionBoundary,
 }
 
 impl<'a> QueuedDrainRequest<'a> {
@@ -63,7 +63,7 @@ impl<'a> QueuedDrainRequest<'a> {
         available_tokens: usize,
         max_context_tokens: usize,
         max_rows: usize,
-        boundary: QueuedWorkClaimBoundary,
+        boundary: AdmissionBoundary,
     ) -> Self {
         Self {
             candidates,
@@ -102,7 +102,7 @@ impl<'a> QueuedDrainRequest<'a> {
     }
 
     /// The claim boundary this wake is draining at.
-    pub fn boundary(&self) -> QueuedWorkClaimBoundary {
+    pub fn boundary(&self) -> AdmissionBoundary {
         self.boundary
     }
 }
@@ -280,7 +280,7 @@ mod tests {
                 available_tokens,
                 available_tokens,
                 64,
-                QueuedWorkClaimBoundary::Idle,
+                AdmissionBoundary::Idle,
             );
             assert_eq!(
                 policy.select_drain(&request),
@@ -294,7 +294,7 @@ mod tests {
         let candidates = vec![candidate(1), candidate(2), candidate(3)];
         let policy = DrainModePolicy::new(DrainMode::All);
         assert_eq!(policy.name(), "all");
-        let request = QueuedDrainRequest::new(&candidates, 8, 8, 64, QueuedWorkClaimBoundary::Idle);
+        let request = QueuedDrainRequest::new(&candidates, 8, 8, 64, AdmissionBoundary::Idle);
         assert_eq!(
             policy.select_drain(&request),
             QueuedDrainSelection::leading(3)

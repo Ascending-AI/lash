@@ -6,8 +6,8 @@
 //! pool or connection acquisition, backend I/O, and thread dispatch performed
 //! by the inner implementation; it does not isolate any of those components.
 //! Decorator-side commit sizing and node bookkeeping sit outside the bracket.
-//! Queue-driver wake dispatch and claim scans do not pass through this
-//! decorator at all and remain owned by the existing `wait.*` phase metrics.
+//! Queue-driver wake dispatch does not pass through this decorator at all and
+//! remains owned by the existing `wait.*` phase metrics.
 
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
@@ -266,57 +266,28 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
         result
     }
 
-    async fn claim_next_turn_inputs(
+    async fn admit_root(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::ClaimAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core::WorkClaim<lash_core::runtime::TurnInputClaimData>>, StoreError>
-    {
-        let observation = self.metrics.observe_call("claim_next_turn_inputs");
+        request: &lash_core::store::AdmitRootRequest,
+    ) -> Result<Option<lash_core::store::RootAdmission>, StoreError> {
+        let observation = self.metrics.observe_call("admit_root");
         let started = observation.started_at;
-        let result = self
-            .inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await;
-        self.metrics.record_timing("claim_scan", started.elapsed());
+        let result = self.inner.admit_root(request).await;
+        self.metrics
+            .record_timing("admission_scan", started.elapsed());
         drop(observation);
         result
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn claim_checkpoint_work(
+    async fn admit_at_checkpoint(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::ClaimAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        turn_id: &lash_core::TurnId,
-        checkpoint: lash_core::CheckpointKind,
-        max_inputs: usize,
-        policy: lash_core::QueuedWorkClaimPolicy,
-    ) -> Result<
-        (
-            Option<lash_core::WorkClaim<lash_core::runtime::TurnInputClaimData>>,
-            Option<lash_core::WorkClaim<lash_core::runtime::QueuedWorkClaimData>>,
-        ),
-        StoreError,
-    > {
-        let observation = self.metrics.observe_call("claim_checkpoint_work");
+        request: &lash_core::store::CheckpointAdmissionRequest,
+    ) -> Result<lash_core::store::CheckpointAdmission, StoreError> {
+        let observation = self.metrics.observe_call("admit_at_checkpoint");
         let started = observation.started_at;
-        let result = self
-            .inner
-            .claim_checkpoint_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-                policy,
-            )
-            .await;
-        self.metrics.record_timing("claim_scan", started.elapsed());
+        let result = self.inner.admit_at_checkpoint(request).await;
+        self.metrics
+            .record_timing("admission_scan", started.elapsed());
         drop(observation);
         result
     }

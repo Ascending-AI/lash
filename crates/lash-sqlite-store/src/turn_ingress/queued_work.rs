@@ -1,9 +1,9 @@
 //! `queued_work_batches` statements only SQLite issues.
 //!
-//! The claim scan is where the two backends diverge most. PostgreSQL takes
-//! `FOR UPDATE … SKIP LOCKED` over the candidate rows; SQLite needs no row
-//! lock, because the scan already runs inside `BEGIN IMMEDIATE`. The
-//! delivery-boundary rule itself is the same rule, spelled twice.
+//! The admission scan is where the two backends diverge most. PostgreSQL takes
+//! `FOR UPDATE` over the candidate rows; SQLite needs no row lock, because the
+//! scan already runs inside `BEGIN IMMEDIATE`. The delivery-boundary rule
+//! itself is the same rule, spelled twice.
 
 lash_store_sql::statements! {
     /// `queued_work_batches` statements only SQLite issues.
@@ -20,169 +20,109 @@ lash_store_sql::statements! {
         /// session `?1`.
         ///
         /// No lock suffix: the commit already holds the database write lock.
-        settlement_facts = "SELECT claim_id, claim_token, claim_session_lease_generation
+        settlement_facts = "SELECT admitted_root
              FROM queued_work_batches
              WHERE session_id = ?1 AND batch_id = ?2";
 
-        /// Batch `?2` of session `?1` at `?3`, if no live claim holds it.
+        /// Batch `?2` of session `?1`, if it is open.
         ///
         /// Same lock fork as [`settlement_facts`](Self::settlement_facts).
         select_cancelable = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM session_meta sm
-                    WHERE sm.session_id = ?1
-                      AND sm.drive_epoch
-                          = queued_work_batches.claim_session_lease_generation
-               ))";
+               AND admitted_root IS NULL";
 
-        /// Cancel batch `?2` of session `?1` at `?3`, if no live claim holds
-        /// it.
+        /// Withdraw batch `?2` of session `?1`, if it is open.
         ///
-        /// The liveness predicate is repeated on the delete rather than
-        /// inherited from the read above, because SQLite has no row lock to
-        /// carry it: the write lock makes the pair atomic, and the predicate
-        /// makes the delete truthful on its own. PostgreSQL's read takes
-        /// `FOR UPDATE`, so its delete is keyed by id alone.
+        /// The open predicate is repeated on the delete rather than inherited
+        /// from the read above, because SQLite has no row lock to carry it:
+        /// the write lock makes the pair atomic, and the predicate makes the
+        /// delete truthful on its own. PostgreSQL's read takes `FOR UPDATE`,
+        /// so its delete is keyed by id alone.
         delete_cancelled = "DELETE FROM queued_work_batches
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM session_meta sm
-                    WHERE sm.session_id = ?1
-                      AND sm.drive_epoch
-                          = queued_work_batches.claim_session_lease_generation
-               ))";
+               AND admitted_root IS NULL";
 
-        /// Session `?1`'s claim candidates for generation `?2`, up to `?3` of
-        /// them, with no turn in progress.
+        /// Session `?1`'s admission candidates with no turn in progress, up to
+        /// `?2` of them.
         ///
-        /// At an idle boundary the head is whatever is pending, so the
-        /// candidate set is the run from the head onwards. A claimed head
-        /// widens the limit to the whole run because an interrupted claim
-        /// must be recomposed in full.
-        claim_candidates_idle = "WITH queued_work_head_candidate AS (
-                 SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-                 FROM (
-                     SELECT enqueue_seq AS head_enqueue_seq,
-                            batch_id AS head_batch_id,
-                            delivery_policy AS head_delivery_policy,
-                            claim_id AS head_claim_id
-                     FROM queued_work_batches
-                     WHERE session_id = ?1
-                       AND (
-                            claim_token IS NULL
-                            OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4
-                       )
-                     ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
-                     LIMIT 1
-                 ) AS unfiltered_head
+        /// At an idle boundary the head is whatever is open, commands first:
+        /// the command lane drains before the turn lane (ADR 0101 §4). The
+        /// candidate set is the run of the head's own kind from the head
+        /// onwards.
+        admission_candidates_idle = "WITH queued_work_head_candidate AS (
+                 SELECT enqueue_seq AS head_enqueue_seq, work_kind AS head_work_kind
+                 FROM queued_work_batches
+                 WHERE session_id = ?1 AND admitted_root IS NULL
+                 ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
+                 LIMIT 1
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4
-               )
-               AND (work_kind = 'control' OR NOT EXISTS (
-                    SELECT 1 FROM queued_work_batches AS commands
-                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
-               ))
+               AND admitted_root IS NULL
                AND enqueue_seq >= head_enqueue_seq
-               AND work_kind = (SELECT work_kind FROM queued_work_batches WHERE session_id = ?1 AND enqueue_seq = head_enqueue_seq)
-               AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
-             ORDER BY CASE WHEN work_kind = 'control' THEN 0 ELSE 1 END, enqueue_seq ASC
-             LIMIT COALESCE((
-                 SELECT CASE WHEN head_claim_id IS NULL THEN ?3 ELSE 9223372036854775807 END
-                 FROM queued_work_head_candidate
-             ), 0)";
+               AND work_kind = head_work_kind
+             ORDER BY enqueue_seq ASC
+             LIMIT ?2";
 
-        /// [`claim_candidates_idle`](Self::claim_candidates_idle) at a turn
-        /// checkpoint, where only work whose delivery policy admits the
-        /// earliest safe boundary may start.
+        /// Session `?1`'s open queued turn work a root's admission composes
+        /// from at an idle boundary, up to `?2` of them (ADR 0101 §4, §5).
         ///
-        /// The head is read twice: once unfiltered, to learn the policy and
-        /// claim of whatever is actually first, and once filtered, because a
-        /// batch that must wait for the current turn's commit blocks
-        /// everything behind it unless the head belongs to an interrupted
-        /// claim this caller is recomposing.
-        claim_candidates_boundary = "WITH queued_work_unfiltered_head AS (
-                 SELECT enqueue_seq AS head_enqueue_seq,
-                        batch_id AS head_batch_id,
-                        delivery_policy AS head_delivery_policy,
-                        claim_id AS head_claim_id
+        /// The admission chose the turn lane at a boundary whose command
+        /// lane was empty, so a command enqueued since holds back only the
+        /// rows after it: the run starts at the earliest open turn work and
+        /// ends at the earliest open command, exactly as the next-turn input
+        /// scan does.
+        admission_candidates_turn_lane = "WITH queued_work_head_candidate AS (
+                 SELECT enqueue_seq AS head_enqueue_seq
                  FROM queued_work_batches
-                 WHERE session_id = ?1 AND work_kind = 'turn'
-                   AND (
-                        claim_token IS NULL
-                        OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4
-                   )
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
                  ORDER BY enqueue_seq ASC
                  LIMIT 1
-             ),
-             queued_work_head_candidate AS (
-                 SELECT head_enqueue_seq, head_batch_id, head_delivery_policy, head_claim_id
-                 FROM (
-                     SELECT candidate.enqueue_seq AS head_enqueue_seq,
-                            candidate.batch_id AS head_batch_id,
-                            candidate.delivery_policy AS head_delivery_policy,
-                            candidate.claim_id AS head_claim_id
-                     FROM queued_work_batches AS candidate
-                     CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                     WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
-                       AND (
-                            candidate.claim_token IS NULL
-                            OR candidate.claim_session_lease_generation <> ?2
-                            OR candidate.claim_owner_incarnation_id <> ?4
-                       )
-                       AND (
-                            (
-                                 candidate.enqueue_seq = unfiltered.head_enqueue_seq
-                                 AND unfiltered.head_delivery_policy = 'earliest_safe_boundary'
-                            )
-                            OR (
-                                 unfiltered.head_delivery_policy <> 'earliest_safe_boundary'
-                                 AND unfiltered.head_claim_id IS NOT NULL
-                                 AND (
-                                      candidate.claim_id IS NULL
-                                      OR candidate.claim_id <> unfiltered.head_claim_id
-                                 )
-                            )
-                       )
-                     ORDER BY candidate.enqueue_seq ASC
-                     LIMIT 1
-                 ) AS boundary_head
-                 WHERE head_delivery_policy = 'earliest_safe_boundary'
              )
              SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              CROSS JOIN queued_work_head_candidate
              WHERE session_id = ?1 AND work_kind = 'turn'
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?2
-                            OR claim_owner_incarnation_id <> ?4
-               )
+               AND admitted_root IS NULL
                AND enqueue_seq >= head_enqueue_seq
-               AND (head_claim_id IS NULL OR queued_work_batches.claim_id = head_claim_id)
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+                      AND commands.enqueue_seq < queued_work_batches.enqueue_seq
+               )
              ORDER BY enqueue_seq ASC
-             LIMIT COALESCE((
-                 SELECT CASE WHEN head_claim_id IS NULL THEN ?3 ELSE 9223372036854775807 END
-                 FROM queued_work_head_candidate
-             ), 0)";
+             LIMIT ?2";
+
+        /// [`admission_candidates_idle`](Self::admission_candidates_idle) at
+        /// a turn checkpoint, where only work whose delivery policy admits the
+        /// earliest safe boundary may start: an open head that must wait for
+        /// the current turn's commit blocks everything behind it.
+        admission_candidates_boundary = "WITH queued_work_head_candidate AS (
+                 SELECT enqueue_seq AS head_enqueue_seq,
+                        delivery_policy AS head_delivery_policy
+                 FROM queued_work_batches
+                 WHERE session_id = ?1 AND work_kind = 'turn' AND admitted_root IS NULL
+                 ORDER BY enqueue_seq ASC
+                 LIMIT 1
+             )
+             SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
+             FROM queued_work_batches
+             CROSS JOIN queued_work_head_candidate
+             WHERE session_id = ?1 AND work_kind = 'turn'
+               AND admitted_root IS NULL
+               AND head_delivery_policy = 'earliest_safe_boundary'
+               AND enqueue_seq >= head_enqueue_seq
+             ORDER BY enqueue_seq ASC
+             LIMIT ?2";
     }
 }
 
@@ -192,12 +132,13 @@ lash_store_sql::statements! {
         /// The payloads of every batch id in the JSON array `?1`, keyed by
         /// batch and in item order.
         ///
-        /// One page for a whole claim rather than one query per batch: the
-        /// claim path hydrates a run of batches at once, and under SQLite's
-        /// write lock the run cannot change between them anyway. PostgreSQL
-        /// hydrates per batch inside a `REPEATABLE READ` snapshot instead, so
-        /// it has no counterpart. The list bind is a JSON array unpacked with
-        /// `json_each`, which is how this crate binds every list.
+        /// One page for a whole admission rather than one query per batch:
+        /// the admission hydrates a run of batches at once, and under
+        /// SQLite's write lock the run cannot change between them anyway.
+        /// PostgreSQL hydrates per batch inside a `REPEATABLE READ` snapshot
+        /// instead, so it has no counterpart. The list bind is a JSON array
+        /// unpacked with `json_each`, which is how this crate binds every
+        /// list.
         list_by_batches = "SELECT batch_id, item_id, payload_json
              FROM queued_work_items
              WHERE batch_id IN (SELECT value FROM json_each(?1))

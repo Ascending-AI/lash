@@ -1,7 +1,8 @@
 use super::*;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::store::IngressSettlement;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs after
@@ -213,7 +214,7 @@ where
             },
         },
     );
-    let _rejection_lease = seal_claim_authority_for_test(
+    let _rejection_lease = seal_drive_fence_for_test(
         &cold_reopen,
         &SessionId::from("checkpoint-component-refs"),
         "checkpoint-component-rejections",
@@ -348,8 +349,12 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     store: Arc<dyn RuntimePersistence>,
 ) {
     let session_id = "turn-input-application";
-    let owner_id = "turn-input-application-owner";
-    let lease = seal_claim_authority_for_test(&store, &SessionId::from(session_id), owner_id).await;
+    let fence = seal_drive_fence_for_test(
+        &store,
+        &SessionId::from(session_id),
+        "turn-input-application-owner",
+    )
+    .await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -361,7 +366,7 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         .into_iter()
         .enumerate()
     {
-        let admitted = futures_util::future::try_join_all((0..2).map(|input_index| {
+        let enqueued = futures_util::future::try_join_all((0..2).map(|input_index| {
             store.enqueue_pending_turn_input(
                 pending_next_turn_input_draft(
                     &SessionId::from(session_id),
@@ -374,23 +379,34 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         }))
         .await
         .expect("enqueue application inputs");
-        let mut claim = store
-            .claim_next_turn_inputs(
-                &SessionId::from(session_id),
-                &lease.fence(),
-                &lease_owner(owner_id),
-                10,
-            )
-            .await
-            .expect("claim application inputs")
-            .expect("application input claim");
+        let head = enqueued
+            .iter()
+            .min_by_key(|input| input.enqueue_seq)
+            .expect("two inputs were enqueued");
+        let admission = admitted_root(
+            &store,
+            &fence,
+            turn_id,
+            lash_core::store::AdmittedHead::Input(head.input_id.clone()),
+        )
+        .await;
+        let mut admitted = *admission
+            .inputs
+            .clone()
+            .expect("the root admits its inputs");
         let committed_message_id = format!("application-message-{turn_index}");
-        claim.record_initial_turn_application(&crate::TurnId::from(turn_id), &committed_message_id);
-        let turn_expected = claim.applications.clone();
-        assert_eq!(admitted.len(), turn_expected.len());
+        admitted
+            .record_initial_turn_application(&crate::TurnId::from(turn_id), &committed_message_id);
+        let turn_expected = admitted.applications.clone();
+        assert_eq!(enqueued.len(), turn_expected.len());
 
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(claim.completion());
+        let mut settlement = IngressSettlement::new(TurnId::from(turn_id));
+        settlement.completed_inputs.push(admitted.completion());
+        let mut commit = final_commit(
+            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            &fence,
+            settlement,
+        );
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
             session_id, turn_id, "final",
         ));
@@ -436,18 +452,51 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
     );
 }
 
+fn admitted_input_ids(admission: &lash_core::store::CheckpointAdmission) -> Vec<String> {
+    admission
+        .inputs
+        .iter()
+        .flat_map(|inputs| inputs.inputs.iter())
+        .map(|input| input.input_id.as_str().to_string())
+        .collect()
+}
+
+fn admitted_batch_ids(admission: &lash_core::store::CheckpointAdmission) -> Vec<String> {
+    admission
+        .queued
+        .iter()
+        .flat_map(|queued| queued.batches.iter())
+        .map(|batch| batch.batch_id.as_str().to_string())
+        .collect()
+}
+
+/// Admit what `turn`'s checkpoint `kind` takes at `step`, `turn` being its
+/// own root.
+async fn at_checkpoint(
+    store: &Arc<dyn RuntimePersistence>,
+    fence: &lash_core::store::DriveFence,
+    turn: &TurnId,
+    kind: crate::CheckpointKind,
+    step: &str,
+    max_inputs: usize,
+    policy: crate::TurnLaneAdmissionPolicy,
+) -> Result<lash_core::store::CheckpointAdmission, StoreError> {
+    admit_at_checkpoint_for_test(store, fence, turn, turn, kind, step, max_inputs, policy).await
+}
+
+/// A checkpoint's admission takes both families in one transaction, binds
+/// them to its root and step, and no other step takes them again.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePersistence>) {
-    let session_id = "checkpoint-work";
+pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn RuntimePersistence>) {
+    let session_id = SessionId::from("checkpoint-work");
     let turn_id = crate::TurnId::from("checkpoint-turn");
-    let owner = lease_owner("checkpoint-owner");
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
+            &session_id,
+            &turn_id,
             crate::TurnInputCheckpointBoundary::AfterWork,
             "checkpoint input",
         ))
@@ -455,68 +504,172 @@ pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePer
         .expect("enqueue checkpoint input");
     let batch = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from(session_id),
+            &session_id,
             "checkpoint queued work",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue checkpoint queued work");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(session_id),
-            &owner,
-            "checkpoint-work-claims-both-families-once-executor",
-            60_000,
-        )
-        .await
-        .expect("claim checkpoint session lease")
-        .acquired()
-        .expect("checkpoint session lease acquired");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-owner").await;
 
-    let (input_claim, queue_claim) = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            10,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("claim both checkpoint work families");
-    let input_claim = input_claim.expect("checkpoint input claim exists");
-    let queue_claim = queue_claim.expect("checkpoint queue claim exists");
-    assert_eq!(input_claim.inputs[0].input_id, input.input_id);
-    assert_eq!(queue_claim.batches[0].batch_id, batch.batch_id);
-    assert_eq!(input_claim.session_lease_generation, lease.fencing_token);
-    assert_eq!(queue_claim.session_lease_generation, lease.fencing_token);
+    let admitted = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "checkpoint-turn:step:1",
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("admit both checkpoint work families");
+    assert_eq!(
+        admitted_input_ids(&admitted),
+        vec![input.input_id.to_string()]
+    );
+    assert_eq!(
+        admitted_batch_ids(&admitted),
+        vec![batch.batch_id.to_string()]
+    );
 
-    let second = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            10,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("same-generation checkpoint re-claim");
+    let later_step = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "checkpoint-turn:step:2",
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("a later checkpoint of the same root");
     assert!(
-        second.0.is_none() && second.1.is_none(),
-        "checkpoint claims must be granted exactly once per lease generation"
+        later_step.is_empty(),
+        "rows a checkpoint admitted are bound to its step; no other step takes them"
+    );
+}
+
+/// FIG-3927 N3, checkpoint half: `admit_at_checkpoint` is idempotent by
+/// `(root, step)`. Run again under the same fence, under a later fence, or
+/// with rows enqueued in between, the step reads back exactly the rows it
+/// bound, byte for byte, and takes nothing more.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("checkpoint-step-idempotence");
+    let turn_id = crate::TurnId::from("checkpoint-step-idempotence:turn");
+    let step = "checkpoint-step-idempotence:step";
+    store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "first checkpoint input",
+        ))
+        .await
+        .expect("enqueue checkpoint input");
+    store
+        .enqueue_queued_work(queued_draft(
+            &session_id,
+            "first checkpoint wake",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue checkpoint queued work");
+    let first = seal_drive_fence_for_test(&store, &session_id, "checkpoint-step-a").await;
+    let admitted = at_checkpoint(
+        &store,
+        &first,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        step,
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("the first execution admits");
+    assert!(!admitted.is_empty());
+    let recorded = serde_json::to_value(&admitted).expect("encode the admission");
+
+    let same_fence = at_checkpoint(
+        &store,
+        &first,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        step,
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("a rerun under the same fence");
+    assert_eq!(
+        serde_json::to_value(&same_fence).expect("encode the rerun"),
+        recorded,
+        "a rerun under the same fence reads its own rows back"
+    );
+
+    store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "later checkpoint input",
+        ))
+        .await
+        .expect("enqueue a later input");
+    store
+        .enqueue_queued_work(queued_draft(
+            &session_id,
+            "later checkpoint wake",
+            DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue later queued work");
+    store
+        .supersede_drive_epoch_for_test(&first)
+        .await
+        .expect("the first drive is superseded");
+    let successor = seal_drive_fence_for_test(&store, &session_id, "checkpoint-step-b").await;
+    let resumed = at_checkpoint(
+        &store,
+        &successor,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        step,
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("a rerun under a later fence");
+    assert_eq!(
+        serde_json::to_value(&resumed).expect("encode the resumed rerun"),
+        recorded,
+        "a rerun under a later fence reads back exactly the recorded rows, not the later ones"
+    );
+    assert!(
+        at_checkpoint(
+            &store,
+            &first,
+            &turn_id,
+            crate::CheckpointKind::AfterWork,
+            step,
+            10,
+            crate::testing::queued_work_claim_policy(10),
+        )
+        .await
+        .is_err_and(|error| matches!(error, StoreError::StaleDriveFence { .. })),
+        "the superseded fence reads nothing back"
     );
 }
 
 /// `TurnInputIngress::ActiveTurn { min_boundary }` must be honored at every
-/// checkpoint a backend can be asked about. This pins all four
-/// boundary/checkpoint cells on both the admission-probe path
-/// (`claim_checkpoint_work`) and the direct claim path
-/// (`claim_active_turn_inputs`): `BeforeCompletion` ingress is withheld at
-/// `AfterWork` and admitted at `BeforeCompletion`; `AfterWork` ingress is
-/// admitted at both (FIG-1524).
+/// checkpoint a backend can be asked about: `BeforeCompletion` ingress is
+/// withheld at `AfterWork` and admitted at `BeforeCompletion`; `AfterWork`
+/// ingress is admitted at both (FIG-1524).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -524,168 +677,104 @@ pub async fn checkpoint_work_claims_both_families_once(store: Arc<dyn RuntimePer
 pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let session_id = "checkpoint-min-boundary";
+    let session_id = SessionId::from("checkpoint-min-boundary");
     let turn_id = crate::TurnId::from("checkpoint-min-boundary:turn");
-    let owner = lease_owner("checkpoint-min-boundary-owner");
     let before_completion = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
+            &session_id,
+            &turn_id,
             crate::TurnInputCheckpointBoundary::BeforeCompletion,
             "withheld until before-completion",
         ))
         .await
         .expect("enqueue before-completion input");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(session_id),
-            &owner,
-            "checkpoint-min-boundary-executor",
-            60_000,
-        )
-        .await
-        .expect("claim min-boundary session lease")
-        .acquired()
-        .expect("min-boundary session lease acquired");
+    let fence =
+        seal_drive_fence_for_test(&store, &session_id, "checkpoint-min-boundary-owner").await;
 
-    let probed = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            10,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("probe after-work checkpoint holding only before-completion ingress");
+    let probed = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "min-boundary:step:1",
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("probe after-work checkpoint holding only before-completion ingress");
     assert!(
-        probed.0.is_none() && probed.1.is_none(),
+        probed.is_empty(),
         "before-completion ingress must not be admitted at the after-work checkpoint"
     );
-    assert!(
-        store
-            .claim_active_turn_inputs(
-                &SessionId::from(session_id),
-                &lease.fence(),
-                &owner,
-                &turn_id,
-                crate::CheckpointKind::AfterWork,
-                10,
-            )
-            .await
-            .expect("direct after-work claim holding only before-completion ingress")
-            .is_none(),
-        "the direct claim path must honor min_boundary at the after-work checkpoint too"
-    );
 
-    let after_work_first = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "admitted at after-work",
-        ))
-        .await
-        .expect("enqueue first after-work input");
-    let after_work_second = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "admitted through the direct claim path",
-        ))
-        .await
-        .expect("enqueue second after-work input");
-    let after_work_third = store
-        .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
-            crate::TurnInputCheckpointBoundary::AfterWork,
-            "still pending at before-completion",
-        ))
-        .await
-        .expect("enqueue third after-work input");
+    let mut after_work = Vec::new();
+    for text in [
+        "admitted at the first after-work checkpoint",
+        "admitted at the second after-work checkpoint",
+        "still pending at before-completion",
+    ] {
+        after_work.push(
+            store
+                .enqueue_pending_turn_input(pending_active_turn_input_draft(
+                    &session_id,
+                    &turn_id,
+                    crate::TurnInputCheckpointBoundary::AfterWork,
+                    text,
+                ))
+                .await
+                .expect("enqueue after-work input"),
+        );
+    }
 
-    let (probe_claim, probe_queue) = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
+    for (step, expected) in [
+        ("min-boundary:step:2", &after_work[0]),
+        ("min-boundary:step:3", &after_work[1]),
+    ] {
+        let admitted = at_checkpoint(
+            &store,
+            &fence,
             &turn_id,
             crate::CheckpointKind::AfterWork,
+            step,
             1,
             crate::testing::queued_work_claim_policy(10),
         )
         .await
-        .expect("claim after-work checkpoint work");
-    assert!(probe_queue.is_none(), "no queued work was enqueued");
-    assert_eq!(
-        probe_claim
-            .expect("after-work checkpoint input claim")
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![after_work_first.input_id.as_str()],
-        "the after-work checkpoint must admit after-work ingress, skipping the earlier \
-         before-completion row rather than stalling on it"
-    );
+        .expect("admit after-work checkpoint work");
+        assert!(admitted.queued.is_none(), "no queued work was enqueued");
+        assert_eq!(
+            admitted_input_ids(&admitted),
+            vec![expected.input_id.to_string()],
+            "the after-work checkpoint must admit after-work ingress, skipping the earlier \
+             before-completion row rather than stalling on it"
+        );
+    }
 
-    let after_work_claim = store
-        .claim_active_turn_inputs(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            1,
-        )
-        .await
-        .expect("claim after-work admitted input")
-        .expect("after-work input claim");
+    let admitted = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::BeforeCompletion,
+        "min-boundary:step:4",
+        10,
+        crate::testing::queued_work_claim_policy(10),
+    )
+    .await
+    .expect("admit before-completion checkpoint work");
+    assert!(admitted.queued.is_none(), "no queued work was enqueued");
     assert_eq!(
-        after_work_claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![after_work_second.input_id.as_str()],
-        "the direct claim path must admit after-work ingress at the after-work checkpoint"
-    );
-
-    let (input_claim, queue_claim) = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::BeforeCompletion,
-            10,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("claim before-completion checkpoint work");
-    assert!(queue_claim.is_none(), "no queued work was enqueued");
-    let input_claim = input_claim.expect("before-completion input claim");
-    assert_eq!(
-        input_claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<Vec<_>>(),
+        admitted_input_ids(&admitted),
         vec![
-            before_completion.input_id.as_str(),
-            after_work_third.input_id.as_str(),
+            before_completion.input_id.to_string(),
+            after_work[2].input_id.to_string(),
         ],
         "the before-completion checkpoint must admit both boundaries in enqueue order"
     );
 }
 
-/// A checkpoint claim spans pending inputs and queued work atomically. If the
-/// queued head cannot fit the context window, the active-turn input must remain
-/// pending and visible rather than being left accepted under a discarded claim.
+/// A checkpoint admission spans pending inputs and queued work atomically.
+/// If the queued head cannot fit the context window, the active-turn input
+/// must remain pending and open rather than bound to a refused admission.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -693,63 +782,52 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
 pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let session_id = "checkpoint-budget-atomicity";
+    let session_id = SessionId::from("checkpoint-budget-atomicity");
     let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
-    let owner = lease_owner("checkpoint-budget-atomicity-owner");
     let input = store
         .enqueue_pending_turn_input(pending_active_turn_input_draft(
-            &SessionId::from(session_id),
-            &TurnId::from(turn_id.as_str()),
+            &session_id,
+            &turn_id,
             crate::TurnInputCheckpointBoundary::AfterWork,
             "input that must survive a queue budget refusal",
         ))
         .await
-        .expect("enqueue active-turn input for atomic checkpoint claim");
+        .expect("enqueue active-turn input for atomic checkpoint admission");
     let oversized_text = "oversized queued work".repeat(64);
     store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from(session_id),
+            &session_id,
             &oversized_text,
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue oversized checkpoint queued work");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(session_id),
-            &owner,
-            "checkpoint-budget-refusal-executor",
-            60_000,
-        )
-        .await
-        .expect("claim checkpoint atomicity session lease")
-        .acquired()
-        .expect("checkpoint atomicity session lease acquired");
-    let error = store
-        .claim_checkpoint_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            10,
-            crate::QueuedWorkClaimPolicy {
-                max_context_tokens: 64,
-                action_token_reserve: 1,
-                max_rows: 10,
-                max_pending_age_ms: 30_000,
-                drain_policy: crate::default_queued_drain_policy(),
-            },
-        )
-        .await
-        .expect_err("oversized queued row must refuse the combined checkpoint claim");
+    let fence =
+        seal_drive_fence_for_test(&store, &session_id, "checkpoint-budget-atomicity-owner").await;
+    let error = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "checkpoint-budget:step",
+        10,
+        crate::TurnLaneAdmissionPolicy {
+            max_context_tokens: 64,
+            action_token_reserve: 1,
+            max_rows: 10,
+            max_pending_age_ms: 30_000,
+            drain_policy: crate::default_queued_drain_policy(),
+        },
+    )
+    .await
+    .expect_err("oversized queued row must refuse the combined checkpoint admission");
     assert!(matches!(
         error,
         StoreError::QueuedWorkRowExceedsContextWindow { .. }
     ));
 
     let pending = store
-        .list_pending_turn_inputs(&SessionId::from(session_id))
+        .list_pending_turn_inputs(&session_id)
         .await
         .expect("list active input after checkpoint budget refusal");
     assert_eq!(
@@ -758,53 +836,47 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
         vec![input.input_id.as_str()],
-        "the input claim must roll back with the refused queued-work claim"
+        "the input binding must roll back with the refused queued-work admission"
     );
     assert_eq!(
         pending[0].input.state.kind(),
         crate::TurnInputStateKind::PendingActive
     );
+    assert_eq!(pending[0].status, crate::PendingTurnInputReadStatus::Open);
 }
 
 /// Prove checkpoint admission probes stay read-only for empty queues and for
 /// deferred queue heads, while real checkpoint work still shares one write
-/// transaction and deferred work remains claimable at the idle boundary.
+/// transaction and deferred work remains admissible at the idle boundary.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_claim_probe_transaction_counts(
+pub async fn checkpoint_admission_probe_transaction_counts(
     store: Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
     counts: impl Fn() -> (usize, usize),
 ) {
     let turn_id = crate::TurnId::from(format!("{session_id}:counter-turn"));
-    let owner = lease_owner(&format!("{session_id}:checkpoint-counter-owner"));
-    let lease = store
-        .seal_claim_epoch_for_test(
-            session_id,
-            &owner,
-            "checkpoint-claim-probe-transaction-counts-executor",
-            60_000,
-        )
-        .await
-        .expect("claim checkpoint counter lease")
-        .acquired()
-        .expect("checkpoint counter lease acquired");
+    let fence = seal_drive_fence_for_test(
+        &store,
+        session_id,
+        &format!("{session_id}:checkpoint-counter-owner"),
+    )
+    .await;
 
-    let empty = store
-        .claim_checkpoint_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            64,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("probe quiescent checkpoint");
-    assert!(empty.0.is_none() && empty.1.is_none());
+    let empty = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "counter:step:1",
+        64,
+        crate::testing::queued_work_claim_policy(64),
+    )
+    .await
+    .expect("probe quiescent checkpoint");
+    assert!(empty.is_empty());
     assert_eq!(counts(), (1, 0));
 
     let deferred = store
@@ -815,21 +887,20 @@ pub async fn checkpoint_claim_probe_transaction_counts(
         ))
         .await
         .expect("enqueue deferred checkpoint head");
-    let deferred_checkpoint = store
-        .claim_checkpoint_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            64,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("probe deferred checkpoint head");
+    let deferred_checkpoint = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "counter:step:2",
+        64,
+        crate::testing::queued_work_claim_policy(64),
+    )
+    .await
+    .expect("probe deferred checkpoint head");
     assert!(
-        deferred_checkpoint.0.is_none() && deferred_checkpoint.1.is_none(),
-        "after-current-turn-commit work must not claim at an active checkpoint"
+        deferred_checkpoint.is_empty(),
+        "after-current-turn-commit work must not be admitted at an active checkpoint"
     );
     assert_eq!(
         counts(),
@@ -837,19 +908,14 @@ pub async fn checkpoint_claim_probe_transaction_counts(
         "a deferred queue head must not open a checkpoint write transaction"
     );
 
-    let deferred_claim = store
-        .claim_ready_queued_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("claim deferred work at idle boundary")
-        .claim()
-        .expect("deferred work remains claimable at idle boundary");
-    assert_eq!(deferred_claim.batches[0].batch_id, deferred.batch_id);
+    let idle = admitted_root(
+        &store,
+        &fence,
+        "counter-idle-root",
+        lash_core::store::AdmittedHead::Batch(deferred.batch_id.clone()),
+    )
+    .await;
+    assert_eq!(idle.batch_ids(), vec![deferred.batch_id.clone()]);
 
     store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -870,19 +936,18 @@ pub async fn checkpoint_claim_probe_transaction_counts(
         ))
         .await
         .expect("enqueue counter work");
-    let pending = store
-        .claim_checkpoint_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            &turn_id,
-            crate::CheckpointKind::AfterWork,
-            64,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("claim pending checkpoint work");
-    assert!(pending.0.is_some() && pending.1.is_some());
+    let pending = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "counter:step:3",
+        64,
+        crate::testing::queued_work_claim_policy(64),
+    )
+    .await
+    .expect("admit pending checkpoint work");
+    assert!(pending.inputs.is_some() && pending.queued.is_some());
     assert_eq!(counts(), (3, 1));
 }
 
@@ -953,20 +1018,6 @@ pub(super) fn keyed_queued_draft(
         text,
         delivery_policy,
     )
-}
-
-/// The `key` a [`keyed_queued_draft`] row was enqueued under, read back from
-/// its wake. The source key names the wake's minted-form process id, so the
-/// label is read from the wake id (`wake:<session>:<key>:<sequence>`), which
-/// carries it verbatim.
-pub(super) fn keyed_source(batch: &QueuedWorkBatch) -> Option<&str> {
-    match &batch.items.first()?.payload {
-        QueuedWorkPayload::ProcessWake { wake } => {
-            let (rest, _sequence) = wake.wake_id.rsplit_once(':')?;
-            rest.rsplit_once(':').map(|(_, key)| key)
-        }
-        QueuedWorkPayload::SessionCommand { .. } => None,
-    }
 }
 
 pub(super) fn queued_session_command_draft(
@@ -1041,10 +1092,6 @@ pub(super) fn expect_cancelled_pending_input(
         }
         other => panic!("expected cancelled pending turn input `{input_id}`, got {other:?}"),
     }
-}
-
-pub(super) fn lease_owner(owner_id: &str) -> crate::LeaseOwnerIdentity {
-    crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
 }
 
 #[expect(

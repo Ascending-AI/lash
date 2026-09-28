@@ -121,8 +121,8 @@ enum RuntimeStateMachinePhaseSymbol {
     Checkpoint,
     LeadingCommandClaim,
     TurnWorkClaim,
-    NextTurnInputClaim,
-    MisalignedNextTurnInputClaim,
+    NextTurnInputAdmission,
+    MisalignedNextTurnInputAdmission,
     StaleLeaseExpiry,
     StaleQueueCompletionFault,
     ReleasedLeaseCommitFault,
@@ -135,11 +135,9 @@ impl RuntimeStateMachinePhaseSymbol {
             Self::Ingress => RuntimeIngressPhase::new().into(),
             Self::Checkpoint => RuntimeCheckpointPhase::new().into(),
             Self::LeadingCommandClaim => RuntimeLeadingCommandClaimPhase::new().into(),
-            Self::TurnWorkClaim => {
-                RuntimeTurnWorkClaimPhase::at(QueuedWorkClaimBoundary::Idle).into()
-            }
-            Self::NextTurnInputClaim => RuntimeNextTurnInputClaimPhase::new().into(),
-            Self::MisalignedNextTurnInputClaim => RuntimeNextTurnInputClaimPhase::new()
+            Self::TurnWorkClaim => RuntimeTurnWorkClaimPhase::at(AdmissionBoundary::Idle).into(),
+            Self::NextTurnInputAdmission => RuntimeNextTurnInputAdmissionPhase::new().into(),
+            Self::MisalignedNextTurnInputAdmission => RuntimeNextTurnInputAdmissionPhase::new()
                 .expect_inputs(vec!["one"], Vec::new())
                 .into(),
             Self::StaleLeaseExpiry => RuntimeLeasePhase::expire_stale_holder().into(),
@@ -161,8 +159,8 @@ impl RuntimeStateMachinePhaseSymbol {
             Self::Checkpoint
                 | Self::LeadingCommandClaim
                 | Self::TurnWorkClaim
-                | Self::NextTurnInputClaim
-                | Self::MisalignedNextTurnInputClaim
+                | Self::NextTurnInputAdmission
+                | Self::MisalignedNextTurnInputAdmission
                 | Self::StaleQueueCompletionFault
                 | Self::Commit
         )
@@ -176,8 +174,8 @@ fn runtime_state_machine_phase_symbol_strategy()
         Just(RuntimeStateMachinePhaseSymbol::Checkpoint),
         Just(RuntimeStateMachinePhaseSymbol::LeadingCommandClaim),
         Just(RuntimeStateMachinePhaseSymbol::TurnWorkClaim),
-        Just(RuntimeStateMachinePhaseSymbol::NextTurnInputClaim),
-        Just(RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputClaim),
+        Just(RuntimeStateMachinePhaseSymbol::NextTurnInputAdmission),
+        Just(RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputAdmission),
         Just(RuntimeStateMachinePhaseSymbol::StaleLeaseExpiry),
         Just(RuntimeStateMachinePhaseSymbol::StaleQueueCompletionFault),
         Just(RuntimeStateMachinePhaseSymbol::ReleasedLeaseCommitFault),
@@ -209,7 +207,7 @@ fn runtime_state_machine_phase_order_oracle(symbols: &[RuntimeStateMachinePhaseS
             RuntimeStateMachinePhaseSymbol::StaleQueueCompletionFault if !saw_turn_work_claim => {
                 return false;
             }
-            RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputClaim => {
+            RuntimeStateMachinePhaseSymbol::MisalignedNextTurnInputAdmission => {
                 return false;
             }
             _ => {}
@@ -261,7 +259,7 @@ async fn runtime_scenario_drains_command_before_turn_work_and_commits_checkpoint
                 .expect_count(1),
         )
         .phase(RuntimeCheckpointPhase::new().turn_index(7))
-        .phase(RuntimeTurnWorkClaimPhase::at(QueuedWorkClaimBoundary::Idle).expect_count(1))
+        .phase(RuntimeTurnWorkClaimPhase::at(AdmissionBoundary::Idle).expect_count(1))
         .phase(RuntimeFaultPhase::StaleQueueCompletion)
         .phase(RuntimeCommitPhase::new().expect_checkpoint_turn_index(7))
         .run()
@@ -283,7 +281,7 @@ async fn runtime_scenario_command_only_queue_drain_completes_without_turn_work()
                 .expect_enqueued_classes(vec![QueuedWorkClass::SessionCommand]),
         )
         .phase(RuntimeLeadingCommandClaimPhase::new().expect_count(1))
-        .phase(RuntimeTurnWorkClaimPhase::at(QueuedWorkClaimBoundary::Idle).expect_count(0))
+        .phase(RuntimeTurnWorkClaimPhase::at(AdmissionBoundary::Idle).expect_count(0))
         .phase(RuntimeCommitPhase::new())
         .run()
         .await;
@@ -309,7 +307,7 @@ async fn runtime_scenario_queued_work_claim_keeps_pending_next_turn_input() {
                 .expect_enqueued_classes(vec![QueuedWorkClass::TurnWork]),
         )
         .phase(
-            RuntimeTurnWorkClaimPhase::at(QueuedWorkClaimBoundary::Idle)
+            RuntimeTurnWorkClaimPhase::at(AdmissionBoundary::Idle)
                 .expect_count(1)
                 .expect_pending_turn_inputs_after_claim(vec![RuntimePendingTurnInputExpectation {
                     alias: "pending-user-input",
@@ -336,8 +334,7 @@ async fn runtime_scenario_claims_process_wake_at_active_checkpoint_boundary() {
                 .expect_enqueued_classes(vec![QueuedWorkClass::TurnWork]),
         )
         .phase(
-            RuntimeTurnWorkClaimPhase::at(QueuedWorkClaimBoundary::ActiveTurnCheckpoint)
-                .expect_count(1),
+            RuntimeTurnWorkClaimPhase::at(AdmissionBoundary::ActiveTurnCheckpoint).expect_count(1),
         )
         .run()
         .await;
@@ -368,7 +365,7 @@ async fn runtime_scenario_claims_queued_turn_input_and_completes_it() {
                 }),
         )
         .phase(
-            RuntimeNextTurnInputClaimPhase::new()
+            RuntimeNextTurnInputAdmissionPhase::new()
                 .expect_inputs(
                     vec!["first", "second"],
                     vec!["first queued input", "second queued input"],
@@ -408,7 +405,7 @@ async fn runtime_scenario_observation_replay_keeps_original_turn_input() {
                 }),
         )
         .phase(
-            RuntimeNextTurnInputClaimPhase::new()
+            RuntimeNextTurnInputAdmissionPhase::new()
                 .expect_inputs(vec!["observed-live-input"], vec!["observed live input"])
                 .expect_pending_held_after_claim(),
         )

@@ -3,15 +3,19 @@
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::Arc;
 
-use lash_core_execution::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
+use lash_core_execution::runtime::QueuedWorkBatchDraft;
+use lash_core_execution::store::{
+    AdmittedHead, CheckpointAdmissionRequest, IngressSettlement, PhysicalTurn, RootTerminalWrite,
+    TurnCommitId,
+};
 use lash_core_execution::testing::TestClock;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
 use lash_core_execution::{
     CheckpointKind, Clock, DeliveryPolicy, LeaseOwnerIdentity, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputSuffixCancelOutcome,
-    RuntimeCommit, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, TurnInput, TurnInputCheckpointBoundary, TurnInputIngress,
-    facade_support::SessionCommand,
+    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputReadStatus,
+    PendingTurnInputSuffixCancelOutcome, RuntimeCommit, RuntimeSessionState, SessionRelation,
+    SessionStoreCreateRequest, SessionStoreFactory, TurnId, TurnInput, TurnInputCheckpointBoundary,
+    TurnInputIngress, facade_support::SessionCommand,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -22,10 +26,16 @@ use crate::support::{SharedDatabaseLock, database_url};
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
 const RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE: &str = concat!(
     include_str!("../src/postgres/runtime_persistence/queued_work.rs"),
-    "\nimpl TurnInputStore for PostgresSessionStore"
+    "\nimpl IngressStore for PostgresSessionStore"
 );
-const RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE: &str =
-    include_str!("../src/postgres/runtime_persistence/claim_support.rs");
+const RUNTIME_PERSISTENCE_ADMISSION_SOURCE: &str = concat!(
+    include_str!("../src/postgres/runtime_persistence/admission.rs"),
+    "\n// end of admission.rs"
+);
+const RUNTIME_PERSISTENCE_INGRESS_SETTLEMENT_SOURCE: &str = concat!(
+    include_str!("../src/postgres/runtime_persistence/ingress_settlement.rs"),
+    "\n// end of ingress_settlement.rs"
+);
 const RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE: &str =
     include_str!("../src/postgres/runtime_persistence/turn_input.rs");
 const RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE: &str =
@@ -79,70 +89,35 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
     // This is deliberately a lexical fence, not a behavioral test: ADR-0044
     // recognizes that an in-process test cannot skew `SystemTime::now()`.
     let clock_sensitive_regions = [
+        // Every admission path — root, checkpoint and the command run — and
+        // the free functions that compose and bind their rows, through the
+        // end of the file.
         (
-            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
-            "async fn claim_leading_ready_session_command(",
-            "async fn claim_ready_queued_work(",
+            RUNTIME_PERSISTENCE_ADMISSION_SOURCE,
+            "async fn follow_on_blocks_admission_tx(",
+            "// end of admission.rs",
+        ),
+        // A commit's settlement of the rows its root admitted runs inside the
+        // commit's transaction, on the same server clock.
+        (
+            RUNTIME_PERSISTENCE_INGRESS_SETTLEMENT_SOURCE,
+            "async fn settle_commit_ingress_tx(",
+            "// end of ingress_settlement.rs",
         ),
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
-            "async fn claim_ready_queued_work(",
-            "async fn abandon_queued_work_claim(",
-        ),
-        // The third queued-work claim copy. `claim_ready_queued_work` above is
-        // a thin caller of this free function, which is what actually reads
-        // `now` and CAS-stamps the claim, and it lives far below the impl block
-        // — outside every region above. Without this entry the only claim path
-        // that could read a host clock unnoticed is the one doing the work.
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn claim_queued_work_rows_postgres(",
-            "async fn claim_ready_queued_work_postgres_tx(",
-        ),
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn claim_ready_queued_work_postgres_tx(",
-            "async fn orphaned_active_turn_ids_tx(",
-        ),
-        // The checkpoint probe is a free function below the store impl. Keep
-        // its SQL decision on the PostgreSQL clock even though it has no
-        // injected clock parameter. The region runs through the empty-scan
-        // refusal helper so that clock-deciding neighbour is fenced too.
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn checkpoint_work_pending_postgres(",
-            "async fn claim_ready_queued_work_postgres_tx(",
-        ),
-        // The orphaned-input repair runs inside the caller's transaction and
-        // must remain inside the same server-clock contract as its claim path.
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn repair_orphaned_active_turn_inputs_tx(",
-            "async fn claim_pending_turn_inputs_postgres_tx(",
-        ),
-        // The single transaction-scoped pending-input claim body. The public
-        // `claim_pending_turn_inputs_postgres` caller is fenced below, but
-        // this helper is far below the impl block and reads `now` and
-        // CAS-stamps claims directly — fence the body as well.
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn claim_pending_turn_inputs_postgres_tx(",
-            "async fn claim_pending_turn_inputs_postgres(",
+            "async fn cancel_queued_work_batch_pg(",
+            "async fn queued_work_batch_completed_pg(",
         ),
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
-            "async fn cancel_queued_work_batch(",
-            "async fn list_queued_work(",
+            "async fn pending_session_work_ordering_pg(",
+            "async fn list_open_queued_work_pg(",
         ),
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
-            "async fn pending_session_work_ordering(",
-            "async fn list_pending_queued_work(",
-        ),
-        (
-            RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
-            "async fn list_pending_queued_work(",
-            "impl TurnInputStore for PostgresSessionStore",
+            "async fn list_open_queued_work_pg(",
+            "impl IngressStore for PostgresSessionStore",
         ),
         (
             RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,
@@ -157,12 +132,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,
             "async fn cancel_pending_turn_input_suffix(",
-            "async fn claim_active_turn_inputs(",
-        ),
-        (
-            RUNTIME_PERSISTENCE_CLAIM_SUPPORT_SOURCE,
-            "async fn claim_pending_turn_inputs_postgres(",
-            "pub(super) async fn pending_follow_on_tx(",
+            "async fn enqueue_queued_work(",
         ),
         (
             RUNTIME_PERSISTENCE_SESSION_COMMIT_SOURCE,
@@ -212,7 +182,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         );
     }
     // The sanctioned read issues a *named* statement rather than a literal
-    // (FIG-3387), so the claim is two links: this body issues
+    // (FIG-3387), so the contract is two links: this body issues
     // `select_statement_epoch_ms`, and that statement's declared text samples
     // the server clock. Both are asserted, so neither link can be cut without
     // this test going red.
@@ -261,13 +231,14 @@ fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWa
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock() {
+async fn queued_work_and_pending_input_admission_decisions_follow_the_postgres_clock() {
     let Some((_lock, storage)) =
         configured_storage("queued-work/pending-input PostgreSQL clock contract").await
     else {
         return;
     };
     let session_id = unique_id("clock-contract-session");
+    let session = SessionId::from(session_id.clone());
     let server_before = db_now_ms(&storage).await;
     let clock = Arc::new(TestClock::new(server_before.saturating_add(CLOCK_SKEW_MS)));
     let factory = storage
@@ -277,7 +248,7 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
         .create_store(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.clone()),
+            session_id: session.clone(),
             relation: SessionRelation::Root,
             policy: lash_core_execution::SessionPolicy::new(
                 lash_core_execution::TurnBudget::Unbounded,
@@ -285,18 +256,17 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
         })
         .await
         .expect("create skewed-clock session store");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(session_id.clone()),
+    let fence = store
+        .seal_drive_epoch_for_test(
+            &session,
             &LeaseOwnerIdentity::opaque("clock-contract-owner", "clock-contract-owner:i"),
-            "queued-work-and-pending-input-claim-decisions-follow-the-postgres-clock-executor",
+            "queued-work-and-pending-input-admission-decisions-follow-the-postgres-clock-executor",
             60_000,
         )
         .await
         .expect("seal session drive")
         .acquired()
         .expect("session drive sealed");
-    let owner = lease.owner.clone();
 
     let command = store
         .enqueue_queued_work(QueuedWorkBatchDraft::new(
@@ -310,7 +280,7 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
         .expect("enqueue session command under skewed client clock");
     let batch = store
         .enqueue_queued_work(lash_core_execution::runtime::process_wake_batch_draft(
-            clock_contract_wake(&SessionId::from(session_id.clone())),
+            clock_contract_wake(&session),
         ))
         .await
         .expect("enqueue queued work under skewed client clock");
@@ -333,103 +303,102 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
         ))
         .await
         .expect("enqueue pending input under skewed client clock");
-    let command_claim = store
-        .claim_leading_ready_session_command(
-            &SessionId::from(session_id.clone()),
-            &lease.fence(),
-            &owner,
-        )
+
+    // The command lane is bindless: the run reads the command, and it stays
+    // open (and withdrawable) until a fenced commit applies it.
+    let commands = store
+        .open_session_command_run(&fence)
         .await
-        .expect("command claim must validate against PostgreSQL time")
-        .expect("session command remains claimable despite future-skewed client clock");
-    assert_eq!(command_claim.batches[0].batch_id, command.batch_id);
+        .expect("the command run must validate against PostgreSQL time");
     assert_eq!(
-        store
-            .list_pending_queued_work(&SessionId::from(session_id.clone()))
-            .await
-            .expect("list pending queue against PostgreSQL time")
+        commands
             .iter()
             .map(|batch| batch.batch_id.as_str())
             .collect::<Vec<_>>(),
-        vec![batch.batch_id.as_str()],
-        "a live server-clock claim must stay hidden from the pending queue"
+        vec![command.batch_id.as_str()],
+        "the session command is readable despite a future-skewed client clock"
     );
-    assert!(
-        store
-            .cancel_queued_work_batch(&SessionId::from(session_id.clone()), &command.batch_id)
-            .await
-            .expect("cancel claimed command against PostgreSQL time")
-            .is_none(),
-        "a future-skewed client clock must not make a live claim cancellable"
-    );
-    store
-        .abandon_queued_work_claim(&command_claim)
-        .await
-        .expect("release command claim for the turn-work probe");
     assert_eq!(
         store
-            .cancel_queued_work_batch(&SessionId::from(session_id.clone()), &command.batch_id)
+            .cancel_queued_work_batch(&session, &command.batch_id)
             .await
-            .expect("cancel released command")
-            .expect("released command is cancellable")
+            .expect("cancel the open command")
+            .expect("an unapplied command is withdrawable")
             .batch_id,
         command.batch_id
     );
-    let queue_claim = store
-        .claim_ready_queued_work(
-            &SessionId::from(session_id.clone()),
-            &lease.fence(),
-            &owner,
-            QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("queue claim must validate against PostgreSQL time")
-        .claim()
-        .expect("queued work remains claimable despite future-skewed client clock");
-    assert_eq!(queue_claim.batches[0].batch_id, batch.batch_id);
 
-    let active_claim = store
-        .claim_active_turn_inputs(
-            &SessionId::from(session_id.clone()),
-            &lease.fence(),
-            &owner,
-            &lash_core_execution::TurnId::from("clock-contract-turn"),
-            CheckpointKind::AfterWork,
-            1,
-        )
+    let root = TurnId::from("clock-contract-root");
+    let mut request = lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+        &fence,
+        &root,
+        AdmittedHead::Batch(batch.batch_id.clone()),
+    );
+    request.policy = lash_core_execution::testing::queued_work_claim_policy(1);
+    let admission = store
+        .admit_root(&request)
         .await
-        .expect("active-input claim must validate against PostgreSQL time")
-        .expect("active input remains claimable despite future-skewed client clock");
-    assert_eq!(active_claim.inputs[0].input_id, active_input.input_id);
+        .expect("the root admission must validate against PostgreSQL time")
+        .expect("queued work is admissible despite a future-skewed client clock");
+    assert_eq!(admission.batch_ids(), vec![batch.batch_id.clone()]);
+    assert!(
+        store
+            .list_open_queued_work(&session)
+            .await
+            .expect("list open queue against PostgreSQL time")
+            .is_empty(),
+        "an admitted batch stays hidden from the open queue"
+    );
+
+    let checkpoint = store
+        .admit_at_checkpoint(&CheckpointAdmissionRequest {
+            fence: fence.clone(),
+            root: root.clone(),
+            turn_id: TurnId::from("clock-contract-turn"),
+            checkpoint: CheckpointKind::AfterWork,
+            step: "clock-contract-checkpoint".to_string(),
+            max_inputs: 1,
+            policy: lash_core_execution::testing::queued_work_claim_policy(1),
+        })
+        .await
+        .expect("the checkpoint admission must validate against PostgreSQL time");
+    let checkpoint_inputs = checkpoint
+        .inputs
+        .clone()
+        .expect("the active input is admitted");
+    assert_eq!(checkpoint_inputs.inputs[0].input_id, active_input.input_id);
     assert_eq!(
         store
-            .list_pending_turn_inputs(&SessionId::from(session_id.clone()))
+            .list_pending_turn_inputs(&session)
             .await
             .expect("list pending inputs against PostgreSQL time")
             .iter()
-            .map(|input| input.input.input_id.as_str())
+            .map(|read| (read.input.input_id.as_str(), read.status.clone()))
             .collect::<Vec<_>>(),
-        vec![next_input.input_id.as_str()],
-        "a live server-clock input claim must stay hidden from pending inputs"
+        vec![(
+            next_input.input_id.as_str(),
+            PendingTurnInputReadStatus::Open
+        )],
+        "an input a checkpoint admitted is accepted into its turn and leaves the pending \
+         read model; the rest stay open"
     );
     let cancel = store
         .cancel_pending_turn_inputs(
-            &SessionId::from(session_id.clone()),
+            &session,
             &[PendingTurnInputCancelTarget::input_id(
                 &active_input.input_id,
             )],
         )
         .await
-        .expect("cancel claimed input against PostgreSQL time");
+        .expect("cancel admitted input against PostgreSQL time");
     assert!(matches!(
         &cancel[0].outcome,
-        PendingTurnInputCancelOutcome::AlreadyClaimed { input, .. }
-            if input.input_id == active_input.input_id
+        PendingTurnInputCancelOutcome::AlreadyAdmitted { input, root: admitted }
+            if input.input_id == active_input.input_id && *admitted == root
     ));
     let suffix = store
         .cancel_pending_turn_input_suffix(
-            &SessionId::from(session_id.clone()),
+            &session,
             &PendingTurnInputCancelTarget::input_id(&active_input.input_id),
         )
         .await
@@ -439,13 +408,45 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
     };
     assert!(matches!(
         &outcomes[0],
-        PendingTurnInputCancelOutcome::AlreadyClaimed { input, .. }
+        PendingTurnInputCancelOutcome::AlreadyAdmitted { input, .. }
             if input.input_id == active_input.input_id
     ));
     assert!(matches!(
         &outcomes[1],
         PendingTurnInputCancelOutcome::Cancelled(input) if input.input_id == next_input.input_id
     ));
+
+    // The root's final commit settles what it admitted and ends it, so the
+    // next root is admissible.
+    let mut settlement = IngressSettlement::new(root.clone());
+    settlement
+        .completed_batches
+        .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+    settlement
+        .completed_inputs
+        .push(checkpoint_inputs.completion());
+    let state = RuntimeSessionState {
+        session_id: session.clone(),
+        ..RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core_execution::testing::store_fixtures::settling_commit_for_test(
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        &fence,
+        settlement,
+    );
+    commit.root_terminal = Some(Box::new(RootTerminalWrite {
+        commit: TurnCommitId::new(root.clone(), 0),
+        turn: PhysicalTurn::derive_turn_id(&root, 0),
+        root: root.clone(),
+        stop: None,
+    }));
+    store
+        .commit_runtime_state(commit)
+        .await
+        .expect("the root's final commit must validate against PostgreSQL time");
+
     let final_next_input = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
             &session_id,
@@ -454,12 +455,18 @@ async fn queued_work_and_pending_input_claim_decisions_follow_the_postgres_clock
         ))
         .await
         .expect("enqueue final pending input under skewed client clock");
-    let input_claim = store
-        .claim_next_turn_inputs(&SessionId::from(session_id), &lease.fence(), &owner, 1)
+    let next = store
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                &fence,
+                &TurnId::from("clock-contract-next-root"),
+                AdmittedHead::Input(final_next_input.input_id.clone()),
+            ),
+        )
         .await
-        .expect("input claim must validate against PostgreSQL time")
-        .expect("pending input remains claimable despite future-skewed client clock");
-    assert_eq!(input_claim.inputs[0].input_id, final_next_input.input_id);
+        .expect("the input admission must validate against PostgreSQL time")
+        .expect("the pending input is admissible despite a future-skewed client clock");
+    assert_eq!(next.input_ids(), vec![final_next_input.input_id]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

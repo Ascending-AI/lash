@@ -42,22 +42,8 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
 ) -> Result<(), StoreError> {
     let carried: &[(&str, bool)] = &[
         ("failure_evidence", !commit.failure_evidence.is_empty()),
-        (
-            "completed_queue_claims",
-            !commit.completed_queue_claims.is_empty(),
-        ),
-        (
-            "completed_turn_input_claims",
-            !commit.completed_turn_input_claims.is_empty(),
-        ),
-        (
-            "undelivered_turn_input_claims",
-            !commit.undelivered_turn_input_claims.is_empty(),
-        ),
-        (
-            "undelivered_queue_claims",
-            !commit.undelivered_queue_claims.is_empty(),
-        ),
+        ("ingress", commit.ingress.is_some()),
+        ("applied_commands", commit.applied_commands.is_some()),
         (
             "interrupted_turn_input_turn_id",
             commit.interrupted_turn_input_turn_id.is_some(),
@@ -106,7 +92,6 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         commit_budget: _, // host operational policy
         session_id,
         expected_head_revision: _, // CAS is excluded from replay identity
-        session_execution_lease_fence: _, // transaction predicate, not content
         drive_fence: _,            // transaction predicate, not content
         root_terminal: _,          // a turn root's end; no boundary carries one
         park_root: _,              // a store instruction, not content
@@ -119,17 +104,15 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         usage_deltas,
         failure_evidence: _, // refused non-empty by validation
         turn_commit,
-        completed_queue_claims: _,        // refused non-empty by validation
-        completed_turn_input_claims: _,   // refused non-empty by validation
-        undelivered_turn_input_claims: _, // refused non-empty by validation
-        undelivered_queue_claims: _,      // refused non-empty by validation
-        pending_follow_on: _,             // head fact carried unchanged; the store refuses a change
+        ingress: _,                             // refused present by validation
+        applied_commands: _,                    // refused present by validation
+        pending_follow_on: _, // head fact carried unchanged; the store refuses a change
         interrupted_turn_input_turn_id: _, // refused present by validation
         interrupted_turn_input_cancellation: _, // refused present by validation
         interrupted_turn_cancel_intent: _, // transient CAS predicate
         turn_cancel_closure_settlement: _, // transient fenced obligation
-        adopted_intent_rows: _,           // refused non-zero by validation
-        committed_attachment_ids: _,      // refused non-empty by validation
+        adopted_intent_rows: _, // refused non-zero by validation
+        committed_attachment_ids: _, // refused non-empty by validation
     } = commit;
     let operation_key = turn_commit.operation.storage_key()?;
     let projection = SemanticBoundaryRequestIntent {
@@ -387,16 +370,10 @@ mod semantic_boundary_request_identity_tests {
     #[test]
     fn semantic_boundary_commit_refuses_settlement_content() {
         let mut commit = boundary_commit("protocol-materialization", "record-config");
-        commit
-            .completed_queue_claims
-            .push(crate::QueuedWorkCompletion {
-                session_id: SessionId::from("root"),
-                claim_id: "claim".to_string(),
-                lease_token: "token".to_string(),
-                data: crate::QueuedWorkCompletionData {
-                    batch_ids: vec!["batch".into()],
-                },
-            });
+        commit.applied_commands = Some(crate::QueuedWorkCompletion {
+            session_id: SessionId::from("root"),
+            batch_ids: vec!["batch".into()],
+        });
         commit
             .stamp_semantic_boundary()
             .expect("stamping does not adjudicate purity");
@@ -405,7 +382,7 @@ mod semantic_boundary_request_identity_tests {
             .expect_err("settlement content must not ride a semantic-boundary commit");
         assert!(
             error.to_string().contains(
-                "semantic-boundary receipt identity for operation `record-config` cannot ride a commit carrying `completed_queue_claims`"
+                "semantic-boundary receipt identity for operation `record-config` cannot ride a commit carrying `applied_commands`"
             ),
             "unexpected purity refusal: {error}"
         );

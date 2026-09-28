@@ -131,14 +131,14 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(
     assert_eq!(settled_retry.input_id, first.input_id);
 }
 
-/// A next-turn claim never mixes run specs: with every input pending and a
-/// permissive bound, `A, A, B, A` claims `[A, A]`, then `[B]`, then `[A]`.
+/// A next-turn admission never mixes run specs: with every input pending and
+/// a permissive bound, `A, A, B, A` admits `[A, A]`, then `[B]`, then `[A]`.
 /// The prefix stops at the first differing spec and never reaches past it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_next_turn_claim_never_mixes_run_specs(store: Arc<dyn RuntimePersistence>) {
+pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimePersistence>) {
     let session_id = SessionId::from("run-spec-claims");
     let a = spec_with_prompt("shape a");
     let mut enqueued = Vec::new();
@@ -158,35 +158,29 @@ pub async fn a_next_turn_claim_never_mixes_run_specs(store: Arc<dyn RuntimePersi
                 .input_id,
         );
     }
-    let lease = seal_claim_authority_for_test(&store, &session_id, "run-spec-claim-owner").await;
-    let owner = lease_owner("run-spec-claim-owner");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "run-spec-claim-owner").await;
     let mut compositions = Vec::new();
-    loop {
-        let Some(claim) = store
-            .claim_next_turn_inputs(&session_id, &lease.fence(), &owner, 64)
+    for ordinal in 0.. {
+        // Each root is headed by the earliest open input and, once it ends,
+        // the next root starts at the row after its admission.
+        let Some(head) = store
+            .list_pending_turn_inputs(&session_id)
             .await
-            .expect("claim the next-turn prefix")
+            .expect("list open inputs")
+            .into_iter()
+            .filter(|read| read.status == crate::PendingTurnInputReadStatus::Open)
+            .min_by_key(|read| read.input.enqueue_seq)
         else {
             break;
         };
-        let ids = claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.clone())
-            .collect::<Vec<_>>();
-        // Hand the claim back and withdraw its rows, so the next claim
-        // starts at the row after it.
-        store
-            .abandon_turn_input_claim(&claim)
-            .await
-            .expect("hand the claim back");
-        for id in &ids {
-            store
-                .cancel_pending_turn_input(&session_id, id)
-                .await
-                .expect("withdraw a claimed row");
-        }
-        compositions.push(ids);
+        let admission = drive_root_to_end(
+            &store,
+            &fence,
+            &format!("run-spec-root-{ordinal}"),
+            crate::store::AdmittedHead::Input(head.input.input_id.clone()),
+        )
+        .await;
+        compositions.push(admission.input_ids());
     }
     assert_eq!(
         compositions,
@@ -195,7 +189,7 @@ pub async fn a_next_turn_claim_never_mixes_run_specs(store: Arc<dyn RuntimePersi
             vec![enqueued[2].clone()],
             vec![enqueued[3].clone()],
         ],
-        "four inputs in three ordered claims: the prefix stops at each spec change"
+        "four inputs in three ordered admissions: the prefix stops at each spec change"
     );
 }
 
@@ -469,14 +463,14 @@ pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
 ) {
     let session_id = SessionId::from("run-spec-queued-steering");
     let batch = store
-        .enqueue_queued_work(checkpoint_claims::queued_draft(
+        .enqueue_queued_work(checkpoint_admissions::queued_draft(
             &session_id,
             "the root's work",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue the head batch");
-    let lease = seal_claim_authority_for_test(&store, &session_id, "queued-owner").await;
+    let lease = seal_drive_fence_for_test(&store, &session_id, "queued-owner").await;
     super::root_admissions::admitted_on(
         &store,
         &lease,

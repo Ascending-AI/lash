@@ -811,23 +811,23 @@
         "advisory_duration": {
           "ms_max": 151.366,
           "phases": {
-            "queued_work.abandon_join_claim": {
+            "queued_work.supersede_join_drive": {
               "budget_ms": 3.041,
               "required": true
             },
-            "queued_work.claim_exclusive_turn_work": {
+            "queued_work.admit_exclusive_turn_work": {
               "budget_ms": 7.343,
               "required": true
             },
-            "queued_work.claim_join_turn_work": {
+            "queued_work.admit_join_turn_work": {
               "budget_ms": 17.148,
               "required": true
             },
-            "queued_work.claim_session_command": {
+            "queued_work.open_session_command_run": {
               "budget_ms": 9.978,
               "required": true
             },
-            "queued_work.claim_session_lease": {
+            "queued_work.seal_drive_epoch": {
               "budget_ms": 2.372,
               "required": true
             },
@@ -851,7 +851,7 @@
               "budget_ms": 2.695,
               "required": true
             },
-            "queued_work.reclaim_ready": {
+            "queued_work.resume_join_admission": {
               "budget_ms": 11.768,
               "required": true
             }
@@ -2687,11 +2687,11 @@
               "budget_ms": 6.307,
               "required": true
             },
-            "store_hardening.memory.claim_queued_work": {
+            "store_hardening.memory.admit_queued_work": {
               "budget_ms": 8.335,
               "required": true
             },
-            "store_hardening.memory.claim_session_lease": {
+            "store_hardening.memory.seal_drive_epoch": {
               "budget_ms": 8.911,
               "required": true
             },
@@ -2719,11 +2719,11 @@
               "budget_ms": 264.525,
               "required": true
             },
-            "store_hardening.postgres.claim_queued_work": {
+            "store_hardening.postgres.admit_queued_work": {
               "budget_ms": 320.688,
               "required": true
             },
-            "store_hardening.postgres.claim_session_lease": {
+            "store_hardening.postgres.seal_drive_epoch": {
               "budget_ms": 309.862,
               "required": true
             },
@@ -2759,11 +2759,11 @@
               "budget_ms": 110.446,
               "required": true
             },
-            "store_hardening.sqlite.claim_queued_work": {
+            "store_hardening.sqlite.admit_queued_work": {
               "budget_ms": 62.32,
               "required": true
             },
-            "store_hardening.sqlite.claim_session_lease": {
+            "store_hardening.sqlite.seal_drive_epoch": {
               "budget_ms": 44.198,
               "required": true
             },
@@ -3127,23 +3127,23 @@
         "advisory_duration": {
           "ms_max": 253.806,
           "phases": {
-            "turn_input_ingress.abandon_active_claim": {
+            "turn_input_ingress.supersede_active_drive": {
               "budget_ms": 3.892,
               "required": true
             },
-            "turn_input_ingress.abandon_next_claim": {
+            "turn_input_ingress.supersede_next_drive": {
               "budget_ms": 37.725,
               "required": true
             },
-            "turn_input_ingress.claim_active_initial": {
+            "turn_input_ingress.admit_active_inputs": {
               "budget_ms": 7.328,
               "required": true
             },
-            "turn_input_ingress.claim_next_turn_inputs": {
+            "turn_input_ingress.admit_next_turn_inputs": {
               "budget_ms": 31.137,
               "required": true
             },
-            "turn_input_ingress.claim_session_lease": {
+            "turn_input_ingress.seal_drive_epoch": {
               "budget_ms": 3.526,
               "required": true
             },
@@ -3167,11 +3167,11 @@
               "budget_ms": 3.133,
               "required": true
             },
-            "turn_input_ingress.reclaim_active_inputs": {
+            "turn_input_ingress.resume_active_admission": {
               "budget_ms": 26.056,
               "required": true
             },
-            "turn_input_ingress.reclaim_next_turn_inputs": {
+            "turn_input_ingress.resume_next_admission": {
               "budget_ms": 32.642,
               "required": true
             }

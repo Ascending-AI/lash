@@ -1,7 +1,7 @@
 #[cfg(test)]
 use super::logical_turn::next_physical_turn_id;
 use super::logical_turn::{
-    LogicalTurnClaims, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
+    LogicalTurnAdmissions, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
 use super::turn_control::ActiveTurnControl;
 use super::*;
@@ -11,7 +11,6 @@ use crate::facade_support::{ProtocolTurnOptionsFacadeOps, RuntimeSessionStateFac
 use lash_sansio::core_support::*;
 
 mod accept;
-mod claim_repair;
 mod commit;
 mod execute;
 mod follow_on_recovery;
@@ -39,16 +38,6 @@ pub use resident_session::ResidentSessionState;
 /// publishes to the host sinks outside the drive.
 pub(in crate::runtime) struct TurnSinks<'sinks> {
     pub(in crate::runtime) observer: &'sinks TurnObserver,
-}
-
-/// The session-execution lease a turn phase runs under, together with the
-/// policy that decides whether reaching the end of the phase releases it.
-///
-/// The guard and the policy are always passed together and are meaningless
-/// apart, so they travel as one field on the phase contexts.
-pub(in crate::runtime) struct TurnLeaseScope<'lease> {
-    pub(in crate::runtime) guard: Option<&'lease DriveClaimGuard>,
-    pub(in crate::runtime) release_policy: SessionExecutionLeaseReleasePolicy,
 }
 
 /// Projects a terminal turn outcome onto the closed trace outcome.
@@ -138,25 +127,6 @@ fn session_head_refresh_error(err: SessionError) -> RuntimeError {
     RuntimeError::new(RuntimeErrorCode::SessionHeadRefresh, err.to_string())
 }
 
-#[derive(Clone, Copy)]
-pub(super) enum SessionExecutionLeaseReleasePolicy {
-    KeepOnAgentFrameSwitch,
-}
-
-impl SessionExecutionLeaseReleasePolicy {
-    fn should_release(self, outcome: &TurnOutcome, withheld_terminal_work: bool) -> bool {
-        match self {
-            // FIG-3157: a terminal finish that withheld claimed work is still
-            // mid-run. The follow-on turn drives that claim, and a claim stays
-            // generation-valid only while the lease that fenced it is held
-            // (ADR 0029), so the guard travels with the work.
-            Self::KeepOnAgentFrameSwitch => {
-                !matches!(outcome, TurnOutcome::AgentFrameSwitch { .. }) && !withheld_terminal_work
-            }
-        }
-    }
-}
-
 fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str {
     match payload {
         crate::QueuedWorkPayload::ProcessWake { .. } => "process_wake",
@@ -164,8 +134,8 @@ fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str 
     }
 }
 
-fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<crate::BatchId> {
-    claim
+fn queued_work_batch_ids(queued: &crate::AdmittedQueuedWork) -> Vec<crate::BatchId> {
+    queued
         .batches
         .iter()
         .map(|batch| batch.batch_id.clone())
@@ -174,11 +144,10 @@ fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<crate::BatchId> 
 
 /// Measures the whole host-visible turn.
 ///
-/// Opened before the runtime claims the turn (session-execution lease and
-/// queued-work/turn-input claims) and stamped onto the assembled turn after
-/// the final commit and post-persist hooks complete, so
+/// Opened before the runtime admits the turn's rows and stamped onto the
+/// assembled turn after the final commit and post-persist hooks complete, so
 /// [`TurnExecutionMetrics`](crate::TurnExecutionMetrics) timing covers
-/// claim → final commit. Reads only the injected [`Clock`](crate::Clock):
+/// admission → final commit. Reads only the injected [`Clock`](crate::Clock):
 /// `started_at_ms` comes from the wall-clock source and the duration from the
 /// monotonic source, so deterministic clocks produce deterministic timing.
 #[derive(Clone, Copy)]
@@ -217,18 +186,27 @@ async fn turn_control_binding<'a>(
         .await
 }
 
-pub(in crate::runtime) fn queued_work_trace_payload(
-    boundary: crate::QueuedWorkClaimBoundary,
-    claim: &crate::QueuedWorkClaim,
+/// The `ingress.admitted` trace of one admission (FIG-3927): the rows
+/// `root` bound under `admitted_by` (its root admission step, or a
+/// checkpoint's replay key), at `boundary`, with the causes its queued work
+/// materialized.
+pub(in crate::runtime) fn ingress_admitted_trace_payload(
+    root: &TurnId,
+    admitted_by: &str,
+    boundary: crate::AdmissionBoundary,
+    inputs: Option<&crate::AdmittedTurnInputs>,
+    queued: Option<&crate::AdmittedQueuedWork>,
     causes: &[crate::TurnCause],
 ) -> serde_json::Value {
     serde_json::json!({
+        "root": root,
+        "admitted_by": admitted_by,
         "boundary": boundary,
-        "claim_id": claim.claim_id,
-        "owner_id": claim.owner.owner_id,
-        "incarnation_id": claim.owner.incarnation_id,
-        "batch_ids": queued_work_batch_ids(claim),
-        "payload_types": claim.batches.iter()
+        "input_ids": inputs.map(crate::AdmittedTurnInputs::input_ids).unwrap_or_default(),
+        "batch_ids": queued.map(queued_work_batch_ids).unwrap_or_default(),
+        "payload_types": queued
+            .into_iter()
+            .flat_map(|queued| queued.batches.iter())
             .flat_map(|batch| batch.items.iter())
             .map(|item| queued_work_payload_type(&item.payload))
             .collect::<Vec<_>>(),
@@ -236,31 +214,33 @@ pub(in crate::runtime) fn queued_work_trace_payload(
     })
 }
 
-pub(in crate::runtime) fn queued_work_completion_trace_payload(
-    completions: &[crate::QueuedWorkCompletion],
+/// The `ingress.settled` trace of one commit: the rows `root` settled as
+/// delivered, and the rows it handed back open or dropped.
+pub(in crate::runtime) fn ingress_settled_trace_payload(
+    settlement: &crate::store::IngressSettlement,
 ) -> serde_json::Value {
-    serde_json::json!({
-        "claims": completions.iter().map(|completion| {
-            serde_json::json!({
-                "session_id": completion.session_id,
-                "claim_id": completion.claim_id,
-                "batch_ids": completion.batch_ids,
+    let rows = |rows: &[crate::store::IngressRowId]| {
+        rows.iter()
+            .map(|row| match row {
+                crate::store::IngressRowId::Input(input) => input.to_string(),
+                crate::store::IngressRowId::Batch(batch) => batch.to_string(),
             })
-        }).collect::<Vec<_>>(),
-    })
-}
-
-pub(in crate::runtime) fn turn_input_completion_trace_payload(
-    completions: &[crate::TurnInputCompletion],
-) -> serde_json::Value {
+            .collect::<Vec<_>>()
+    };
     serde_json::json!({
-        "claims": completions.iter().map(|completion| {
-            serde_json::json!({
-                "session_id": completion.session_id,
-                "claim_id": completion.claim_id(),
-                "input_ids": completion.input_ids,
-            })
-        }).collect::<Vec<_>>(),
+        "root": settlement.root,
+        "input_ids": settlement
+            .completed_inputs
+            .iter()
+            .flat_map(|completion| completion.input_ids.iter())
+            .collect::<Vec<_>>(),
+        "batch_ids": settlement
+            .completed_batches
+            .iter()
+            .flat_map(|completion| completion.batch_ids.iter())
+            .collect::<Vec<_>>(),
+        "released": rows(&settlement.released),
+        "dropped": rows(&settlement.dropped),
     })
 }
 
@@ -309,8 +289,8 @@ pub(in crate::runtime) fn emit_queued_work_started(
     observer: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
     turn_id: &TurnId,
-    boundary: crate::QueuedWorkClaimBoundary,
-    claim: &crate::QueuedWorkClaim,
+    boundary: crate::AdmissionBoundary,
+    queued: &crate::AdmittedQueuedWork,
     causes: Vec<crate::TurnCause>,
 ) {
     cursor.observe(
@@ -319,7 +299,7 @@ pub(in crate::runtime) fn emit_queued_work_started(
             correlation_id: None,
             event: TurnEvent::QueuedWorkStarted {
                 boundary,
-                batch_ids: queued_work_batch_ids(claim)
+                batch_ids: queued_work_batch_ids(queued)
                     .into_iter()
                     .map(crate::BatchId::into_inner)
                     .collect(),
@@ -332,8 +312,8 @@ pub(in crate::runtime) fn emit_queued_work_started(
 pub(in crate::runtime) fn send_queued_work_started_event(
     event_tx: &TurnObserver,
     cursor: &mut crate::engine::ObservationCursor,
-    boundary: crate::QueuedWorkClaimBoundary,
-    claim: &crate::QueuedWorkClaim,
+    boundary: crate::AdmissionBoundary,
+    queued: &crate::AdmittedQueuedWork,
     causes: Vec<crate::TurnCause>,
 ) {
     cursor.observe(
@@ -342,7 +322,7 @@ pub(in crate::runtime) fn send_queued_work_started_event(
             correlation_id: None,
             event: TurnEvent::QueuedWorkStarted {
                 boundary,
-                batch_ids: queued_work_batch_ids(claim)
+                batch_ids: queued_work_batch_ids(queued)
                     .into_iter()
                     .map(crate::BatchId::into_inner)
                     .collect(),
@@ -670,10 +650,6 @@ mod tests {
         handler.close().await.expect("close committed turn handler");
     }
 }
-
-#[cfg(test)]
-#[path = "turn_loop/panic_tests.rs"]
-mod panic_tests;
 
 #[cfg(test)]
 #[path = "turn_loop/recovery_tests.rs"]

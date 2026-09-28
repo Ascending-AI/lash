@@ -102,7 +102,7 @@ impl TestTurnDrive for LashRuntime {
                     .map_err(crate::engine::DriveAbort::into_error)?
             else {
                 return Ok(QueuedTurnDrain::Empty(
-                    EmptyQueuedDrainReason::ClaimRefused(crate::QueuedWorkClaimRefusal::Empty),
+                    EmptyQueuedDrainReason::AdmissionRefused(crate::AdmissionRefusal::Empty),
                 ));
             };
             let work = admitted.work().clone();
@@ -124,8 +124,8 @@ impl TestTurnDrive for LashRuntime {
             }
             return Ok(match report.run.and_then(AgentFrameRun::into_final_turn) {
                 Some(turn) => QueuedTurnDrain::Ran(turn),
-                None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
-                    crate::QueuedWorkClaimRefusal::Empty,
+                None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                    crate::AdmissionRefusal::Empty,
                 )),
             });
         }

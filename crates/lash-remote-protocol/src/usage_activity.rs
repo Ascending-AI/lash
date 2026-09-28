@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::llm::{RemoteLlmCallRecord, validate_llm_call_record};
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::{
-    RemotePluginMessage, RemoteQueuedWorkClaimBoundary, RemoteTurnCause, RemoteTurnInputCheckpoint,
+    RemoteAdmissionBoundary, RemotePluginMessage, RemoteTurnCause, RemoteTurnInputCheckpoint,
 };
 
 // Wire mirror of the runtime usage counters. This is a deliberately versioned
@@ -214,7 +214,7 @@ pub enum RemoteTurnEvent {
         applications: Vec<crate::observations::RemoteTurnInputApplication>,
     },
     QueuedWorkStarted {
-        boundary: RemoteQueuedWorkClaimBoundary,
+        boundary: RemoteAdmissionBoundary,
         batch_ids: Vec<String>,
         causes: Vec<RemoteTurnCause>,
     },

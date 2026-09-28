@@ -235,7 +235,7 @@ pub enum TurnEvent {
         turn_id: TurnId,
     },
     QueuedWorkStarted {
-        boundary: crate::QueuedWorkClaimBoundary,
+        boundary: crate::AdmissionBoundary,
         batch_ids: Vec<String>,
         causes: Vec<crate::TurnCause>,
     },
@@ -642,7 +642,7 @@ pub trait SessionStoreFactory:
     /// before session state, plugins, and a runtime are hydrated.
     ///
     /// First-party factories override this at their database seam. `Some`
-    /// reports a known durable answer; `None` means claimability is unknown and
+    /// reports a known durable answer; `None` means admissibility is unknown and
     /// admits one conservative, successfully completed run. A transiently
     /// failed pass still receives the driver's finite retry ladder before the
     /// demand idles. Unknown must hydrate rather than silently strand durable
@@ -660,7 +660,7 @@ pub trait SessionStoreFactory:
             return Ok(None);
         };
         if !store
-            .list_pending_queued_work(&request.session_id)
+            .list_open_queued_work(&request.session_id)
             .await?
             .is_empty()
         {

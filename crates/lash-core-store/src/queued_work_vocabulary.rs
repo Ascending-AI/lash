@@ -1,6 +1,6 @@
 //! Durable queued-work vocabulary.
 //!
-//! The queue's durable rows, their claim and completion payloads and the
+//! The queue's durable rows, their admission and completion payloads and the
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
@@ -109,7 +109,7 @@ impl DeliveryPolicy {
 }
 /// Semantic kind of one queued-work row.
 ///
-/// Control rows are always claimed alone even when a producer assigns a merge
+/// Control rows are always admitted alone even when a producer assigns a merge
 /// key accidentally.
 ///
 /// This is also the durable ingress-family discriminator. [`Self::Control`]
@@ -143,9 +143,9 @@ impl QueuedWorkKind {
         }
     }
 
-    /// Reports whether rows of this kind may join an adjacent compatible turn claim.
+    /// Reports whether rows of this kind may join an adjacent compatible turn admission.
     ///
-    /// Only [`Self::Turn`] is batchable. Control rows remain single-row claims
+    /// Only [`Self::Turn`] is batchable. Control rows remain single-row admissions
     /// even when they carry the same merge key as neighboring work.
     pub fn is_batchable(self) -> bool {
         matches!(self, Self::Turn)
@@ -216,10 +216,10 @@ impl QueuedWorkAuthority {
         self
     }
 }
-/// Complete claim-time bounds and drain policy passed to durable store
+/// Complete admission-time bounds and drain policy passed to durable store
 /// implementations.
 #[derive(Clone, Debug)]
-pub struct QueuedWorkClaimPolicy {
+pub struct TurnLaneAdmissionPolicy {
     pub max_context_tokens: usize,
     pub action_token_reserve: usize,
     pub max_rows: usize,
@@ -442,51 +442,46 @@ pub struct ProcessWakeSource {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum QueuedWorkClaimBoundary {
+pub enum AdmissionBoundary {
     ActiveTurnCheckpoint,
     Idle,
 }
+/// The queued-work batches one commit completes (FIG-3927): row
+/// identities only, settled under the committing root's admission.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct QueuedWorkCompletionData {
+pub struct QueuedWorkCompletion {
+    pub session_id: SessionId,
     pub batch_ids: Vec<crate::BatchId>,
 }
-/// A shared work completion carrying settled queued-work batch identities.
-pub type QueuedWorkCompletion = crate::WorkCompletion<QueuedWorkCompletionData>;
+/// Queued-work batches one admission bound to a root, with their payloads,
+/// in `enqueue_seq` order (FIG-3927). The binding lives on the rows; this
+/// is what the root drives and what its journal records.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct QueuedWorkClaimData {
+pub struct AdmittedQueuedWork {
+    pub session_id: SessionId,
     pub batches: Vec<QueuedWorkBatch>,
-    /// Interrupted predecessor identity a store implementor must restore if
-    /// this successor claim is abandoned. This is claim-control metadata, not
-    /// durable protocol payload, so it is deliberately omitted from serde.
-    #[serde(skip)]
-    pub abandon_restore_claim_id: Option<String>,
-    /// Interrupted predecessor token paired with `abandon_restore_claim_id`.
-    #[serde(skip)]
-    pub abandon_restore_claim_token: Option<Box<str>>,
 }
-/// A shared work claim carrying queued-work batches.
-pub type QueuedWorkClaim = crate::WorkClaim<QueuedWorkClaimData>;
-impl crate::WorkClaim<QueuedWorkClaimData> {
+impl AdmittedQueuedWork {
     pub fn completion(&self) -> QueuedWorkCompletion {
         QueuedWorkCompletion {
             session_id: self.session_id.clone(),
-            claim_id: self.claim_id.clone(),
-            lease_token: self.lease_token.clone(),
-            data: QueuedWorkCompletionData {
-                batch_ids: self
-                    .batches
-                    .iter()
-                    .map(|batch| batch.batch_id.clone())
-                    .collect(),
-            },
+            batch_ids: self.batch_ids(),
         }
+    }
+
+    /// The admitted batches' ids, in admission order.
+    pub fn batch_ids(&self) -> Vec<crate::BatchId> {
+        self.batches
+            .iter()
+            .map(|batch| batch.batch_id.clone())
+            .collect()
     }
 
     pub fn is_empty(&self) -> bool {
         self.batches.iter().all(|batch| batch.items.is_empty())
     }
 
-    /// Materializes checkpoint input from a claim for runtime and conformance-suite implementors.
+    /// Materializes checkpoint input from admitted work for runtime and conformance-suite implementors.
     pub fn materialize_queued_checkpoint_work(&self) -> QueuedCheckpointWork {
         let mut turn_causes = Vec::new();
         for batch in &self.batches {
@@ -519,7 +514,7 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
     }
 
     /// Extract every independently receipted command in a coalesced
-    /// session-command claim. Every batch remains exactly one control item;
+    /// session-command run. Every batch remains exactly one control item;
     /// only the enclosing commit is shared.
     pub fn session_commands(&self) -> Option<Vec<(&QueuedWorkBatch, &SessionCommand)>> {
         let mut commands = Vec::with_capacity(self.batches.len());
@@ -699,7 +694,7 @@ pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String 
 ///
 /// The key says only that wake rows are eligible to share a turn. Work kind,
 /// delivery boundary, authority, elevation, row count, age, and rendered size
-/// remain independent claim gates.
+/// remain independent admission gates.
 pub const PROCESS_WAKE_MERGE_KEY: &str = "lash.process_wake";
 
 pub fn process_wake_batch_draft(wake: ProcessWakeDelivery) -> QueuedWorkBatchDraft {

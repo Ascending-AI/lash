@@ -81,9 +81,12 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.list_undelivered.sql(),
         sql.pending_inputs.cancel.sql(),
         sql.pending_inputs.defer_to_next_turn.sql(),
-        sql.pending_inputs.claim.sql(),
-        sql.pending_inputs.settle_claimed.sql(),
-        sql.pending_inputs.settle_unclaimed.sql(),
+        sql.pending_inputs.earliest_next_turn_candidate_seq.sql(),
+        sql.pending_inputs.select_admitted_by_step.sql(),
+        sql.pending_inputs.admit.sql(),
+        sql.pending_inputs.settle_admitted.sql(),
+        sql.pending_inputs.release_admitted.sql(),
+        sql.pending_inputs.release_root.sql(),
         sql.pending_inputs.delete_withdrawn.sql(),
         sql.pending_inputs.delete_by_session.sql(),
         sql.pending_inputs.insert_new.sql(),
@@ -91,36 +94,40 @@ fn every_turn_ingress_statement_prepares_against_the_real_schema() {
         sql.pending_inputs.select_session_by_input_id.sql(),
         sql.pending_inputs_sqlite.settlement_facts.sql(),
         sql.pending_inputs_sqlite.select_suffix.sql(),
-        sql.pending_inputs_sqlite.select_active_turn_claims.sql(),
-        sql.pending_inputs_sqlite.select_active_turn_rows.sql(),
         sql.pending_inputs_sqlite.select_pending_active.sql(),
-        sql.pending_inputs_sqlite.claim_candidates_next_turn.sql(),
         sql.pending_inputs_sqlite
-            .claim_candidates_admitted_root
+            .admission_candidates_next_turn
             .sql(),
         sql.pending_inputs_sqlite
-            .claim_candidates_active_turn_after_work
+            .admission_candidates_active_turn_after_work
             .sql(),
         sql.pending_inputs_sqlite
-            .claim_candidates_active_turn_before_completion
+            .admission_candidates_active_turn_before_completion
             .sql(),
-        sql.pending_inputs_sqlite.abandon_claim.sql(),
-        sql.pending_inputs_sqlite.abandon_claims.sql(),
         sql.queued_batches.select_by_id.sql(),
         sql.queued_batches.select_id_by_source_key.sql(),
         sql.queued_batches.list_by_session.sql(),
-        sql.queued_batches.list_unclaimed.sql(),
-        sql.queued_batches.claim.sql(),
-        sql.queued_batches.abandon_claim.sql(),
-        sql.queued_batches.settle_claimed.sql(),
+        sql.queued_batches.list_open.sql(),
+        sql.queued_batches.select_admitted_by_step.sql(),
+        sql.queued_batches.admit.sql(),
+        sql.queued_batches.deliver_open_command.sql(),
+        sql.queued_batches.select_admitted_batch_head_payload.sql(),
+        sql.queued_batches.settle_admitted.sql(),
+        sql.queued_batches.settle_command.sql(),
+        sql.queued_batches.release_admitted.sql(),
+        sql.queued_batches.release_root.sql(),
         sql.queued_batches.delete_by_session.sql(),
         sql.queued_batches_sqlite.insert_new.sql(),
         sql.queued_batches_sqlite.settlement_facts.sql(),
         sql.queued_batches_sqlite.select_cancelable.sql(),
         sql.queued_batches_sqlite.delete_cancelled.sql(),
-        sql.queued_batches.select_head_candidate.sql(),
-        sql.queued_batches_sqlite.claim_candidates_idle.sql(),
-        sql.queued_batches_sqlite.claim_candidates_boundary.sql(),
+        sql.queued_batches_sqlite.admission_candidates_idle.sql(),
+        sql.queued_batches_sqlite
+            .admission_candidates_turn_lane
+            .sql(),
+        sql.queued_batches_sqlite
+            .admission_candidates_boundary
+            .sql(),
         sql.queued_items.insert_new.sql(),
         sql.queued_items.list_by_batch.sql(),
         sql.queued_items_sqlite.list_by_batches.sql(),
@@ -169,40 +176,45 @@ fn every_tool_intent_statement_prepares_against_the_process_schema() {
 }
 
 #[test]
-fn a_claim_candidate_scan_seeks_its_session_index() {
-    // These three replaced one `format!` that spliced the mode's filter in per
-    // call, including a `? AND state = '…'` disjunct a planner cannot use. Each
-    // named shape has to seek `idx_pending_turn_inputs_session`, or naming them
-    // separately bought nothing.
+fn an_admission_candidate_scan_seeks_the_open_row_index() {
+    // Each named shape replaced one `format!` that spliced the mode's filter
+    // in per call, and each has to seek the partial index over open rows
+    // (FIG-3927): the settled rows a session keeps forever are outside it, so
+    // an admission's cost does not grow with the session's history.
     let conn = catalog();
     let statements = &turn_ingress_sql().pending_inputs_sqlite;
     for statement in [
-        &statements.claim_candidates_next_turn,
-        &statements.claim_candidates_admitted_root,
-        &statements.claim_candidates_active_turn_after_work,
-        &statements.claim_candidates_active_turn_before_completion,
+        &statements.select_pending_active,
+        &statements.admission_candidates_next_turn,
+        &statements.admission_candidates_active_turn_after_work,
+        &statements.admission_candidates_active_turn_before_completion,
     ] {
-        assert_uses(&conn, statement, "idx_pending_turn_inputs_session");
+        assert_uses(&conn, statement, "idx_pending_turn_inputs_open");
     }
 }
 
 #[test]
-fn abandoning_a_batch_of_claims_seeks_the_claim_index() {
-    // The batch abandon binds its `(session_id, claim_id, claim_token)` triples
-    // as a JSON array instead of building one `IN ((?,?,?), …)` per arity. The
-    // row-value `IN (SELECT …)` is what keeps that seekable; a correlated
-    // `EXISTS` over `json_each` would scan the table once per claim.
+fn a_root_release_seeks_the_admission_index() {
+    // A root's terminal write releases every row it still holds; the
+    // `(session_id, admitted_root)` index is what keeps that one seek per
+    // table rather than a scan of the session's history.
     let conn = catalog();
+    let sql = turn_ingress_sql();
     assert_uses(
         &conn,
-        &turn_ingress_sql().pending_inputs_sqlite.abandon_claims,
-        "idx_pending_turn_inputs_claim",
+        &sql.pending_inputs.release_root,
+        "idx_pending_turn_inputs_admitted",
+    );
+    assert_uses(
+        &conn,
+        &sql.queued_batches.release_root,
+        "idx_queued_work_admitted",
     );
 }
 
 #[test]
 fn the_multi_batch_item_read_seeks_its_batch() {
-    // The claim path hydrates a run of batches in one page; if the `json_each`
+    // The admission path hydrates a run of batches in one page; if the `json_each`
     // bind scans `queued_work_items` the page costs the whole table.
     let conn = catalog();
     let plan = plan(
@@ -225,8 +237,8 @@ mod byte_identity {
     fn a_state_token_renders_to_the_predicate_its_generator_spells() {
         // A `{{term(column)}}` token is only worth having if it renders to
         // exactly what the generator produces: the enum stays the one source of
-        // the vocabulary, and `idx_pending_turn_inputs_session` is only helped
-        // by a predicate the planner can match against the column.
+        // the vocabulary, and `idx_pending_turn_inputs_open` is only usable by
+        // a predicate that repeats its own terms.
         let sql = turn_ingress_sql();
         assert!(
             sql.pending_inputs.delete_withdrawn.sql().contains(
@@ -235,10 +247,13 @@ mod byte_identity {
             "the retention delete no longer spells the generated cancelled state",
         );
         assert!(
-            sql.pending_inputs.settle_unclaimed.sql().contains(
-                &vocabulary::nonterminal_turn_input_state_predicate_sql("state")
-            ),
-            "the unclaimed settlement no longer spells the generated open set",
+            sql.pending_inputs_sqlite
+                .admission_candidates_next_turn
+                .sql()
+                .contains(&vocabulary::undelivered_turn_input_state_predicate_sql(
+                    "state"
+                )),
+            "the next-turn admission scan no longer spells the open-row index's state set",
         );
         assert!(
             sql.pending_inputs.list_undelivered.sql().contains(
@@ -250,7 +265,7 @@ mod byte_identity {
             sql.family.has_claimable_work.sql().contains(
                 &vocabulary::deferred_next_turn_turn_input_state_predicate_sql("pti.state")
             ),
-            "the claimable-work probe no longer spells the generated deferred state",
+            "the open-work probe no longer spells the generated deferred state",
         );
     }
 
@@ -266,12 +281,12 @@ mod byte_identity {
         for (statement, checkpoint) in [
             (
                 &sql.pending_inputs_sqlite
-                    .claim_candidates_active_turn_after_work,
+                    .admission_candidates_active_turn_after_work,
                 lash_core_execution::CheckpointKind::AfterWork,
             ),
             (
                 &sql.pending_inputs_sqlite
-                    .claim_candidates_active_turn_before_completion,
+                    .admission_candidates_active_turn_before_completion,
                 lash_core_execution::CheckpointKind::BeforeCompletion,
             ),
             (
@@ -299,22 +314,35 @@ mod byte_identity {
     }
 
     #[test]
-    fn the_schema_still_declares_the_check_the_release_statements_depend_on() {
-        // Every release path clears the whole four-column claim identity
-        // because this CHECK refuses a row that carries part of it. If the
-        // constraint were ever dropped, the spelling would stop being
-        // load-bearing and this test would say so.
+    fn the_schema_still_declares_the_checks_the_release_statements_depend_on() {
+        // Every release path clears both admission columns because these
+        // CHECKs refuse a row that carries one without the other, and a
+        // settled row that still names a root. If either constraint were ever
+        // dropped, the spelling would stop being load-bearing and this test
+        // would say so.
         let conn = catalog();
-        let declared: String = conn
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                ["pending_turn_inputs"],
-                |row| row.get(0),
-            )
-            .expect("the table is declared");
-        assert!(
-            declared.contains("ck_pending_turn_inputs_claim_identity_all_or_none"),
-            "the all-or-none claim identity CHECK is gone:\n{declared}"
-        );
+        for (table, check) in [
+            (
+                "pending_turn_inputs",
+                "ck_pending_turn_inputs_admission_all_or_none",
+            ),
+            (
+                "pending_turn_inputs",
+                "ck_pending_turn_inputs_settled_unadmitted",
+            ),
+            (
+                "queued_work_batches",
+                "ck_queued_work_batches_admission_all_or_none",
+            ),
+        ] {
+            let declared: String = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .expect("the table is declared");
+            assert!(declared.contains(check), "`{check}` is gone:\n{declared}");
+        }
     }
 }

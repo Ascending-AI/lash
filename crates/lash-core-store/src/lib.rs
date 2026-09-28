@@ -103,9 +103,8 @@ pub(crate) use session_graph::{
 };
 pub(crate) use store::{
     AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
-    CheckpointComponentDescriptor, ClaimAuthority, GraphAppend, HydratedCheckpointComponent,
-    LeaseOwnerIdentity, OperationId, QueuedWorkClaimOutcome, RuntimePersistence, SessionMeta,
-    StoreError, WorkClaim,
+    CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
+    OperationId, RuntimePersistence, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedgerAttempt};
@@ -122,9 +121,9 @@ pub use process_identity::process_id_for_test;
 pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
-    DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkClaimBoundary, QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion,
-    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
+    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+    QueuedWorkKind, QueuedWorkPayload, SessionCommand, TurnLaneAdmissionPolicy,
 };
 pub(crate) use runtime_error::{RuntimeError, RuntimeErrorCode};
 pub(crate) use session_identity::{
@@ -142,10 +141,10 @@ pub(crate) use turn_control_vocabulary::{
     TurnCancelRequest, TurnCancelRequestRecord,
 };
 pub(crate) use turn_input_vocabulary::{
-    PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    AdmittedTurnInputs, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
     PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, TurnInputApplication,
-    TurnInputClaimData, TurnInputCompletion, TurnInputState, TurnInputStateKind,
+    TurnInputCompletion, TurnInputStateKind,
 };
 
 pub(crate) use await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
@@ -154,7 +153,6 @@ pub(crate) use effect_identity::{RuntimeEffectKind, RuntimeInvocation};
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};
-pub(crate) use queued_work_vocabulary::QueuedWorkClaim;
 pub(crate) use session_graph::SessionGraphScopeError;
 pub(crate) use store::queued_work::QueuedWorkClass;
 pub(crate) use turn_input_vocabulary::TurnInputCheckpointBoundary;
@@ -184,9 +182,6 @@ pub(crate) mod session_model {
 /// Path shim: the durable half of what `lash-core` exposes as `crate::runtime`.
 pub(crate) mod runtime {
     pub(crate) use crate::session_state as state;
-    pub(crate) use crate::{
-        QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimData, TurnInputClaimData,
-    };
 
     #[allow(unused_imports)]
     pub(crate) use crate::turn_input_vocabulary::ingress_message_id;
@@ -212,8 +207,6 @@ pub(crate) use session_identity::{
 pub(crate) use session_policy::ApplyConfigPatch;
 #[allow(unused_imports)]
 pub(crate) use session_policy::StaleConfigRevision;
-pub(crate) use store::OrphanedTurnInputScope;
-pub(crate) use store::work_claim::WorkCompletion;
 
 #[allow(unused_imports)]
 pub(crate) use attachments::AttachmentGcFence;
@@ -238,8 +231,6 @@ pub(crate) use queued_drain_policy::{
     DrainMode, DrainModePolicy, QueuedDrainSelection, default_queued_drain_policy,
 };
 #[allow(unused_imports)]
-pub(crate) use queued_work_vocabulary::QueuedWorkCompletionData;
-#[allow(unused_imports)]
 pub(crate) use queued_work_vocabulary::TurnWorkPayload;
 #[allow(unused_imports)]
 pub(crate) use session_graph::{
@@ -262,9 +253,9 @@ pub(crate) use store::{SessionAdmission, SessionBinding};
 #[allow(unused_imports)]
 pub(crate) use turn_failure_evidence::ChargeSafetyRefusalEvidence;
 #[allow(unused_imports)]
-pub(crate) use turn_input_vocabulary::{TurnInputClaimMode, ingress_message_id};
+pub(crate) use turn_input_vocabulary::TurnInputCompletionData;
 #[allow(unused_imports)]
-pub(crate) use turn_input_vocabulary::{TurnInputCompletionData, TurnInputSettlementClaim};
+pub(crate) use turn_input_vocabulary::{TurnInputAdmissionMode, ingress_message_id};
 
 pub(crate) use turn_input_vocabulary::TurnActivityId;
 

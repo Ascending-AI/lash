@@ -7,7 +7,7 @@ use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
-use crate::runtime::claim_settlement::TurnClaimSettlement;
+use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::session_model::SessionHistoryRecord;
 use crate::store::{GraphAppend, RuntimeCommit, RuntimePersistence, StoreError};
 use crate::{
@@ -76,11 +76,9 @@ pub(super) struct TurnBoundary {
     park_root: Option<crate::TurnId>,
 }
 
-/// A final commit's drive fence, and the terminal evidence it writes.
-pub(super) type DriveCommit = (
-    crate::store::DriveFence,
-    Option<crate::store::RootTerminalWrite>,
-);
+/// A final commit's drive fence and root, and the terminal evidence it
+/// writes.
+pub(super) type DriveCommit = crate::runtime::drive::DriveCommit;
 
 /// Explicit two-phase lifecycle for a turn commit.
 /// Drafting accumulates progress; finalization irreversibly assembles and
@@ -365,8 +363,7 @@ impl TurnBoundary {
         returned_turn: &mut AssembledTurn,
         session: Option<&mut Session>,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
-        claim_settlement: TurnClaimSettlement,
-        current_session_lease_fence: Option<crate::ClaimAuthority>,
+        ingress_settlement: TurnIngressSettlement,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -374,7 +371,6 @@ impl TurnBoundary {
         turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
         turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-        session_execution_lease_completion: Option<crate::ClaimAuthority>,
     ) -> Result<AcceptedTurnCommit, StoreError> {
         // Record the outcome before capturing execution state: a second author
         // that conflicts refuses here, with nothing captured and nothing
@@ -410,8 +406,7 @@ impl TurnBoundary {
                 usage_deltas,
                 failure_evidence: &returned_turn.failure_evidence,
                 outcome: &returned_turn.outcome,
-                claim_settlement,
-                current_session_lease_fence,
+                ingress_settlement,
                 pending_follow_on,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
@@ -419,7 +414,6 @@ impl TurnBoundary {
                 turn_cancel_closure_settlement,
                 turn_control_resolver,
                 recorded_attachment_intent_ids,
-                session_execution_lease_completion,
             })
             .await;
         settle_execution_state_capture(
@@ -549,8 +543,7 @@ impl TurnBoundary {
             usage_deltas,
             failure_evidence,
             outcome,
-            claim_settlement,
-            current_session_lease_fence,
+            ingress_settlement,
             pending_follow_on,
             interrupted_turn_input_turn_id,
             interrupted_turn_input_cancellation,
@@ -558,7 +551,6 @@ impl TurnBoundary {
             turn_cancel_closure_settlement,
             turn_control_resolver,
             recorded_attachment_intent_ids,
-            session_execution_lease_completion,
         } = input;
         // Every path into the final commit reconciles the same way. A turn
         // driven through `final_commit` already recorded this outcome so the
@@ -647,8 +639,7 @@ impl TurnBoundary {
                 usage_deltas,
                 failure_evidence,
                 operation,
-                claim_settlement,
-                current_session_lease_fence,
+                ingress_settlement,
                 interrupted_turn_input_turn_id,
                 interrupted_turn_input_cancellation,
                 interrupted_turn_cancel_intent,
@@ -656,7 +647,6 @@ impl TurnBoundary {
                 turn_control_resolver,
                 committed_attachment_ids,
                 adopted_intent_rows,
-                session_execution_lease_completion,
                 drive_commit,
                 park_root,
             )
@@ -688,8 +678,7 @@ impl TurnBoundary {
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         failure_evidence: &[crate::TurnFailureEvidence],
         operation: crate::OperationId,
-        mut claim_settlement: TurnClaimSettlement,
-        current_session_lease_fence: Option<crate::ClaimAuthority>,
+        ingress_settlement: TurnIngressSettlement,
         interrupted_turn_input_turn_id: Option<TurnId>,
         interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
         interrupted_turn_cancel_intent: Option<crate::TurnCancelIntentSnapshot>,
@@ -697,7 +686,6 @@ impl TurnBoundary {
         _turn_control_resolver: Option<&dyn crate::AwaitEventResolver>,
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
-        _session_execution_lease_completion: Option<crate::ClaimAuthority>,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
     ) -> FinalCommitResult {
@@ -732,22 +720,33 @@ impl TurnBoundary {
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
         commit.adopted_intent_rows = adopted_intent_rows;
-        let current_session_lease_generation = current_session_lease_fence
+        // A cancelled turn's undelivered input follows the cancellation's
+        // disposition; every other handed-back row is deferred.
+        let disposition = interrupted_turn_input_cancellation
             .as_ref()
-            .map(|fence| fence.fencing_token);
-        commit.completed_queue_claims = claim_settlement.queued.completions.clone();
-        commit.completed_turn_input_claims = claim_settlement.turn_inputs.completions.clone();
-        commit.undelivered_turn_input_claims =
-            std::mem::take(&mut claim_settlement.undelivered_turn_inputs);
-        commit.undelivered_queue_claims =
-            std::mem::take(&mut claim_settlement.undelivered_queue_claims);
+            .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+                evidence.undelivered
+            });
         commit.interrupted_turn_input_turn_id = interrupted_turn_input_turn_id;
         commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;
         commit.turn_cancel_closure_settlement = turn_cancel_closure_settlement;
-        if let Some((fence, root_terminal)) = drive_commit {
-            commit.drive_fence = Some(Box::new(fence));
-            commit.root_terminal = root_terminal.map(Box::new);
+        // The rows a turn settles are its root's, settled under the root's
+        // drive fence (FIG-3927): a turn that runs under no admitted root
+        // admitted nothing and settles nothing.
+        match drive_commit {
+            Some(drive_commit) => {
+                commit.drive_fence = Some(Box::new(drive_commit.fence));
+                commit.root_terminal = drive_commit.terminal.map(Box::new);
+                if !ingress_settlement.is_empty() {
+                    commit.ingress =
+                        Some(ingress_settlement.into_ingress(drive_commit.root, disposition));
+                }
+            }
+            None if !ingress_settlement.is_empty() => {
+                return Err(StoreError::IngressSettlementUnfenced { session_id });
+            }
+            None => {}
         }
         commit.park_root = park_root;
         // Cancellation-intent retries are progress-fenced: every refusal
@@ -757,10 +756,6 @@ impl TurnBoundary {
         // iteration that honoured an AfterStep request) which a raw promise
         // peek cannot reconstruct.
         let result = loop {
-            commit.validate_claim_settlement(
-                claim_settlement.queued.originating(),
-                claim_settlement.turn_inputs.originating(),
-            )?;
             match crate::store::commit_runtime_state_verified(store, commit.clone()).await {
                 Ok(result) => break result,
                 Err(crate::StoreError::TurnCancelIntentChanged { .. }) => {
@@ -777,26 +772,6 @@ impl TurnBoundary {
                     let address = crate::TurnAddress::new(&session_id, turn_id);
                     let observed = store.turn_cancel_request_intent(&address).await?;
                     commit.interrupted_turn_cancel_intent = Some(observed);
-                }
-                // A claim this turn restored from an earlier execution, or its
-                // journaled drive, was superseded: another driver took those
-                // rows, and the journal already holds this turn's answer to
-                // them. Cede and commit nothing, never drop the rows and
-                // commit the same words again (ADR 0069 §6, FIG-3552). The
-                // refusal travels as the typed runtime error the turn's
-                // caller classifies.
-                Err(err) if claim_settlement.cedes(&err, current_session_lease_generation) => {
-                    return Err(StoreError::TurnOutcomeMaterializationRefused {
-                        error: Box::new(crate::RuntimeError::new(
-                            crate::RuntimeErrorCode::AcceptedTurnInputCeded,
-                            format!(
-                                "rows this turn claimed in an earlier execution or in its \
-                                 journaled drive were reclaimed by another driver before the \
-                                 turn could commit, so another turn answers them; nothing was \
-                                 committed: {err}"
-                            ),
-                        )),
-                    });
                 }
                 Err(err) => return Err(err),
             }

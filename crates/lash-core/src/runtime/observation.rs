@@ -747,32 +747,6 @@ impl RuntimeHandle {
         ops.cancel_pending_turn_input_suffix(&store, anchor).await
     }
 
-    /// Release a held queued-work claim without completing it, returning its
-    /// batches to the pending queue immediately.
-    ///
-    /// This is the host lever behind stopping an external queued-work driver
-    /// mid-claim: the host clears its ownership and the work becomes claimable
-    /// at once instead of remaining held, and hidden from pending views, until
-    /// this owner's generation stops holding the session lease.
-    pub async fn abandon_queued_work_claim(
-        &self,
-        claim: &crate::QueuedWorkClaim,
-    ) -> Result<(), crate::RuntimeError> {
-        let (ops, store) = self.durable_queue()?;
-        ops.abandon_queued_work_claim(&store, claim).await
-    }
-
-    /// Release a held pending-turn-input claim without completing it, returning
-    /// its inputs to the pending queue immediately. The turn-input counterpart
-    /// of [`abandon_queued_work_claim`](Self::abandon_queued_work_claim).
-    pub async fn abandon_turn_input_claim(
-        &self,
-        claim: &crate::TurnInputClaim,
-    ) -> Result<(), crate::RuntimeError> {
-        let (ops, store) = self.durable_queue()?;
-        ops.abandon_turn_input_claim(&store, claim).await
-    }
-
     pub async fn cancel_queued_work_batch(
         &self,
         batch_id: &str,

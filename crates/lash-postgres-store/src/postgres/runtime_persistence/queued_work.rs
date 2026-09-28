@@ -1,8 +1,11 @@
+//! The queued-work half of [`IngressStore`] for [`PostgresSessionStore`], as
+//! inherent methods the trait implementation forwards to: enqueue, host
+//! withdrawal, the completion marker, and the open-work reads.
+
 use super::*;
 
-#[async_trait::async_trait]
-impl QueuedWorkStore for PostgresSessionStore {
-    async fn enqueue_queued_work(
+impl PostgresSessionStore {
+    pub(super) async fn enqueue_queued_work_pg(
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkBatch, StoreError> {
@@ -20,7 +23,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         Ok(queued)
     }
 
-    async fn enqueue_queued_work_with_outcome(
+    pub(super) async fn enqueue_queued_work_with_outcome_pg(
         &self,
         batch: QueuedWorkBatchDraft,
     ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
@@ -39,344 +42,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         Ok(queued)
     }
 
-    async fn claim_leading_ready_session_command(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        if super::claim_support::follow_on_blocks_claim_tx(
-            &mut tx,
-            session_id,
-            lash_core_execution::store::FollowOnClaim::Idle,
-        )
-        .await?
-        {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
-        // The fence is validated live, so its fencing token is the
-        // currently-live session-lease generation; claims pin it and are
-        // claimable only across a different generation (ADR 0029).
-        let generation = session_execution_lease.fencing_token;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let (selected_rows, mut selected_batches, candidates) =
-            scan_queued_work_candidates_postgres(
-                &mut tx,
-                session_id,
-                generation,
-                owner,
-                QueuedWorkClaimBoundary::Idle,
-                MAX_SESSION_COMMAND_BATCHES_PER_CLAIM,
-            )
-            .await?;
-        let selected_len = select_leading_session_command(&candidates);
-        if selected_len == 0 {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
-
-        selected_batches.truncate(selected_len);
-        match claim_queued_work_rows_postgres(
-            &mut tx,
-            now,
-            session_id,
-            owner,
-            generation,
-            &selected_rows[..selected_len],
-            selected_batches,
-            &candidates[..selected_len],
-        )
-        .await?
-        {
-            ClaimTransactionOutcome::Commit(claim) => {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                Ok(claim)
-            }
-            ClaimTransactionOutcome::Rollback(_) => {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                Ok(None)
-            }
-        }
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: QueuedWorkClaimBoundary,
-        policy: QueuedWorkClaimPolicy,
-    ) -> Result<QueuedWorkClaimOutcome, StoreError> {
-        if policy.max_rows == 0 {
-            return Ok(QueuedWorkClaimOutcome::Refused(
-                QueuedWorkClaimRefusal::ZeroLimit,
-            ));
-        }
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        if super::claim_support::follow_on_blocks_claim_tx(
-            &mut tx,
-            session_id,
-            lash_core_execution::store::FollowOnClaim::Idle,
-        )
-        .await?
-        {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(QueuedWorkClaimOutcome::Refused(
-                QueuedWorkClaimRefusal::FollowOnPending,
-            ));
-        }
-        let generation = session_execution_lease.fencing_token;
-        let now = postgres_transaction_epoch_ms(&mut tx).await?;
-        let (selected_rows, mut selected_batches, candidates) =
-            scan_queued_work_candidates_postgres(
-                &mut tx,
-                session_id,
-                generation,
-                owner,
-                boundary,
-                policy.max_rows,
-            )
-            .await?;
-        let prefix = select_turn_work_claim_prefix(&candidates, boundary, &policy, now)?;
-        let selected_len = match prefix {
-            TurnWorkClaimPrefix::Selected { len } => len,
-            TurnWorkClaimPrefix::Refused { reason: refusal } => {
-                // The candidate query applies the boundary rule in SQL, so an empty
-                // scan reaches the claim state machine as a bare `Empty`. Re-ask it
-                // with the unfiltered head so this backend names the same fact
-                // every other one names.
-                let refusal = if refusal == QueuedWorkClaimRefusal::Empty {
-                    postgres_refusal_for_empty_scan(
-                        &mut tx, session_id, generation, owner, boundary, &policy,
-                    )
-                    .await?
-                    .into_refusal()
-                } else {
-                    refusal
-                };
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(QueuedWorkClaimOutcome::Refused(refusal));
-            }
-        };
-
-        selected_batches.truncate(selected_len);
-        match claim_queued_work_rows_postgres(
-            &mut tx,
-            now,
-            session_id,
-            owner,
-            generation,
-            &selected_rows[..selected_len],
-            selected_batches,
-            &candidates[..selected_len],
-        )
-        .await?
-        {
-            ClaimTransactionOutcome::Commit(claim) => {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                Ok(match claim {
-                    Some(claim) => QueuedWorkClaimOutcome::Claimed(claim),
-                    None => QueuedWorkClaimOutcome::Refused(QueuedWorkClaimRefusal::Empty),
-                })
-            }
-            ClaimTransactionOutcome::Rollback(_) => {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                Ok(QueuedWorkClaimOutcome::Refused(
-                    QueuedWorkClaimRefusal::ClaimRaceLost,
-                ))
-            }
-        }
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core_execution::TurnId,
-        checkpoint: lash_core_execution::CheckpointKind,
-        max_inputs: usize,
-        policy: QueuedWorkClaimPolicy,
-    ) -> Result<
-        (
-            Option<lash_core_execution::TurnInputClaim>,
-            Option<QueuedWorkClaim>,
-        ),
-        StoreError,
-    > {
-        #[cfg(test)]
-        self.checkpoint_probe_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if !checkpoint_work_pending_postgres(
-            &self.pool,
-            session_id,
-            session_execution_lease.fencing_token,
-            turn_id,
-            checkpoint,
-            max_inputs,
-            policy.max_rows,
-        )
-        .await?
-        {
-            return Ok((None, None));
-        }
-
-        #[cfg(test)]
-        self.checkpoint_write_transaction_count
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        if super::claim_support::follow_on_blocks_claim_tx(
-            &mut tx,
-            session_id,
-            lash_core_execution::store::FollowOnClaim::Checkpoint { turn_id },
-        )
-        .await?
-        {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok((None, None));
-        }
-        let input = claim_pending_turn_inputs_postgres_tx(
-            &mut tx,
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-            lash_core_execution::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.clone(),
-                checkpoint,
-            },
-            CommandLaneGate::Boundary,
-        )
-        .await?;
-        let input = match input {
-            ClaimTransactionOutcome::Commit(input) => input,
-            ClaimTransactionOutcome::Rollback(input) => {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                return Ok((input, None));
-            }
-        };
-        let queued = claim_ready_queued_work_postgres_tx(
-            &mut tx,
-            session_id,
-            session_execution_lease,
-            owner,
-            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            policy,
-        )
-        .await?;
-        match queued {
-            ClaimTransactionOutcome::Commit(queued) => {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                Ok((input, queued))
-            }
-            ClaimTransactionOutcome::Rollback(queued) => {
-                tx.rollback().await.map_err(store_sqlx_error)?;
-                Ok((None, queued))
-            }
-        }
-    }
-
-    async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .queued_batches
-                .abandon_claim
-                .sql(),
-        )
-        .bind(claim.session_id.as_str())
-        .bind(&claim.claim_id)
-        .bind(&claim.lease_token)
-        .bind(
-            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(claim),
-        )
-        .bind(
-            lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
-                claim,
-            ),
-        )
-        .execute(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn abandon_queued_work_claims(
-        &self,
-        claims: &[QueuedWorkClaim],
-    ) -> Result<(), StoreError> {
-        if claims.is_empty() {
-            return Ok(());
-        }
-        // One statement, not a loop: the claims a batch abandon gives up are
-        // bound as five parallel arrays, so the statement's own text is fixed
-        // however many there are.
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let session_ids = claims
-            .iter()
-            .map(|claim| claim.session_id.as_str().to_string())
-            .collect::<Vec<_>>();
-        let claim_ids = claims
-            .iter()
-            .map(|claim| claim.claim_id.clone())
-            .collect::<Vec<_>>();
-        let claim_tokens = claims
-            .iter()
-            .map(|claim| claim.lease_token.clone())
-            .collect::<Vec<_>>();
-        let restore_claim_ids = claims
-            .iter()
-            .map(|claim| {
-                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_id(
-                    claim,
-                )
-                .map(str::to_string)
-            })
-            .collect::<Vec<_>>();
-        let restore_claim_tokens = claims
-            .iter()
-            .map(|claim| {
-                lash_core_execution::store_backend_support::queued_work_abandon_restore_claim_token(
-                    claim,
-                )
-                .map(str::to_string)
-            })
-            .collect::<Vec<_>>();
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .queued_batches_postgres
-                .abandon_claims
-                .sql(),
-        )
-        .bind(&session_ids)
-        .bind(&claim_ids)
-        .bind(&claim_tokens)
-        .bind(&restore_claim_ids)
-        .bind(&restore_claim_tokens)
-        .execute(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn cancel_queued_work_batch(
+    pub(super) async fn cancel_queued_work_batch_pg(
         &self,
         session_id: &SessionId,
         batch_id: &str,
@@ -398,23 +64,11 @@ impl QueuedWorkStore for PostgresSessionStore {
             return Ok(None);
         };
         let row = queued_batch_row(row)?;
-        // A claimed row of the session's unfinished root is its own to
-        // settle or release, whichever drive epoch claimed it.
-        if row.claim_token.is_some()
-            && crate::session_roots::unfinished_root_conn(&mut tx, session_id)
-                .await?
-                .is_some()
-        {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        }
         let batch = queued_work_batch_from_row(&mut tx, row).await?;
         // A host cancel is a wake's terminal transition too: the fence lands
         // with the removal, or a redelivery of the withdrawn wake would be
         // admitted again (FIG-3545).
-        if let Some(wake) =
-            lash_core_execution::store::claim_plan::TerminalProcessWake::of_batch(&batch)
-        {
+        if let Some(wake) = lash_core_execution::store::TerminalProcessWake::of_batch(&batch) {
             raise_wake_redelivery_fence_tx(&mut tx, session_id, &wake).await?;
         }
         sqlx::query(sql.queued_batches_postgres.delete_cancelled.sql())
@@ -426,7 +80,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         Ok(Some(batch))
     }
 
-    async fn queued_work_batch_completed(
+    pub(super) async fn queued_work_batch_completed_pg(
         &self,
         session_id: &SessionId,
         batch_id: &str,
@@ -449,7 +103,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         .map_err(store_sqlx_error)
     }
 
-    async fn list_queued_work(
+    pub(super) async fn list_queued_work_pg(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
@@ -487,7 +141,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         Ok(batches)
     }
 
-    async fn pending_session_work_ordering(
+    pub(super) async fn pending_session_work_ordering_pg(
         &self,
         session_id: &SessionId,
     ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
@@ -529,7 +183,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         })
     }
 
-    async fn list_pending_queued_work(
+    pub(super) async fn list_open_queued_work_pg(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
@@ -551,7 +205,7 @@ impl QueuedWorkStore for PostgresSessionStore {
         let rows = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .queued_batches
-                .list_unclaimed
+                .list_open
                 .sql(),
         )
         .bind(session_id.as_str())

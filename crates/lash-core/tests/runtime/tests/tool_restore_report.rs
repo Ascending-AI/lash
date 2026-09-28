@@ -597,7 +597,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         .expect("park the enqueue-only open");
 
     // The row is durable and undriven.
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
     assert_eq!(pending.len(), 1, "exactly one pending row was admitted");
@@ -804,7 +804,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
 
     // The refused drive left both accepted rows, the queued one and the one
     // the refused turn sent, pending, and the tool surface untouched.
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
     assert_eq!(pending.len(), 2, "no pending row was settled");

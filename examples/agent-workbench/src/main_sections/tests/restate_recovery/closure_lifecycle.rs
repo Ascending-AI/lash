@@ -13,7 +13,7 @@ async fn authorize_restate_completion_closure(
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
     Arc<dyn lash::persistence::RuntimePersistence>,
-    lash::persistence::ClaimAuthority,
+    lash::persistence::DriveFence,
     lash::TurnCancelClosureAuthorization,
 ) {
     use lash::persistence::SessionStoreFactory as _;
@@ -29,7 +29,7 @@ async fn authorize_restate_completion_closure(
         })
         .await
         .expect("create live Restate catalog session");
-    let lease = lash::testing::store_fixtures::seal_claim_authority_for_test(
+    let lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
         &store,
         &address.session_id,
         session,
@@ -45,7 +45,7 @@ async fn authorize_restate_completion_closure(
     store
         .validate_turn_cancellation_binding(
             &address.session_id,
-            &lease.fence(),
+            &lease,
             binding.binding_id(),
             physical_scope,
         )
@@ -79,14 +79,39 @@ async fn authorize_restate_completion_closure(
             .expect("terminal key"),
         lash::TurnCancelClosureProposal::CompletionSealed,
         lash::TurnCancelIntentSnapshot::Absent,
-        &lease.fence(),
+        &lease,
     )
     .expect("materialize live Restate closure authorization");
     store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await
         .expect("register live Restate participant before local authorization");
     (store, lease, authorization)
+}
+
+/// The owner's teardown commit: it consumes `authorization`'s closure under
+/// `lease` and re-defers the turn's undelivered input.
+async fn consume_closure_by_commit(
+    store: &dyn lash::persistence::RuntimePersistence,
+    lease: &lash::persistence::DriveFence,
+    authorization: &lash::TurnCancelClosureAuthorization,
+    settlement: lash::TurnCancelClosureSettlement,
+) -> Result<(), lash::persistence::StoreError> {
+    let state = lash::persistence::RuntimeSessionState {
+        session_id: authorization.session_id().clone(),
+        ..lash::persistence::RuntimeSessionState::new(lash::runtime::SessionPolicy::new(
+            lash::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash::persistence::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .deferring_interrupted_turn_inputs(
+            authorization.turn_id().clone(),
+            settlement.effective_cancellation().cloned(),
+        );
+    commit.interrupted_turn_cancel_intent = Some(authorization.observed_intent().clone());
+    commit.turn_cancel_closure_settlement = Some(settlement);
+    commit.drive_fence = Some(Box::new(lease.clone()));
+    store.commit_runtime_state(commit).await.map(|_| ())
 }
 
 async fn settle_and_release_restate_completion_closure(
@@ -94,7 +119,7 @@ async fn settle_and_release_restate_completion_closure(
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     scope: &lash::runtime::ExecutionScope,
     store: Arc<dyn lash::persistence::RuntimePersistence>,
-    lease: lash::persistence::ClaimAuthority,
+    lease: lash::persistence::DriveFence,
     authorization: lash::TurnCancelClosureAuthorization,
 ) {
     use lash::persistence::SessionStoreFactory as _;
@@ -107,18 +132,9 @@ async fn settle_and_release_restate_completion_closure(
         .settle_authorized_closure(&authorization)
         .await
         .expect("settle closure at live Restate owner");
-    store
-        .repair_orphaned_active_turn_inputs(
-            authorization.session_id(),
-            &lease.fence(),
-            authorization.turn_id(),
-            authorization.observed_intent(),
-            Some(&settlement),
-        )
+    consume_closure_by_commit(store.as_ref(), &lease, &authorization, settlement)
         .await
-        .expect("consume live Restate catalog pin")
-        .into_applied()
-        .expect("live Restate repair applies");
+        .expect("consume live Restate catalog pin");
     factory
         .retire_turn_cancel_closure_scope(scope)
         .await
@@ -255,7 +271,7 @@ fn live_restate_participant_protocol_crash_child() {
             )
             .await;
             store
-                .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                .authorize_turn_cancel_closure(&lease, &authorization)
                 .await
                 .expect("register boundary never returns before the parent kills this child");
         } else {
@@ -385,18 +401,9 @@ async fn prove_live_restate_participant_crash_windows(
         .settle_authorized_closure(&authorization)
         .await
         .expect("settle release-crash closure");
-    store
-        .repair_orphaned_active_turn_inputs(
-            authorization.session_id(),
-            &lease.fence(),
-            authorization.turn_id(),
-            authorization.observed_intent(),
-            Some(&settlement),
-        )
+    consume_closure_by_commit(store.as_ref(), &lease, &authorization, settlement)
         .await
-        .expect("consume release-crash authorization")
-        .into_applied()
-        .expect("release-crash repair applies");
+        .expect("consume release-crash authorization");
     drop(store);
     drop(release_factory);
 
@@ -556,7 +563,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 })
                 .await
                 .expect("create late live Restate catalog session");
-            let late_lease = lash::testing::store_fixtures::seal_claim_authority_for_test(
+            let late_lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
                 &late_store,
                 &late_address.session_id,
                 "late",
@@ -572,7 +579,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             late_store
                 .validate_turn_cancellation_binding(
                     &late_address.session_id,
-                    &late_lease.fence(),
+                    &late_lease,
                     late_binding.binding_id(),
                     &late_scope,
                 )
@@ -606,7 +613,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                     .expect("late terminal key"),
                 lash::TurnCancelClosureProposal::CompletionSealed,
                 lash::TurnCancelIntentSnapshot::Absent,
-                &late_lease.fence(),
+                &late_lease,
             )
             .expect("materialize late live Restate authorization");
             host.retire_effect_journal(
@@ -615,7 +622,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             .await
             .expect("retire live Restate index before catalog authorization");
             late_store
-                .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+                .authorize_turn_cancel_closure(&late_lease, &late_authorization)
                 .await
                 .expect_err("retired live Restate owner refuses late catalog authorization");
             assert!(

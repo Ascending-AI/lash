@@ -172,7 +172,7 @@ pub(crate) async fn reject_if_active_turn_settled(
         | lash::PendingTurnInputCancelOutcome::AlreadyCancelled(_) => Err(AppError::conflict(
             "the running turn settled before the input could be injected",
         )),
-        lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. }
+        lash::PendingTurnInputCancelOutcome::AlreadyAdmitted { .. }
         | lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => Ok(()),
         // Audited: this is a locally synthesized reconciliation-invariant failure, not a propagated store error.
         lash::PendingTurnInputCancelOutcome::NotFound => Err(AppError::internal(format!(

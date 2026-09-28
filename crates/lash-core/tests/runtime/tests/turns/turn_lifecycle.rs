@@ -534,17 +534,15 @@ pub(super) async fn final_commit_refusals_reach_the_runtime_host_mapper() {
     }
 }
 
-/// FIG-1573: a turn that ends without committing must not leave an input
-/// pinned to it - no crash required.
+/// FIG-1573 under FIG-3927 §2.6: a turn that ends without committing leaves
+/// no input pinned to a dead turn once its root ends.
 ///
-/// The host routed an input into the running turn, so the row is
-/// `pending_active` and scoped to that turn's id. The commit-time re-defer
-/// (`RuntimeCommit::deferring_interrupted_turn_inputs`) is the only writer that
-/// moves such a row back to `deferred_next_turn`, and this turn never reaches
-/// its commit: the store fences it, exactly as a claim fenced at a checkpoint
-/// does in the field. The teardown owes the row the same repair, and this test
-/// reads the durable row directly so it proves the teardown trigger and not the
-/// drain-time backstop.
+/// The host routed an input into the running turn, and the turn's checkpoint
+/// admitted it to the root. The turn's commit is refused for good, so the
+/// turn ends without the commit-time re-defer. Nothing re-defers the row
+/// behind the root's back: it stays bound to the root until the root's
+/// terminal write, here the engine's lost-run end, re-defers it to the next
+/// turn. The root's own acceptance ends with the root.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_deferred_at_teardown() {
     let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
@@ -575,7 +573,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     )
     .await;
 
-    lash_core::TurnInputStore::enqueue_pending_turn_input(
+    lash_core::IngressStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             session_id,
@@ -621,29 +619,62 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         lash_core::TurnFailureCause::Outcome
     );
 
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
-        store.as_ref(),
-        &SessionId::from(session_id),
-    )
-    .await
-    .expect("list pending turn inputs");
+    let undelivered = || async {
+        lash_core::IngressStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from(session_id),
+        )
+        .await
+        .expect("list pending turn inputs")
+    };
+    let pending = undelivered().await;
     assert_eq!(
         pending.len(),
-        2,
-        "the routed input is still queued, and so is the fenced turn's own acceptance (ADR 0069)"
+        1,
+        "the routed input is the turn's, admitted at its checkpoint; only the root's own \
+         acceptance is undelivered"
     );
-    for row in &pending {
-        assert_eq!(
-            row.input.state,
-            lash_core::TurnInputState::DeferredNextTurn,
-            "the teardown of a turn that cannot commit must re-defer every input it held"
-        );
-        assert_eq!(
-            row.input.ingress(),
-            lash_core::TurnInputIngress::NextTurn,
-            "the repaired rows must be addressable by the next turn, not by the dead turn id"
-        );
-    }
+    assert_eq!(
+        pending[0].status,
+        lash_core::PendingTurnInputReadStatus::Admitted {
+            root: TurnId::from(live_turn_id)
+        },
+        "the torn-down turn's rows stay bound to its root until the root ends"
+    );
+
+    lash_core::SessionStoreFactory::end_lost_root(
+        lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
+        &lash_core::engine::RootRef {
+            session: SessionId::from(session_id),
+            root: TurnId::from(live_turn_id),
+        },
+        0,
+    )
+    .await
+    .expect("end the lost root")
+    .expect("the root had no terminal");
+    let pending = undelivered().await;
+    assert_eq!(
+        pending.len(),
+        1,
+        "the root's end re-defers the routed input, and its own acceptance ends with it"
+    );
+    let row = &pending[0];
+    assert!(
+        row.input.source_key.is_none(),
+        "the re-deferred row is the routed input, not the root's own acceptance"
+    );
+    assert_eq!(row.status, lash_core::PendingTurnInputReadStatus::Open);
+    assert_eq!(
+        row.input.state,
+        lash_core::TurnInputState::DeferredNextTurn,
+        "the root's end must re-defer the input its dead turn held"
+    );
+    assert_eq!(
+        row.input.ingress(),
+        lash_core::TurnInputIngress::NextTurn,
+        "the repaired row must be addressable by the next turn, not by the dead turn id"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1274,13 +1305,10 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     handler.close().await.expect("close the drain's handler");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queue after recovered handoff")
-        .is_empty()
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("queue after recovered handoff")
+            .is_empty()
     );
 }
 
@@ -1761,14 +1789,14 @@ impl lash_core::store::RuntimePersistenceDecorator for JournalRedriveStore {
     }
 }
 
-/// Claims an open next-turn row under the drive's incarnation just before
-/// its root claim, so a repeated claim still finds the accepted row held.
-pub(super) struct HeldClaimBeforeDriveStore {
+/// Withdraws the accepted head input just before the drive's root admission,
+/// as a host cancel racing the drive would.
+pub(super) struct WithdrawBeforeDriveStore {
     pub(super) inner: Arc<RecordingStore>,
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for HeldClaimBeforeDriveStore {
+impl lash_core::store::RuntimePersistenceDecorator for WithdrawBeforeDriveStore {
     fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -1777,40 +1805,15 @@ impl lash_core::store::RuntimePersistenceDecorator for HeldClaimBeforeDriveStore
         &self,
         request: &lash_core::store::AdmitRootRequest,
     ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
-        lash_core::store::TurnInputStore::claim_next_turn_inputs(
-            self.inner.as_ref(),
-            &request.session_id,
-            &request.lease,
-            &request.lease.owner,
-            request.max_inputs,
-        )
-        .await?;
+        if let lash_core::store::AdmittedHead::Input(input_id) = &request.head {
+            lash_core::store::IngressStore::cancel_pending_turn_input(
+                self.inner.as_ref(),
+                request.session_id(),
+                input_id.as_str(),
+            )
+            .await?;
+        }
         self.inner.admit_root(request).await
-    }
-
-    async fn claim_next_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &lash_core::ClaimAuthority,
-        owner: &lash_core::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core::TurnInputClaim>, lash_core::StoreError> {
-        lash_core::store::TurnInputStore::claim_next_turn_inputs(
-            self.inner.as_ref(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-        )
-        .await?;
-        lash_core::store::TurnInputStore::claim_next_turn_inputs(
-            self.inner.as_ref(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-        )
-        .await
     }
 }
 
@@ -1825,7 +1828,7 @@ pub(super) async fn append_process_wake_to_queue(
         .await
         .expect("append wake");
     let wake = appended.wake_delivery.expect("wake delivery");
-    lash_core::store::QueuedWorkStore::enqueue_queued_work(
+    lash_core::store::IngressStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::process_wake_batch_draft(wake.clone()),
     )
@@ -1876,7 +1879,7 @@ pub(super) async fn enqueue_turn_input_for_checkpoint(
         input,
     );
     draft.source_key = source_key;
-    lash_core::store::TurnInputStore::enqueue_pending_turn_input(store, draft)
+    lash_core::store::IngressStore::enqueue_pending_turn_input(store, draft)
         .await
         .expect("enqueue turn input")
 }
@@ -1886,7 +1889,7 @@ pub(super) async fn enqueue_idle_turn_input(
     session_id: &SessionId,
     text: &str,
 ) -> lash_core::PendingTurnInput {
-    lash_core::store::TurnInputStore::enqueue_pending_turn_input(
+    lash_core::store::IngressStore::enqueue_pending_turn_input(
         store,
         lash_core::PendingTurnInputDraft::new(
             session_id.to_string(),
@@ -1903,7 +1906,7 @@ pub(super) async fn enqueue_session_command(
     session_id: &SessionId,
     reason: &str,
 ) -> lash_core::testing::runtime_internals::QueuedWorkBatch {
-    lash_core::store::QueuedWorkStore::enqueue_queued_work(
+    lash_core::store::IngressStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
             session_id.to_string(),
@@ -1922,7 +1925,7 @@ pub(super) async fn enqueue_config_patch_command(
     session_id: &SessionId,
     patch: lash_core::runtime::ApplyConfigPatch,
 ) -> lash_core::testing::runtime_internals::QueuedWorkBatch {
-    lash_core::store::QueuedWorkStore::enqueue_queued_work(
+    lash_core::store::IngressStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
             session_id.to_string(),

@@ -8,7 +8,7 @@
 //! terminal — and all of them run on the lane's one observer connection, so
 //! the cadence never rescans session history or opens a connection per tick:
 //!
-//! * `claim` — the input's pending row first reports `Held` (the drive took
+//! * `claim` — the input's pending row first reports `Admitted` (a root took
 //!   it), or leaves the open set.
 //! * `applied` — the input's durable binding names the root that took it.
 //! * `settled` — the root's terminal evidence is readable.
@@ -702,7 +702,10 @@ async fn poll_marks(
             match rows.iter().find(|row| row.input.input_id == input_id) {
                 Some(row) => {
                     row_seen = true;
-                    if matches!(row.status, lash::PendingTurnInputReadStatus::Held { .. }) {
+                    if matches!(
+                        row.status,
+                        lash::PendingTurnInputReadStatus::Admitted { .. }
+                    ) {
                         marks.claim_ms = Some(now);
                     }
                 }
@@ -711,7 +714,7 @@ async fn poll_marks(
                 None => {}
             }
         }
-        // The claim's transaction binds the input to its root, so the keyed
+        // The admission's transaction binds the input to its root, so the keyed
         // `root_of_input` read is the applied mark and the settled mark's
         // key in one.
         if root.is_none()
@@ -1086,17 +1089,20 @@ mod tests {
             self.inner.as_ref()
         }
 
-        /// The row reports `Pending` on the first read and `Held` after, a
-        /// drive's claim landing between two ticks.
+        /// The row reports `Open` on the first read and `Admitted` after, a
+        /// drive's root admission landing between two ticks.
         async fn list_pending_turn_inputs(
             &self,
             _session_id: &SessionId,
         ) -> Result<Vec<lash::PendingTurnInputRead>, lash::persistence::StoreError> {
             let call = self.pending_calls.fetch_add(1, Ordering::SeqCst);
             Ok(vec![if call == 0 {
-                lash::PendingTurnInputRead::pending(self.row.clone())
+                lash::PendingTurnInputRead::open(self.row.clone())
             } else {
-                lash::PendingTurnInputRead::held(self.row.clone(), 0)
+                lash::PendingTurnInputRead::admitted(
+                    self.row.clone(),
+                    lash_core::TurnId::from("poll-probe-root"),
+                )
             }])
         }
 

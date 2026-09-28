@@ -14,11 +14,11 @@ fn decode_binding_scope(
 }
 
 #[async_trait::async_trait]
-impl TurnInputStore for Store {
+impl IngressStore for Store {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -29,7 +29,7 @@ impl TurnInputStore for Store {
                 message: error.to_string(),
             })?;
         let session_id = session_id.clone();
-        let fence = session_execution_lease.clone();
+        let fence = fence.clone();
         let binding_id = binding_id.to_string();
         let admitted_physical_scope = admitted_scope
             .session_id()
@@ -39,12 +39,11 @@ impl TurnInputStore for Store {
             .as_ref()
             .map(encode_json)
             .transpose()?;
-        let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
                 let outcome: Result<(), StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
-                    ensure_session_execution_lease_conn(tx, &session_id, &fence, now)?;
+                    super::drive_epoch::require_fence_conn(tx, &session_id, &fence)?;
                     let sql = crate::turn_ingress::turn_ingress_sql();
                     let existing = tx
                         .query_row(
@@ -89,7 +88,7 @@ impl TurnInputStore for Store {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -121,7 +120,7 @@ impl TurnInputStore for Store {
                     }
                 })?;
         }
-        let fence = session_execution_lease.clone();
+        let fence = fence.clone();
         let authorization = authorization.clone();
         self.conn
             .write_flow(move |tx| {
@@ -129,8 +128,8 @@ impl TurnInputStore for Store {
                     (|| {
                         let sql = crate::turn_ingress::turn_ingress_sql();
                         ensure_session_not_deleted_conn(tx, authorization.session_id())?;
-                        if authorization.session_id() != fence.session_id
-                            || authorization.authorizing_fencing_token() != fence.fencing_token
+                        if authorization.session_id() != fence.session()
+                            || authorization.authorizing_fencing_token() != fence.epoch()
                         {
                             return Err(StoreError::SessionExecutionLeaseExpired {
                                 session_id: authorization.session_id().clone(),
@@ -241,17 +240,12 @@ impl TurnInputStore for Store {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         binding_id: &str,
         admitted_scope: &lash_core_execution::ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
-        self.validate_turn_cancellation_binding(
-            session_id,
-            session_execution_lease,
-            binding_id,
-            admitted_scope,
-        )
-        .await?;
+        self.validate_turn_cancellation_binding(session_id, fence, binding_id, admitted_scope)
+            .await?;
         let session_id = session_id.clone();
         let encoded = self
             .conn
@@ -606,7 +600,7 @@ impl TurnInputStore for Store {
                             let rows = stmt
                                 .query_map(
                                     params![session_id.as_str()],
-                                    pending_turn_input_read_row_from_sql,
+                                    pending_turn_input_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
                             rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
@@ -694,7 +688,7 @@ impl TurnInputStore for Store {
                             &session_id,
                             &target,
                         )? {
-                            Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
+                            Some(row) => cancel_pending_turn_input_row_conn(tx, row)?,
                             None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                         };
                         results.push(lash_core_execution::PendingTurnInputCancelReceipt {
@@ -776,7 +770,7 @@ impl TurnInputStore for Store {
                         };
                         let mut outcomes = Vec::with_capacity(rows.len());
                         for row in rows {
-                            outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
+                            outcomes.push(cancel_pending_turn_input_row_conn(tx, row)?);
                         }
                         let released: Option<(String, i64)> = tx
                             .query_row(
@@ -816,255 +810,64 @@ impl TurnInputStore for Store {
             .map_err(sqlite_error)?
     }
 
-    async fn claim_active_turn_inputs(
+    async fn enqueue_queued_work(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkBatch, StoreError> {
+        self.enqueue_queued_work_sqlite(batch).await
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        self.enqueue_queued_work_with_outcome_sqlite(batch).await
+    }
+
+    async fn open_session_command_run(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        super::open_session_command_run_sqlite(self, fence).await
+    }
+
+    async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core_execution::TurnId,
-        checkpoint: lash_core_execution::CheckpointKind,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
-        claim_pending_turn_inputs_sqlite(
-            &self.conn,
-            self.clock.timestamp_ms(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-            lash_core_execution::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.clone(),
-                checkpoint,
-            },
-        )
-        .await
+        batch_id: &str,
+    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
+        self.cancel_queued_work_batch_sqlite(session_id, batch_id)
+            .await
     }
 
-    async fn claim_next_turn_inputs(
+    async fn queued_work_batch_completed(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
-        claim_pending_turn_inputs_sqlite(
-            &self.conn,
-            self.clock.timestamp_ms(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-            lash_core_execution::TurnInputClaimMode::NextTurn,
-        )
-        .await
-    }
-
-    async fn abandon_turn_input_claim(
-        &self,
-        claim: &lash_core_execution::TurnInputClaim,
-    ) -> Result<(), StoreError> {
-        let session_id = claim.session_id.clone();
-        let claim_id = claim.claim_id.clone();
-        let lease_token = claim.lease_token.clone();
-        self.conn
-            .write(move |tx| {
-                crate::conn::cached_execute(
-                    tx,
-                    crate::turn_ingress::turn_ingress_sql()
-                        .pending_inputs_sqlite
-                        .abandon_claim
-                        .sql(),
-                    params![
-                        session_id.as_str(),
-                        claim_id.as_str(),
-                        lease_token,
-                        lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
-                        lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
-                    ],
-                )
-            })
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.queued_work_batch_completed_sqlite(session_id, batch_id)
             .await
-            .map_err(sqlite_error)?;
-        Ok(())
     }
 
-    async fn orphaned_active_turn_ids(
+    async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        scope: lash_core_execution::OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
-        let session_id = SessionId::from(session_id.to_string());
-        let session_execution_lease = session_execution_lease.clone();
-        let scope = OwnedOrphanedScope::from(scope);
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let outcome: Result<Vec<lash_core_execution::TurnId>, StoreError> = (|| {
-                    ensure_session_execution_lease_conn(
-                        tx,
-                        &session_id,
-                        &session_execution_lease,
-                        now,
-                    )?;
-                    orphaned_active_turn_ids_conn(
-                        tx,
-                        &session_id,
-                        session_execution_lease.fencing_token,
-                        scope.borrow(),
-                    )
-                })(
-                );
-                Ok(match outcome {
-                    Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)?
+    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+        self.pending_session_work_ordering_sqlite(session_id).await
     }
 
-    async fn repair_orphaned_active_turn_inputs(
+    async fn list_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        turn_id: &lash_core_execution::TurnId,
-        observed: &lash_core_execution::TurnCancelIntentSnapshot,
-        settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
-    ) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
-        let session_id = session_id.clone();
-        let session_execution_lease = session_execution_lease.clone();
-        let turn_id = turn_id.clone();
-        let observed = observed.clone();
-        let settlement = settlement.cloned();
-        let now = self.clock.timestamp_ms();
-        self.conn
-            .write_flow(move |tx| {
-                let outcome = (|| {
-                    ensure_session_execution_lease_conn(
-                        tx,
-                        &session_id,
-                        &session_execution_lease,
-                        now,
-                    )?;
-                    let closure = settlement
-                        .as_ref()
-                        .map(lash_core_execution::TurnCancelClosureSettlement::authorization);
-                    let stored = tx
-                        .query_row(
-                            crate::turn_ingress::turn_ingress_sql()
-                                .closures_sqlite
-                                .select_by_turn
-                                .sql(),
-                            params![session_id.as_str(), turn_id.as_str()],
-                            |row| row.get::<_, String>(0),
-                        )
-                        .optional()
-                        .map_err(sqlite_error)?;
-                    let closure_required = stored.is_some()
-                        || !matches!(
-                            observed,
-                            lash_core_execution::TurnCancelIntentSnapshot::Absent
-                        );
-                    if closure_required != settlement.is_some()
-                        || closure.is_some_and(|authorization| {
-                            authorization.session_id() != session_id
-                                || authorization.turn_id() != turn_id
-                        })
-                    {
-                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                            session_id: session_id.clone(),
-                            turn_id: turn_id.clone(),
-                        });
-                    }
-                    if let Some(closure) = closure
-                        && stored.as_deref() != Some(encode_json(closure)?.as_str())
-                    {
-                        return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                            session_id: session_id.clone(),
-                            turn_id: turn_id.clone(),
-                        });
-                    }
-                    let repaired = repair_orphaned_active_turn_inputs_conn(
-                        tx,
-                        &session_id,
-                        session_execution_lease.fencing_token,
-                        &turn_id,
-                        &observed,
-                        settlement.as_ref(),
-                    )?;
-                    if settlement.is_some()
-                        && matches!(
-                            repaired,
-                            lash_core_execution::TurnCancelRepairResult::Applied(_)
-                        )
-                    {
-                        crate::conn::cached_execute(
-                            tx,
-                            crate::turn_ingress::turn_ingress_sql()
-                                .closures
-                                .delete_by_turn
-                                .sql(),
-                            params![session_id.as_str(), turn_id.as_str()],
-                        )
-                        .map_err(sqlite_error)?;
-                    }
-                    Ok(repaired)
-                })();
-                Ok(match outcome {
-                    Ok(repaired) => TxOutcome::Commit(Ok(repaired)),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)?
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.list_queued_work_sqlite(session_id).await
     }
 
-    async fn abandon_turn_input_claims(
+    async fn list_open_queued_work(
         &self,
-        claims: &[lash_core_execution::TurnInputClaim],
-    ) -> Result<(), StoreError> {
-        if claims.is_empty() {
-            return Ok(());
-        }
-        // FIG-1573: the restored open spelling derives from each row's own
-        // ingress, exactly as the singular sibling resolves it — a next-turn
-        // row restores to `deferred_next_turn`, never `pending_active`. The
-        // whole batch is written in ONE statement inside ONE transaction: a
-        // batch abandon is one caller giving up one set of rows, and a crash
-        // between two statements would leave half the batch claimed by a
-        // claim id the caller has already dropped.
-        // The triples the batch gives up are bound as one JSON array, so the
-        // statement's own text is fixed however many claims there are.
-        let triples = claims
-            .iter()
-            .map(|claim| {
-                [
-                    claim.session_id.as_str(),
-                    claim.claim_id.as_str(),
-                    claim.lease_token.as_str(),
-                ]
-            })
-            .collect::<Vec<_>>();
-        let triples = encode_json(&triples)?;
-        self.conn
-            .write(move |tx| {
-                crate::conn::cached_execute(
-                    tx,
-                    crate::turn_ingress::turn_ingress_sql()
-                        .pending_inputs_sqlite
-                        .abandon_claims
-                        .sql(),
-                    params![
-                        triples,
-                        lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
-                        lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
-                    ],
-                )
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(())
+        session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.list_open_queued_work_sqlite(session_id).await
     }
 }
 

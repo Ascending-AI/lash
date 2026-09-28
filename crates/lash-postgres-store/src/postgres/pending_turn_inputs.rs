@@ -1,4 +1,4 @@
-//! Pending turn-input row projection and turn-input claim leases.
+//! Pending turn-input row projection and host withdrawal.
 //!
 //! The durable representation of queued turn inputs, mirroring the SQLite
 //! backend's `pending_turn_inputs` module. Originated in `session_factory.rs`;
@@ -15,47 +15,9 @@ pub(crate) struct PendingTurnInputRow {
     state: lash_core_execution::TurnInputState,
     input_json: String,
     enqueued_at_ms: u64,
-    claim_id: Option<String>,
-    pub(crate) claim_fencing_token: u64,
-    claim_owner: Option<LeaseOwnerIdentity>,
-    claim_token: Option<String>,
-    claim_session_lease_generation: u64,
+    /// The root whose admission holds the row; `None` while it is open.
+    pub(crate) admitted_root: Option<String>,
     run_spec_hash: Option<String>,
-}
-
-impl PendingTurnInputRow {
-    /// The claim columns the shared claimability verdict consults.
-    ///
-    /// Exposed as one value rather than two fields so a call site cannot pass
-    /// a generation that belongs to a different row's token.
-    pub(crate) fn claim_facts(
-        &self,
-    ) -> lash_core_execution::store_backend_support::WorkRowClaimFacts<'_> {
-        lash_core_execution::store_backend_support::WorkRowClaimFacts {
-            claim_token: self.claim_token.as_deref(),
-            claim_session_lease_generation: self.claim_session_lease_generation,
-            claim_owner_incarnation_id: self
-                .claim_owner
-                .as_ref()
-                .map(|owner| owner.incarnation_id.as_str()),
-        }
-    }
-
-    /// The decoded lifecycle state this row carries.
-    pub(crate) fn state(&self) -> &lash_core_execution::TurnInputState {
-        &self.state
-    }
-
-    /// Whether a claim token names this row, which is the only way its
-    /// generation means anything.
-    pub(crate) fn is_claimed(&self) -> bool {
-        self.claim_token.is_some()
-    }
-
-    /// The session-execution-lease generation this row's claim is pinned to.
-    pub(crate) fn claim_session_lease_generation(&self) -> u64 {
-        self.claim_session_lease_generation
-    }
 }
 
 pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, StoreError> {
@@ -79,22 +41,7 @@ pub(crate) fn pending_turn_input_row(row: PgRow) -> Result<PendingTurnInputRow, 
             "enqueued_at_ms",
             row.get("enqueued_at_ms"),
         )?,
-        claim_id: row.get("claim_id"),
-        claim_fencing_token: u64_from_sql(
-            "PendingTurnInput",
-            "claim_fencing_token",
-            row.get("claim_fencing_token"),
-        )?,
-        claim_owner: lease_owner_from_columns(
-            row.get("claim_owner_id"),
-            row.get("claim_owner_incarnation_id"),
-        )?,
-        claim_token: row.get("claim_token"),
-        claim_session_lease_generation: u64_from_sql(
-            "PendingTurnInput",
-            "claim_session_lease_generation",
-            row.get("claim_session_lease_generation"),
-        )?,
+        admitted_root: row.get("admitted_root"),
         run_spec_hash: row.get("run_spec_hash"),
     })
 }
@@ -119,14 +66,15 @@ pub(crate) fn pending_turn_input_from_row(
 pub(crate) fn pending_turn_input_read_from_row(
     row: PgRow,
 ) -> Result<lash_core_execution::PendingTurnInputRead, StoreError> {
-    let drive_epoch = row
-        .get::<Option<i64>, _>("live_claim_drive_epoch")
-        .map(|value| u64_from_sql("PendingTurnInputRead", "drive_epoch", value))
-        .transpose()?;
-    let input = pending_turn_input_from_row(pending_turn_input_row(row)?)?;
-    Ok(match drive_epoch {
-        Some(drive_epoch) => lash_core_execution::PendingTurnInputRead::held(input, drive_epoch),
-        None => lash_core_execution::PendingTurnInputRead::pending(input),
+    let row = pending_turn_input_row(row)?;
+    let admitted_root = row.admitted_root.clone();
+    let input = pending_turn_input_from_row(row)?;
+    Ok(match admitted_root {
+        Some(root) => lash_core_execution::PendingTurnInputRead::admitted(
+            input,
+            lash_core_execution::TurnId::from(root),
+        ),
+        None => lash_core_execution::PendingTurnInputRead::open(input),
     })
 }
 
@@ -191,23 +139,6 @@ pub(crate) async fn load_pending_turn_input_row_by_target_tx(
     row.map(pending_turn_input_row).transpose()
 }
 
-fn pending_turn_input_claim_diagnostics_from_row(
-    row: &PendingTurnInputRow,
-) -> Option<lash_core_execution::PendingTurnInputClaimDiagnostics> {
-    row.claim_token
-        .is_some()
-        .then(|| lash_core_execution::PendingTurnInputClaimDiagnostics {
-            state: row.state.clone(),
-            claim_id: row.claim_id.clone(),
-            claim_owner: row.claim_owner.clone(),
-            claim_session_lease_generation: row
-                .claim_token
-                .as_ref()
-                .map(|_| row.claim_session_lease_generation),
-            claim_fencing_token: row.claim_fencing_token,
-        })
-}
-
 /// Which rows a cancel locks in queue order before it writes any.
 pub(crate) enum CancelLockScope<'a> {
     /// The resolved explicit targets.
@@ -245,13 +176,15 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
     Ok(())
 }
 
-/// Cancel one locked row.
+/// Withdraw one locked row for the host (FIG-3927): an open row is
+/// cancelled; a row a root admitted is that root's to settle or release, so
+/// the cancel changes nothing and answers the root that holds it.
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
-    _now_epoch_ms: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
-    let mut input = pending_turn_input_from_row(row.clone())?;
+    let admitted_root = row.admitted_root.clone();
+    let mut input = pending_turn_input_from_row(row)?;
     match input.state.kind() {
         lash_core_execution::runtime::TurnInputStateKind::Cancelled => {
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::AlreadyCancelled(input))
@@ -262,46 +195,33 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
         lash_core_execution::runtime::TurnInputStateKind::PendingActive
         | lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn
         | lash_core_execution::runtime::TurnInputStateKind::Accepted => {
-            // A claim is live only while its admitting drive epoch remains current.
-            let live_claim = row.claim_token.is_some()
-                && crate::runtime_persistence::drive_epoch::drive_epoch_tx(tx, &row.session_id)
-                    .await?
-                    .epoch
-                    == row.claim_session_lease_generation;
-            if live_claim {
+            if let Some(root) = admitted_root {
                 return Ok(
-                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
+                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyAdmitted {
                         input,
-                        claim: pending_turn_input_claim_diagnostics_from_row(&row),
+                        root: lash_core_execution::TurnId::from(root),
                     },
                 );
             }
-            // A claimed row of the session's unfinished root is its own to
-            // settle or release, whichever drive epoch claimed it.
-            let root_holds_input = row.claim_token.is_some()
-                && crate::session_roots::unfinished_root_conn(tx, &row.session_id)
-                    .await?
-                    .is_some();
-            if root_holds_input {
-                return Ok(
-                    lash_core_execution::PendingTurnInputCancelOutcome::AlreadyClaimed {
-                        input,
-                        claim: pending_turn_input_claim_diagnostics_from_row(&row),
-                    },
-                );
-            }
-            sqlx::query(
+            let cancelled = sqlx::query(
                 crate::turn_ingress::turn_ingress_sql()
                     .pending_inputs
                     .cancel
                     .sql(),
             )
-            .bind(row.session_id.as_str())
-            .bind(row.input_id.as_str())
+            .bind(input.session_id.as_str())
+            .bind(input.input_id.as_str())
             .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
             .execute(&mut **tx)
             .await
-            .map_err(store_sqlx_error)?;
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+            if cancelled != 1 {
+                return Err(StoreError::Backend(format!(
+                    "open turn input `{}` was not withdrawn under its row lock",
+                    input.input_id
+                )));
+            }
             input.state = lash_core_execution::TurnInputState::Cancelled(input.state.ingress());
             Ok(lash_core_execution::PendingTurnInputCancelOutcome::Cancelled(input))
         }

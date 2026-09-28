@@ -150,12 +150,8 @@ table lash_parent_end_plans
   unique (obligation_id)
   primary-key (parent_kind, parent_id)
 table lash_pending_turn_inputs
-  column claim_fencing_token bigint not-null default
-  column claim_id text nullable
-  column claim_owner_id text nullable
-  column claim_owner_incarnation_id text nullable
-  column claim_session_lease_generation bigint not-null default
-  column claim_token text nullable
+  column admitted_by text nullable
+  column admitted_root text nullable
   column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null
   column ingress_json text not-null
@@ -305,13 +301,10 @@ table lash_processes
   unique (start_obligation_id)
   primary-key (process_id)
 table lash_queued_work_batches
+  column admitted_by text nullable
+  column admitted_root text nullable
   column authority_json text not-null
   column batch_id text not-null
-  column claim_fencing_token bigint not-null default
-  column claim_id text nullable
-  column claim_owner_incarnation_id text nullable
-  column claim_session_lease_generation bigint not-null default
-  column claim_token text nullable
   column delivery_policy text not-null
   column enqueue_seq bigint not-null
   column enqueued_at_ms bigint not-null

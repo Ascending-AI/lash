@@ -159,7 +159,7 @@ pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_root
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
         backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
-        lash_core::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
+        lash_core::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
     );
     config.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(transport.clone().into_handle()),
@@ -328,7 +328,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     // (ADR 0101 §5).
     assert_eq!(
         *boundary,
-        lash_core::testing::runtime_internals::QueuedWorkClaimBoundary::Idle
+        lash_core::testing::runtime_internals::AdmissionBoundary::Idle
     );
     assert!(causes.iter().any(|cause| {
         cause.event_type == "process.wake"
@@ -361,7 +361,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         "durable wake events must not be bridged as injected plugin messages"
     );
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &sid("root"))
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &sid("root"))
             .await
             .expect("queued work after commit")
             .is_empty()
@@ -745,7 +745,7 @@ pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
     // This exhaustive match is the type-level ingress proof: generic queued
     // work has no model-visible TurnInput representation. Persisted user input
     // therefore has to cross the dedicated PendingTurnInputDraft/
-    // TurnInputStore seam used by `LashRuntime::enqueue_turn_input`.
+    // IngressStore seam used by `LashRuntime::enqueue_turn_input`.
     fn work_class(
         payload: &lash_core::testing::runtime_internals::QueuedWorkPayload,
     ) -> lash_core::store::QueuedWorkClass {
@@ -1324,7 +1324,7 @@ pub(super) async fn a_mid_run_generation_patch_merges_like_the_spec_overlay_does
 
 /// The storeless half of the empty-drain contract: with no durable store the
 /// queue does not exist at all, and the drain must say so by name. Reporting
-/// `ExecutionLaneBusy` or `ClaimRefused` here would tell the host to retry or
+/// `ExecutionLaneBusy` or `AdmissionRefused` here would tell the host to retry or
 /// abandon work that was never queued.
 #[tokio::test(flavor = "multi_thread")]
 pub(super) async fn an_automatic_drain_without_a_durable_queue_says_so() {
@@ -1368,7 +1368,7 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
 
     assert_eq!(store.load_session_count(), full_loads_before);
     assert_eq!(store.load_session_head_meta_count(), head_reads_before);
-    let pending = lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &sid("root"))
+    let pending = lash_core::store::IngressStore::list_queued_work(store.as_ref(), &sid("root"))
         .await
         .expect("inspect deferred durable command");
     assert_eq!(pending.len(), 1);
@@ -1418,8 +1418,8 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
     assert!(matches!(
         idle,
         lash_core::facade_support::QueuedTurnDrain::Empty(
-            lash_core::facade_support::EmptyQueuedDrainReason::ClaimRefused(
-                lash_core::QueuedWorkClaimRefusal::Empty
+            lash_core::facade_support::EmptyQueuedDrainReason::AdmissionRefused(
+                lash_core::AdmissionRefusal::Empty
             )
         )
     ));
@@ -1497,7 +1497,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
         "the first root's claim took both inputs, so a later drain has nothing to run"
     );
     assert_eq!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)
+        lash_core::store::IngressStore::list_turn_input_applications(store.as_ref(), &session)
             .await
             .expect("read the applied inputs")
             .len(),

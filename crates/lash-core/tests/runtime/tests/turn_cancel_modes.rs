@@ -504,7 +504,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
             );
             let turn_id = format!("matrix-{mode:?}-{disposition:?}").to_ascii_lowercase();
-            let undelivered = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
+            let undelivered = lash_core::store::IngressStore::enqueue_pending_turn_input(
                 store.as_ref(),
                 lash_core::PendingTurnInputDraft::new(
                     &session_id,
@@ -561,7 +561,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 vec![(undelivered.input_id.clone(), disposition)],
                 "{mode:?}/{disposition:?}: the disposition applies to the undelivered active-turn input"
             );
-            let pending: Vec<_> = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+            let pending: Vec<_> = lash_core::store::IngressStore::list_pending_turn_inputs(
                 store.as_ref(),
                 &session_id,
             )
@@ -676,7 +676,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             );
         }
         let pending: Vec<_> =
-            lash_core::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+            lash_core::store::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
                 .await
                 .expect("pending inputs")
                 .into_iter()

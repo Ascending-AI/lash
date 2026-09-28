@@ -1,6 +1,6 @@
 //! L-D1 through L-D4: the recorded session close and its retained tombstone.
 
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -346,7 +346,7 @@ pub(super) async fn pin_a_turn_cancel_closure(
     id: &SessionId,
 ) {
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             id,
             &crate::LeaseOwnerIdentity::opaque("close-law", "close-law:incarnation"),
             "close-law:executor",
@@ -361,7 +361,7 @@ pub(super) async fn pin_a_turn_cancel_closure(
     let binding = crate::turn_control_binding_id_for_scope("s7c-close-law", &scope)
         .expect("bind closure scope");
     store
-        .validate_turn_cancellation_binding(id, &lease.fence(), &binding, &scope)
+        .validate_turn_cancellation_binding(id, &lease, &binding, &scope)
         .await
         .expect("validate closure binding");
     let key = |suffix: &str, wait| crate::AwaitEventKey {
@@ -382,11 +382,11 @@ pub(super) async fn pin_a_turn_cancel_closure(
         key("terminal", crate::AwaitEventWaitIdentity::TurnTerminal),
         crate::TurnCancelClosureProposal::CompletionSealed,
         crate::TurnCancelIntentSnapshot::Absent,
-        &lease.fence(),
+        &lease,
     )
     .expect("construct closure authorization");
     store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await
         .expect("pin the session");
 }

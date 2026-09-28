@@ -118,71 +118,87 @@ fn append_identity_refuses_non_append_operation_key() {
     ));
 }
 
-#[test]
-fn claim_settlement_refuses_foreign_completions_in_both_directions() {
-    let mut commit = intent_fixture();
-    commit.completed_queue_claims = vec![crate::QueuedWorkCompletion {
-        session_id: commit.session_id.clone(),
-        claim_id: "foreign-queue".to_string(),
-        lease_token: "token".to_string(),
-        data: crate::QueuedWorkCompletionData {
+fn ingress_fixture(commit: &RuntimeCommit) -> IngressSettlement {
+    IngressSettlement {
+        root: crate::TurnId::from("root-turn"),
+        completed_inputs: vec![crate::TurnInputCompletion {
+            session_id: commit.session_id.clone(),
+            data: crate::TurnInputCompletionData {
+                input_ids: vec!["input".into()],
+                applications: Vec::new(),
+            },
+        }],
+        completed_batches: vec![crate::QueuedWorkCompletion {
+            session_id: commit.session_id.clone(),
             batch_ids: vec!["batch".into()],
-        },
-    }];
-    let queue_error = commit
-        .validate_claim_settlement(&[], &[])
-        .expect_err("foreign queued-work completion must be refused");
+        }],
+        released: Vec::new(),
+        dropped: Vec::new(),
+    }
+}
+
+#[test]
+fn ingress_settlement_requires_the_drive_fence() {
+    let mut commit = intent_fixture();
+    commit.ingress = Some(ingress_fixture(&commit));
+    let error = commit
+        .validate_ingress_settlement()
+        .expect_err("a settlement without a drive fence must be refused");
     assert!(matches!(
-        queue_error,
-        StoreError::ForeignQueuedWorkCompletion { ref claim_id, .. }
-            if claim_id == "foreign-queue"
+        error,
+        StoreError::IngressSettlementUnfenced { ref session_id } if *session_id == commit.session_id
     ));
 
-    commit.completed_queue_claims.clear();
-    commit.completed_turn_input_claims = vec![crate::TurnInputCompletion {
+    commit.ingress = None;
+    commit.applied_commands = Some(crate::QueuedWorkCompletion {
         session_id: commit.session_id.clone(),
-        claim: Some(crate::TurnInputSettlementClaim {
-            claim_id: "foreign-input".to_string(),
-            lease_token: "token".to_string(),
-        }),
-        data: crate::TurnInputCompletionData {
-            input_ids: vec!["input".into()],
-            applications: Vec::new(),
-        },
-    }];
-    let input_error = commit
-        .validate_claim_settlement(&[], &[])
-        .expect_err("foreign turn-input completion must be refused");
+        batch_ids: vec!["command".into()],
+    });
     assert!(matches!(
-        input_error,
-        StoreError::ForeignTurnInputCompletion { ref claim_id, .. }
-            if claim_id == "foreign-input"
+        commit.validate_ingress_settlement(),
+        Err(StoreError::IngressSettlementUnfenced { .. })
     ));
 }
 
 #[test]
-fn claim_settlement_refuses_duplicate_completion_count() {
+fn ingress_settlement_refuses_a_row_named_twice() {
     let mut commit = intent_fixture();
-    let completion = crate::QueuedWorkCompletion {
-        session_id: commit.session_id.clone(),
-        claim_id: "originating-queue".to_string(),
-        lease_token: "token".to_string(),
-        data: crate::QueuedWorkCompletionData {
-            batch_ids: vec!["batch".into()],
-        },
-    };
-    commit.completed_queue_claims = vec![completion.clone(), completion.clone()];
-
+    commit.drive_fence = Some(Box::new(crate::store_backend_support::sealed_drive_fence(
+        commit.session_id.clone(),
+        1,
+        AdmissionId::new("admission"),
+    )));
+    let mut ingress = ingress_fixture(&commit);
+    ingress.released.push(IngressRowId::Batch("batch".into()));
+    commit.ingress = Some(ingress);
     let error = commit
-        .validate_claim_settlement(&[completion], &[])
-        .expect_err("duplicate queued-work completion must be refused");
+        .validate_ingress_settlement()
+        .expect_err("a row completed and released must be refused");
     assert!(matches!(
         error,
-        StoreError::ClaimSettlementCountMismatch {
-            claim_kind: "queued-work",
-            originating_count: 1,
-            completed_count: 2,
-        }
+        StoreError::IngressSettlementDuplicate { ref row, .. }
+            if **row == IngressRowId::Batch("batch".into())
+    ));
+}
+
+#[test]
+fn ingress_settlement_refuses_a_completion_minted_for_another_session() {
+    let mut commit = intent_fixture();
+    commit.drive_fence = Some(Box::new(crate::store_backend_support::sealed_drive_fence(
+        commit.session_id.clone(),
+        1,
+        AdmissionId::new("admission"),
+    )));
+    let mut ingress = ingress_fixture(&commit);
+    ingress.completed_inputs[0].session_id = SessionId::from("foreign-session");
+    commit.ingress = Some(ingress);
+    let error = commit
+        .validate_ingress_settlement()
+        .expect_err("a foreign completion must be refused");
+    assert!(matches!(
+        error,
+        StoreError::IngressRowNotAdmitted { ref row, admitted_root: None, .. }
+            if **row == IngressRowId::Input("input".into())
     ));
 }
 
@@ -347,12 +363,8 @@ fn with_operation_returns_the_append_id_mapping() {
 #[test]
 fn legacy_hash_reproduces_random_committed_message_id_conflict() {
     let mut first = intent_fixture();
-    first.completed_turn_input_claims = vec![crate::TurnInputCompletion {
+    let completion = crate::TurnInputCompletion {
         session_id: SessionId::from("golden-session"),
-        claim: Some(crate::TurnInputSettlementClaim {
-            claim_id: "claim-a".to_string(),
-            lease_token: "lease-a".to_string(),
-        }),
         data: crate::TurnInputCompletionData {
             input_ids: vec!["input-1".into()],
             applications: vec![crate::TurnInputApplication {
@@ -363,10 +375,23 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
                 checkpoint: None,
             }],
         },
-    }];
+    };
+    first.ingress = Some(IngressSettlement {
+        root: crate::TurnId::from("turn-42"),
+        completed_inputs: vec![completion],
+        completed_batches: Vec::new(),
+        released: Vec::new(),
+        dropped: Vec::new(),
+    });
     let mut replay = first.clone();
-    replay.completed_turn_input_claims[0].applications[0].committed_message_id =
-        "random-attempt-b".to_string();
+    replay
+        .ingress
+        .as_mut()
+        .expect("replay settles ingress")
+        .completed_inputs[0]
+        .data
+        .applications[0]
+        .committed_message_id = "random-attempt-b".to_string();
 
     assert_ne!(
         legacy_turn_commit_hash(&first),
@@ -943,12 +968,7 @@ fn decorator_surface_covers_every_component_trait_method() {
     let root = include_str!("root.rs");
 
     let mut declared = declared_methods(attachment_manifest, "AttachmentManifest");
-    for trait_name in [
-        "SessionCommitStore",
-        "TurnInputStore",
-        "QueuedWorkStore",
-        "StoreMaintenance",
-    ] {
+    for trait_name in ["SessionCommitStore", "IngressStore", "StoreMaintenance"] {
         declared.extend(declared_methods(store_mod, trait_name));
     }
     declared.extend(declared_methods(drive_fence, "DriveEpochStore"));

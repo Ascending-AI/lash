@@ -248,7 +248,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(crate) fn checkpoint_claim_counts(&self) -> (usize, usize) {
+    pub(crate) fn checkpoint_admission_counts(&self) -> (usize, usize) {
         (
             self.checkpoint_probe_count
                 .load(std::sync::atomic::Ordering::Relaxed),

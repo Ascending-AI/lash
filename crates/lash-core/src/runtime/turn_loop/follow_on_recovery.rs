@@ -5,8 +5,8 @@
 //! head. When the drive that wrote it runs on, the logical run takes the
 //! follow-on inline and nothing here is involved. When that drive died
 //! between the switch commit and the follow-on's terminal commit, the next
-//! drive recovers it here, before it claims anything: every claim but the
-//! follow-on's own is blocked while it is owed anyway.
+//! drive recovers it here, before it admits anything: every admission but
+//! the follow-on's own is blocked while it is owed anyway.
 //!
 //! The session drive's admission admits an owed follow-on as a root of its
 //! own, named by the recovery count it records
@@ -32,7 +32,7 @@ impl LashRuntime {
     async fn recover_pending_follow_on(
         &mut self,
         store: &dyn crate::store::RuntimePersistence,
-        fence: &crate::ClaimAuthority,
+        fence: &DriveFence,
         recorded: Option<u32>,
     ) -> Result<crate::store::FollowOnRecovery, RuntimeError> {
         let owed = self
@@ -92,7 +92,7 @@ impl LashRuntime {
         follow_on: &TurnId,
         recorded: u32,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
-        let Some(lease) = self.claim_drive_authority_for_queued_work(&opts).await? else {
+        let Some(fence) = self.drive_root.as_ref().map(|root| root.fence.clone()) else {
             return Ok(QueuedTurnDrain::Empty(
                 EmptyQueuedDrainReason::ExecutionLaneBusy,
             ));
@@ -108,7 +108,7 @@ impl LashRuntime {
                         "a follow-on recovery requires persistence",
                     )
                 })?;
-            self.refresh_resident_head_under_lease(Some(&lease)).await?;
+            self.refresh_resident_head().await?;
             if !self
                 .state
                 .pending_follow_on
@@ -117,7 +117,7 @@ impl LashRuntime {
             {
                 return Ok(None);
             }
-            self.recover_pending_follow_on(store.as_ref(), &lease.fence(), Some(recorded))
+            self.recover_pending_follow_on(store.as_ref(), &fence, Some(recorded))
                 .await
                 .map(Some)
         }
@@ -125,19 +125,15 @@ impl LashRuntime {
         let recovery = match prepared {
             Ok(Some(recovery)) => recovery,
             Ok(None) => {
-                let _ = lease.release_if_live().await;
                 return Ok(QueuedTurnDrain::Empty(
-                    EmptyQueuedDrainReason::ClaimRefused(
-                        crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                    EmptyQueuedDrainReason::AdmissionRefused(
+                        crate::AdmissionRefusal::AdmissionRaceLost,
                     ),
                 ));
             }
-            Err(error) => {
-                let _ = lease.release_if_live().await;
-                return Err(error);
-            }
+            Err(error) => return Err(error),
         };
-        Box::pin(self.drive_recovered_follow_on(recovery, &opts, lease)).await
+        Box::pin(self.drive_recovered_follow_on(recovery, &opts, fence)).await
     }
 
     /// Drive a recovered follow-on as a logical run of its own, continuing
@@ -150,7 +146,7 @@ impl LashRuntime {
         &mut self,
         recovery: crate::store::FollowOnRecovery,
         queued_opts: &QueuedTurnOptions<'_>,
-        lease: DriveClaimGuard,
+        fence: DriveFence,
     ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
         let (start, owed) = match recovery {
             crate::store::FollowOnRecovery::Run(owed) => {
@@ -170,31 +166,23 @@ impl LashRuntime {
                 format!("follow-on:{}", owed.follow_on_turn_id),
             )
         });
-        let opts = match queued_opts.bind(scope) {
-            Ok(opts) => opts,
-            Err(error) => {
-                let _ = lease.release_if_live().await;
-                return Err(error);
-            }
-        };
-        let mut lease = Some(lease);
-        let result = self
+        let opts = queued_opts.bind(scope)?;
+        let run = self
             .drive_logical_turn(
                 start,
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),
                 opts.local_stop().clone(),
-                LogicalTurnClaims::new(Vec::new(), Vec::new()),
-                &mut lease,
+                LogicalTurnAdmissions::new(Vec::new(), Vec::new()),
+                Some(&fence),
                 TurnStopwatch::start(self.host.core.clock.as_ref()),
             )
-            .await;
-        let run = self.settle_drive_authority(lease.as_ref(), result).await?;
+            .await?;
         Ok(match run.into_final_turn() {
             Some(turn) => QueuedTurnDrain::Ran(turn),
-            None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
-                crate::QueuedWorkClaimRefusal::FollowOnPending,
+            None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::AdmissionRefused(
+                crate::AdmissionRefusal::FollowOnPending,
             )),
         })
     }

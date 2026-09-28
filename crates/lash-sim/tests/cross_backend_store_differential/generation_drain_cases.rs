@@ -136,7 +136,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             lash_core::store::AdmittedHead::Batch(
                 store
                     .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(
-                        claim_observability_wake(&session_id),
+                        admission_observability_wake(&session_id),
                     ))
                     .await
                     .expect("enqueue the head batch")
@@ -160,7 +160,7 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             format!("{nonce}-{name}:incarnation"),
         );
         let lease = store
-            .seal_claim_epoch_for_test(
+            .seal_drive_epoch_for_test(
                 &session_id,
                 &owner,
                 &format!("{nonce}-{name}-executor"),
@@ -171,25 +171,11 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
             .acquired()
             .expect("drive seal");
         let root = lash_core::TurnId::from(format!("{nonce}-{name}"));
+        let mut request =
+            lash_core::testing::store_fixtures::admit_root_request_for_test(&lease, &root, head);
+        request.admitted_generation = stamp.clone();
         store
-            .admit_root(&lash_core::store::AdmitRootRequest {
-                session_id: session_id.clone(),
-                lease: lease.fence(),
-                owner: lease.owner.clone(),
-                root: root.clone(),
-                head,
-                max_inputs: 64,
-                policy: lash_core::testing::queued_work_claim_policy(64),
-                base: lash_core::store::SessionHeadRef {
-                    generation: 0,
-                    revision: 0,
-                    leaf: None,
-                    checkpoint: None,
-                },
-                turn_index: 1,
-                generation: None,
-                admitted_generation: stamp.clone(),
-            })
+            .admit_root(&request)
             .await
             .expect("admit the root")
             .expect("the root reaches its head");

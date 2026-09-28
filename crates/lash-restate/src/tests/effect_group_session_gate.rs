@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_core::store::StoreTestSupport as _;
-use lash_core::store::{SessionCommitStore as _, TurnInputStore as _};
+use lash_core::store::{IngressStore as _, SessionCommitStore as _};
 use lash_core::{
     EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,

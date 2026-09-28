@@ -1081,7 +1081,7 @@ impl ActiveTurnControl {
         &self,
         binding_id: impl Into<String>,
         admitted_scope: ExecutionScope,
-        fence: &crate::ClaimAuthority,
+        fence: &crate::store::DriveFence,
         observed_intent: TurnCancelIntentSnapshot,
         honoured: Option<&TurnCancellationEvidence>,
         assembled: Option<TurnCancellationEvidence>,
@@ -1285,54 +1285,6 @@ impl ActiveTurnControl {
     /// The turn this handle controls.
     pub fn address(&self) -> &TurnAddress {
         &self.address
-    }
-
-    /// Observe the current effective gate winner without closing escalation.
-    /// Ordinary request projection uses this after a row-CAS refusal while the
-    /// turn is still live and future `AfterStep` to `Immediate` escalation
-    /// remains valid.
-    async fn peek_effective_cancel_decision(
-        resolver: &dyn AwaitEventResolver,
-        address: &TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
-        let key = match cancel_gate_key(resolver, address).await {
-            Ok(key) => key,
-            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
-                return Ok(None);
-            }
-            Err(err) => return Err(err),
-        };
-        let resolution = match resolver.peek_await_event(&key).await {
-            Ok(resolution) => resolution,
-            Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
-                return Ok(None);
-            }
-            Err(err) => return Err(err),
-        };
-        let Some(terminal) = resolution.map(decode_gate).transpose()? else {
-            return Ok(Some(crate::TurnCancelRepairDecision::NoCancellationIntent));
-        };
-        Ok(Some(match terminal {
-            TurnGateTerminal::CancelRequested(evidence) => {
-                crate::TurnCancelRepairDecision::CancellationWon(
-                    effective_cancel_evidence(resolver, address, evidence).await?,
-                )
-            }
-            TurnGateTerminal::CompletionSealed => {
-                crate::TurnCancelRepairDecision::CancellationDidNotWin
-            }
-        }))
-    }
-
-    /// Observe the current gate pair for orphan-input repair without changing
-    /// either promise. The caller's store transaction supplies the lease and
-    /// intent fences; an expired repair owner must not close shared escalation
-    /// authority before that transaction can reject it.
-    pub async fn peek_orphan_repair_decision(
-        resolver: &dyn AwaitEventResolver,
-        address: &TurnAddress,
-    ) -> Result<Option<crate::TurnCancelRepairDecision>, RuntimeError> {
-        Self::peek_effective_cancel_decision(resolver, address).await
     }
 
     /// Execution-side only: wait until the gate pair asks this turn to stop

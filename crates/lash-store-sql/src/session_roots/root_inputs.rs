@@ -1,5 +1,5 @@
 //! `session_root_inputs`: the root each accepted input of a session is bound
-//! to. The recorded claim step binds the rows it claimed; a fork rebinds
+//! to. The recorded admission step binds the rows it admitted; a fork rebinds
 //! held inputs to its new root.
 
 /// The table's unprefixed name.

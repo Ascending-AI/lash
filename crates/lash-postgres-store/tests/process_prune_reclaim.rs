@@ -6,7 +6,7 @@
 //! This lives in its own test target rather than the conformance suite, which is
 //! at its line budget.
 
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
 use std::sync::Arc;
 
 use lash_core_execution::{
@@ -205,7 +205,7 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
         .await
         .expect("enqueue pending input");
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &session_id,
             &lash_core_execution::LeaseOwnerIdentity::opaque(
                 "prune-run-owner",
@@ -219,26 +219,13 @@ async fn postgres_process_prune_removes_an_admitted_roots_record() {
         .acquired()
         .expect("drive sealed");
     let admission = store
-        .admit_root(&lash_core_execution::store::AdmitRootRequest {
-            session_id: session_id.clone(),
-            lease: lease.fence(),
-            owner: lease.owner.clone(),
-            root: lash_core_execution::TurnId::from("prune-root"),
-            head: lash_core_execution::store::AdmittedHead::Input(input.input_id.clone()),
-            max_inputs: 64,
-            policy: lash_core_execution::testing::queued_work_claim_policy(64),
-            base: lash_core_execution::store::SessionHeadRef {
-                generation: 0,
-                revision: 0,
-                leaf: None,
-                checkpoint: None,
-            },
-            turn_index: 1,
-            generation: None,
-            admitted_generation: lash_core_execution::engine::BuildGeneration::for_test(
-                "conformance",
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                &lease,
+                &lash_core_execution::TurnId::from("prune-root"),
+                lash_core_execution::store::AdmittedHead::Input(input.input_id.clone()),
             ),
-        })
+        )
         .await
         .expect("admit the root")
         .expect("the root reaches its head");

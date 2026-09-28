@@ -35,10 +35,33 @@ fn unreported_usage_attempts(
         .collect()
 }
 
+/// Trace a final commit whose head compare-and-set the store rejected,
+/// naming the runtime that attempted it.
+fn trace_commit_cas_rejected(
+    session_id: &crate::SessionId,
+    writer: &crate::LeaseOwnerIdentity,
+    executor_id: &str,
+    error: &crate::StoreError,
+) {
+    let crate::StoreError::HeadRevisionConflict { expected, actual } = error else {
+        return;
+    };
+    tracing::warn!(
+        session_id = %session_id,
+        owner_id = %writer.owner_id,
+        incarnation_id = %writer.incarnation_id,
+        executor_id,
+        expected_head_revision = expected,
+        actual_head_revision = actual,
+        event = "session_head.commit_cas_rejected",
+        "the commit's head compare-and-set was rejected"
+    );
+}
+
 /// Select the exact closure operation a recovered turn must finish.
 ///
-/// A successor lease may settle and consume this persisted operation, but may
-/// not replace it with an authorization carrying its new fencing token. The
+/// A successor drive may settle and consume this persisted operation, but may
+/// not replace it with an authorization carrying its new drive epoch. The
 /// binding and admitted physical scope remain part of the authorization being
 /// adopted, so recovery cannot broaden the original authority.
 pub(super) fn recovered_turn_cancel_closure(
@@ -82,13 +105,11 @@ struct PreparedTurn {
 }
 
 /// What the final commit writes: the session it advances, the usage it stages,
-/// the claim settlement it carries, and the lease it is fenced by.
+/// and the ingress settlement it carries under its root's drive fence.
 struct TurnCommitRequest<'commit> {
     session: Option<&'commit mut Session>,
     staged_usage: session_manager::StagedTokenLedger,
     commit_effects: super::logical_turn::LogicalTurnCommitEffects,
-    session_execution_lease: Option<&'commit DriveClaimGuard>,
-    release_session_execution_lease: bool,
     trace_turn_id: &'commit TurnId,
     recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
     interrupted_turn_input_cancellation: Option<crate::TurnCancellationEvidence>,
@@ -166,8 +187,6 @@ impl PreparedTurn {
             session,
             staged_usage,
             commit_effects,
-            session_execution_lease,
-            release_session_execution_lease,
             trace_turn_id,
             recorded_attachment_intent_ids,
             interrupted_turn_input_cancellation,
@@ -184,8 +203,7 @@ impl PreparedTurn {
             &mut self.turn,
             session,
             staged_usage.deltas(),
-            commit_effects.claim_settlement,
-            session_execution_lease.map(DriveClaimGuard::fence),
+            commit_effects.ingress_settlement,
             commit_effects.pending_follow_on,
             // Any active-turn input that missed the turn's final
             // checkpoint must become the next ordinary user turn.
@@ -195,7 +213,6 @@ impl PreparedTurn {
             turn_cancel_closure_settlement,
             Some(turn_control_resolver),
             recorded_attachment_intent_ids,
-            None,
         ))
         .await;
         let accepted = match accepted {
@@ -233,12 +250,6 @@ impl PreparedTurn {
             resident_state: self.turn_pipeline.into_final_state(),
             accepted,
             staged_usage,
-            release_session_execution_lease,
-            retained_lease_continuity: if release_session_execution_lease {
-                None
-            } else {
-                session_execution_lease.and_then(DriveClaimGuard::continuity)
-            },
         })
     }
 }
@@ -253,8 +264,6 @@ struct CommittedTurn {
     resident_state: RuntimeSessionState,
     accepted: AcceptedTurnCommit,
     staged_usage: session_manager::StagedTokenLedger,
-    release_session_execution_lease: bool,
-    retained_lease_continuity: Option<DriveClaimContinuity>,
 }
 
 impl TypedTurnPhase for CommittedTurn {
@@ -269,18 +278,9 @@ impl CommittedTurn {
         self,
         runtime: &mut LashRuntime,
         trace_turn_id: &TurnId,
-        session_execution_lease: Option<&DriveClaimGuard>,
     ) -> Result<PostCommitDelivery, crate::StoreError> {
         let confirmed_usage = self.accepted.into_confirmed_usage();
         self.staged_usage.confirm_identities(&confirmed_usage)?;
-        if self.release_session_execution_lease
-            && let Some(lease) = session_execution_lease
-        {
-            lease.mark_released();
-        }
-        runtime
-            .resident_session
-            .retain_committed_lease_continuity(self.retained_lease_continuity);
         runtime.install_resident_state(self.resident_state);
         let observation_revision =
             crate::runtime::observation::observation_revision(&runtime.state);
@@ -296,16 +296,16 @@ impl CommittedTurn {
 }
 
 /// What the commit phase needs to settle one physical turn: the assembled turn
-/// itself, the claims it must settle, and the lease and control handles the
-/// settlement runs under.
+/// itself, the admitted rows it must settle, and the drive fence and control
+/// handles the settlement runs under.
 pub(in crate::runtime) struct TurnCommitContext<'commit, 'run> {
     pub(in crate::runtime) finish: TurnFinishInput,
-    pub(in crate::runtime) claims: &'commit LogicalTurnClaims,
+    pub(in crate::runtime) admissions: &'commit LogicalTurnAdmissions,
     pub(in crate::runtime) scoped_effect_controller: &'commit ScopedEffectController<'run>,
     /// The cancellation the turn recorded honouring, if any: a journaled
     /// peek's answer, never a live token (FIG-3672 P9).
     pub(in crate::runtime) honoured_cancel: Option<crate::TurnCancellationEvidence>,
-    pub(in crate::runtime) lease: TurnLeaseScope<'commit>,
+    pub(in crate::runtime) drive_fence: Option<&'commit DriveFence>,
     pub(in crate::runtime) turn_control: &'commit ActiveTurnControl,
     /// What the turn publishes through. The terminal publication waits
     /// until the host has received every event the turn queued (see
@@ -319,7 +319,7 @@ pub(super) struct CancelledTurnFinishContext<'cancel, 'run> {
     pub(super) driver: TurnDriverRemainder,
     pub(super) cancellation_messages: crate::MessageSequence,
     pub(super) finish_scoped_effect_controller: &'cancel ScopedEffectController<'run>,
-    pub(super) lease: TurnLeaseScope<'cancel>,
+    pub(super) drive_fence: Option<&'cancel DriveFence>,
     pub(super) turn_control: &'cancel ActiveTurnControl,
     pub(super) turn_index: usize,
     pub(super) trace_turn_id: TurnId,
@@ -338,8 +338,8 @@ pub(in crate::runtime) struct LogicalTurnErrorContext<'error, 'run> {
     pub(in crate::runtime) delivered_task: Option<String>,
     pub(in crate::runtime) sinks: TurnSinks<'error>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
-    pub(in crate::runtime) claims: LogicalTurnClaims,
-    pub(in crate::runtime) session_execution_lease: Option<&'error DriveClaimGuard>,
+    pub(in crate::runtime) admissions: LogicalTurnAdmissions,
+    pub(in crate::runtime) drive_fence: Option<&'error DriveFence>,
 }
 
 impl LashRuntime {
@@ -349,14 +349,10 @@ impl LashRuntime {
     ) -> Result<PhysicalTurnExecution, RuntimeError> {
         let TurnCommitContext {
             finish,
-            claims,
+            admissions,
             scoped_effect_controller,
             honoured_cancel,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+            drive_fence,
             turn_control,
             observer,
         } = context;
@@ -426,10 +422,6 @@ impl LashRuntime {
             Some(TurnOutcome::Stopped(TurnStop::Cancelled { evidence })) => Some(evidence.clone()),
             _ => None,
         };
-        let lease_was_lost = session_execution_lease.is_some_and(|lease| lease.is_lost());
-        // A lost lease never turns a recorded cancellation into a proposal of
-        // this worker's: the commit's head CAS arbitrates the race.
-        let honoured_cancel = honoured_cancel.filter(|_| !lease_was_lost);
         let mut interrupted_turn_cancel_intent =
             match self.session.as_ref().and_then(Session::history_store) {
                 Some(store) => Some(
@@ -445,10 +437,10 @@ impl LashRuntime {
             };
         let turn_cancel_closure_authorization = match (
             self.session.as_ref().and_then(Session::history_store),
-            session_execution_lease,
+            drive_fence,
             interrupted_turn_cancel_intent.clone(),
         ) {
-            (Some(store), Some(lease), Some(observed)) => {
+            (Some(store), Some(fence), Some(observed)) => {
                 let address = crate::TurnAddress::new(&self.state.session_id, &trace_turn_id);
                 let admitted_scope = crate::runtime::effect::executor::admitted_turn_cancel_scope(
                     &address,
@@ -457,9 +449,9 @@ impl LashRuntime {
                 );
                 if let Some(authorization) = recovered_turn_cancel_closure(
                     store
-                        // Finalization may outlive the advisory lease. The exact
-                        // persisted operation is matched to this address, binding,
-                        // and scope below; activation's live-lease check is separate.
+                        // The exact persisted operation is matched to this
+                        // address, binding, and scope below; activation's fence
+                        // check is separate.
                         .pending_turn_cancel_closure_pins()
                         .await
                         .map_err(runtime_error_from_store_commit)?,
@@ -474,13 +466,13 @@ impl LashRuntime {
                         let authorization = turn_control.closure_authorization(
                             &turn_control_binding_id,
                             admitted_scope.clone(),
-                            &lease.fence(),
+                            fence,
                             observed.clone(),
                             honoured_cancel.as_ref(),
                             assembled_cancellation.clone(),
                         )?;
                         match store
-                            .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                            .authorize_turn_cancel_closure(fence, &authorization)
                             .await
                         {
                             Ok(_) => {
@@ -526,9 +518,8 @@ impl LashRuntime {
             }
         };
         // Interruption derives from the sealed gate evidence. When a durable
-        // cancel races lease loss, the final commit's head CAS and any claim
-        // batch-ownership checks are the arbiters. Lease loss alone does not
-        // reject a current-head commit.
+        // cancel races a successor drive, the final commit's drive fence and
+        // head CAS are the arbiters.
         let interrupted = cancellation.is_some();
 
         turn_pipeline.finalize_turn_read_state(new_messages, interrupted);
@@ -603,10 +594,9 @@ impl LashRuntime {
         };
 
         let plugins = Arc::clone(session.plugins());
-        let manager = match self.runtime_session_services_for_turn(
-            session_execution_lease,
-            turn_pipeline.graph_appends(),
-        ) {
+        let manager = match self
+            .runtime_session_services_for_turn(drive_fence, turn_pipeline.graph_appends())
+        {
             Ok(manager) => manager,
             Err(err) => {
                 return Err(RuntimeError::new(
@@ -639,14 +629,6 @@ impl LashRuntime {
             turn: returned_turn,
             events: finalized.events,
         };
-        let release_session_execution_lease = session_execution_lease_release_policy
-            .should_release(
-                prepared.outcome(),
-                claims.carries_follow_on_work(matches!(
-                    prepared.outcome(),
-                    TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-                )),
-            );
         // The follow-on this turn's terminal commit leaves on the head: a frame
         // switch writes it, and any other outcome of the turn it names clears
         // it (ADR 0101 §3).
@@ -661,17 +643,31 @@ impl LashRuntime {
                 return Err(err);
             }
         };
-        let commit_effects = claims.commit_effects(
-            prepared.outcome(),
-            &self.journaled_drive_claims,
-            pending_follow_on,
-        );
+        let commit_effects = admissions.commit_effects(prepared.outcome(), pending_follow_on);
+        // A physical turn the logical run continues after — a frame switch,
+        // or withheld work a follow-on turn drives — keeps its drive for the
+        // observers of its commit; a final one leaves them drive-less.
+        let continues_run = matches!(prepared.outcome(), TurnOutcome::AgentFrameSwitch { .. })
+            || admissions.carries_follow_on_work(matches!(
+                prepared.outcome(),
+                TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+            ));
+        let settlement_trace = self.drive_root.as_ref().map(|root| {
+            commit_effects.ingress_settlement.clone().into_ingress(
+                root.root().clone(),
+                cancellation
+                    .as_ref()
+                    .map_or(crate::TurnCancelDisposition::Defer, |evidence| {
+                        evidence.undelivered
+                    }),
+            )
+        });
         // Under an admitted root, the commit presents the root's drive fence
         // and, when this turn ends the root, writes its terminal evidence
         // (FIG-3600 S7).
         let drive_commit = self.drive_root.as_ref().and_then(|root| {
             let owes_follow_on = commit_effects.pending_follow_on.is_some()
-                || claims.carries_follow_on_work(matches!(
+                || admissions.carries_follow_on_work(matches!(
                     prepared.outcome(),
                     TurnOutcome::Stopped(TurnStop::Cancelled { .. })
                 ));
@@ -679,7 +675,7 @@ impl LashRuntime {
         });
         let writes_root_terminal = drive_commit
             .as_ref()
-            .is_some_and(|(_, terminal)| terminal.is_some());
+            .is_some_and(|commit| commit.terminal.is_some());
         let mut prepared = prepared;
         prepared.turn_pipeline.set_drive_commit(drive_commit);
         // The commit clears the park of the root the turn runs under, the
@@ -688,13 +684,6 @@ impl LashRuntime {
             scoped_effect_controller.execution_scope().logical_root(),
             &trace_turn_id,
         ));
-        let queued_work_completion_trace =
-            commit_effects.claim_settlement.queued.completions.clone();
-        let turn_input_completion_trace = commit_effects
-            .claim_settlement
-            .turn_inputs
-            .completions
-            .clone();
         let staged_usage = match session_manager::stage_token_ledger_shared(
             &self.shared_token_ledger,
             &prepared.final_operation(),
@@ -711,8 +700,6 @@ impl LashRuntime {
                     session: self.session.as_mut(),
                     staged_usage,
                     commit_effects,
-                    session_execution_lease,
-                    release_session_execution_lease,
                     trace_turn_id: &trace_turn_id,
                     recorded_attachment_intent_ids: self
                         .host
@@ -750,13 +737,12 @@ impl LashRuntime {
                     &err,
                     self.host.core.clock.as_ref(),
                 );
-                // Reported here, not inside the commit: the guard reference and the
-                // claimant are already live in this future, so naming the writer
-                // costs nothing, while carrying evidence through the commit await
-                // would grow every turn future.
+                // Reported here, not inside the commit: the writer's identity
+                // is already live in this future, so naming it costs nothing,
+                // while carrying evidence through the commit await would grow
+                // every turn future.
                 trace_commit_cas_rejected(
                     &self.state.session_id,
-                    session_execution_lease.map(DriveClaimGuard::fence).as_ref(),
                     &self.runtime_lease_owner,
                     &self.runtime_lease_executor_id,
                     &err,
@@ -768,7 +754,7 @@ impl LashRuntime {
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
         let mut delivery = committed
-            .adopt(self, &trace_turn_id, session_execution_lease)
+            .adopt(self, &trace_turn_id)
             .map_err(runtime_error_from_store_commit)?;
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
@@ -811,7 +797,7 @@ impl LashRuntime {
                 self.invalidate_resident_session_state();
             }
         }
-        if !queued_work_completion_trace.is_empty() {
+        if let Some(settlement) = settlement_trace.filter(|settlement| !settlement.is_empty()) {
             crate::trace::emit_trace(
                 &self.host.core.tracing.trace_sink,
                 &self.host.core.tracing.trace_context,
@@ -820,41 +806,19 @@ impl LashRuntime {
                     .for_turn_index(delivery.turn.state.turn_index)
                     .for_turn(trace_turn_id.clone()),
                 lash_trace::TraceEvent::Custom {
-                    name: "queued_work.completed".to_string(),
-                    payload: queued_work_completion_trace_payload(&queued_work_completion_trace),
+                    name: "ingress.settled".to_string(),
+                    payload: ingress_settled_trace_payload(&settlement),
                 },
                 self.host.core.clock.as_ref(),
             );
         }
-        if !turn_input_completion_trace.is_empty() {
-            crate::trace::emit_trace(
-                &self.host.core.tracing.trace_sink,
-                &self.host.core.tracing.trace_context,
-                lash_trace::TraceContext::default()
-                    .for_session(delivery.turn.state.session_id.clone())
-                    .for_turn_index(delivery.turn.state.turn_index)
-                    .for_turn(trace_turn_id.clone()),
-                lash_trace::TraceEvent::Custom {
-                    name: "turn_input.completed".to_string(),
-                    payload: turn_input_completion_trace_payload(&turn_input_completion_trace),
-                },
-                self.host.core.clock.as_ref(),
-            );
-        }
-        // A final physical turn has already atomically released its lane, so
-        // TurnPersisted observers are genuinely lane-less. Agent-frame
-        // switches retain the guard and their observers must borrow it.
-        let post_commit_session_execution_lease = if release_session_execution_lease {
-            None
-        } else {
-            session_execution_lease
-        };
+        let post_commit_drive_fence = drive_fence.filter(|_| continues_run);
         match self
             .emit_turn_persisted_event(
                 &delivery.turn,
                 scoped_effect_controller,
                 &trace_turn_id,
-                post_commit_session_execution_lease,
+                post_commit_drive_fence,
             )
             .await
         {
@@ -897,11 +861,7 @@ impl LashRuntime {
             driver,
             cancellation_messages,
             finish_scoped_effect_controller,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+            drive_fence,
             turn_control,
             turn_index,
             trace_turn_id,
@@ -911,8 +871,8 @@ impl LashRuntime {
             policy,
             mut recorded_assembly,
             turn_pipeline,
-            pending_queue_claims,
-            pending_turn_input_claims,
+            pending_queued,
+            pending_turn_inputs,
             withheld_terminal_work,
             turn_cancel,
             ..
@@ -937,9 +897,9 @@ impl LashRuntime {
         // hands the work it withheld from its terminal checkpoint to the
         // cancellation, directly rather than inferred from the committed
         // outcome: input settles through the undelivered disposition
-        // (FIG-3531), and wakes are deferred and recorded, never completed
+        // (FIG-3531), and wakes are released and recorded, never completed
         // (FIG-3543, ADR 0101 §10).
-        let claims = LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
+        let admissions = LogicalTurnAdmissions::new(pending_queued, pending_turn_inputs)
             .with_undelivered(withheld_terminal_work);
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
@@ -950,13 +910,10 @@ impl LashRuntime {
                 turn_index,
                 trace_turn_id,
             },
-            claims: &claims,
+            admissions: &admissions,
             scoped_effect_controller: finish_scoped_effect_controller,
             honoured_cancel: Some(evidence),
-            lease: TurnLeaseScope {
-                guard: session_execution_lease,
-                release_policy: session_execution_lease_release_policy,
-            },
+            drive_fence,
             turn_control,
             observer,
         }))
@@ -1001,8 +958,8 @@ impl LashRuntime {
             delivered_task,
             sinks: TurnSinks { observer },
             scoped_effect_controller,
-            claims,
-            session_execution_lease,
+            admissions,
+            drive_fence,
         } = context;
         let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding =
@@ -1066,7 +1023,7 @@ impl LashRuntime {
             self.host.core.durability.commit_budget,
         );
         turn_pipeline.apply_prepared_messages(&messages);
-        let finish_result = Box::pin(self.finish_turn(TurnCommitContext {
+        Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,
                 recorded_assembly,
@@ -1076,23 +1033,13 @@ impl LashRuntime {
                 turn_index: self.state.turn_index + 1,
                 trace_turn_id,
             },
-            claims: &claims,
+            admissions: &admissions,
             scoped_effect_controller: &scoped_effect_controller,
             honoured_cancel: None,
-            lease: TurnLeaseScope {
-                guard: session_execution_lease,
-                release_policy: SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
-            },
+            drive_fence,
             turn_control: &turn_control,
             observer,
         }))
-        .await;
-        if let Err(err) = &finish_result {
-            self.abandon_queued_work_claims_after_local_abort(err, &claims.queued)
-                .await;
-            self.abandon_turn_input_claims_after_local_abort(err, &claims.turn_inputs)
-                .await;
-        }
-        finish_result
+        .await
     }
 }

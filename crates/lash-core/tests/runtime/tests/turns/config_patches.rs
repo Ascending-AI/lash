@@ -113,13 +113,10 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
         "N config commands must share exactly one head commit"
     );
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list settled config commands")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list settled config commands")
+            .is_empty(),
         "every independently accepted command must settle its own batch"
     );
     assert_eq!(runtime.session_policy().model.id, "queued-model-c");

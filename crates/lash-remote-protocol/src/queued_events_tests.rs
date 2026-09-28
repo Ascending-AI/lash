@@ -9,7 +9,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
     let cases = [
         (
             lash_core::TurnEvent::QueuedWorkStarted {
-                boundary: lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+                boundary: lash_core::runtime::AdmissionBoundary::Idle,
                 batch_ids: vec!["batch".into()],
                 causes: vec![lash_core::TurnCause {
                     id: "cause".into(),
@@ -71,9 +71,9 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
 #[test]
 fn queued_event_closed_vocabularies_have_independent_literal_pins() {
     for (value, literal) in [
-        (RemoteQueuedWorkClaimBoundary::Idle, "idle"),
+        (RemoteAdmissionBoundary::Idle, "idle"),
         (
-            RemoteQueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            RemoteAdmissionBoundary::ActiveTurnCheckpoint,
             "active_turn_checkpoint",
         ),
     ] {

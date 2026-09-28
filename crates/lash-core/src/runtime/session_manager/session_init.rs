@@ -400,16 +400,10 @@ async fn commit_initialized_session(
     // Lane-less by construction: the session is being created before it
     // owns an execution lane. A guard for another session cannot authorize
     // this commit.
-    let result = commit_runtime_state_without_session_lease(
-        Arc::clone(&materialized.store_binding),
-        commit,
-        &materialized.runtime.runtime_lease_owner,
-        &materialized.runtime.runtime_lease_executor_id,
-        materialized.runtime.host.core.control.lease_timings,
-        Arc::clone(&materialized.runtime.host.core.clock),
-    )
-    .await
-    .map_err(|err| crate::PluginError::Session(err.to_string()))?;
+    let result =
+        crate::store::commit_runtime_state_verified(materialized.store_binding.as_ref(), commit)
+            .await
+            .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     persisted_state.apply_persisted_commit_result(result);
     persisted_state.mark_node_ids_persisted(persisted_node_ids);
     materialized.runtime.install_resident_state(persisted_state);
@@ -996,11 +990,11 @@ impl RuntimeSessionServices {
                 ))
             })?;
         for receipt in &receipts {
-            if let crate::PendingTurnInputCancelOutcome::AlreadyClaimed { claim, .. } =
+            if let crate::PendingTurnInputCancelOutcome::AlreadyAdmitted { root, .. } =
                 &receipt.outcome
             {
                 return Err(crate::PluginError::Session(format!(
-                    "cancelled process `{process_id}` child session `{session_id}` still holds this turn's input under a live claim: {claim:?}"
+                    "cancelled process `{process_id}` child session `{session_id}` still holds this turn's input under root `{root}`"
                 )));
             }
         }

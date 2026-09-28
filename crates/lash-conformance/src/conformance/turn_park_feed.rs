@@ -8,7 +8,6 @@
 //! park count, the oldest park's age, and the per-reason split the gauges
 //! record.
 
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 
@@ -455,7 +454,9 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         "another turn's commit leaves the park"
     );
 
-    // A cancel that withdraws the parked turn's held input cancels the park.
+    // A cancel that withdraws the parked turn's held input cancels the park:
+    // the parked root holds no admission, so its bound input stays open and
+    // withdrawable.
     let withdraw_session = SessionId::from("park-feed-withdraw");
     let withdraw_store = create_bound_store(&factory, &withdraw_session).await;
     let input = withdraw_store
@@ -466,17 +467,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("enqueue the held input");
-    let lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
-        &withdraw_store,
-        &withdraw_session,
-        "withdraw-owner",
-    )
-    .await;
-    let _drive = withdraw_store
-        .claim_next_turn_inputs(&withdraw_session, &lease.fence(), &lease.owner, 1)
-        .await
-        .expect("claim the drive")
-        .expect("the input is claimable");
     withdraw_store
         .bind_root_inputs(
             &withdraw_session,
@@ -494,13 +484,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("park turn-3");
-    // A parked turn's claim is live only while the lease generation it pins
-    // still holds the session; the turn aborted, so its lease releases and
-    // the held input's cancel withdraws it.
-    withdraw_store
-        .supersede_claim_epoch_for_test(&lease.completion())
-        .await
-        .expect("release the aborted turn's lease");
     let cancelled = withdraw_store
         .cancel_pending_turn_input(&withdraw_session, &input.input_id)
         .await
@@ -525,22 +508,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("enqueue the held input");
-    let suffix_lease = crate::testing::store_fixtures::seal_claim_authority_for_test(
-        &suffix_store,
-        &suffix_session,
-        "suffix-owner",
-    )
-    .await;
-    let _suffix_drive = suffix_store
-        .claim_next_turn_inputs(
-            &suffix_session,
-            &suffix_lease.fence(),
-            &suffix_lease.owner,
-            1,
-        )
-        .await
-        .expect("claim the drive")
-        .expect("the held input is claimable");
     suffix_store
         .bind_root_inputs(
             &suffix_session,
@@ -558,10 +525,6 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
         ))
         .await
         .expect("park turn-3s");
-    suffix_store
-        .supersede_claim_epoch_for_test(&suffix_lease.completion())
-        .await
-        .expect("release the aborted turn's lease");
     let suffix_outcome = suffix_store
         .cancel_pending_turn_input_suffix(
             &suffix_session,

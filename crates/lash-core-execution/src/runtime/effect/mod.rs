@@ -47,8 +47,8 @@ pub use lash_core_effect::await_event_identity;
 mod validation;
 
 pub use envelope::{
-    AdmittedHeadVerdict, AssistantResponseHookEvents, AssistantStreamHookState, CheckpointClaimSet,
-    LlmRequestSpec, LlmStreamRecord, ProcessCommand, ProcessEffectOutcome,
+    AdmittedHeadVerdict, AssistantResponseHookEvents, AssistantStreamHookState,
+    CheckpointAdmittedSet, LlmRequestSpec, LlmStreamRecord, ProcessCommand, ProcessEffectOutcome,
     RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
     RuntimeLlmCallOutcome, ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome,

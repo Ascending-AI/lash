@@ -170,9 +170,10 @@ impl DriveRootRun {
         }
     }
 
-    /// What the commit of physical turn `turn` presents: the fence, and the
-    /// root's terminal evidence when the turn ends the root. `None` for a
-    /// turn that is not one of the root's physical turns.
+    /// What the commit of physical turn `turn` presents: the fence, the root
+    /// whose admitted rows it settles, and the root's terminal evidence when
+    /// the turn ends the root. `None` for a turn that is not one of the
+    /// root's physical turns.
     ///
     /// A turn ends its root when it finishes or stops and leaves nothing
     /// owed: no follow-on on the head, and no withheld work a follow-on turn
@@ -182,25 +183,23 @@ impl DriveRootRun {
         turn: &TurnId,
         outcome: &crate::TurnOutcome,
         owes_follow_on: bool,
-    ) -> Option<(
-        crate::store::DriveFence,
-        Option<crate::store::RootTerminalWrite>,
-    )> {
+    ) -> Option<DriveCommit> {
         let commit = crate::store::TurnCommitId::of_physical_turn(&self.root, turn)?;
         let (stop, terminal) = match outcome {
             crate::TurnOutcome::Finished(_) => (None, true),
             crate::TurnOutcome::Stopped(stop) => (Some(stop.clone()), true),
             crate::TurnOutcome::AgentFrameSwitch { .. } => (None, false),
         };
-        Some((
-            self.fence.clone(),
-            (terminal && !owes_follow_on).then(|| crate::store::RootTerminalWrite {
+        Some(DriveCommit {
+            fence: self.fence.clone(),
+            root: self.root.clone(),
+            terminal: (terminal && !owes_follow_on).then(|| crate::store::RootTerminalWrite {
                 root: self.root.clone(),
                 commit,
                 turn: turn.clone(),
                 stop,
             }),
-        ))
+        })
     }
 
     /// The logical root this run's evidence and park name.
@@ -216,6 +215,17 @@ impl DriveRootRun {
     pub(crate) fn mark_terminal_written(&mut self) {
         self.terminal_written = true;
     }
+}
+
+/// What a root's physical-turn commit presents (FIG-3600 S7, FIG-3927).
+#[derive(Clone, Debug)]
+pub(crate) struct DriveCommit {
+    /// The fence of the drive admission the root runs under.
+    pub(crate) fence: crate::store::DriveFence,
+    /// The root whose admitted rows the commit settles.
+    pub(crate) root: TurnId,
+    /// The root's terminal evidence, when the turn ends the root.
+    pub(crate) terminal: Option<crate::store::RootTerminalWrite>,
 }
 
 /// One admitted root's run, with the physical turns it assembled.
@@ -588,7 +598,7 @@ fn controller_abort(root: Option<&TurnId>, error: RuntimeEffectControllerError) 
 /// Restate stops polling a handler that suspends at an await, so an attempt
 /// can end where it awaited and nothing after that await runs. The resident
 /// runtime then still holds what the attempt did to it: its sealed root,
-/// its journaled claims, the turn index its admission recorded, and a
+/// the turn index its admission recorded, and a
 /// resident session holding a code cell that returned but was never
 /// settled. A guard dropped before its attempt returned discards all of it,
 /// and invalidates the resident session so the next use reloads the durable
@@ -790,8 +800,8 @@ impl LashRuntime {
     }
 
     /// Discard what an earlier root's attempt left on this runtime (its
-    /// sealed run, its journaled claims, its admitted turn index and the
-    /// resident session state it touched), so the next root starts from the
+    /// sealed run, its admitted turn index and the resident session state it
+    /// touched), so the next root starts from the
     /// durable session exactly as a redrive in a fresh process does.
     fn discard_root_residue(&mut self) {
         self.discard_attempt_fields();
@@ -799,10 +809,9 @@ impl LashRuntime {
     }
 
     /// Discard the fields a root's attempt keeps only while it runs: its
-    /// sealed run, its journaled claims and its admitted turn index.
+    /// sealed run and its admitted turn index.
     fn discard_attempt_fields(&mut self) {
         self.drive_root = None;
-        self.journaled_drive_claims.clear();
         self.admitted_turn_index = None;
     }
 
@@ -811,7 +820,7 @@ impl LashRuntime {
     /// `live` carries the live `TurnContext` of an in-process caller whose
     /// accepted input the root may drive (a child session turn's process
     /// correlation and lineage): it cannot cross the durable boundary, so it
-    /// is re-attached when the root's claim drives that input.
+    /// is re-attached when the root's admission drives that input.
     pub(crate) async fn run_admitted_root_step(
         &mut self,
         controller: &ScopedEffectController<'_>,
@@ -852,12 +861,7 @@ impl LashRuntime {
         let crate::engine::SealVerdict::Sealed(fence) = verdict else {
             unreachable!("a refused seal returned above");
         };
-        let input_authority = crate::runtime::DriveClaimGuard::from_drive_fence(
-            &fence,
-            self.runtime_lease_owner.clone(),
-            self.runtime_lease_executor_id.clone(),
-        );
-        let run = DriveRootRun::sealed(&admitted, fence);
+        let run = DriveRootRun::sealed(&admitted, fence.clone());
         let evidence_root = run.root.clone();
         let outer = self.drive_root.replace(Box::new(run));
         let result = match admitted.work().clone() {
@@ -868,7 +872,7 @@ impl LashRuntime {
                     &crate::store::AdmittedHead::Input(head),
                     sinks,
                     live,
-                    Some(input_authority),
+                    &fence,
                 ))
                 .await
             }
@@ -879,13 +883,12 @@ impl LashRuntime {
                     &crate::store::AdmittedHead::Batch(head),
                     sinks,
                     None,
-                    Some(input_authority),
+                    &fence,
                 ))
                 .await
             }
             crate::engine::AdmittedWork::Commands { .. } => {
-                Box::pin(self.run_commands_root(&root_controller, &admitted, &input_authority))
-                    .await
+                Box::pin(self.run_commands_root(&root_controller, &admitted, &fence)).await
             }
             crate::engine::AdmittedWork::FollowOn {
                 follow_on,

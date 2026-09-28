@@ -1048,7 +1048,7 @@ pub async fn a_command_roots_redrive_replays_its_recorded_outcome(
     assert!(
         parts
             .store
-            .list_pending_queued_work(&parts.session_id)
+            .list_open_queued_work(&parts.session_id)
             .await
             .expect("read the command lane")
             .is_empty(),

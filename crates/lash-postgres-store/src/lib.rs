@@ -39,32 +39,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkKind,
+    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, TurnLaneAdmissionPolicy,
 };
 use lash_core_execution::store::queued_work::{
-    ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    MAX_SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
+    select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, ExecutionScope, GcReport,
-    LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta, SessionNodeRecord,
-    SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
-    StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
-    facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, IngressStore,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStartOutcome, ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter,
+    SessionMeta, SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest,
+    SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use lash_core_execution::{
@@ -130,9 +126,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // prefix is unreachable garbage operators delete manually.
 //
 // Bumped to 12 for claim generation fencing (ADR 0029): `lash_queued_work_batches`
-// and `lash_pending_turn_inputs` replace their per-claim `claim_claimed_at_ms` /
-// `claim_expires_at_ms` columns with a single `claim_session_lease_generation`
-// pinning the session-execution-lease generation the claim was taken under. This
+// and `lash_pending_turn_inputs` replace their per-claim claimed-at and expiry
+// columns with a single column pinning the session-execution-lease generation
+// the claim was taken under (since replaced by root admission, FIG-3927). This
 // is a reject-and-recreate boundary; pre-12 databases are rejected at open.
 //
 // Bumped to 15 for FIG-546 owner-bound attachment intents, following the
@@ -1375,7 +1371,7 @@ impl PostgresSessionStore {
     }
 
     #[cfg(test)]
-    fn checkpoint_claim_counts(&self) -> (usize, usize) {
+    fn checkpoint_admission_counts(&self) -> (usize, usize) {
         (
             self.checkpoint_probe_count
                 .load(std::sync::atomic::Ordering::Relaxed),
@@ -1504,8 +1500,6 @@ mod trigger_listing_plan_tests;
 mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
-#[path = "postgres/turn_input_settlement.rs"]
-mod turn_input_settlement;
 
 pub use backend::PostgresStoreSet;
 pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
@@ -1518,7 +1512,7 @@ pub use schema_shape::{
 };
 use {
     pending_turn_inputs::*, process_helpers::*, queued_work::*, schema::*, session_factory::*,
-    support::*, turn_input_settlement::*,
+    support::*,
 };
 
 // `tests/support/mod.rs` is also compiled into this crate's unit tests (as

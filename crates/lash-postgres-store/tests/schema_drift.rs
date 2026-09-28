@@ -17,14 +17,10 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::runtime::{QueuedWorkClaimBoundary, process_wake_batch_draft};
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
-use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore, StoreError};
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig, SchemaCheck,
     SchemaFinding,
 };
-use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{Connection, Executor, PgConnection};
@@ -1650,148 +1646,6 @@ async fn verification_waiting_for_the_key_sees_the_holders_committed_work() {
         "a verification that waited for the key must see the schema as the holder left \
          it, not as it was before the wait: {report}"
     );
-    scratch.cleanup().await;
-}
-
-fn corruption_fixture_wake(
-    session_id: &SessionId,
-    case: &str,
-) -> lash_core_execution::ProcessWakeDelivery {
-    let process_id = || lash_core_execution::ProcessId::fixture(&format!("corrupt-process-{case}"));
-    lash_core_execution::ProcessWakeDelivery {
-        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-        wake_id: format!("corrupt-wake-{case}"),
-        target_session_id: session_id.clone(),
-        process_id: process_id(),
-        sequence: 1,
-        event_type: "process.wake".to_string(),
-        event_invocation: lash_core_execution::RuntimeInvocation {
-            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.clone()),
-            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
-                process_id: process_id(),
-                sequence: 1,
-                event_type: "process.wake".to_string(),
-            },
-            caused_by: None,
-            replay: None,
-        },
-        process_caused_by: None,
-        authority: lash_core_execution::QueuedWorkAuthority::default(),
-        input: case.to_string(),
-        created_at_ms: 1,
-    }
-}
-
-#[tokio::test]
-async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
-    let Some(database_url) = database_url() else {
-        eprintln!("skipping corrupt predecessor rollback: database URL is not set");
-        return;
-    };
-    let scratch = ScratchSchema::provision(&database_url).await;
-    scratch
-        .apply(
-            "ALTER TABLE lash_queued_work_batches
-                 DROP CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none",
-        )
-        .await;
-    let storage = scratch
-        .open_host_provisioned(SchemaCheck::Enforce)
-        .await
-        .expect("open controlled corruption fixture");
-
-    for (case, prior_id, prior_token, should_succeed) in [
-        ("id-only", Some("prior-id"), None, false),
-        ("token-only", None, Some("prior-token"), false),
-        ("paired", Some("prior-id"), Some("prior-token"), true),
-    ] {
-        let session_id = SessionId::from(format!("corrupt-predecessor-{case}"));
-        let store = storage.session_store(session_id.clone());
-        let queued = store
-            .enqueue_queued_work(process_wake_batch_draft(corruption_fixture_wake(
-                &session_id,
-                case,
-            )))
-            .await
-            .expect("enqueue corruption fixture");
-        sqlx::query(
-            "UPDATE lash_queued_work_batches
-             SET claim_id = $2, claim_token = $3,
-                 claim_fencing_token = 7, claim_session_lease_generation = 0
-             WHERE batch_id = $1",
-        )
-        .bind(queued.batch_id.as_str())
-        .bind(prior_id)
-        .bind(prior_token)
-        .execute(&scratch.pool)
-        .await
-        .expect("inject predecessor claim state");
-
-        let executor_id = format!("corrupt-executor-{case}");
-        let lease = store
-            .seal_claim_epoch_for_test(
-                &session_id,
-                &LeaseOwnerIdentity::opaque(
-                    format!("corrupt-owner-{case}"),
-                    format!("corrupt-owner-{case}:incarnation"),
-                ),
-                &executor_id,
-                60_000,
-            )
-            .await
-            .expect("seal drive")
-            .acquired()
-            .expect("drive sealed");
-        let owner = lease.owner.clone();
-        let outcome = store
-            .claim_ready_queued_work(
-                &session_id,
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core_execution::testing::queued_work_claim_policy(1),
-            )
-            .await;
-
-        if should_succeed {
-            let claim = outcome
-                .expect("a complete predecessor pair is valid")
-                .claim()
-                .expect("paired predecessor is reclaimable");
-            assert_eq!(claim.data.abandon_restore_claim_id.as_deref(), prior_id);
-            assert_eq!(
-                claim.data.abandon_restore_claim_token.as_deref(),
-                prior_token
-            );
-            continue;
-        }
-
-        assert!(matches!(
-            outcome,
-            Err(StoreError::QueuedWorkPredecessorClaimCorrupt { .. })
-        ));
-        let persisted = sqlx::query_as::<_, (Option<String>, Option<String>, i64, i64)>(
-            "SELECT claim_id, claim_token, claim_fencing_token,
-                    claim_session_lease_generation
-             FROM lash_queued_work_batches WHERE batch_id = $1",
-        )
-        .bind(queued.batch_id.as_str())
-        .fetch_one(&scratch.pool)
-        .await
-        .expect("read row after refusal");
-        assert_eq!(
-            persisted,
-            (
-                prior_id.map(str::to_string),
-                prior_token.map(str::to_string),
-                7,
-                0,
-            ),
-            "claim transaction changed the corrupt predecessor row"
-        );
-    }
-
-    drop(storage);
     scratch.cleanup().await;
 }
 

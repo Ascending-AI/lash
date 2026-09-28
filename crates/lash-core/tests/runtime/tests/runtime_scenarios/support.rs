@@ -4,18 +4,20 @@ const SEED: u64 = 0x5_5c01;
 pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
-pub(crate) use lash_core::store::{QueuedWorkStore, SessionCommitStore, TurnInputStore};
-pub(crate) use lash_core::testing::RuntimePersistenceTestClaimExt;
+pub(crate) use lash_core::store::{
+    AdmittedHead, CheckpointAdmission, DriveFence, IngressStore, RootAdmission, RootStore,
+    SessionCommitStore,
+};
+pub(crate) use lash_core::testing::RuntimePersistenceTestDriveExt;
 pub(crate) use lash_core::{
-    ClaimAuthority, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit,
-    StoreError, TurnInput, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress,
-    TurnInputState,
+    LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit, StoreError,
+    TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
 };
 
+#[path = "support/admission.rs"]
+mod admission;
 #[path = "support/checkpoint.rs"]
 mod checkpoint;
-#[path = "support/claim.rs"]
-mod claim;
 #[path = "support/commit.rs"]
 mod commit;
 #[path = "support/fault.rs"]
@@ -109,7 +111,7 @@ impl RuntimeScenario {
                         self.name
                     );
                 }
-                RuntimeScenarioPhase::NextTurnInputClaim(phase)
+                RuntimeScenarioPhase::NextTurnInputAdmission(phase)
                     if phase.expected_aliases.len() != phase.expected_texts.len() =>
                 {
                     panic!(
@@ -141,12 +143,15 @@ struct RuntimeScenarioContext {
     /// turn-cancellation promises a deferral fixture settles.
     turn_control: lash_core::TurnCancellationAuthority,
     owner: Option<LeaseOwnerIdentity>,
-    lease: Option<ClaimAuthority>,
+    lease: Option<DriveFence>,
     state: RuntimeSessionState,
     enqueued_turn_inputs: HashMap<&'static str, PendingTurnInput>,
-    command_claim: Option<QueuedWorkClaim>,
-    turn_claim: Option<QueuedWorkClaim>,
-    turn_input_claim: Option<TurnInputClaim>,
+    /// The session-command run the scenario opened, settled bindlessly.
+    commands: Vec<QueuedWorkBatch>,
+    /// The scenario root's admission, settled by its final commit.
+    admission: Option<RootAdmission>,
+    /// What the scenario root admitted at its checkpoint.
+    checkpoint_admission: Option<CheckpointAdmission>,
     lease_released: bool,
 }
 
@@ -188,9 +193,9 @@ impl RuntimeScenarioContext {
             lease: None,
             state,
             enqueued_turn_inputs: HashMap::new(),
-            command_claim: None,
-            turn_claim: None,
-            turn_input_claim: None,
+            commands: Vec::new(),
+            admission: None,
+            checkpoint_admission: None,
             lease_released: false,
         }
     }
@@ -207,7 +212,7 @@ impl RuntimeScenarioContext {
                 self.leading_command_claim(phase).await
             }
             RuntimeScenarioPhase::TurnWorkClaim(phase) => self.turn_work_claim(phase).await,
-            RuntimeScenarioPhase::NextTurnInputClaim(phase) => {
+            RuntimeScenarioPhase::NextTurnInputAdmission(phase) => {
                 self.next_turn_input_claim(phase).await
             }
             RuntimeScenarioPhase::Lease(phase) => self.lease_phase(phase).await,
@@ -233,7 +238,7 @@ impl RuntimeScenarioContext {
         let owner = lease_owner(self.host_behavior.lease_owner_id);
         let lease = self
             .store()
-            .seal_claim_epoch_for_test(&self.session_id, &owner, "scenario-drive", 0)
+            .seal_drive_epoch_for_test(&self.session_id, &owner, "scenario-drive", 0)
             .await
             .expect("seal scenario drive epoch")
             .acquired()
@@ -242,7 +247,7 @@ impl RuntimeScenarioContext {
         self.lease = Some(lease);
     }
 
-    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &ClaimAuthority) {
+    fn owner_and_lease(&self) -> (&LeaseOwnerIdentity, &DriveFence) {
         (
             self.owner
                 .as_ref()
@@ -251,6 +256,43 @@ impl RuntimeScenarioContext {
                 .as_ref()
                 .expect("RuntimeScenario phase forgot to claim a lease"),
         )
+    }
+}
+
+impl RuntimeScenarioContext {
+    /// The bindless settlement of the opened session-command run.
+    fn command_completion(&self) -> Option<lash_core::runtime::QueuedWorkCompletion> {
+        (!self.commands.is_empty()).then(|| lash_core::runtime::QueuedWorkCompletion {
+            session_id: self.session_id.clone(),
+            batch_ids: self
+                .commands
+                .iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect(),
+        })
+    }
+
+    /// The settlement completing every row the scenario root admitted.
+    fn root_settlement(&self) -> lash_core::store::IngressSettlement {
+        let mut settlement =
+            lash_core::store::IngressSettlement::new(TurnId::from(admission::SCENARIO_ROOT));
+        if let Some(admission) = &self.admission {
+            settlement
+                .completed_inputs
+                .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+            settlement
+                .completed_batches
+                .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+        }
+        if let Some(admission) = &self.checkpoint_admission {
+            settlement
+                .completed_inputs
+                .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+            settlement
+                .completed_batches
+                .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+        }
+        settlement
     }
 }
 
@@ -273,7 +315,7 @@ pub(crate) enum RuntimeScenarioPhase {
     Checkpoint(RuntimeCheckpointPhase),
     LeadingCommandClaim(RuntimeLeadingCommandClaimPhase),
     TurnWorkClaim(RuntimeTurnWorkClaimPhase),
-    NextTurnInputClaim(RuntimeNextTurnInputClaimPhase),
+    NextTurnInputAdmission(RuntimeNextTurnInputAdmissionPhase),
     Lease(RuntimeLeasePhase),
     Fault(RuntimeFaultPhase),
     Commit(RuntimeCommitPhase),
@@ -286,7 +328,7 @@ impl RuntimeScenarioPhase {
             Self::Checkpoint(_)
                 | Self::LeadingCommandClaim(_)
                 | Self::TurnWorkClaim(_)
-                | Self::NextTurnInputClaim(_)
+                | Self::NextTurnInputAdmission(_)
                 | Self::Fault(RuntimeFaultPhase::StaleQueueCompletion)
                 | Self::Commit(_)
         )
@@ -419,13 +461,13 @@ impl From<RuntimeLeadingCommandClaimPhase> for RuntimeScenarioPhase {
 
 #[derive(Clone, Debug)]
 pub(crate) struct RuntimeTurnWorkClaimPhase {
-    pub(crate) boundary: QueuedWorkClaimBoundary,
+    pub(crate) boundary: AdmissionBoundary,
     pub(crate) expected_count: usize,
     pub(crate) pending_turn_inputs_after_queue_claim: Vec<RuntimePendingTurnInputExpectation>,
 }
 
 impl RuntimeTurnWorkClaimPhase {
-    pub(crate) fn at(boundary: QueuedWorkClaimBoundary) -> Self {
+    pub(crate) fn at(boundary: AdmissionBoundary) -> Self {
         Self {
             boundary,
             expected_count: 0,
@@ -454,13 +496,13 @@ impl From<RuntimeTurnWorkClaimPhase> for RuntimeScenarioPhase {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct RuntimeNextTurnInputClaimPhase {
+pub(crate) struct RuntimeNextTurnInputAdmissionPhase {
     pub(crate) expected_aliases: Vec<&'static str>,
     pub(crate) expected_texts: Vec<&'static str>,
     pub(crate) verify_pending_turn_inputs_held_after_claim: bool,
 }
 
-impl RuntimeNextTurnInputClaimPhase {
+impl RuntimeNextTurnInputAdmissionPhase {
     pub(crate) fn new() -> Self {
         Self::default()
     }
@@ -481,9 +523,9 @@ impl RuntimeNextTurnInputClaimPhase {
     }
 }
 
-impl From<RuntimeNextTurnInputClaimPhase> for RuntimeScenarioPhase {
-    fn from(phase: RuntimeNextTurnInputClaimPhase) -> Self {
-        Self::NextTurnInputClaim(phase)
+impl From<RuntimeNextTurnInputAdmissionPhase> for RuntimeScenarioPhase {
+    fn from(phase: RuntimeNextTurnInputAdmissionPhase) -> Self {
+        Self::NextTurnInputAdmission(phase)
     }
 }
 

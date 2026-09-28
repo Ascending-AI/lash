@@ -507,7 +507,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .await
         .expect("accept the root's input")
         .input_id;
-    let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+    let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
         &(session_store.clone() as Arc<dyn lash_core::RuntimePersistence>),
         &turn_session,
         "generation-drain-status",
@@ -515,23 +515,16 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     .await;
     let root = lash_core::TurnId::from("generation-drain-status-root");
     let admission = session_store
-        .admit_root(&lash_core::store::AdmitRootRequest {
-            session_id: turn_session.clone(),
-            lease: lease.fence(),
-            owner: lease.owner.clone(),
-            root: root.clone(),
-            head: lash_core::store::AdmittedHead::Input(head),
-            max_inputs: 1,
-            policy: lash_core::testing::queued_work_claim_policy(1),
-            base: lash_core::store::SessionHeadRef {
-                generation: 0,
-                revision: 0,
-                leaf: None,
-                checkpoint: None,
-            },
-            turn_index: 1,
-            generation: None,
-            admitted_generation: retired.clone(),
+        .admit_root(&{
+            let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+                &lease,
+                &root,
+                lash_core::store::AdmittedHead::Input(head),
+            );
+            request.max_inputs = 1;
+            request.policy = lash_core::testing::queued_work_claim_policy(1);
+            request.admitted_generation = retired.clone();
+            request
         })
         .await
         .expect("admit the root")
@@ -589,19 +582,18 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     };
     state.ensure_agent_frame_initialized();
     let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[]);
-    commit.session_execution_lease_fence = Some(lease.authority());
-    commit.drive_fence = Some(Box::new(lease.drive_fence()));
+    commit.drive_fence = Some(Box::new(lease.clone()));
     commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
         commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
         turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-        root,
+        root: root.clone(),
         stop: None,
     }));
-    commit.completed_turn_input_claims = admission
-        .inputs
-        .iter()
-        .map(|claim| claim.completion())
-        .collect();
+    let mut settlement = lash_core::store::IngressSettlement::new(root);
+    settlement
+        .completed_inputs
+        .extend(admission.inputs.iter().map(|inputs| inputs.completion()));
+    commit.ingress = Some(settlement);
     session_store
         .commit_runtime_state(commit)
         .await

@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS session_ingress_sequence (
 /// The logical-root family (FIG-3600 S7), carried by the durable core alone.
 ///
 /// `session_roots` holds one row per `(session, root)` a drive admitted work
-/// under, with the exact result of an input root's claim, committed in the
-/// claim's own transaction (FIG-3840), and the root's terminal evidence once
+/// under, with the exact result of the root's admission (`admission_json`),
+/// committed in the admission's own transaction (FIG-3840, FIG-3927), and the root's terminal evidence once
 /// it has one: all four `terminal_*` columns are set together, exactly once. `session_root_inputs`
 /// binds each accepted input to the root that drives it. `control_intents`
 /// records an operator's verb or a session's close; a `close_session` row

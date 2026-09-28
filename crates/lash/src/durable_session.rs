@@ -64,8 +64,7 @@ use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
-    PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch, QueuedWorkClaim,
-    TurnInputClaim,
+    PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch,
 };
 use lash_sansio::SessionId;
 use tokio::sync::OnceCell;
@@ -393,29 +392,6 @@ impl DurableSession {
     ) -> Result<Option<QueuedWorkBatch>> {
         let store = self.store().await?;
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
-    }
-
-    /// Release a held queued-work claim without completing it, returning its
-    /// batches to the pending queue immediately.
-    ///
-    /// Token-authorised release, not interference with a live claimant: the
-    /// store matches the claim's `claim_id` *and* `claim_token`, so a
-    /// non-holder is refused. A host stopping an external queued-work driver
-    /// mid-claim calls this with the claims that driver still holds so the work
-    /// becomes claimable again at once instead of waiting for a superseding
-    /// claim to repair the held rows.
-    pub async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<()> {
-        let store = self.store().await?;
-        Ok(self.ops.abandon_queued_work_claim(store, claim).await?)
-    }
-
-    /// Release a held pending-turn-input claim without completing it, returning
-    /// its inputs to the pending queue immediately. The turn-input counterpart
-    /// of [`abandon_queued_work_claim`](Self::abandon_queued_work_claim), with
-    /// the same `claim_id`/`claim_token` authorisation.
-    pub async fn abandon_turn_input_claim(&self, claim: &TurnInputClaim) -> Result<()> {
-        let store = self.store().await?;
-        Ok(self.ops.abandon_turn_input_claim(store, claim).await?)
     }
 
     /// Read the canonical settled view of this durable session without opening

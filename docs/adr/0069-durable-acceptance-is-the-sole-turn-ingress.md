@@ -372,7 +372,7 @@ A queued drive drops nothing and withdraws nothing. The accepted row stays in
 the next-turn queue in arrival order, the call succeeds with one turn whose
 outcome is `TurnOutcome::Queued { ahead }` and which carries the acceptance
 receipt, and the queued-work drain answers the input in order, exactly once. The claim bound is host policy
-(`QueuedWorkBatchingConfig::with_max_turn_input_claim`, default 64), shared by
+(`QueuedWorkBatchingConfig::with_max_turn_input_admission`, default 64), shared by
 the direct-turn drive and the drain because they claim from the same queue.
 Retrying the call would admit the words a second time; replaying the turn
 reports the same queue position.

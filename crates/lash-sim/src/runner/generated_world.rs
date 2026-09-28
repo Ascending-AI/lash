@@ -554,8 +554,8 @@ impl GeneratedRuntimeWorld {
         tokio::select! {
             ready = async {
                 runtime_session.provider_schedule.wait_until_blocked(exchange_index, 0).await;
-                // The same model rows that admission will claim must now be
-                // visible as held in the runtime's pending-input view. No
+                // The same model rows that admission will take must now be
+                // visible as admitted in the runtime's pending-input view. No
                 // boundary is delivered during this wait and the first wire
                 // gate is closed, so these rows cannot have been cancelled or
                 // completed. An empty admission needs no store read.
@@ -565,7 +565,7 @@ impl GeneratedRuntimeWorld {
                     if expected_claims.iter().all(|input_id| {
                         pending.iter().any(|read| {
                             &read.input.input_id == input_id
-                                && matches!(read.status, lash::PendingTurnInputReadStatus::Held { .. })
+                                && matches!(read.status, lash::PendingTurnInputReadStatus::Admitted { .. })
                         })
                     }) {
                         break;
@@ -960,8 +960,8 @@ impl GeneratedRuntimeWorld {
         drop(runtime_session.drive_hold.take());
         let (cancelled, cancel_outcome) = match &outcome {
             lash::PendingTurnInputCancelOutcome::Cancelled(_) => (true, "cancelled"),
-            lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
-                (false, "already_claimed")
+            lash::PendingTurnInputCancelOutcome::AlreadyAdmitted { .. } => {
+                (false, "already_admitted")
             }
             lash::PendingTurnInputCancelOutcome::AlreadyCompleted(_) => {
                 (false, "already_completed")

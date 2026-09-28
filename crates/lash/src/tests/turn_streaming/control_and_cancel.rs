@@ -350,7 +350,7 @@ pub(super) async fn wait_for_stable_build_count(builds: &AtomicUsize) -> usize {
         }
     })
     .await
-    .expect("unknown-claimability hydration reaches an idle steady state")
+    .expect("unknown-admissibility hydration reaches an idle steady state")
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -443,7 +443,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
 }
 
 #[tokio::test]
-pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_claimability()
+pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_admissibility()
 -> Result<()> {
     // The engine's bounded retry of a drive whose runtime did not open.
     const MAX_TRANSIENT_HYDRATIONS_PER_NOTIFICATION: usize = 8;
@@ -863,7 +863,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             );
         }
     }
-    let record = lash_core::store::TurnInputStore::turn_cancel_request(
+    let record = lash_core::store::IngressStore::turn_cancel_request(
         store.as_ref(),
         &lash_core::facade_support::TurnAddress::new(session_id, turn_id),
     )

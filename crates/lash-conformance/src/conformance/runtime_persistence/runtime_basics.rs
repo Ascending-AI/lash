@@ -82,8 +82,7 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(
 )]
 pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
     let session_id = "concurrent-head-cas";
-    let _lease =
-        seal_claim_authority_for_test(&store, &SessionId::from(session_id), "cas-owner").await;
+    let _lease = seal_drive_fence_for_test(&store, &SessionId::from(session_id), "cas-owner").await;
     let make_commit = |node_id: &str| {
         let state = RuntimeSessionState {
             session_id: SessionId::from(session_id.to_string()),

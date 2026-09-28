@@ -9,7 +9,7 @@
       },
       "placement": "boundary"
     },
-    "outcome": "No root is admitted yet. The successor reclaims the lane, finds no unfinished root and admits the unchanged durable ingress."
+    "outcome": "No root is admitted yet. The successor seals the next drive, finds no unfinished root and admits the unchanged durable ingress."
   },
   {
     "point": {
@@ -21,19 +21,7 @@
       },
       "placement": "boundary"
     },
-    "outcome": "The lease is held but no root is admitted. The successor reclaims the lane and admits the unchanged durable ingress."
-  },
-  {
-    "point": {
-      "operation": {
-        "seam": "store",
-        "operation": {
-          "kind": "defer_orphaned_active_turn_inputs"
-        }
-      },
-      "placement": "boundary"
-    },
-    "outcome": "No orphaned input exists in the reference prefix; the successor reclaims the lease and executes its durable ingress once."
+    "outcome": "The drive is sealed but no root is admitted. The successor seals the next drive and admits the unchanged durable ingress."
   },
   {
     "point": {
@@ -217,26 +205,26 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_checkpoint_work",
+          "kind": "admit_at_checkpoint",
           "checkpoint": "afterwork"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect re-executes."
+    "outcome": "Tool progress is not durable; active input and queued work stay open and the effect re-executes."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_checkpoint_work",
+          "kind": "admit_at_checkpoint",
           "checkpoint": "afterwork"
         }
       },
       "placement": "inside_call"
     },
-    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect."
+    "outcome": "The checkpoint bound its rows to the root under its step; the successor reruns the step, reads the same rows back and replays the uncommitted effect."
   },
   {
     "point": {
@@ -275,7 +263,7 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_checkpoint_work",
+          "kind": "admit_at_checkpoint",
           "checkpoint": "beforecompletion"
         }
       },
@@ -288,13 +276,13 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "claim_checkpoint_work",
+          "kind": "admit_at_checkpoint",
           "checkpoint": "beforecompletion"
         }
       },
       "placement": "inside_call"
     },
-    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed."
+    "outcome": "Any final checkpoint admission stays bound to the root and reads back on the rerun; no model or effect outcome was committed."
   },
   {
     "point": {
@@ -354,7 +342,7 @@
       },
       "placement": "boundary"
     },
-    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn.",
+    "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles the root's admitted rows with the recovered terminal turn.",
     "level_2": {
       "exact": {
         "effect_executions": {
@@ -386,7 +374,7 @@
   },
   {
     "scenario": "checkpoint_execute_finalize",
-    "outcome": "A checkpoint executed before its outcome was finalized is reclaimed by the successor, which reaches the exact durable terminal state without stranding ingress.",
+    "outcome": "A checkpoint executed before its outcome was finalized is read back by the successor from the rows its step bound, which reaches the exact durable terminal state without stranding ingress.",
     "exact": {
       "terminal": 1,
       "pending_inputs": 0,
@@ -404,7 +392,7 @@
   },
   {
     "scenario": "active_turn_input_pinned_to_recovered_turn",
-    "outcome": "FIG-1573: with the crashed turn seeded without a next-turn row, recovery's drain claims no next-turn input and evaluates the orphan backstop while an active-turn row is still pinned to the very turn it is about to resume. The resumed turn keeps that row and delivers it at its own checkpoint, so recovery still reaches the exact durable terminal state with no ingress left behind; a sweep that took the row instead would change the replayed provider request.",
+    "outcome": "FIG-1573: with the crashed turn seeded without a next-turn row, recovery resumes the unfinished root while an active-turn row is still pinned to the very turn it is about to resume. The resumed turn keeps that row and delivers it at its own checkpoint, so recovery still reaches the exact durable terminal state with no ingress left behind; only the root's terminal re-defers a pinned row, and a sweep that took the row instead would change the replayed provider request.",
     "exact": {
       "terminal": 1,
       "pending_inputs": 0,
@@ -413,7 +401,7 @@
   },
   {
     "scenario": "peer_reclaim",
-    "outcome": "After the peer releases its lease, durable admission reclaims its exact queued-work member under the recovery lease and settles it with the recovered terminal commit.",
+    "outcome": "After the peer's drive is superseded, the recovery drive resumes the peer's root, reads back its exact queued-work member and settles it with the recovered terminal commit.",
     "exact": {
       "terminal": 1,
       "pending_inputs": 0,

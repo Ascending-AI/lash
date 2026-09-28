@@ -627,7 +627,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             }
             RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
                 result: Ok(lash_core::CheckpointDelivery::default()),
-                claims: Box::default(),
+                admitted: Box::default(),
             }),
             // The sync is the only way a turn machine gets its environment
             // and its tool surface, so the double runs it as the host does.

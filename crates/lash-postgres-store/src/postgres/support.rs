@@ -254,10 +254,6 @@ pub(crate) fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64
     })
 }
 
-pub(crate) fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
-    sql_counter_value("session_lease_generation", value)
-}
-
 pub(crate) fn plugin_sql_counter_value(
     counter: &'static str,
     value: u64,

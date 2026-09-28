@@ -9,8 +9,7 @@ pub const TABLE: &str = "queued_work_batches";
 /// each call site `join(", ")`ed into a `format!`; it is one list now, and the
 /// row decoders read by column name so the order is the list's to choose.
 pub const COLUMNS: &str = "enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-     work_kind, authority_json, merge_key, enqueued_at_ms,
-     claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id";
+     work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by";
 
 /// The columns written after allocation under the session lock.
 pub const INSERT_COLUMNS: &str =
@@ -18,31 +17,19 @@ pub const INSERT_COLUMNS: &str =
      authority_json, merge_key, enqueued_at_ms";
 
 /// The facts the settlement verdict
-/// [`require_settleable_queued_work`](lash_core::store_backend_support::require_settleable_queued_work)
+/// [`require_admitted_to_root`](lash_core::store_backend_support::require_admitted_to_root)
 /// consults, and nothing else.
 ///
 /// Narrow on purpose: this read runs once per settled batch of every commit and
 /// no part of the settlement decision looks at `authority_json`, which is an
 /// unbounded caller-supplied envelope.
-pub const SETTLEMENT_COLUMNS: &str = "claim_id, claim_token, claim_session_lease_generation";
-
-/// The four facts the delivery-boundary rule needs about the queue's head.
-///
-/// Narrow because the head candidate is a *decision input*, not a row: the
-/// boundary rule asks only where the head sits, what its delivery policy is and
-/// whether it is already claimed. Reading whole rows to answer that would carry
-/// every batch's `authority_json` through the claim path's hottest query.
-pub const HEAD_CANDIDATE_COLUMNS: &str = "enqueue_seq AS head_enqueue_seq,
-     batch_id AS head_batch_id,
-     delivery_policy AS head_delivery_policy,
-     claim_id AS head_claim_id";
+pub const SETTLEMENT_COLUMNS: &str = "admitted_root";
 
 crate::statements! {
     /// `queued_work_batches` statements both backends issue verbatim.
     pub struct QueuedBatchStatements @ "queued_work_batch" {
         select_by_id = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              WHERE batch_id = ?1";
 
@@ -52,60 +39,41 @@ crate::statements! {
 
         /// Every batch of session `?1`, in enqueue order.
         list_by_session = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
              WHERE session_id = ?1
              ORDER BY enqueue_seq ASC";
 
-        /// Session batches not held by a claim in the current drive epoch.
-        list_unclaimed = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
-                    work_kind, authority_json, merge_key, enqueued_at_ms,
-                    claim_fencing_token, claim_token, claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+        /// Session `?1`'s open batches: every batch no root has admitted, in
+        /// enqueue order. Session commands are never admitted, so they are
+        /// always open.
+        list_open = "SELECT enqueue_seq, batch_id, session_id, source_key, delivery_policy,
+                    work_kind, authority_json, merge_key, enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (claim_token IS NULL OR NOT EXISTS (
-                    SELECT 1 FROM session_meta meta
-                    WHERE meta.session_id = ?1
-                      AND meta.drive_admission_id IS NOT NULL
-                      AND meta.drive_epoch
-                          = queued_work_batches.claim_session_lease_generation
-               ))
+             WHERE session_id = ?1 AND admitted_root IS NULL
              ORDER BY enqueue_seq ASC";
 
-        /// Session `?1`'s head for generation `?2`, unfiltered by the
-        /// delivery boundary: what an empty candidate scan is asked about so
-        /// the refusal it reports names the head's own reason.
-        select_head_candidate = "SELECT enqueue_seq, batch_id, session_id, source_key,
+        /// Session `?1`'s batches root `?2` bound under step `?3`, in
+        /// `enqueue_seq` order: what a re-executed admission step reads back
+        /// instead of choosing again (FIG-3927).
+        select_admitted_by_step = "SELECT enqueue_seq, batch_id, session_id, source_key,
                     delivery_policy, work_kind, authority_json, merge_key,
-                    enqueued_at_ms, claim_fencing_token, claim_token,
-                    claim_session_lease_generation, claim_id, claim_owner_incarnation_id
+                    enqueued_at_ms, admitted_root, admitted_by
              FROM queued_work_batches
-             WHERE session_id = ?1
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?2
-                    OR claim_owner_incarnation_id <> ?3
-               )
-             ORDER BY enqueue_seq ASC
-             LIMIT 1";
+             WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
+             ORDER BY enqueue_seq ASC";
 
-        /// Claim batch `?2` of session `?1` for claim `?3`, lease token `?4`,
-        /// generation `?5`, fencing token `?6`, at `?7`.
+        /// Admit open batch `?2` of session `?1` to root `?3` by step `?4`,
+        /// at `?5`.
         ///
-        /// The claim is the batch's admission, so it delivers the batch's
-        /// ingress obligation in the same write (ADR 0109 §3).
-        ///
-        /// The generation predicate stays on the statement as the backstop of
-        /// [`queued_work_batch_claimability`](lash_core::store_backend_support::queued_work_batch_claimability):
-        /// the verdict decides over the locked row, and a row count other than
-        /// one is a disagreement between the two.
-        claim = "UPDATE queued_work_batches
-             SET claim_id = ?3,
-                 claim_token = ?4,
-                 claim_fencing_token = ?6,
-                 claim_session_lease_generation = ?5,
-                 claim_owner_incarnation_id = ?8,
+        /// The admission is the batch's delivery, so it delivers the batch's
+        /// ingress obligation in the same write (ADR 0109 §3). The open
+        /// predicate is the write's backstop: the composition was read in the
+        /// same transaction, so a row count other than one is a disagreement
+        /// between the two.
+        admit = "UPDATE queued_work_batches
+             SET admitted_root = ?3,
+                 admitted_by = ?4,
                  obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN 'delivered' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
@@ -115,61 +83,96 @@ crate::statements! {
                  obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN NULL ELSE obligation_stall_reason END,
                  obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
-                     THEN ?7 ELSE obligation_settled_at_ms END
+                     THEN ?5 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND batch_id = ?2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?5
-                    OR claim_owner_incarnation_id <> ?8
-               )";
+               AND admitted_root IS NULL";
 
-        /// The first payload of batch `?2` of session `?1`, if claim `?3`/`?4`
-        /// still holds it: the wake identity a settled batch contributes to its
-        /// redelivery fence.
+        /// Deliver the ingress obligation of open session command `?2` of
+        /// session `?1` at `?3`: the command lane takes no admission, so the
+        /// drive that reads a command run acknowledges it here, in one fenced
+        /// write, before it applies the run (ADR 0109 §3).
+        deliver_open_command = "UPDATE queued_work_batches
+             SET obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?3 ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1
+               AND batch_id = ?2
+               AND admitted_root IS NULL";
+
+        /// The first payload of batch `?2` of session `?1`, if root `?3`
+        /// still holds it: the wake identity a settled batch contributes to
+        /// its redelivery fence.
         ///
         /// The wake-source key travels in the plan's covered-item list, so the
         /// payload is the only fact still on the row. Both backends decode it
         /// the same way; the wake batch carries exactly one wake item
         /// (`validate_process_wake_source`), so the head payload is the batch's
         /// whole wake contribution.
-        select_claimed_batch_head_payload = "SELECT item.payload_json
+        select_admitted_batch_head_payload = "SELECT item.payload_json
              FROM queued_work_batches AS batch
              JOIN queued_work_items AS item ON item.batch_id = batch.batch_id
              WHERE batch.session_id = ?1
                AND batch.batch_id = ?2
-               AND batch.claim_id = ?3
-               AND batch.claim_token = ?4
+               AND batch.admitted_root = ?3
              ORDER BY item.item_index ASC
              LIMIT 1";
 
-        /// Give up claim `?2`/`?3` on session `?1`, restoring the interrupted
-        /// predecessor identity `?4`/`?5` the claim displaced.
+        /// Settle batch `?2` of session `?1` under root `?3`, which must hold
+        /// it, by removing it. A settled batch has no resting state: its items
+        /// go with it through the foreign key's cascade.
+        settle_admitted = "DELETE FROM queued_work_batches
+             WHERE session_id = ?1
+               AND batch_id = ?2
+               AND admitted_root = ?3";
+
+        /// Settle open session command `?2` of session `?1` by removing it:
+        /// the command lane's settlement, in the commit that applied it
+        /// (FIG-3927). A command withdrawn since the drive read it matches no
+        /// row, and the commit is refused.
+        settle_command = "DELETE FROM queued_work_batches
+             WHERE session_id = ?1
+               AND batch_id = ?2
+               AND admitted_root IS NULL";
+
+        /// Hand batch `?2` of session `?1` back open at its own position,
+        /// under root `?3`, which must hold it.
         ///
         /// A row handed back to the queue owes its session a drive again: a
-        /// delivered ingress obligation is due at once (ADR 0109 §3), and
-        /// its next claim asks under a fresh attempt.
-        abandon_claim = "UPDATE queued_work_batches
-             SET claim_id = ?4,
-                 claim_token = ?5,
-                 claim_session_lease_generation = 0,
-                 claim_owner_incarnation_id = NULL,
+        /// delivered ingress obligation is due at once (ADR 0109 §3). A
+        /// released wake keeps its redelivery floor: the fence is raised only
+        /// by a wake's terminal transition.
+        release_admitted = "UPDATE queued_work_batches
+             SET admitted_root = NULL,
+                 admitted_by = NULL,
                  obligation_state = CASE WHEN obligation_state = 'delivered'
                      THEN 'due' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
                      THEN 0 ELSE obligation_due_at_ms END,
                  obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
                      THEN NULL ELSE obligation_settled_at_ms END
-             WHERE session_id = ?1 AND claim_id = ?2 AND claim_token = ?3";
+             WHERE session_id = ?1 AND batch_id = ?2 AND admitted_root = ?3";
 
-        /// Settle batch `?2` of session `?1` under claim `?3`/`?4` by removing
-        /// it. A settled batch has no resting state: its items go with it
-        /// through the foreign key's cascade.
-        settle_claimed = "DELETE FROM queued_work_batches
-             WHERE session_id = ?1
-               AND batch_id = ?2
-               AND claim_id = ?3
-               AND claim_token = ?4";
+        /// [`release_admitted`](Self::release_admitted) over every batch root
+        /// `?2` of session `?1` still holds: the root's terminal write, after
+        /// the settlements its commit named (FIG-3927).
+        release_root = "UPDATE queued_work_batches
+             SET admitted_root = NULL,
+                 admitted_by = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1 AND admitted_root = ?2";
 
         delete_by_session = "DELETE FROM queued_work_batches WHERE session_id = ?1";
     }
@@ -178,11 +181,6 @@ crate::statements! {
 crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct BatchRootVerbStatements @ "queued_work_batch" {
-        release_batches = "UPDATE queued_work_batches SET
-            claim_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0,
-            claim_owner_incarnation_id = NULL
-            WHERE session_id = ?1 AND claim_token IS NOT NULL";
         delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
     }
 }

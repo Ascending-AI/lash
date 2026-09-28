@@ -1,3 +1,4 @@
+use super::admission::SCENARIO_ROOT;
 use super::*;
 
 impl RuntimeScenarioContext {
@@ -9,16 +10,19 @@ impl RuntimeScenarioContext {
             .appended_nodes()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let final_commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
-            .completing_queue_claims(
-                self.command_claim
-                    .iter()
-                    .chain(self.turn_claim.iter())
-                    .map(QueuedWorkClaim::completion),
-            )
-            .completing_turn_input_claims(
-                self.turn_input_claim.iter().map(TurnInputClaim::completion),
-            );
+        let mut final_commit = RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+        final_commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        final_commit.applied_commands = self.command_completion();
+        if self.admission.is_some() || self.checkpoint_admission.is_some() {
+            final_commit.ingress = Some(self.root_settlement());
+            let root = TurnId::from(SCENARIO_ROOT);
+            final_commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
+                commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+                turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
+                root,
+                stop: None,
+            }));
+        }
         let result = self
             .store()
             .commit_runtime_state(final_commit)
@@ -26,9 +30,9 @@ impl RuntimeScenarioContext {
             .expect("commit runtime scenario final state");
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
-        self.command_claim = None;
-        self.turn_claim = None;
-        self.turn_input_claim = None;
+        self.commands.clear();
+        self.admission = None;
+        self.checkpoint_admission = None;
         self.lease_released = true;
 
         if phase.pending_turn_inputs_empty_after_commit {
@@ -68,7 +72,7 @@ impl RuntimeScenarioContext {
                 .await
                 .expect("list queued work after scenario")
                 .is_empty(),
-            "{} should complete all claimed queue work",
+            "{} should complete all admitted queue work",
             self.name
         );
     }

@@ -1,6 +1,5 @@
 //! Shared SQL and identity helpers backends implement their store tier with.
 
-pub use crate::store::claim_authority::lease_owner_from_columns;
 use lash_sansio::SessionId;
 
 mod append_identity;
@@ -40,7 +39,7 @@ pub use turn_input_lifecycle_sql::{
 
 /// Reserved runtime-receipt identity used as the durable completion marker
 /// for one settled session-command batch. Backends write one marker for
-/// every batch in a coalesced command claim in the same transaction as the
+/// every batch in a coalesced command run in the same transaction as the
 /// head commit and queue deletion.
 pub fn session_command_batch_completion_key(
     session_id: &SessionId,
@@ -92,83 +91,6 @@ pub fn drain_end_receipt_storage_key(
     .storage_key()
 }
 
-/// Construct queued-work claim data with the predecessor identity that an abandoning store
-/// must restore.
-pub fn queued_work_claim_data(
-    batches: Vec<crate::runtime::QueuedWorkBatch>,
-    abandon_restore_claim_id: Option<String>,
-    abandon_restore_claim_token: Option<String>,
-) -> Result<crate::runtime::QueuedWorkClaimData, crate::StoreError> {
-    if abandon_restore_claim_id.is_some() != abandon_restore_claim_token.is_some() {
-        return Err(crate::StoreError::QueuedWorkPredecessorClaimCorrupt {
-            claim_id_present: abandon_restore_claim_id.is_some(),
-            claim_token_present: abandon_restore_claim_token.is_some(),
-        });
-    }
-    Ok(crate::runtime::QueuedWorkClaimData {
-        batches,
-        abandon_restore_claim_id,
-        abandon_restore_claim_token: abandon_restore_claim_token.map(String::into_boxed_str),
-    })
-}
-
-/// Return the interrupted predecessor identity an abandoning queued-work
-/// store must restore, or `None` when the claim originated as fresh work.
-pub fn queued_work_abandon_restore_claim_id(
-    claim: &crate::runtime::QueuedWorkClaim,
-) -> Option<&str> {
-    claim.abandon_restore_claim_id.as_deref()
-}
-
-pub fn queued_work_abandon_restore_claim_token(
-    claim: &crate::runtime::QueuedWorkClaim,
-) -> Option<&str> {
-    claim.abandon_restore_claim_token.as_deref()
-}
-
-/// The one rule deciding whether an active-turn-scoped pending-input row is
-/// an orphan this scope may repair.
-///
-/// Every backend answers with this function or with SQL that mirrors it
-/// literally, so "which rows can a dead turn's repair touch" has exactly one
-/// definition (FIG-1573). The row must be active-turn scoped and in a state
-/// only its own turn could advance; the scope then supplies the proof that
-/// the turn is gone. `live_generation` is the fencing token of the lease the
-/// backend has just re-validated in this transaction, so a row claimed by
-/// the live lane is never an orphan.
-pub fn orphaned_active_turn_input_is_repairable(
-    scope: crate::OrphanedTurnInputScope<'_>,
-    live_generation: u64,
-    state: &crate::TurnInputState,
-    claim_token_present: bool,
-    claim_session_lease_generation: u64,
-) -> bool {
-    let pinned_turn_id = match state {
-        crate::TurnInputState::PendingActive(scope) | crate::TurnInputState::Accepted(scope) => {
-            &scope.turn_id
-        }
-        _ => return false,
-    };
-    match scope {
-        crate::OrphanedTurnInputScope::Turn(turn_id) => pinned_turn_id == turn_id,
-        crate::OrphanedTurnInputScope::LaneGeneration { resumable_turn_id } => {
-            // A turn the caller can still resume owns its pinned rows, even
-            // though its claim generation is dead: durable recovery replays
-            // it under the same turn id, and a swept row changes the
-            // request that replay reconstructs (FIG-1573).
-            if let Some(resumable) = resumable_turn_id
-                && pinned_turn_id
-                    .as_str()
-                    .strip_prefix(resumable.as_str())
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
-            {
-                return false;
-            }
-            !claim_token_present || claim_session_lease_generation != live_generation
-        }
-    }
-}
-
 /// Build the SQL predicate admitting exactly the active-turn ingress whose
 /// minimum boundary has been reached at `checkpoint`.
 ///
@@ -182,10 +104,10 @@ pub fn orphaned_active_turn_input_is_repairable(
 /// An absent field reads as the serde default (`after_work`), so a
 /// hand-written or externally produced row cannot bypass the filter by
 /// omitting the key. A value this build does not recognize matches no
-/// literal and is therefore never claimed here: a node that cannot
+/// literal and is therefore never admitted here: a node that cannot
 /// interpret a boundary leaves the row for a peer that can, where before
 /// FIG-1524 the final checkpoint selected such a row and the
-/// deserialization failure failed the whole claim call.
+/// deserialization failure failed the whole admission.
 pub fn admitted_min_boundary_sql(
     min_boundary_expr: &str,
     checkpoint: crate::CheckpointKind,
@@ -238,32 +160,6 @@ pub fn terminal_turn_input_states_sql() -> String {
 
 pub use crate::runtime::turn_input_ingress::derive_pending_turn_input_id;
 
-/// The affected-item records of the process wakes a withheld queued-work
-/// claim holds, each deferred (FIG-3543, ADR 0101 §10): one per wake item, in
-/// the claim's batch and item order. A cancel commit writes them after it released the
-/// claim; a claim that holds no wake yields none.
-#[must_use]
-pub fn deferred_wake_records(
-    claim: &crate::QueuedWorkClaim,
-) -> Vec<crate::turn_control_vocabulary::TurnCancelAffectedWake> {
-    claim
-        .batches
-        .iter()
-        .flat_map(|batch| {
-            batch.items.iter().filter_map(|item| match &item.payload {
-                crate::QueuedWorkPayload::ProcessWake { wake } => Some(
-                    crate::turn_control_vocabulary::TurnCancelAffectedWake::deferred(
-                        batch.batch_id.clone(),
-                        item.item_id.clone(),
-                        (**wake).clone(),
-                    ),
-                ),
-                crate::QueuedWorkPayload::SessionCommand { .. } => None,
-            })
-        })
-        .collect()
-}
-
 /// The fence a backend's [`DriveEpochStore::seal_drive_epoch`] returns for
 /// the epoch its compare-and-set raised, or the one a retried seal of the
 /// same admission finds. It is the only constructor of a [`DriveFence`]
@@ -279,13 +175,15 @@ pub fn sealed_drive_fence(
 ) -> crate::store::DriveFence {
     crate::store::DriveFence::sealed_by_store(session_id, epoch, admission)
 }
+/// The admission verdicts every backend takes alike; see
+/// [`crate::store::admission_plan`].
+pub use crate::store::admission_plan::{
+    deferred_wake_records, require_admitted_to_root, require_open_command,
+};
 /// One verdict function per fencing decision; see [`crate::store::fencing`].
 pub use crate::store::fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
-    QueuedWorkSettlementFacts, TurnInputSettlementFacts, WakeDeliveryClaimFacts,
-    WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability, fenced_write_applied,
-    head_publication_verdict, queued_work_batch_claimability, require_fenced_write_applied,
-    require_settleable_queued_work, require_settleable_turn_input,
-    require_single_writer_head_publication, turn_input_claimability,
-    unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
+    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, fenced_write_applied,
+    head_publication_verdict, require_fenced_write_applied, require_single_writer_head_publication,
+    wake_delivery_claim_verdict,
 };

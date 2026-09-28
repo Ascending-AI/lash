@@ -160,10 +160,6 @@ pub struct ResidentSessionContinuity {
     /// runtime's resident state, so the next physical turn must reload deliberately before
     /// planning.
     graph_head_stale: Arc<AtomicBool>,
-    /// Lease-guard identity retained across a successful physical-turn commit.
-    /// A match proves no release/reacquisition boundary occurred before the
-    /// next physical turn on this handle.
-    last_committed_lease_continuity: Option<DriveClaimContinuity>,
     /// Most recent physical turn committed by this runtime, paired with the
     /// resulting session revision for observation-envelope attribution.
     last_committed_observation_turn: Option<(u64, TurnId)>,
@@ -180,7 +176,6 @@ impl ResidentSessionContinuity {
             validity: ResidentSessionState::Valid,
             graph_loaded_from_store: false,
             graph_head_stale: Arc::new(AtomicBool::new(false)),
-            last_committed_lease_continuity: None,
             last_committed_observation_turn: None,
             invalidation_incidents: 0,
         }
@@ -210,27 +205,16 @@ impl ResidentSessionContinuity {
             };
         }
         self.graph_loaded_from_store = false;
-        self.last_committed_lease_continuity = None;
         self.last_committed_observation_turn = None;
     }
 
     /// Settle every resident-freshness fact after a full durable adoption
     /// (FIG-1875): the resident state is valid, the graph is the one loaded
     /// from the store, and no cross-process staleness is pending.
-    ///
-    /// `lease_continuity` is the continuity of the session-execution lease
-    /// held across the adoption, when the caller holds one: while that lease
-    /// stays live no other executor can advance the durable head, so the
-    /// freshly adopted resident graph is current under it and the turn loop
-    /// issues no second durable probe.
-    pub(in crate::runtime) fn mark_adopted(
-        &mut self,
-        lease_continuity: Option<DriveClaimContinuity>,
-    ) {
+    pub(in crate::runtime) fn mark_adopted(&mut self) {
         self.validity = ResidentSessionState::Valid;
         self.graph_loaded_from_store = true;
         self.graph_head_stale.store(false, Ordering::Release);
-        self.last_committed_lease_continuity = lease_continuity;
     }
 
     /// Record that this handle has now attempted a durable graph load.
@@ -247,32 +231,6 @@ impl ResidentSessionContinuity {
     /// a borrowed nested commit this handle never observes directly.
     pub(in crate::runtime) fn graph_head_stale_flag(&self) -> &Arc<AtomicBool> {
         &self.graph_head_stale
-    }
-
-    /// Whether the resident graph can be planned against without a fresh
-    /// durable probe.
-    ///
-    /// Only continuous lease custody proves it: this handle must have loaded
-    /// the graph itself, no nested commit may have marked it stale, and the
-    /// lease generation must be the same one the last commit ran under. Any
-    /// release/reacquisition boundary in between lets another executor advance
-    /// the durable head.
-    pub(in crate::runtime) fn graph_is_current_under(
-        &self,
-        lease_continuity: Option<DriveClaimContinuity>,
-    ) -> bool {
-        self.graph_loaded_from_store
-            && !self.graph_head_stale.load(Ordering::Acquire)
-            && lease_continuity.is_some()
-            && lease_continuity == self.last_committed_lease_continuity
-    }
-
-    /// Retain (or drop) the lease identity a just-committed turn ran under.
-    pub(in crate::runtime) fn retain_committed_lease_continuity(
-        &mut self,
-        lease_continuity: Option<DriveClaimContinuity>,
-    ) {
-        self.last_committed_lease_continuity = lease_continuity;
     }
 
     /// Name the turn that produced `revision`, for observation attribution.
@@ -384,8 +342,7 @@ impl LashRuntime {
     }
 
     pub async fn reload_invalidated_resident_session_state(&mut self) -> Result<(), RuntimeError> {
-        self.reload_invalidated_resident_session_state_under_lease(None)
-            .await
+        self.reload_invalidated_resident_session().await
     }
 
     /// Restore the session's tool registry, plugin state and protocol session
@@ -535,10 +492,7 @@ impl LashRuntime {
         Ok(tool_restore)
     }
 
-    pub(super) async fn reload_invalidated_resident_session_state_under_lease(
-        &mut self,
-        session_execution_lease: Option<&DriveClaimGuard>,
-    ) -> Result<(), RuntimeError> {
+    pub(super) async fn reload_invalidated_resident_session(&mut self) -> Result<(), RuntimeError> {
         let decision_id = match self.resident_session.validity() {
             ResidentSessionState::Valid => {
                 self.trace_resident_session_reload_decision(ResidentSessionReloadDecision {
@@ -609,8 +563,7 @@ impl LashRuntime {
             // A successful reload is a full durable adoption: settle the
             // freshness facts so the turn loop does not issue a second
             // durable probe right after this reload (FIG-1875).
-            self.resident_session
-                .mark_adopted(session_execution_lease.and_then(DriveClaimGuard::continuity));
+            self.resident_session.mark_adopted();
             Ok(())
         }
         .await;
@@ -679,7 +632,7 @@ mod tests {
             }
         );
 
-        continuity.mark_adopted(None);
+        continuity.mark_adopted();
         continuity.invalidate(&session_id);
         assert_eq!(
             continuity.validity(),

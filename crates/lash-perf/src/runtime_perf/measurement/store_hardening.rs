@@ -8,7 +8,7 @@ const HARDENING_PRUNE_BATCH: usize = 16;
 #[derive(Clone, Copy)]
 struct StoreHardeningPhaseNames {
     seal_drive_epoch: &'static str,
-    claim_queued_work: &'static str,
+    admit_queued_work: &'static str,
     complete_queued_work: &'static str,
     attachment_intent: &'static str,
     attachment_adopt: &'static str,
@@ -18,7 +18,7 @@ struct StoreHardeningPhaseNames {
 
 const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
     seal_drive_epoch: "store_hardening.memory.seal_drive_epoch",
-    claim_queued_work: "store_hardening.memory.claim_queued_work",
+    admit_queued_work: "store_hardening.memory.admit_queued_work",
     complete_queued_work: "store_hardening.memory.complete_queued_work",
     attachment_intent: "store_hardening.memory.attachment_intent",
     attachment_adopt: "store_hardening.memory.attachment_adopt",
@@ -28,7 +28,7 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 
 const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
     seal_drive_epoch: "store_hardening.sqlite.seal_drive_epoch",
-    claim_queued_work: "store_hardening.sqlite.claim_queued_work",
+    admit_queued_work: "store_hardening.sqlite.admit_queued_work",
     complete_queued_work: "store_hardening.sqlite.complete_queued_work",
     attachment_intent: "store_hardening.sqlite.attachment_intent",
     attachment_adopt: "store_hardening.sqlite.attachment_adopt",
@@ -38,7 +38,7 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
 
 const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
     seal_drive_epoch: "store_hardening.postgres.seal_drive_epoch",
-    claim_queued_work: "store_hardening.postgres.claim_queued_work",
+    admit_queued_work: "store_hardening.postgres.admit_queued_work",
     complete_queued_work: "store_hardening.postgres.complete_queued_work",
     attachment_intent: "store_hardening.postgres.attachment_intent",
     attachment_adopt: "store_hardening.postgres.attachment_adopt",
@@ -137,7 +137,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     })
     .await?;
 
-    let owner = lash_core::LeaseOwnerIdentity::opaque("lash-perf", &run_id);
     for turn_index in 0..chat_turns {
         run.turn(
             turn_index,
@@ -184,7 +183,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                     measure_store_hardening_backend_turn(
                         &memory_store,
                         &memory_session_id,
-                        &owner,
                         turn_index,
                         MEMORY_HARDENING_PHASES,
                     )
@@ -194,7 +192,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                     measure_store_hardening_backend_turn(
                         &sqlite_store,
                         &sqlite_session_id,
-                        &owner,
                         turn_index,
                         SQLITE_HARDENING_PHASES,
                     )
@@ -204,7 +201,6 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                     measure_store_hardening_backend_turn(
                         &postgres_store,
                         &postgres_session_id,
-                        &owner,
                         turn_index,
                         POSTGRES_HARDENING_PHASES,
                     )
@@ -339,18 +335,17 @@ fn measure_hardening_identity_phases(
 async fn measure_store_hardening_backend_turn(
     store: &Arc<dyn lash_core::RuntimePersistence>,
     session_id: &SessionId,
-    owner: &lash_core::LeaseOwnerIdentity,
     turn_index: usize,
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
     let (lease, phase) = measure_runtime_perf_async_phase(names.seal_drive_epoch, async {
-        seal_perf_claim(store.as_ref(), session_id).await
+        seal_perf_drive(store.as_ref(), session_id).await
     })
     .await?;
     phases.insert(phase.0, phase.1);
 
-    store
+    let head = store
         .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(
             super::queued_work::queued_work_stress_wake(
                 session_id,
@@ -359,27 +354,29 @@ async fn measure_store_hardening_backend_turn(
                 store.fleet_format(),
             ),
         ))
-        .await?;
-    let (claim, phase) = measure_runtime_perf_async_phase(names.claim_queued_work, async {
+        .await?
+        .batch_id;
+    let root = lash_core::TurnId::from(format!("hardening-root-{turn_index}"));
+    let (admission, phase) = measure_runtime_perf_async_phase(names.admit_queued_work, async {
+        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+            &lease,
+            &root,
+            lash_core::store::AdmittedHead::Batch(head.clone()),
+        );
+        request.policy = lash_core::testing::queued_work_claim_policy(1);
         store
-            .claim_ready_queued_work(
-                session_id,
-                &lease.fence(),
-                owner,
-                QueuedWorkClaimBoundary::Idle,
-                lash_core::testing::queued_work_claim_policy(1),
-            )
+            .admit_root(&request)
             .await?
-            .claim()
-            .ok_or_else(|| anyhow::anyhow!("store-hardening expected queued-work claim"))
+            .ok_or_else(|| anyhow::anyhow!("store-hardening expected a queued-work admission"))
     })
     .await?;
     phases.insert(phase.0, phase.1);
 
     let mut state = load_store_hardening_state(store, session_id).await?;
     let (_, phase) = measure_runtime_perf_async_phase(names.complete_queued_work, async {
-        let commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_queue_claim(claim.completion());
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
+        commit.drive_fence = Some(Box::new(lease.clone()));
+        let commit = super::queued_work::finishing_perf_root(commit, &root, &admission);
         let result = store.commit_runtime_state(commit).await?;
         state.apply_persisted_commit_result(result);
         Ok::<(), anyhow::Error>(())

@@ -1102,11 +1102,11 @@ run_state_machine_and_fault_matrix() {
     run_cargo_tests -p lash-sim --locked --test crash_point_matrix \
       process_terminal_mid_journal_step
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      queued_work_claims_supersede_across_session_lease_generations
+      a_stale_fence_writes_nothing
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      turn_input_claims_supersede_across_session_lease_generations
+      settlement_is_predicated_on_the_root
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance_memory \
-      same_generation_claim_scans_reach_rows_beyond_the_scan_surplus
+      concurrent_admissions_bind_every_row_to_at_most_one_root
   fi
 
   if area_selected protocol; then

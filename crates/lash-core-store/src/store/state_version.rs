@@ -19,12 +19,12 @@ pub const OLDEST_SUPPORTED_SESSION_STATE_VERSION: u32 = 3;
 /// a later migration or drain can identify them.
 pub const CURRENT_SESSION_STATE_VERSION: u32 = 3;
 
-/// Successful lease-fenced admission of one complete session-state generation.
+/// Successful drive-fenced admission of one complete session-state generation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionStateAdmission {
     pub session_id: SessionId,
     pub version: u32,
-    pub lease_fencing_token: u64,
+    pub drive_epoch: u64,
 }
 
 /// Interpret an independently read physical marker.

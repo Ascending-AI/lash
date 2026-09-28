@@ -173,7 +173,7 @@ lash_store_sql::statements! {
                     pending_follow_on_json
              FROM session_head WHERE session_id = ?1";
 
-        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every claim
+        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every admission
         /// inside its write transaction.
         select_pending_follow_on = "SELECT pending_follow_on_json FROM session_head WHERE session_id = ?1";
 

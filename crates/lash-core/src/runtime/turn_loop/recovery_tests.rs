@@ -1,9 +1,7 @@
-use super::claim_repair::is_resumable_turn_or_follow_on;
 use super::commit::recovered_turn_cancel_closure;
 use crate::{
-    AwaitEventKey, AwaitEventWaitIdentity, ClaimAuthority, ExecutionScope, LeaseOwnerIdentity,
-    TurnAddress, TurnCancelClosureAuthorization, TurnCancelClosureProposal,
-    TurnCancelIntentSnapshot, TurnId,
+    AwaitEventKey, AwaitEventWaitIdentity, ExecutionScope, TurnAddress,
+    TurnCancelClosureAuthorization, TurnCancelClosureProposal, TurnCancelIntentSnapshot,
 };
 
 fn closure_authorization(
@@ -29,33 +27,13 @@ fn closure_authorization(
         key(AwaitEventWaitIdentity::TurnTerminal, "terminal"),
         TurnCancelClosureProposal::CompletionSealed,
         TurnCancelIntentSnapshot::Absent,
-        &ClaimAuthority {
-            session_id: "recovery-session".into(),
-            owner: LeaseOwnerIdentity::opaque("owner", "old-process"),
-            executor_id: "old-executor".to_string(),
-            lease_token: "old-lease".to_string(),
+        &crate::store_backend_support::sealed_drive_fence(
+            "recovery-session".into(),
             fencing_token,
-        },
+            crate::store::AdmissionId::new("old-admission"),
+        ),
     )
     .expect("valid closure authorization")
-}
-
-#[test]
-fn recovery_retains_only_the_resumable_logical_turn_closures() {
-    let root = TurnId::from("root-turn");
-    assert!(is_resumable_turn_or_follow_on(&root, &root));
-    assert!(is_resumable_turn_or_follow_on(
-        &TurnId::from("root-turn:agent-frame:1"),
-        &root,
-    ));
-    assert!(!is_resumable_turn_or_follow_on(
-        &TurnId::from("root-turn-other"),
-        &root,
-    ));
-    assert!(!is_resumable_turn_or_follow_on(
-        &TurnId::from("unrelated-turn"),
-        &root,
-    ));
 }
 
 #[test]

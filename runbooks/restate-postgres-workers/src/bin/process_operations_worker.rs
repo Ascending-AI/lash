@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use lash::ProcessId;
 use lash::SessionId;
 use lash::persistence::{
-    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft, QueuedWorkStore as _,
+    DeliveryPolicy, IngressStore as _, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft,
 };
 use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{

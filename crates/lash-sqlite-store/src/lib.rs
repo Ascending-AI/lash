@@ -56,34 +56,29 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, prepare_process_event_append,
-    prepare_process_registration,
+    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+    TurnLaneAdmissionPolicy, prepare_process_event_append, prepare_process_registration,
 };
 use lash_core_execution::store::queued_work::{
-    ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    MAX_SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
+    select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessListFilter,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, IngressStore, PersistedSegmentHandover,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
-    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
-    facade_support::registry_transitions,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -419,10 +414,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
         counter,
         current: value,
     })
-}
-
-fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
-    sql_counter_value("session_lease_generation", value)
 }
 
 fn plugin_sql_counter_value(

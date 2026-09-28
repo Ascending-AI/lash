@@ -68,15 +68,15 @@ async fn cancel_input(
         // the root's end: a root that switched frames runs on in its
         // follow-on turns, so its root answers whether it settled.
         PendingTurnInputCancelOutcome::AlreadyCompleted(_)
-        | PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
+        | PendingTurnInputCancelOutcome::AlreadyAdmitted { .. } => {
             let root = root_of_input(parts, input).await?;
             cancel_root(parts, &root, request_id, request).await
         }
     }
 }
 
-/// The root that took `input`, from its durable binding: the claim binds it
-/// before any turn commits, so a cancel reaches the consuming root even
+/// The root that took `input`, from its durable binding: the admission binds
+/// it before any turn commits, so a cancel reaches the consuming root even
 /// before the input has application evidence.
 async fn root_of_input(parts: &SendParts, input: &InputId) -> Result<TurnId> {
     if let Some(root) = parts.store.root_of_input(&parts.session_id, input).await? {

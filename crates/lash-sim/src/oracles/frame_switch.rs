@@ -39,107 +39,81 @@ pub fn frame_switch_seeds(observations: &[FrameSwitchSeedObservation]) -> Oracle
     )
 }
 
-/// Match runtime claim/completion trace records by claim kind, claim id and
-/// the ingress rows the claim holds, and require a single terminal settlement
-/// for every claimed ingress. The rows are part of a claim's identity because
-/// a store may hand the same claim id to a later claim over different rows:
-/// SQLite derives it from a rowid that a deleted batch frees for reuse.
+/// Match the runtime's admission and settlement trace records by root and
+/// row (FIG-3927), and require every admitted row to be admitted once and
+/// settled once under the root that admitted it: completed as delivered, or
+/// handed back open or dropped by that root's commit.
 pub fn logical_turn_claims_settle_exactly_once(
     records: &[lash_core::facade_support::TraceRecord],
 ) -> OracleVerdict {
-    type ClaimKey = (String, String, Vec<String>);
-    fn held_rows(claim: &Value) -> Vec<String> {
-        let mut rows = ["batch_ids", "input_ids"]
-            .into_iter()
-            .filter_map(|field| claim.get(field).and_then(Value::as_array))
+    type RowKey = (String, String);
+    fn row_ids(payload: &Value, fields: &[&str]) -> Vec<String> {
+        fields
+            .iter()
+            .filter_map(|field| payload.get(*field).and_then(Value::as_array))
             .flatten()
             .filter_map(Value::as_str)
             .map(str::to_string)
-            .collect::<Vec<_>>();
-        rows.sort();
-        rows
+            .collect()
     }
-    let mut claimed = BTreeMap::<ClaimKey, usize>::new();
-    let mut completed = BTreeMap::<ClaimKey, usize>::new();
+    let mut admitted = BTreeMap::<RowKey, usize>::new();
+    let mut settled = BTreeMap::<RowKey, usize>::new();
     for record in records {
         let lash_core::TraceEvent::Custom { name, payload } = &record.event else {
             continue;
         };
-        match name.as_str() {
-            "queued_work.claimed" | "turn_input.claimed" => {
-                let Some(claim_id) = payload.get("claim_id").and_then(Value::as_str) else {
-                    return OracleVerdict::failed(
-                        LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
-                        format!("{name} trace omitted claim_id"),
-                    );
-                };
-                *claimed
-                    .entry((
-                        name.trim_end_matches(".claimed").to_string(),
-                        claim_id.to_string(),
-                        held_rows(payload),
-                    ))
-                    .or_default() += 1;
-            }
-            "queued_work.completed" | "turn_input.completed" => {
-                let Some(claims) = payload.get("claims").and_then(Value::as_array) else {
-                    return OracleVerdict::failed(
-                        LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
-                        format!("{name} trace omitted claims"),
-                    );
-                };
-                for claim in claims {
-                    let Some(claim_id) = claim.get("claim_id").and_then(Value::as_str) else {
-                        return OracleVerdict::failed(
-                            LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
-                            format!("{name} trace contained a claim without claim_id"),
-                        );
-                    };
-                    *completed
-                        .entry((
-                            name.trim_end_matches(".completed").to_string(),
-                            claim_id.to_string(),
-                            held_rows(claim),
-                        ))
-                        .or_default() += 1;
-                }
-            }
-            _ => {}
+        let (counts, fields): (&mut BTreeMap<RowKey, usize>, &[&str]) = match name.as_str() {
+            "ingress.admitted" => (&mut admitted, &["input_ids", "batch_ids"]),
+            "ingress.settled" => (
+                &mut settled,
+                &["input_ids", "batch_ids", "released", "dropped"],
+            ),
+            _ => continue,
+        };
+        let Some(root) = payload.get("root").and_then(Value::as_str) else {
+            return OracleVerdict::failed(
+                LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
+                format!("{name} trace omitted root"),
+            );
+        };
+        for row in row_ids(payload, fields) {
+            *counts.entry((root.to_string(), row)).or_default() += 1;
         }
     }
-    if claimed.is_empty() {
+    if admitted.is_empty() {
         return OracleVerdict::failed(
             LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
-            "no claimed ingress was observed",
+            "no admitted ingress was observed",
         );
     }
-    for (claim, claim_count) in &claimed {
-        let completion_count = completed.get(claim).copied().unwrap_or_default();
-        if *claim_count != 1 || completion_count != 1 {
+    for (row, admission_count) in &admitted {
+        let settlement_count = settled.get(row).copied().unwrap_or_default();
+        if *admission_count != 1 || settlement_count != 1 {
             return OracleVerdict::failed(
                 LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
                 format!(
-                    "{} claim `{}` over {:?} was claimed {claim_count} times and settled {completion_count} times",
-                    claim.0, claim.1, claim.2
+                    "row `{}` of root `{}` was admitted {admission_count} times and settled \
+                     {settlement_count} times",
+                    row.1, row.0
                 ),
             );
         }
     }
-    if let Some((claim, count)) = completed
+    if let Some((row, count)) = settled
         .iter()
-        .find(|(claim, count)| !claimed.contains_key(*claim) || **count != 1)
+        .find(|(row, count)| !admitted.contains_key(*row) || **count != 1)
     {
         return OracleVerdict::failed(
             LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
             format!(
-                "{} claim `{}` over {:?} had {count} terminal settlements without one matching claim",
-                claim.0, claim.1, claim.2
+                "row `{}` of root `{}` had {count} settlements without one matching admission",
+                row.1, row.0
             ),
         );
     }
     OracleVerdict::passed(
         LOGICAL_TURN_CLAIM_EXACTLY_ONCE_ORACLE,
-        format!("{} ingress claims settled exactly once", claimed.len()),
+        format!("{} admitted rows settled exactly once", admitted.len()),
     )
 }
 
@@ -401,7 +375,7 @@ pub fn generated_final_value_semantic_channel(
 }
 
 #[cfg(test)]
-mod claim_identity_tests {
+mod admission_identity_tests {
     use super::*;
 
     fn record(name: &str, payload: Value) -> lash_core::facade_support::TraceRecord {
@@ -417,33 +391,45 @@ mod claim_identity_tests {
         }
     }
 
-    fn claim_and_settle(batch: &str) -> [lash_core::facade_support::TraceRecord; 2] {
+    fn admit_and_settle(root: &str, batch: &str) -> [lash_core::facade_support::TraceRecord; 2] {
         [
             record(
-                "queued_work.claimed",
-                serde_json::json!({"claim_id": "qwc:1:1", "batch_ids": [batch]}),
+                "ingress.admitted",
+                serde_json::json!({"root": root, "admitted_by": "admit", "batch_ids": [batch]}),
             ),
             record(
-                "queued_work.completed",
-                serde_json::json!({"claims": [{"claim_id": "qwc:1:1", "batch_ids": [batch]}]}),
+                "ingress.settled",
+                serde_json::json!({"root": root, "batch_ids": [batch]}),
             ),
         ]
     }
 
-    /// A claim id a store hands to successive claims over different batches
-    /// is two claims, each settled once.
+    /// A row one root released and another admitted is two admissions, each
+    /// settled once.
     #[test]
-    fn a_reused_claim_id_over_distinct_rows_is_distinct_claims() {
-        let records = [claim_and_settle("qwb:a"), claim_and_settle("qwb:b")].concat();
+    fn a_row_readmitted_by_another_root_is_a_distinct_admission() {
+        let mut records = admit_and_settle("root-a", "qwb:a").to_vec();
+        records.push(record(
+            "ingress.admitted",
+            serde_json::json!({"root": "root-b", "admitted_by": "admit", "batch_ids": ["qwb:b"]}),
+        ));
+        records.push(record(
+            "ingress.settled",
+            serde_json::json!({"root": "root-b", "released": ["qwb:b"]}),
+        ));
         let verdict = logical_turn_claims_settle_exactly_once(&records);
         assert!(verdict.is_passed(), "{verdict:?}");
     }
 
-    /// The same claim over the same batch, claimed and settled twice, is a
-    /// double settlement.
+    /// The same row admitted and settled twice under one root is a double
+    /// settlement.
     #[test]
-    fn the_same_claim_over_the_same_rows_twice_is_refused() {
-        let records = [claim_and_settle("qwb:a"), claim_and_settle("qwb:a")].concat();
+    fn the_same_row_settled_twice_under_one_root_is_refused() {
+        let records = [
+            admit_and_settle("root-a", "qwb:a"),
+            admit_and_settle("root-a", "qwb:a"),
+        ]
+        .concat();
         let verdict = logical_turn_claims_settle_exactly_once(&records);
         assert!(!verdict.is_passed(), "{verdict:?}");
     }

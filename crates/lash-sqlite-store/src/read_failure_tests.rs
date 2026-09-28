@@ -1,7 +1,6 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
 use lash_core_execution::ModuleArtifactStore;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -586,68 +585,6 @@ async fn malformed_durable_rows_surface_typed_corruption() {
 }
 
 #[tokio::test]
-async fn negative_and_exhausted_queued_work_fences_refuse_with_typed_errors() {
-    let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("fence-corrupt.db");
-    let store = Store::open(&path).await.expect("open store");
-    let session_id = "fence-corrupt";
-    let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(session_id),
-            &owner,
-            "read-failure-executor",
-            0,
-        )
-        .await
-        .expect("seal drive epoch")
-        .acquired()
-        .expect("drive epoch sealed");
-    let batch = store
-        .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
-            session_id,
-            lash_core_execution::DeliveryPolicy::EarliestSafeBoundary,
-            lash_core_execution::runtime::SessionCommand::RefreshToolCatalog {
-                reason: "fence test".to_string(),
-            },
-        ))
-        .await
-        .expect("enqueue queued work");
-    let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-
-    raw.execute(
-        "UPDATE queued_work_batches SET claim_fencing_token = -1 WHERE batch_id = ?1",
-        params![batch.batch_id.as_str()],
-    )
-    .expect("inject negative fence");
-    assert_corrupt(
-        store.list_queued_work(&SessionId::from(session_id)).await,
-        "QueuedWorkBatch",
-    );
-
-    raw.execute(
-        "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
-        params![i64::MAX, batch.batch_id.as_str()],
-    )
-    .expect("seed exhausted fence");
-    let error = store
-        .claim_leading_ready_session_command(
-            &SessionId::from(session_id),
-            &lease.authority(),
-            &owner,
-        )
-        .await
-        .expect_err("exhausted SQL fence must refuse");
-    assert!(matches!(
-        error,
-        StoreError::MonotonicCounterOverflow {
-            counter: "queued_work_claim_fencing_token",
-            current,
-        } if current == i64::MAX as u64
-    ));
-}
-
-#[tokio::test]
 async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     let store = crate::test_support::memory_store()
         .await
@@ -856,7 +793,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
         async move {
             match read {
                 QueuedWorkRead::All => store.list_queued_work(&session_id).await,
-                QueuedWorkRead::Pending => store.list_pending_queued_work(&session_id).await,
+                QueuedWorkRead::Pending => store.list_open_queued_work(&session_id).await,
             }
         }
     });

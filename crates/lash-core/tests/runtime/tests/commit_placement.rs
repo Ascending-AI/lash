@@ -120,7 +120,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         },
     )
     .await;
-    let lease = lash_core::testing::RuntimePersistenceTestClaimExt::seal_claim_epoch_for_test(
+    let lease = lash_core::testing::RuntimePersistenceTestDriveExt::seal_drive_epoch_for_test(
         store.as_ref(),
         &SessionId::from(session_id),
         &lease_owner(session_id),
@@ -135,7 +135,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         effect::layered_operation_controller(&backend, Arc::new(JournaledCommitController::<true>));
     runtime
         .drain_next_session_command_with_cancellation(
-            &lease.fence(),
+            &lease,
             CancellationToken::new(),
             controller.as_ref(),
         )

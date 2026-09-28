@@ -41,17 +41,22 @@ fn a_state_token_renders_to_the_predicate_its_generator_spells() {
     assert!(sql.pending_inputs.delete_withdrawn.sql().contains(
         &vocabulary::cancelled_turn_input_state_predicate_sql("state")
     ),);
-    assert!(sql.pending_inputs.settle_unclaimed.sql().contains(
-        &vocabulary::nonterminal_turn_input_state_predicate_sql("state")
-    ),);
+    assert!(
+        sql.pending_inputs
+            .release_root
+            .sql()
+            .contains(&vocabulary::active_turn_input_state_predicate_sql("state")),
+    );
     assert!(sql.pending_inputs.list_undelivered.sql().contains(
         &vocabulary::undelivered_turn_input_state_predicate_sql("state")
     ),);
     assert!(
         sql.pending_inputs_postgres
-            .select_active_turn_rows
+            .admission_candidates_next_turn
             .sql()
-            .contains(&vocabulary::active_turn_input_state_predicate_sql("state")),
+            .contains(&vocabulary::undelivered_turn_input_state_predicate_sql(
+                "state"
+            )),
     );
 }
 
@@ -67,12 +72,12 @@ fn a_checkpoint_statement_spells_the_boundary_its_generator_spells() {
     for (statement, checkpoint) in [
         (
             &sql.pending_inputs_postgres
-                .claim_candidates_active_turn_after_work,
+                .admission_candidates_active_turn_after_work,
             lash_core_execution::CheckpointKind::AfterWork,
         ),
         (
             &sql.pending_inputs_postgres
-                .claim_candidates_active_turn_before_completion,
+                .admission_candidates_active_turn_before_completion,
             lash_core_execution::CheckpointKind::BeforeCompletion,
         ),
         (

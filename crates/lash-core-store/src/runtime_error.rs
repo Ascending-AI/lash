@@ -57,13 +57,6 @@ pub enum RuntimeErrorCode {
     /// admission is safe to retry and admits the input once the redrive
     /// settles.
     SessionRedriveUnsettled,
-    /// A claim-less turn-input settlement lost the head CAS to whoever holds or
-    /// already settled that row (ADR 0069 §5): no durable record was written.
-    /// Since the initial drive set is journaled with its claim (ADR 0069 §6),
-    /// no runtime path settles without a claim; the store still verifies the
-    /// claim-less predicate, and this code maps its refusal. The FIG-3540
-    /// ingress cutover deletes claim-less settlement together with this code.
-    TurnInputSettlementSuperseded,
     /// The journaled initial drive of a turn cannot drive the input that turn
     /// accepted: another claim of the live lease generation holds it; it is no
     /// longer open because it was settled, cancelled, or pruned by `vacuum()`;
@@ -510,14 +503,6 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
         err @ crate::store::StoreError::RecordEncodingFailed { .. } => {
             RuntimeError::new(RuntimeErrorCode::RecordEncodingFailed, err.to_string())
         }
-        // A no-claim driver that finds the row held/settled cedes at head CAS;
-        // nothing was written, so this is stand-down (ADR 0069 §5(d)).
-        err @ crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. } => {
-            RuntimeError::new(
-                RuntimeErrorCode::TurnInputSettlementSuperseded,
-                err.to_string(),
-            )
-        }
         crate::store::StoreError::SessionExecutionLeaseExpired { session_id } => RuntimeError::new(
             RuntimeErrorCode::SessionExecutionLeaseLost,
             format!("session execution lease for session `{session_id}` was lost before commit"),
@@ -566,7 +551,6 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLeaseLost => "session_execution_lease_lost",
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::SessionRedriveUnsettled => "session_redrive_unsettled",
-            Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
             Self::SessionWorkUnavailable => "session_work_unavailable",
             Self::TurnExecutionRequiresReconciledToolSurface => {
@@ -818,7 +802,6 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLeaseLost,
         Self::SessionExecutionLaneBusy,
         Self::SessionRedriveUnsettled,
-        Self::TurnInputSettlementSuperseded,
         Self::AcceptedTurnInputCeded,
         Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
@@ -1000,7 +983,6 @@ impl RuntimeErrorCode {
             "session_execution_lease_lost" => Self::SessionExecutionLeaseLost,
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "session_redrive_unsettled" => Self::SessionRedriveUnsettled,
-            "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
             "session_work_unavailable" => Self::SessionWorkUnavailable,
             "turn_execution_requires_reconciled_tool_surface" => {

@@ -118,7 +118,7 @@ fn pending_input_cancellation_respects_admission_order_and_terminal_states() {
         assert_eq!(
             first["cancel_outcome"],
             if claim_first {
-                "already_claimed"
+                "already_admitted"
             } else {
                 "cancelled"
             }

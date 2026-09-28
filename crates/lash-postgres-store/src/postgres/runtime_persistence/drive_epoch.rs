@@ -56,6 +56,24 @@ pub(super) async fn require_fence_tx(
     require_current_drive_fence(session_id, fence, &current)
 }
 
+/// Refuse `commit` unless the fence it presents is current, in its own
+/// transaction before anything is read or written: the drive fence of the
+/// admission its root was sealed under, which a successor's seal makes stale
+/// (ADR 0105 §2). A commit that settles ingress must present one
+/// ([`RuntimeCommit::validate_ingress_settlement`]).
+///
+/// [`RuntimeCommit::validate_ingress_settlement`]: lash_core_execution::store::RuntimeCommit::validate_ingress_settlement
+pub(super) async fn require_commit_fences_tx(
+    tx: &mut PgTx<'_>,
+    commit: &lash_core_execution::store::RuntimeCommit,
+) -> Result<(), StoreError> {
+    commit.validate_ingress_settlement()?;
+    match commit.drive_fence.as_ref() {
+        Some(fence) => require_fence_tx(tx, &commit.session_id, fence).await,
+        None => Ok(()),
+    }
+}
+
 impl PostgresSessionStore {
     /// Open a seal transaction for `session_id`, refusing a deleted session.
     async fn begin_seal_tx<'c>(

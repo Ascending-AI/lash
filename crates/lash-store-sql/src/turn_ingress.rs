@@ -1,15 +1,13 @@
-//! The turn-ingress and claim tables: how work reaches a session and who owns
+//! The turn-ingress tables: how work reaches a session and which root holds
 //! it while it is being done.
 //!
-//! One family, ten tables, three lifecycles that share a fencing generation:
+//! One family, ten tables, two lifecycles:
 //!
 //! * **ingress** — [`pending_inputs`] holds the turn inputs a caller submitted
 //!   and [`queued_batches`]/[`queued_items`] the work batches enqueued against
-//!   a session.
-//! * **authority** — the sealed drive epoch is the claim authority.
-//!   fencing token every claim on the two ingress tables pins itself to
-//!   (ADR 0029), so "is this claim still live?" is one question about that
-//!   lease rather than a per-row timer.
+//!   a session. A row a root admitted names it (`admitted_root`), written
+//!   under the session's current drive fence, and only that root's commit or
+//!   terminal write lets go of it again (FIG-3927).
 //! * **cancellation** — [`cancellation_bindings`], [`cancel_requests`],
 //!   [`closure_authorizations`] and
 //!   [`retired_scopes`] carry the durable cancellation facts a turn's closure
@@ -63,11 +61,11 @@ crate::statements! {
              RETURNING turn_id, park_id";
 
         /// The deployment's parked turns, the oldest live park's instant,
-        /// its turns in flight — a session with an unfinished root, a
-        /// claimed turn input that is not settled, or a parked turn — and
-        /// the unparked ones among them its stalled close holds: the
-        /// session's `close_session` intent stalled its obligation (ADR 0109
-        /// §4), so no delete retires the claim until an operator re-arms it.
+        /// its turns in flight — a session with an unfinished root or a
+        /// parked turn — and the unparked ones among them its stalled close
+        /// holds: the session's `close_session` intent stalled its obligation
+        /// (ADR 0109 §4), so no delete retires the root until an operator
+        /// re-arms it.
         count_unsettled_turns = "SELECT
                 (SELECT COUNT(*) FROM turn_parks) AS parked_turns,
                 (SELECT MIN(since_ms) FROM turn_parks) AS oldest_parked_since_ms,
@@ -76,18 +74,10 @@ crate::statements! {
                     UNION
                     SELECT session_id FROM session_roots
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-                    UNION
-                    SELECT session_id FROM pending_turn_inputs
-                    WHERE claim_id IS NOT NULL
-                      AND {{nonterminal_turn_input_state(state)}}
                 ) AS unsettled) AS in_flight_turns,
                 (SELECT COUNT(*) FROM (
                     SELECT session_id FROM session_roots
                     WHERE admission_json IS NOT NULL AND terminal_kind IS NULL
-                    UNION
-                    SELECT session_id FROM pending_turn_inputs
-                    WHERE claim_id IS NOT NULL
-                      AND {{nonterminal_turn_input_state(state)}}
                 ) AS held
                 WHERE held.session_id NOT IN (SELECT session_id FROM turn_parks)
                   AND held.session_id IN (
@@ -110,7 +100,7 @@ crate::statements! {
              GROUP BY park_executable_generation";
 
         /// Whether session `?1` has work a runner could pick up: an unfinished
-        /// root, a queued batch, or an input already deferred to the next
+        /// root, an open queued batch, or an open input deferred to the next
         /// turn.
         ///
         /// One question, so one statement: asking it as two would let a
@@ -125,10 +115,13 @@ crate::statements! {
                 SELECT 1
                 FROM queued_work_batches qwb
                 WHERE qwb.session_id = ?1
+                  AND qwb.admitted_root IS NULL
              ) OR EXISTS(
                 SELECT 1
                 FROM pending_turn_inputs pti
                 WHERE pti.session_id = ?1
+                  AND {{undelivered_turn_input_state(pti.state)}}
+                  AND pti.admitted_root IS NULL
                   AND {{deferred_next_turn_turn_input_state(pti.state)}}
              )";
 
@@ -136,9 +129,9 @@ crate::statements! {
         /// session `?1`, with `?2` naming the control work kind.
         ///
         /// Both lanes are projected from one snapshot, so the command-first
-        /// decision and the input position describe the same boundary.
-        /// A current-epoch claim still precedes work behind it. A successor
-        /// must admit that head before sealing the next epoch, then reclaim it.
+        /// decision and the input position describe the same boundary. A
+        /// session command is never admitted, and an input a root admitted is
+        /// that root's: the unfinished root is admitted before either lane.
         pending_session_work_ordering = "WITH earliest_command AS (
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM queued_work_batches AS queued
@@ -150,6 +143,8 @@ crate::statements! {
                 SELECT enqueued_at_ms, enqueue_seq
                 FROM pending_turn_inputs AS input
                 WHERE session_id = ?1
+                  AND {{undelivered_turn_input_state(input.state)}}
+                  AND input.admitted_root IS NULL
                   AND {{deferred_next_turn_turn_input_state(input.state)}}
                 ORDER BY enqueue_seq ASC
                 LIMIT 1

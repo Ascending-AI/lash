@@ -1,6 +1,6 @@
 use super::session_store_factory::session_store_request;
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
@@ -159,7 +159,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .expect("committed root still has a head");
     assert_eq!(head_after.head_revision, head_before.head_revision);
     let first_lease = root
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &root_request.session_id,
             &crate::LeaseOwnerIdentity::opaque("enumeration-proof", "first"),
             "session-enumeration-proof-executor",
@@ -170,7 +170,8 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .acquired()
         .expect("enumeration did not acquire the lease");
     assert_eq!(
-        first_lease.fencing_token, 1,
+        first_lease.epoch(),
+        1,
         "enumeration must not create or advance the execution lease generation"
     );
 

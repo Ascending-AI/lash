@@ -129,7 +129,7 @@ lash_store_sql::statements! {
         /// snapshot at cutoff `?1`.
         ///
         /// The aggregate visits the whole table so `NothingToDo` stays witnessed emptiness;
-        /// only eligible ids are materialized, through the partial reclaimability index.
+        /// only eligible ids are materialized, through the partial reclamation index.
         select_reclamation_scope = "WITH scope AS (
                  SELECT COUNT(*) AS inspected_count,
                         COUNT(*) FILTER (

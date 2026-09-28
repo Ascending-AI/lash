@@ -1,7 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
-use lash::testing::store_fixtures::RuntimePersistenceTestClaimExt;
+use lash::testing::store_fixtures::RuntimePersistenceTestDriveExt;
 
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
     state
@@ -118,7 +118,7 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
         .await
         .expect("open the durable session catalog");
     let dead_epoch = store
-        .seal_claim_epoch_for_test(&session_id, &dead_incarnation, "abandoned-drive", 0)
+        .seal_drive_epoch_for_test(&session_id, &dead_incarnation, "abandoned-drive", 0)
         .await
         .expect("seal abandoned drive")
         .acquired()
@@ -211,7 +211,7 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
         "the post-takeover append must be fully durable"
     );
 
-    assert!(dead_epoch.fencing_token > 0);
+    assert!(dead_epoch.epoch() > 0);
 }
 
 /// A same-worker successor opens immediately after an abandoned drive.
@@ -254,7 +254,7 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
         "agent-workbench-dead-boot",
     );
     let dead_epoch = store
-        .seal_claim_epoch_for_test(&session_id, &dead_boot, "abandoned-same-worker-drive", 0)
+        .seal_drive_epoch_for_test(&session_id, &dead_boot, "abandoned-same-worker-drive", 0)
         .await
         .expect("seal abandoned drive")
         .acquired()
@@ -287,7 +287,7 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
             .iter()
             .any(|message| { lash::message_text(message) == "same-turn successor committed" })
     );
-    assert!(dead_epoch.fencing_token > 0);
+    assert!(dead_epoch.epoch() > 0);
 }
 
 /// Holds the first two writers to reach `session_graph_append.pre_commit`
@@ -1608,20 +1608,20 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
             .iter()
             .fold((0_usize, 0_usize), |(held, pending), input| {
                 match input.status {
-                    lash::PendingTurnInputReadStatus::Held { .. } => (held + 1, pending),
-                    lash::PendingTurnInputReadStatus::Pending => (held, pending + 1),
+                    lash::PendingTurnInputReadStatus::Admitted { .. } => (held + 1, pending),
+                    lash::PendingTurnInputReadStatus::Open => (held, pending + 1),
                     _ => (held, pending),
                 }
             });
     assert_eq!(
         (held, pending),
         (1, 1),
-        "the running input stays held; the queued send is durably pending: {:?}",
+        "the running input stays admitted; the queued send is durably pending: {:?}",
         mid_turn.pending_turn_inputs
     );
     assert!(mid_turn.pending_turn_inputs.iter().any(|input| {
         input.input.input_id.as_str() == receipt.input_id
-            && matches!(input.status, lash::PendingTurnInputReadStatus::Pending)
+            && matches!(input.status, lash::PendingTurnInputReadStatus::Open)
     }));
 
     release.notify_one();

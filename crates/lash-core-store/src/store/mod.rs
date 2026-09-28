@@ -12,8 +12,7 @@ pub use checkpoint::{
     TOOL_STATE_CHECKPOINT_COMPONENT, ensure_checkpoint_component_encoding_version,
     ensure_checkpoint_component_hash_agreement,
 };
-pub mod claim_plan;
-mod claim_settlement;
+pub mod admission_plan;
 pub mod commit_budget;
 mod commit_identity;
 mod error;
@@ -50,13 +49,12 @@ pub use session_config_views::{
     execution_session_config_from_state, persisted_session_config_from_state,
     root_snapshot_config_from_state,
 };
-pub mod claim_authority;
+mod lease_owner;
 pub mod session_delete;
 mod state_version;
 #[cfg(any(test, feature = "testing"))]
 mod testing;
 mod usage;
-pub mod work_claim;
 
 use record_schema_version::record_schema_version;
 pub use record_schema_version::{
@@ -64,22 +62,17 @@ pub use record_schema_version::{
 };
 
 pub use crate::session_graph::RealizedNodeTimestamp;
+pub use admission_plan::{
+    IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, TerminalProcessWake, TurnLaneStop,
+    deferred_wake_records, plan_turn_input_admission, require_admitted_to_root,
+    require_open_command, turn_input_state_after_admission,
+};
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
     AttachmentManifestEntry, AttachmentOwner, AttachmentOwnerKind, AttachmentWriteFence,
     AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
     decode_attachment_owner,
-};
-pub use claim_authority::{ClaimAuthority, LeaseOwnerIdentity};
-pub use claim_plan::{
-    ClaimPlanDecision, QueuedWorkClaimPlan, QueuedWorkClaimRow, QueuedWorkClaimWrite,
-    QueuedWorkSettlementPlan, QueuedWorkSettlementRow, QueuedWorkSettlementRowClaim,
-    QueuedWorkSettlementWrite, SettlementDecision, TerminalProcessWake, TurnInputClaimPlan,
-    TurnInputClaimRow, TurnInputClaimWrite, TurnInputSettlementPlan, TurnInputSettlementRegime,
-    TurnInputSettlementRow, TurnInputSettlementRowFacts, TurnInputSettlementStep,
-    classify_empty_claim_scan, plan_queued_work_claim, plan_queued_work_settlement,
-    plan_turn_input_claim, plan_turn_input_settlement,
 };
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
@@ -101,12 +94,9 @@ pub use drive_fence::{
 pub use error::StoreError;
 pub use fencing::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET, FencedWrite, HeadPublicationVerdict,
-    QueuedWorkSettlementFacts, TurnInputSettlementFacts, WakeDeliveryClaimFacts,
-    WakeDeliveryClaimVerdict, WorkRowClaimFacts, WorkRowClaimability, fenced_write_applied,
-    head_publication_verdict, queued_work_batch_claimability, require_fenced_write_applied,
-    require_settleable_queued_work, require_settleable_turn_input,
-    require_single_writer_head_publication, turn_input_claimability,
-    unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
+    WakeDeliveryClaimFacts, WakeDeliveryClaimVerdict, fenced_write_applied,
+    head_publication_verdict, require_fenced_write_applied, require_single_writer_head_publication,
+    wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
     FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, RECORD_UPCASTERS, ReadWindow,
@@ -116,6 +106,7 @@ pub use fleet_format::{
     upcast_chain_covers, upcast_json_record,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
+pub use lease_owner::LeaseOwnerIdentity;
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
     LoadedPersistedSession, load_persisted_session, load_persisted_session_admitted,
@@ -135,8 +126,8 @@ pub use park::{
     decide_turn_park_write,
 };
 pub use pending_follow_on::{
-    DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnBlocked, FollowOnClaim, FollowOnRecovery,
-    PendingFollowOn, follow_on_blocks_claim, validate_follow_on_head_write,
+    DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnAdmission, FollowOnBlocked, FollowOnRecovery,
+    PendingFollowOn, follow_on_blocks_admission, validate_follow_on_head_write,
 };
 pub use preflight::{
     DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface, ScanCoverage,
@@ -145,8 +136,8 @@ pub use preflight::{
     compare_releases, release_stamp_advances,
 };
 pub use queued_work::{
-    PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, QueuedWorkClass, TurnWorkClaimPrefix, TurnWorkClaimSelection,
+    AdmissionRefusal, PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
+    TurnWorkPrefix, TurnWorkSelection,
 };
 pub use realization::commit_runtime_state_verified;
 pub use recovery_leader::*;
@@ -156,9 +147,10 @@ pub use retention::{
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
 };
 pub use root::{
-    AdmitRootRequest, AdmittedHead, InMemoryRootLedger, RootAdmission, RootAdmissionAnswer,
-    RootAdmissionRefusal, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId, UnfinishedRoot,
+    AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
+    InMemoryRootLedger, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal, RootEndedTurns,
+    RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite,
+    RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId, UnfinishedRoot,
     decide_root_terminal_write, root_binding_conflict,
 };
 pub use runtime_commit::{
@@ -189,7 +181,6 @@ pub use testing::{
     ConformancePersistence, StoreTestSupport, append_request_commit_with_clock_for_testing,
 };
 pub use usage::{merge_token_ledger_entries_checked, merge_token_ledger_entry_checked};
-pub use work_claim::{WorkClaim, WorkCompletion};
 
 fn default_root_session_id() -> SessionId {
     SessionId::from("root")
@@ -591,7 +582,6 @@ impl RuntimeCommit {
             commit_budget: _,
             session_id: _,
             expected_head_revision: _,
-            session_execution_lease_fence: _,
             drive_fence: _,
             root_terminal,
             park_root,
@@ -604,10 +594,8 @@ impl RuntimeCommit {
             usage_deltas: _,
             failure_evidence,
             turn_commit: _,
-            completed_queue_claims,
-            completed_turn_input_claims,
-            undelivered_turn_input_claims,
-            undelivered_queue_claims,
+            ingress,
+            applied_commands,
             // Carried unchanged from the head; the store refuses a change.
             pending_follow_on: _,
             interrupted_turn_input_turn_id,
@@ -618,10 +606,8 @@ impl RuntimeCommit {
             committed_attachment_ids,
         } = self;
         debug_assert!(
-            completed_queue_claims.is_empty()
-                && completed_turn_input_claims.is_empty()
-                && undelivered_turn_input_claims.is_empty()
-                && undelivered_queue_claims.is_empty()
+            ingress.is_none()
+                && applied_commands.is_none()
                 && interrupted_turn_input_turn_id.is_none()
                 && interrupted_turn_input_cancellation.is_none()
                 && interrupted_turn_cancel_intent.is_none()
@@ -673,25 +659,37 @@ impl RuntimeCommit {
         Ok(())
     }
 
-    /// Flattens application evidence from completed turn-input claims in completion and per-claim
-    /// order for store implementors returning commit results.
+    /// Flattens application evidence from the completed turn inputs of the
+    /// commit's ingress settlement, in completion order, for store
+    /// implementors returning commit results.
     pub fn turn_input_applications(&self) -> Vec<crate::TurnInputApplication> {
-        self.completed_turn_input_claims
-            .iter()
-            .flat_map(|completion| completion.applications.iter().cloned())
-            .collect()
+        self.ingress
+            .as_ref()
+            .map(IngressSettlement::turn_input_applications)
+            .unwrap_or_default()
     }
 
-    pub fn validate_claim_settlement(
-        &self,
-        originating_queue_claims: &[crate::QueuedWorkCompletion],
-        originating_turn_input_claims: &[crate::TurnInputCompletion],
-    ) -> Result<(), StoreError> {
-        claim_settlement::validate_claim_settlement(
-            self,
-            originating_queue_claims,
-            originating_turn_input_claims,
-        )
+    /// Refuse a commit that settles ingress rows or applies commands
+    /// without presenting a drive fence, or names one row twice, before any
+    /// backend reads a row (FIG-3927).
+    pub fn validate_ingress_settlement(&self) -> Result<(), StoreError> {
+        let settles_rows = self
+            .ingress
+            .as_ref()
+            .is_some_and(|ingress| !ingress.is_empty())
+            || self
+                .applied_commands
+                .as_ref()
+                .is_some_and(|commands| !commands.batch_ids.is_empty());
+        if settles_rows && self.drive_fence.is_none() {
+            return Err(StoreError::IngressSettlementUnfenced {
+                session_id: self.session_id.clone(),
+            });
+        }
+        if let Some(ingress) = self.ingress.as_ref() {
+            ingress.validate(&self.session_id)?;
+        }
+        Ok(())
     }
 
     /// Computes the canonical semantic commit hash store implementors use to distinguish idempotent
@@ -792,7 +790,6 @@ impl RuntimeCommit {
             commit_budget,
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
-            session_execution_lease_fence: None,
             drive_fence: None,
             root_terminal: None,
             park_root: None,
@@ -805,10 +802,8 @@ impl RuntimeCommit {
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
-            completed_queue_claims: Vec::new(),
-            completed_turn_input_claims: Vec::new(),
-            undelivered_turn_input_claims: Vec::new(),
-            undelivered_queue_claims: Vec::new(),
+            ingress: None,
+            applied_commands: None,
             pending_follow_on: state.pending_follow_on.as_deref().cloned(),
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -833,51 +828,22 @@ impl RuntimeCommit {
         Ok((self, node_id_mapping))
     }
 
-    /// Requires the caller's current authority without changing lane ownership.
-    pub fn borrowing_session_execution_lease(mut self, fence: ClaimAuthority) -> Self {
-        self.session_execution_lease_fence = Some(fence);
+    /// Present `fence`: the drive fence the commit's root was sealed under.
+    pub fn fenced_by(mut self, fence: DriveFence) -> Self {
+        self.drive_fence = Some(Box::new(fence));
         self
     }
 
-    /// Adds one queued-work completion for store implementors to settle atomically with the runtime
-    /// commit.
-    pub fn completing_queue_claim(
-        mut self,
-        completed_queue_claim: crate::QueuedWorkCompletion,
-    ) -> Self {
-        self.completed_queue_claims.push(completed_queue_claim);
+    /// Settle `ingress` atomically with the runtime commit.
+    pub fn settling_ingress(mut self, ingress: IngressSettlement) -> Self {
+        self.ingress = Some(ingress);
         self
     }
 
-    /// Adds queued-work completions in caller order for store implementors to settle atomically
+    /// Settle the session-command batches `commands` applied, atomically
     /// with the runtime commit.
-    pub fn completing_queue_claims(
-        mut self,
-        completed_queue_claims: impl IntoIterator<Item = crate::QueuedWorkCompletion>,
-    ) -> Self {
-        self.completed_queue_claims.extend(completed_queue_claims);
-        self
-    }
-
-    /// Adds one turn-input completion for store implementors to settle atomically with the runtime
-    /// commit.
-    pub fn completing_turn_input_claim(
-        mut self,
-        completed_turn_input_claim: crate::TurnInputCompletion,
-    ) -> Self {
-        self.completed_turn_input_claims
-            .push(completed_turn_input_claim);
-        self
-    }
-
-    /// Adds turn-input completions in caller order for store implementors to settle atomically with
-    /// the runtime commit.
-    pub fn completing_turn_input_claims(
-        mut self,
-        completed_turn_input_claims: impl IntoIterator<Item = crate::TurnInputCompletion>,
-    ) -> Self {
-        self.completed_turn_input_claims
-            .extend(completed_turn_input_claims);
+    pub fn applying_commands(mut self, commands: crate::QueuedWorkCompletion) -> Self {
+        self.applied_commands = Some(commands);
         self
     }
 
@@ -1010,10 +976,10 @@ impl Default for SessionHeadPayload {
 ///
 /// This segment owns session graph/head commits, checkpoint hydration and
 /// usage, final turn-commit idempotency, session metadata, and the attachment
-/// write-ahead manifest. Queued-work and turn-input *completions* also settle
-/// here — [`commit_runtime_state`](Self::commit_runtime_state) consumes claims
-/// granted by [`QueuedWorkStore`] and [`TurnInputStore`] in the same atomic
-/// commit. In-flight nondeterministic work belongs to the active
+/// write-ahead manifest. The rows a root admitted also settle here —
+/// [`commit_runtime_state`](Self::commit_runtime_state) completes, releases
+/// or drops them by the commit's [`IngressSettlement`] in the same atomic
+/// commit (FIG-3927). In-flight nondeterministic work belongs to the active
 /// [`EffectHost`](crate::EffectHost), not to the store contract.
 ///
 /// The [`AttachmentManifest`] supertrait is required so the runtime can wrap
@@ -1036,16 +1002,16 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         Ok(OLDEST_SUPPORTED_SESSION_STATE_VERSION)
     }
-    /// Revalidate `lease`, then classify the independently read session-state marker.
+    /// Revalidate `fence`, then classify the independently read session-state marker.
     async fn admit_session_state(
         &self,
-        lease: &ClaimAuthority,
+        fence: &DriveFence,
     ) -> Result<SessionStateAdmission, StoreError> {
         let version = self.read_session_state_version().await?;
         Ok(SessionStateAdmission {
-            session_id: lease.session_id.clone(),
+            session_id: fence.session().clone(),
             version,
-            lease_fencing_token: lease.fencing_token,
+            drive_epoch: fence.epoch(),
         })
     }
 
@@ -1100,8 +1066,8 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Keep `base` readable by [`load_session_at`](Self::load_session_at)
     /// until the session's next admission replaces it (FIG-3682).
     ///
-    /// Called by a turn's admission under the session's execution lease, once
-    /// per first execution. While it stands, maintenance that reclaims
+    /// Called by a turn's admission under the session's drive fence, once per
+    /// first execution. While it stands, maintenance that reclaims
     /// unreferenced checkpoints treats `base.checkpoint` as a root, so a
     /// replay of the admitted turn can rebuild its input state even after the
     /// turn's own commit superseded the head and a vacuum ran. A backend that
@@ -1109,7 +1075,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// default.
     async fn retain_admission_base(
         &self,
-        _lease: &ClaimAuthority,
+        _fence: &DriveFence,
         _base: &SessionHeadRef,
     ) -> Result<(), StoreError> {
         Ok(())
@@ -1164,11 +1130,11 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
 
     /// Atomically persist one settled runtime commit and its durable receipt.
     ///
-    /// A commit carrying [`RuntimeCommit::session_execution_lease_fence`]
-    /// borrows a turn driver's held lane without claiming, rotating, renewing,
-    /// or releasing it. Implementors must validate that fence inside the write
-    /// transaction and before receipt lookup, so stale or expired authority
-    /// vetoes even an otherwise replayable operation identity.
+    /// A commit carrying [`RuntimeCommit::drive_fence`] is refused
+    /// [`StoreError::StaleDriveFence`] unless the fence is still the session's
+    /// current one. Implementors must validate it inside the write
+    /// transaction and before receipt lookup, so superseded authority vetoes
+    /// even an otherwise replayable operation identity.
     ///
     /// Implementors must look up the `(session_id, operation storage key)`
     /// receipt inside the write transaction before the fresh append ancestor
@@ -1176,9 +1142,8 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// adjudicated with [`decide_runtime_commit_receipt`]: replay returns the
     /// stored first-attempt [`RuntimeCommitReceipt`] with only
     /// [`RuntimeCommitReceipt::receipt_replayed`] set transiently, applies none
-    /// of the attempted commit envelope, and may release the attempt's explicit
-    /// execution-lease completion. Conflicts and corrupt count cross-checks
-    /// mutate nothing.
+    /// of the attempted commit envelope. Conflicts and corrupt count
+    /// cross-checks mutate nothing.
     ///
     /// Every [`RuntimeUsageDelta`] is published idempotently on `(session_id,
     /// operation_storage_key, entry_ordinal, payload_encoding_version,
@@ -1197,10 +1162,13 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// stored replay bit is `false`. Receipt lookup, fresh-only ancestor fencing,
     /// commit publication, and receipt insertion are one transaction.
     ///
-    /// A queued-work completion that no longer owns a named row must return
-    /// [`StoreError::QueuedWorkClaimSuperseded`] with its `row_id`. If another
-    /// claim owns the live row, the error also carries its claim ID and lease
-    /// generation so recovery preserves peer rows without weakening fencing.
+    /// Every row the commit's [`IngressSettlement`] names must still be bound
+    /// to its root, or the commit is refused whole
+    /// [`StoreError::IngressRowNotAdmitted`]; every applied command must still
+    /// exist and be open, or it is refused
+    /// [`StoreError::SessionCommandWithdrawn`]. A commit that writes its
+    /// root's terminal releases, in the same transaction, every row still
+    /// bound to the root (FIG-3927).
     async fn commit_runtime_state(
         &self,
         commit: RuntimeCommit,
@@ -1223,7 +1191,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     ///
     /// A drive that recovers a pending follow-on calls this before the
     /// follow-on's first effect. Implementations must, in one transaction,
-    /// validate `lease` with the ordinary session-execution fence, refuse with
+    /// validate `fence` against the session's current drive fence, refuse with
     /// [`StoreError::FollowOnNotPending`] unless the head's
     /// `pending_follow_on_json` names `follow_on_turn_id`, and write the fact
     /// back with `attempts` raised by one. The head revision does not move:
@@ -1231,7 +1199,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// Returns the raised fact.
     async fn raise_pending_follow_on_attempts(
         &self,
-        lease: &ClaimAuthority,
+        fence: &DriveFence,
         follow_on_turn_id: &crate::TurnId,
     ) -> Result<PendingFollowOn, StoreError>;
 
@@ -1299,8 +1267,8 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     /// `last_refused_ms`, and writes no event; a different turn's park
     /// supersedes the stored one (`Unparked{Superseded}` then `Parked`).
     /// Any commit of the session clears the park in the commit's transaction,
-    /// as does a cancel that releases the parked turn's claim and the
-    /// session's deletion: a park is live exactly while its turn is.
+    /// as does a cancel that ends the parked root and the session's
+    /// deletion: a park is live exactly while its turn is.
     ///
     /// Returns the record as stored, so the caller can report the allocated
     /// `park_id` and attempt count.
@@ -1324,7 +1292,7 @@ pub trait SessionCommitStore: AttachmentManifest + Send + Sync {
     }
 }
 
-/// What [`TurnInputStore::admit_pending_turn_inputs`] committed (FIG-3975).
+/// What [`IngressStore::admit_pending_turn_inputs`] committed (FIG-3975).
 ///
 /// The admission's own commit can answer the follow-ups the caller owes
 /// next — the session state-version check, the claim of each admitted row's
@@ -1356,54 +1324,56 @@ pub enum TurnInputAdmission {
     Enqueued(Vec<crate::PendingTurnInput>),
 }
 
-/// Pending turn-input lifecycle capability: durable ingress for model-visible
-/// user input.
+/// Durable session ingress (ADR 0101): model-visible user input
+/// (`pending_turn_inputs`) and queued work, process wakes and session
+/// commands (`queued_work_batches`), with their lifecycle reads.
 ///
-/// Active-turn ingress is claimed only by the matching live turn at a
-/// checkpoint. Next-turn ingress is claimed only by idle dispatch. User input
-/// must not be represented as generic queued work. Claims granted here are
-/// completed atomically by [`SessionCommitStore::commit_runtime_state`].
+/// Rows enter here and wait open. A root binds the rows it drives
+/// ([`RootStore::admit_root`], [`RootStore::admit_at_checkpoint`]), and only
+/// that root's commit or terminal settles or releases them again
+/// ([`SessionCommitStore::commit_runtime_state`], FIG-3927). User input must
+/// not be represented as generic queued work.
 #[async_trait::async_trait]
-pub trait TurnInputStore: Send + Sync {
+pub trait IngressStore: Send + Sync {
     /// Persist or validate the one cancellation authority selected for this
     /// session and, for a Process or runtime-operation controller, its physical
     /// journal scope. Session-bound turns keep their exact canonical address in
     /// each closure authorization, so distinct turns may share this authority.
-    /// The check occurs under the current execution fence before any session
-    /// work and never replaces the original selection.
+    /// The check occurs under the current drive fence before any session work
+    /// and never replaces the original selection.
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &DriveFence,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<(), StoreError>;
 
     /// Authorize exact closure of one cancellation gate pair for the admitted
-    /// session and binding. The recorded lease identity authenticates the
-    /// proposal, but its liveness and generation do not fence final settlement.
+    /// session and binding. The drive fence authenticates the proposal, but
+    /// its epoch does not fence final settlement.
     /// A vacant slot accepts this value, an identical retry adopts it, and a
     /// different occupied value or retired physical scope returns a typed refusal.
     /// Final publication additionally requires the session-head CAS.
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &ClaimAuthority,
+        fence: &DriveFence,
         authorization: &crate::TurnCancelClosureAuthorization,
     ) -> Result<crate::TurnCancelClosureAuthorizationOutcome, StoreError>;
 
     /// Load every unconsumed closure obligation for the bound session after
-    /// validating the current execution fence, selected binding, and any
+    /// validating the current drive fence, selected binding, and any
     /// original non-session physical scope.
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &DriveFence,
         binding_id: &str,
         admitted_scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, StoreError>;
 
     /// Read unconsumed closure pins for lifecycle coordination without
-    /// acquiring execution authority. This grants no right to settle or
+    /// presenting a drive fence. This grants no right to settle or
     /// consume them; deletion and scope-retirement owners use it only to refuse
     /// destructive cleanup until an activation holder has drained the pins.
     async fn pending_turn_cancel_closure_pins(
@@ -1558,17 +1528,15 @@ pub trait TurnInputStore: Send + Sync {
         })
     }
 
-    /// List open user inputs for reconciliation or queue preview.
+    /// List undelivered user inputs for reconciliation or queue preview.
     ///
-    /// Completed and cancelled rows are excluded. A claim matching the
-    /// current sealed drive epoch is returned as
-    /// [`PendingTurnInputReadStatus::Held`](crate::PendingTurnInputReadStatus::Held)
-    /// with that epoch. Superseded-epoch, released, and unclaimed rows are
-    /// returned as pending under ADR 0029; this read never infers whether a
-    /// holder process is alive. Resubmitting the same input while its row is
-    /// held creates a duplicate admission once the held row's original claim
-    /// returns; hosts must wait for the claim's epoch to be superseded or
-    /// reuse the same source key.
+    /// Completed and cancelled rows are excluded. A row a root admitted is
+    /// returned as
+    /// [`PendingTurnInputReadStatus::Admitted`](crate::PendingTurnInputReadStatus::Admitted)
+    /// naming that root, and every other row as
+    /// [`Open`](crate::PendingTurnInputReadStatus::Open). An admitted row is
+    /// answered by its root alone; resubmitting the same input under the same
+    /// source key returns the row.
     async fn list_pending_turn_inputs(
         &self,
         session_id: &SessionId,
@@ -1591,7 +1559,9 @@ pub trait TurnInputStore: Send + Sync {
         })
     }
 
-    /// Cancel an unclaimed pending user input by id.
+    /// Cancel an open pending user input by id. An admitted input answers
+    /// [`PendingTurnInputCancelOutcome::AlreadyAdmitted`](crate::PendingTurnInputCancelOutcome::AlreadyAdmitted)
+    /// and changes nothing: the host cancels its root instead.
     ///
     /// Provided convenience: the singular form is exactly
     /// [`cancel_pending_turn_inputs`](Self::cancel_pending_turn_inputs) with a
@@ -1627,159 +1597,7 @@ pub trait TurnInputStore: Send + Sync {
         anchor: &crate::PendingTurnInputCancelTarget,
     ) -> Result<crate::PendingTurnInputSuffixCancelOutcome, StoreError>;
 
-    /// Claim active-turn input at a checkpoint for the live turn id.
-    ///
-    /// The claim pins the caller's live session-execution-lease generation
-    /// (`session_execution_lease.fencing_token`) rather than a TTL; it is live
-    /// exactly while that generation still holds the session lease (ADR 0029).
-    async fn claim_active_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: crate::CheckpointKind,
-        max_inputs: usize,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
-
-    /// Claim queued next-turn input at idle.
-    async fn claim_next_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError>;
-
-    /// Abandon a held pending-turn-input claim so it can be reclaimed.
-    async fn abandon_turn_input_claim(
-        &self,
-        claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
-    ) -> Result<(), StoreError>;
-
-    /// Release multiple held pending-turn-input claims in one backend batch.
-    async fn abandon_turn_input_claims(
-        &self,
-        claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>],
-    ) -> Result<(), StoreError> {
-        for claim in claims {
-            self.abandon_turn_input_claim(claim).await?;
-        }
-        Ok(())
-    }
-
-    /// Discover distinct turn ids with active-turn-scoped inputs eligible for
-    /// recovery consideration under the caller's fence and scope.
-    ///
-    /// An input routed into a running turn is persisted `pending_active` (or
-    /// `accepted` once that turn claims it) and addressed only by the turn id it
-    /// names. The turn's own final commit is what normally re-defers whatever it
-    /// did not deliver ([`RuntimeCommit::deferring_interrupted_turn_inputs`]),
-    /// so a turn that stops without committing strands its inputs in a state no
-    /// next-turn drain can claim and no later turn id can address. This is the
-    /// recovery candidate for that state. Discovery does not establish whether
-    /// a turn ended or whether cancellation won; the caller must consult
-    /// durable intent and the keyed gate before asking for exact-turn repair.
-    async fn orphaned_active_turn_ids(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<crate::TurnId>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "orphaned_active_turn_ids",
-        })
-    }
-
-    /// Repair one orphan only after the caller has consulted the authoritative
-    /// cancellation gate.
-    ///
-    /// The store rechecks the execution fence and row eligibility in the same
-    /// transaction as the mutation. `NoCancellationIntent` additionally
-    /// rechecks that no request row exists, closing the request-versus-repair
-    /// race without resolving a gate for a pre-named turn that may start later.
-    /// A displaced or expired fence is refused with
-    /// [`StoreError::SessionExecutionLeaseExpired`].
-    async fn repair_orphaned_active_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _turn_id: &crate::TurnId,
-        _observed: &crate::TurnCancelIntentSnapshot,
-        _settlement: Option<&crate::TurnCancelClosureSettlement>,
-    ) -> Result<TurnCancelRepairResult, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "repair_orphaned_active_turn_inputs",
-        })
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnCancelRepairResult {
-    Applied(crate::TurnCancelInputOutcome),
-    IntentChanged,
-}
-
-impl TurnCancelRepairResult {
-    pub fn into_applied(self) -> Option<crate::TurnCancelInputOutcome> {
-        match self {
-            Self::Applied(outcome) => Some(outcome),
-            Self::IntentChanged => None,
-        }
-    }
-}
-
-/// Explicit cancellation authority supplied to one orphan-input repair.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnCancelRepairDecision {
-    /// The keyed gate settled with this cancellation evidence.
-    CancellationWon(crate::TurnCancellationEvidence),
-    /// The keyed gate was already sealed by completion.
-    CancellationDidNotWin,
-    /// No request existed when recovery observed the turn. The store must
-    /// recheck absence transactionally and skip repair if intent appeared.
-    NoCancellationIntent,
-}
-
-impl TurnCancelRepairDecision {
-    pub fn disposition(&self) -> crate::TurnCancelDisposition {
-        match self {
-            Self::CancellationWon(evidence) => evidence.undelivered,
-            Self::CancellationDidNotWin | Self::NoCancellationIntent => {
-                crate::TurnCancelDisposition::Defer
-            }
-        }
-    }
-}
-
-/// Bounds which active-turn-scoped rows
-/// [`TurnInputStore::orphaned_active_turn_ids`] may consider for recovery.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OrphanedTurnInputScope<'a> {
-    /// Exactly the rows pinned to one named turn after its local execution
-    /// path tore down without a commit.
-    Turn(&'a crate::TurnId),
-    /// Rows not pinned to the caller's live lane generation, excluding the
-    /// caller-provided resumable turn and its agent-frame follow-ons.
-    ///
-    /// The resumable identity is a conservative exclusion, not lifecycle
-    /// authority. Other candidates can include a pre-named future turn, so
-    /// discovery alone must never resolve a cancellation gate. With no durable
-    /// request, exact repair may only perform the existing ordinary re-defer
-    /// after transactionally confirming request absence.
-    LaneGeneration {
-        resumable_turn_id: Option<&'a TurnId>,
-    },
-}
-
-/// Durable queued-work capability: ingress, ordered claiming, and claim leases
-/// for non-input work (process wakes and session commands).
-///
-/// Claims granted here are completed atomically by
-/// [`SessionCommitStore::commit_runtime_state`].
-#[async_trait::async_trait]
-pub trait QueuedWorkStore: Send + Sync {
-    /// Persist a queued-work batch for later claiming.
+    /// Persist a queued-work batch for later admission.
     async fn enqueue_queued_work(
         &self,
         batch: crate::QueuedWorkBatchDraft,
@@ -1796,91 +1614,29 @@ pub trait QueuedWorkStore: Send + Sync {
         batch: crate::QueuedWorkBatchDraft,
     ) -> Result<crate::QueuedWorkEnqueueOutcome, StoreError>;
 
-    /// Claim leading ready session-command work for `owner_id`.
+    /// The session's leading open session-command run, for the command lane
+    /// to apply (ADR 0101 §4, design §2.7). Takes no admission.
     ///
-    /// A command claim is returned only when the earliest ready claimable batch
-    /// is classified as [`QueuedWorkClass::SessionCommand`]. Non-config
-    /// commands remain one-batch claims; an adjacent `ApplyConfigPatch` prefix
-    /// is claimed together so the runtime can commit it once while completing
-    /// every accepted batch.
-    /// Backends derive the class from queued payloads; no schema column is
-    /// required.
-    async fn claim_leading_ready_session_command(
+    /// The run is returned only when the earliest open batch is classified
+    /// as [`QueuedWorkClass::SessionCommand`]. A non-config command is a run
+    /// of one; an adjacent `ApplyConfigPatch` prefix is returned together (up
+    /// to [`MAX_SESSION_COMMAND_BATCHES_PER_RUN`](crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN))
+    /// so the lane applies it in one commit. In one transaction fenced by
+    /// `fence`, the run's ingress obligations are acknowledged delivered
+    /// (ADR 0109 §3). The applying commit settles the rows
+    /// ([`RuntimeCommit::applied_commands`]); a row withdrawn in between
+    /// refuses that commit.
+    async fn open_session_command_run(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>, StoreError>;
+        fence: &DriveFence,
+    ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
-    /// Claim the next ready turn-work group for `owner_id`.
-    ///
-    /// A turn-work claim is returned only when the earliest ready claimable
-    /// batch is classified as [`QueuedWorkClass::TurnWork`].
-    /// Earlier ready session commands are not skipped and are never
-    /// materialized as turn input.
-    /// When the head belongs to an interrupted predecessor-generation claim,
-    /// the successor reclaims exactly the rows carrying that durable claim id;
-    /// later compatible rows wait for a subsequent claim.
-    ///
-    /// An attempt that acquires nothing must name why: an automatic drain has no
-    /// batch ids to reason about afterwards, so the
-    /// [`QueuedWorkClaimRefusal`] this returns is
-    /// the only account of the empty drain a host ever gets.
-    async fn claim_ready_queued_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        boundary: crate::QueuedWorkClaimBoundary,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError>;
-
-    /// Claim both ingress families admitted at an active-turn checkpoint.
-    ///
-    /// Backends must probe durable store state before opening a write
-    /// transaction. When either family is pending, both claims are granted in
-    /// one write transaction after validating the session-execution fence once.
-    #[allow(clippy::too_many_arguments)]
-    async fn claim_checkpoint_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: crate::CheckpointKind,
-        max_inputs: usize,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<
-        (
-            Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
-            Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>,
-        ),
-        StoreError,
-    >;
-
-    /// Release a held queued-work claim without completing it.
-    async fn abandon_queued_work_claim(
-        &self,
-        claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>,
-    ) -> Result<(), StoreError>;
-
-    /// Release multiple queued-work claims in one backend batch.
-    async fn abandon_queued_work_claims(
-        &self,
-        claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>],
-    ) -> Result<(), StoreError> {
-        for claim in claims {
-            self.abandon_queued_work_claim(claim).await?;
-        }
-        Ok(())
-    }
-
-    /// Remove an unclaimed queued-work batch from durable ingress.
+    /// Remove an open queued-work batch from durable ingress.
     ///
     /// Returns the removed batch when cancellation won the race. Returns `None`
-    /// when the batch is missing or currently held by a live claim; callers must
-    /// treat that as "already claimed or completed" and must not restore any
-    /// stale local draft state.
+    /// when the batch is missing or a root admitted it; callers must treat
+    /// that as "already admitted or completed" and must not restore any stale
+    /// local draft state.
     ///
     /// Cancelling a process-wake batch is a terminal transition of that wake:
     /// the session's redelivery fence rises to `max(floor, sequence)` in the
@@ -1903,36 +1659,30 @@ pub trait QueuedWorkStore: Send + Sync {
         batch_id: &str,
     ) -> Result<bool, StoreError>;
 
-    /// Project the earliest pending session-command and next-turn-input ordering
-    /// keys without hydrating either payload family. The session-command side is
-    /// the pending queued-work rows whose durable `work_kind` is `control`, so
-    /// `cancel` rows — which preempt on their own path — enter neither side. Both
-    /// sides apply the same live-claim filter as the corresponding list read.
+    /// Project the earliest open session-command and next-turn-input ordering
+    /// keys without hydrating either payload family. The session-command side
+    /// is the open queued-work rows whose durable `work_kind` is `control`, so
+    /// `cancel` rows — which preempt on their own path — enter neither side.
+    /// Both sides exclude admitted rows, as the corresponding list read does.
     async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
     ) -> Result<PendingSessionWorkOrdering, StoreError>;
 
-    /// List all queued-work batches for a session, including batches held by a
-    /// live claim.
+    /// List all queued-work batches for a session, admitted ones included.
     async fn list_queued_work(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
 
-    /// List queued-work batches that are still pending presentation/editing.
-    ///
-    /// This excludes batches currently held by a live claim. A claim counts as
-    /// live only while the session-execution-lease generation it pins still
-    /// holds the session lease; batches pinned to a superseded or released
-    /// generation are pending again because they can be reclaimed or cancelled.
+    /// List the queued-work batches no root admitted: still open for
+    /// presentation, editing or cancellation.
     ///
     /// This is a distinct required query, not a derivation of
-    /// [`list_queued_work`](Self::list_queued_work): the two differ by
-    /// claim-state filter, and backends answer each with its own query over
-    /// claim rows rather than leaking claim state to callers for client-side
-    /// filtering.
-    async fn list_pending_queued_work(
+    /// [`list_queued_work`](Self::list_queued_work): backends answer each
+    /// with its own query rather than leaking admission state to callers for
+    /// client-side filtering.
+    async fn list_open_queued_work(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
@@ -2019,13 +1769,13 @@ pub trait FleetFormatStore: Send + Sync {
 /// `Arc<dyn RuntimePersistence>` is *the* runtime storage handle: one object
 /// implementing every persistence capability segment —
 /// [`SessionCommitStore`] (atomic graph/head commits, reads, metadata, and the
-/// attachment write-ahead manifest), [`TurnInputStore`] (pending turn-input
-/// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
+/// attachment write-ahead manifest), [`IngressStore`] (turn-input and
+/// queued-work ingress),
 /// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600),
 /// [`RootStore`] (logical roots' terminal evidence and input bindings, FIG-3600
 /// S7) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
-/// domain: claims granted by the input and queue segments settle atomically in
-/// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
+/// domain: rows the root segment admits from the ingress segment settle
+/// atomically in [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
 /// store contract.
 ///
@@ -2039,8 +1789,7 @@ pub trait FleetFormatStore: Send + Sync {
 pub trait RuntimePersistence:
     FleetFormatStore
     + SessionCommitStore
-    + TurnInputStore
-    + QueuedWorkStore
+    + IngressStore
     + DriveEpochStore
     + RootStore
     + StoreMaintenance
@@ -2050,8 +1799,7 @@ pub trait RuntimePersistence:
 impl<T> RuntimePersistence for T where
     T: FleetFormatStore
         + SessionCommitStore
-        + TurnInputStore
-        + QueuedWorkStore
+        + IngressStore
         + DriveEpochStore
         + RootStore
         + StoreMaintenance

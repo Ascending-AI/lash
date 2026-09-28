@@ -172,14 +172,14 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
         reference.llm_calls, 0,
         "no model call follows the failed gate"
     );
-    // Two reads, and only one of them is the start gate: the failed turn's
-    // teardown probes the gate once more to decide whether to repair its
-    // orphaned inputs, and reads a revoked gate as nothing to repair. A retry
+    // One read: the start gate is observed once, and nothing probes it after
+    // the failure. A failed root's rows are released by its terminal write,
+    // not by a teardown repair that reads the gate (FIG-3927 §2.6). A retry
     // of the start gate would add a read per attempt.
     assert_eq!(
         reference.revocation_reads(),
-        2,
-        "the start gate is observed once, then the teardown probes it: {} {:?}",
+        1,
+        "the start gate is observed once and nothing probes it after the failure: {} {:?}",
         reference.outcome,
         reference.journal
     );

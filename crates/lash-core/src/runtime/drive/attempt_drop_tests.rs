@@ -83,11 +83,6 @@ async fn a_host_read_after_a_dropped_attempt_sees_no_residue() {
         runtime.drive_root.is_none(),
         "the dropped attempt's sealed root is gone"
     );
-    assert!(
-        runtime.journaled_drive_claims.is_empty(),
-        "the dropped attempt's journaled claims are gone: {:?}",
-        runtime.journaled_drive_claims
-    );
     assert_eq!(
         runtime.admitted_turn_index, None,
         "the dropped attempt's admitted turn index is gone"

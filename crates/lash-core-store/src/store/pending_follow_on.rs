@@ -4,12 +4,12 @@
 //! A turn that switches agent frame commits the switch and the obligation to
 //! run the switched frame's task in one head write. The obligation is this
 //! fact, in its own head column (`pending_follow_on_json`), never an ingress
-//! row: nothing can claim it, reorder it, cancel it or render it into another
+//! row: nothing can admit it, reorder it, cancel it or render it into another
 //! frame. It is consumed exactly once, by the terminal commit of the turn it
 //! names, which clears it or writes the next link of the chain.
 //!
 //! This module holds the backend-neutral decisions every store and the
-//! runtime apply: which claims the fact blocks, which head writes it refuses,
+//! runtime apply: which admissions the fact blocks, which head writes it refuses,
 //! and whether a recovering drive may still run it.
 
 use crate::{FrameNodeId, TurnId};
@@ -118,7 +118,7 @@ impl PendingFollowOn {
         self.follow_on_turn_id == *turn_id
     }
 
-    /// The typed refusal a claim or commit meets while this fact is set.
+    /// The typed refusal an admission or commit meets while this fact is set.
     pub fn pending_error(&self, session_id: &crate::SessionId) -> StoreError {
         StoreError::FollowOnPending {
             session_id: session_id.clone(),
@@ -167,40 +167,34 @@ pub enum FollowOnRecovery {
     Exhausted(PendingFollowOn),
 }
 
-/// The claim a store is asked to grant while it reads the head's fact.
+/// The admission a store is asked to make while it reads the head's fact.
 #[derive(Clone, Copy, Debug)]
-pub enum FollowOnClaim<'a> {
-    /// A claim outside any running turn: idle, a session command, a queued
-    /// run's first selection, a direct turn's drive.
+pub enum FollowOnAdmission<'a> {
+    /// An admission outside any running turn: a root's own admission.
     Idle,
-    /// A checkpoint claim of the running turn `turn_id`.
+    /// A checkpoint admission of the running physical turn `turn_id`.
     Checkpoint { turn_id: &'a TurnId },
-    /// A queued run's selection at the physical turn `turn_id`.
-    QueuedRun { turn_id: &'a TurnId },
 }
 
-/// The typed non-error answer to a claim the pending follow-on blocks.
+/// The typed non-error answer to an admission the pending follow-on blocks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FollowOnBlocked {
     pub follow_on_turn_id: TurnId,
     pub attempts: u32,
 }
 
-/// Whether the head's fact blocks `claim`.
+/// Whether the head's fact blocks `admission`.
 ///
-/// While a follow-on is pending, every claim is refused except the
-/// follow-on's own: its checkpoint claims, and the selection of the queued run
-/// whose next physical turn it is.
-pub fn follow_on_blocks_claim(
+/// While a follow-on is pending, every admission is refused except the
+/// follow-on's own checkpoint admissions.
+pub fn follow_on_blocks_admission(
     pending: Option<&PendingFollowOn>,
-    claim: FollowOnClaim<'_>,
+    admission: FollowOnAdmission<'_>,
 ) -> Option<FollowOnBlocked> {
     let pending = pending?;
-    let own = match claim {
-        FollowOnClaim::Idle => false,
-        FollowOnClaim::Checkpoint { turn_id } | FollowOnClaim::QueuedRun { turn_id } => {
-            pending.is_turn(turn_id)
-        }
+    let own = match admission {
+        FollowOnAdmission::Idle => false,
+        FollowOnAdmission::Checkpoint { turn_id } => pending.is_turn(turn_id),
     };
     (!own).then(|| FollowOnBlocked {
         follow_on_turn_id: pending.follow_on_turn_id.clone(),
@@ -379,28 +373,28 @@ mod tests {
     }
 
     #[test]
-    fn only_the_follow_on_claims_while_it_is_pending() {
+    fn only_the_follow_on_admits_while_it_is_pending() {
         let pending = fact("root:agent-frame:1", "f");
-        assert!(follow_on_blocks_claim(Some(&pending), FollowOnClaim::Idle).is_some());
+        assert!(follow_on_blocks_admission(Some(&pending), FollowOnAdmission::Idle).is_some());
         assert!(
-            follow_on_blocks_claim(
+            follow_on_blocks_admission(
                 Some(&pending),
-                FollowOnClaim::Checkpoint {
+                FollowOnAdmission::Checkpoint {
                     turn_id: &TurnId::from("other")
                 }
             )
             .is_some()
         );
         assert!(
-            follow_on_blocks_claim(
+            follow_on_blocks_admission(
                 Some(&pending),
-                FollowOnClaim::Checkpoint {
+                FollowOnAdmission::Checkpoint {
                     turn_id: &pending.follow_on_turn_id
                 }
             )
             .is_none()
         );
-        assert!(follow_on_blocks_claim(None, FollowOnClaim::Idle).is_none());
+        assert!(follow_on_blocks_admission(None, FollowOnAdmission::Idle).is_none());
     }
 
     #[test]

@@ -1,15 +1,15 @@
 //! [`RuntimePersistence`] conformance, organized by capability segment:
 //! [`SessionCommitStore`](crate::SessionCommitStore) (head CAS, checkpoint
 //! hydration, metadata, attachment manifest, turn-commit stamps),
-//! [`QueuedWorkStore`](crate::QueuedWorkStore) (claim fencing),
-//! [`TurnInputStore`](crate::TurnInputStore), and
+//! [`RootStore`](crate::store::RootStore) (admission binding),
+//! [`IngressStore`](crate::IngressStore), and
 //! [`StoreMaintenance`](crate::StoreMaintenance).
 
 use super::*;
 use crate::facade_support::{SessionGraphFacadeOps, ToolStateFacadeOps};
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 pub(super) use lash_core::testing::store_fixtures::commit_runtime_state_for_test;
-use lash_core::testing::store_fixtures::seal_claim_authority_for_test;
+use lash_core::testing::store_fixtures::seal_drive_fence_for_test;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -30,10 +30,10 @@ impl RuntimePersistenceLeaseTiming {
 }
 
 mod admission_base_retention;
+mod admission_laws;
 mod append_receipts;
 mod attachments_and_queue;
-mod checkpoint_claims;
-mod drive_claim;
+mod checkpoint_admissions;
 mod enqueue_sequence_identity;
 mod pending_follow_on;
 mod queue_redrive;
@@ -50,10 +50,10 @@ mod turn_parks;
 /// Public implementation paths used only by the exported registration macros.
 pub mod runtime_persistence_macro_support {
     pub use super::admission_base_retention::*;
+    pub use super::admission_laws::*;
     pub use super::append_receipts::*;
     pub use super::attachments_and_queue::*;
-    pub use super::checkpoint_claims::*;
-    pub use super::drive_claim::*;
+    pub use super::checkpoint_admissions::*;
     pub use super::enqueue_sequence_identity::*;
     pub use super::pending_follow_on::*;
     pub use super::queue_redrive::*;
@@ -75,24 +75,18 @@ pub use append_receipts::{
     append_request_receipt_replays_after_ancestor_superseded,
     inactive_append_ancestor_precedes_stale_head, tombstoned_old_leaf_is_rejected,
 };
-pub use attachments_and_queue::queued_work_claims_supersede_across_session_lease_generations;
-use checkpoint_claims::*;
-pub use checkpoint_claims::{
-    checkpoint_claim_probe_transaction_counts, checkpoint_rejects_unknown_component_ref,
+use checkpoint_admissions::*;
+pub use checkpoint_admissions::{
+    checkpoint_admission_probe_transaction_counts, checkpoint_rejects_unknown_component_ref,
     complete_runtime_checkpoint_component_set_survives_cold_reopens, queued_process_wake_draft,
 };
 
-pub use queue_redrive::{
-    queued_work_redrive_selects_interrupted_claim_identity_over_later_rows,
-    same_generation_claim_scans_reach_rows_beyond_the_scan_surplus,
-};
 pub use suite_and_receipts::{
     UnboundSessionAdmissionState, UnboundSessionResolutionHandles,
     unbound_session_meta_refuses_ambiguous_resolution,
     unbound_session_reads_resolve_the_same_session,
 };
 pub use turn_inputs_and_reopen::{
+    a_checkpoint_admission_rerun_returns_its_own_rows,
     a_turn_that_cannot_commit_leaves_no_input_pinned_to_it,
-    active_turn_input_claim_reacquires_after_unrecorded_checkpoint,
-    turn_input_claims_supersede_across_session_lease_generations,
 };

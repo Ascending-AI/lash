@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::store::{RuntimePersistenceDecorator, TurnInputStore as _};
+use lash_core::store::{IngressStore as _, RuntimePersistenceDecorator};
 use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f460;
@@ -30,19 +30,19 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        lease: &lash_core::ClaimAuthority,
+        lease: &lash_core::store::DriveFence,
         authorization: &lash_core::TurnCancelClosureAuthorization,
     ) -> Result<lash_core::TurnCancelClosureAuthorizationOutcome, lash_core::StoreError> {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
             // An outcome, not a live fault: the engine refuses the root
-            // instead of retrying it, so the owner's teardown runs
-            // (FIG-3897).
+            // instead of retrying it (FIG-3897), and nothing runs between
+            // the refusal and the root's end.
             return Err(lash_core::StoreError::RecordEncodingFailed {
                 record_kind: "turn cancel closure".to_string(),
                 message: "injected finish-time cancellation authorization failure".to_string(),
             });
         }
-        lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
+        lash_core::store::IngressStore::authorize_turn_cancel_closure(
             self.inner.as_ref(),
             lease,
             authorization,
@@ -128,7 +128,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     provider_started_rx
         .await
         .expect("provider should start after lease acquisition");
-    let undelivered = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
+    let undelivered = lash_core::store::IngressStore::enqueue_pending_turn_input(
         inner_store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             SESSION_ID,
@@ -190,11 +190,74 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     );
     assert_eq!(
         store.calls(),
-        2,
-        "finish authorization fails once, then teardown authorizes the durable Drop repair"
+        1,
+        "the finish-time authorization fails once and nothing authorizes after it: \
+         the owner's end repairs nothing (FIG-3927 §2.6); the root's end applies the Drop"
     );
 
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
+    // Between the refusal and the root's end nothing moves: the undelivered
+    // input is still addressed to the turn that is over, the owner's own
+    // input stays bound to the root, and the Drop request records no outcome.
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(
+        inner_store.as_ref(),
+        &lash_core::SessionId::from(SESSION_ID),
+    )
+    .await
+    .expect("list pending turn inputs after the refused finish");
+    let undelivered_row = pending
+        .iter()
+        .find(|row| row.input.input_id == undelivered.input_id)
+        .expect("the undelivered input is still pending");
+    assert_eq!(
+        undelivered_row.status,
+        lash_core::PendingTurnInputReadStatus::Open,
+        "no root admitted the undelivered input"
+    );
+    assert!(
+        matches!(
+            &undelivered_row.input.state,
+            lash_core::TurnInputState::PendingActive(ingress) if ingress.turn_id == TURN_ID
+        ),
+        "the undelivered input is still addressed to the dead turn: {:?}",
+        undelivered_row.input.state
+    );
+    let owner_row = pending
+        .iter()
+        .find(|row| row.input.input_id != undelivered.input_id)
+        .expect("the owner's own input is still pending");
+    assert_eq!(
+        owner_row.status,
+        lash_core::PendingTurnInputReadStatus::Admitted {
+            root: TurnId::from(TURN_ID)
+        },
+        "the owner's input stays bound to its root until the root ends"
+    );
+    let record =
+        lash_core::store::IngressStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+            .await
+            .expect("read durable cancellation record")
+            .expect("Drop request remains recorded");
+    assert!(
+        record.outcome.is_none(),
+        "no outcome is recorded before the root's end applies the Drop"
+    );
+
+    // The engine's lost-run detector ends the root; its terminal write
+    // releases the bound rows and applies the request's Drop to the host
+    // input addressed to the dead turn (FIG-3927 §2.4, §2.6).
+    lash_core::SessionStoreFactory::end_lost_root(
+        lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
+        &lash_core::engine::RootRef {
+            session: SessionId::from(SESSION_ID),
+            root: TurnId::from(TURN_ID),
+        },
+        0,
+    )
+    .await
+    .expect("end the lost root")
+    .expect("the root had no terminal");
+
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(
         inner_store.as_ref(),
         &lash_core::SessionId::from(SESSION_ID),
     )
@@ -204,16 +267,16 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         pending
             .iter()
             .all(|input| input.input.input_id != undelivered.input_id),
-        "Drop evidence must keep the undelivered input out of every later claim"
+        "Drop evidence must keep the undelivered input out of every later admission"
     );
     let record =
-        lash_core::store::TurnInputStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+        lash_core::store::IngressStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
             .await
             .expect("read durable cancellation record")
             .expect("Drop request remains recorded");
     let affected = record
         .outcome
-        .expect("teardown recovery records its input decision")
+        .expect("the root's end records its input decision")
         .affected_inputs;
     assert!(affected.iter().any(|input| {
         input.input_id == undelivered.input_id

@@ -16,7 +16,7 @@ use lash_core::SessionId;
 use lash_core::TurnId;
 use std::collections::BTreeSet;
 
-use lash_core::runtime::QueuedWorkClaimBoundary;
+use lash_core::runtime::AdmissionBoundary;
 use lash_core::{
     AttemptOutcome, AttemptRecord, CheckpointKind, LlmCallId, LlmCallRecord, MessageOrigin,
     MessageRole, PluginMessage, PluginRuntimeEvent, ProtocolPosition, TokenUsage, ToolCallOutput,
@@ -115,7 +115,7 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
         (
             "queued_work_started",
             TurnEvent::QueuedWorkStarted {
-                boundary: QueuedWorkClaimBoundary::Idle,
+                boundary: AdmissionBoundary::Idle,
                 batch_ids: vec!["batch-1".to_string()],
                 causes: vec![TurnCause {
                     id: "cause-1".to_string(),

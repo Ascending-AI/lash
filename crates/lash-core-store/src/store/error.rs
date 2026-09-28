@@ -156,15 +156,6 @@ pub enum StoreError {
     SessionDeleted { session_id: SessionId },
     #[error("store does not support `{operation}`")]
     UnsupportedStoreOperation { operation: &'static str },
-    /// A persisted queued-work row carries only half of the predecessor claim
-    /// correlation that an abandon would have to restore.
-    #[error(
-        "stored queued-work predecessor claim is corrupt: claim id present={claim_id_present}, claim token present={claim_token_present}"
-    )]
-    QueuedWorkPredecessorClaimCorrupt {
-        claim_id_present: bool,
-        claim_token_present: bool,
-    },
     #[error("store head revision conflict: expected {expected}, actual {actual}")]
     HeadRevisionConflict { expected: u64, actual: u64 },
     /// Cancellation intent changed after the runtime observed it and before
@@ -384,49 +375,38 @@ pub enum StoreError {
         /// Nearest `FrameOpen` node id derived by the store.
         derived: Option<String>,
     },
+    /// A commit's ingress settlement named a row its root did not admit:
+    /// the row is open, bound to another root, or gone (FIG-3927). Nothing
+    /// was written; a row is only ever answered by the root that admitted
+    /// it.
     #[error(
-        "queued work claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
+        "root `{root}` of session `{session_id}` did not admit {row}; the row is bound to {admitted_root:?}"
     )]
-    QueuedWorkClaimSuperseded {
+    IngressRowNotAdmitted {
         session_id: SessionId,
-        claim_id: String,
-        row_id: Option<Box<str>>,
-        superseding_claim_id: Option<Box<str>>,
-        superseding_session_lease_generation: Option<Box<u64>>,
+        root: crate::TurnId,
+        row: Box<super::IngressRowId>,
+        admitted_root: Option<crate::TurnId>,
     },
-    #[error(
-        "turn input claim `{claim_id}` for session `{session_id}` is superseded at row {row_id:?} by claim {superseding_claim_id:?} in session-lease generation {superseding_session_lease_generation:?}"
-    )]
-    TurnInputClaimSuperseded {
+    /// A commit's ingress settlement named one row twice.
+    #[error("root `{root}` of session `{session_id}` settles {row} twice in one commit")]
+    IngressSettlementDuplicate {
         session_id: SessionId,
-        claim_id: String,
-        row_id: Option<Box<str>>,
-        superseding_claim_id: Option<Box<str>>,
-        superseding_session_lease_generation: Option<Box<u64>>,
+        root: crate::TurnId,
+        row: Box<super::IngressRowId>,
     },
-    /// A session-ingress settlement named a row its claim no longer holds:
-    /// the row was settled, withdrawn, or re-claimed by another claim since
-    /// (ADR 0101 §7, ADR 0029). Settlement checks claim identity, not only
-    /// state, so nothing was written.
-    #[error(
-        "session ingress claim `{claim_id}` for session `{session_id}` no longer holds item `{item_id}`"
-    )]
-    IngressClaimSuperseded {
+    /// A commit that settles admitted rows or applies session commands
+    /// presented no drive fence: only a sealed drive's fenced commit may
+    /// (FIG-3927).
+    #[error("a commit of session `{session_id}` settles ingress rows without a drive fence")]
+    IngressSettlementUnfenced { session_id: SessionId },
+    /// The command lane's applying commit found one of its command rows
+    /// withdrawn or admitted since it read them (design §2.7). Nothing was
+    /// written; the lane reads the commands again.
+    #[error("session command batch `{batch_id}` of session `{session_id}` is no longer open")]
+    SessionCommandWithdrawn {
         session_id: SessionId,
-        claim_id: String,
-        item_id: String,
-    },
-    /// A session-ingress settlement was refused before any write because it
-    /// is not a settlement its claims can make: a completion of an item the
-    /// committing turn did not render, of a command by a turn, or of a turn
-    /// item by a command drain (ADR 0101 §7).
-    #[error(
-        "session ingress settlement for session `{session_id}` refused at item `{item_id}`: {reason}"
-    )]
-    IngressSettlementRefused {
-        session_id: SessionId,
-        item_id: String,
-        reason: &'static str,
+        batch_id: BatchId,
     },
     /// A storage operation fenced by a drive presented a fence that is not
     /// the session's current drive epoch: a later admission superseded it
@@ -496,61 +476,6 @@ pub enum StoreError {
         session_id: SessionId,
         kind: &'static str,
         source_key: String,
-    },
-    /// An unclaimed turn-input settlement lost the head CAS.
-    ///
-    /// The settling turn accepted `input_id` itself and drove it without the
-    /// session-execution lane ([ADR 0069](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)
-    /// §5). Between acceptance and commit the row stopped being unclaimed and
-    /// unsettled — a recovery claim took it, a cancel withdrew it, or another
-    /// driver already settled it — so this commit affected zero rows and is
-    /// refused whole. Unlike [`Self::TurnInputClaimSuperseded`] this settlement
-    /// carries no lease generation, so it is never dropped and retried: the
-    /// losing driver retires at its first commit attempt.
-    #[error(
-        "unclaimed turn-input settlement for session `{session_id}` lost the head CAS at row `{input_id}`: the row is {observed_state:?} and held by claim {superseding_claim_id:?}"
-    )]
-    UnclaimedTurnInputSettlementSuperseded {
-        session_id: SessionId,
-        input_id: InputId,
-        observed_state: Option<Box<str>>,
-        superseding_claim_id: Option<Box<str>>,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` includes queued-work-derived content without settling claim `{claim_id}`"
-    )]
-    UnsettledQueuedWorkClaim {
-        session_id: SessionId,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` includes turn-input-derived content without settling claim `{claim_id}`"
-    )]
-    UnsettledTurnInputClaim {
-        session_id: SessionId,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` attempts to settle foreign queued-work claim `{claim_id}`"
-    )]
-    ForeignQueuedWorkCompletion {
-        session_id: SessionId,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit for session `{session_id}` attempts to settle foreign turn-input claim `{claim_id}`"
-    )]
-    ForeignTurnInputCompletion {
-        session_id: SessionId,
-        claim_id: String,
-    },
-    #[error(
-        "runtime commit has {completed_count} {claim_kind} completions for {originating_count} originating claims"
-    )]
-    ClaimSettlementCountMismatch {
-        claim_kind: &'static str,
-        originating_count: usize,
-        completed_count: usize,
     },
     #[error(
         "store confirmed {confirmed_count} usage identities, but only {staged_count} were staged"
@@ -835,7 +760,6 @@ impl StoreError {
             Self::SessionDeleted { .. } => "SessionDeleted",
             Self::UnsupportedStoreOperation { .. } => "UnsupportedStoreOperation",
 
-            Self::QueuedWorkPredecessorClaimCorrupt { .. } => "QueuedWorkPredecessorClaimCorrupt",
             Self::UnfinishedRootConflict { .. } => "UnfinishedRootConflict",
             Self::FollowOnPending { .. } => "FollowOnPending",
             Self::FollowOnFrameNotCurrent { .. } => "FollowOnFrameNotCurrent",
@@ -873,14 +797,11 @@ impl StoreError {
             Self::InvalidGraphParent { .. } => "InvalidGraphParent",
             Self::MissingFrameOpenAncestor { .. } => "MissingFrameOpenAncestor",
             Self::CurrentFrameNodeMismatch { .. } => "CurrentFrameNodeMismatch",
-            Self::QueuedWorkClaimSuperseded { .. } => "QueuedWorkClaimSuperseded",
-            Self::TurnInputClaimSuperseded { .. } => "TurnInputClaimSuperseded",
-            Self::UnclaimedTurnInputSettlementSuperseded { .. } => {
-                "UnclaimedTurnInputSettlementSuperseded"
-            }
-            Self::IngressClaimSuperseded { .. } => "IngressClaimSuperseded",
-            Self::IngressSettlementRefused { .. } => "IngressSettlementRefused",
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
+            Self::IngressRowNotAdmitted { .. } => "IngressRowNotAdmitted",
+            Self::IngressSettlementDuplicate { .. } => "IngressSettlementDuplicate",
+            Self::IngressSettlementUnfenced { .. } => "IngressSettlementUnfenced",
+            Self::SessionCommandWithdrawn { .. } => "SessionCommandWithdrawn",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
             Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
             Self::RootInputWithdrawn { .. } => "RootInputWithdrawn",
@@ -889,11 +810,6 @@ impl StoreError {
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
             Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",
-            Self::UnsettledQueuedWorkClaim { .. } => "UnsettledQueuedWorkClaim",
-            Self::UnsettledTurnInputClaim { .. } => "UnsettledTurnInputClaim",
-            Self::ForeignQueuedWorkCompletion { .. } => "ForeignQueuedWorkCompletion",
-            Self::ForeignTurnInputCompletion { .. } => "ForeignTurnInputCompletion",
-            Self::ClaimSettlementCountMismatch { .. } => "ClaimSettlementCountMismatch",
             Self::UnstagedUsageConfirmation { .. } => "UnstagedUsageConfirmation",
             Self::MonotonicCounterOverflow { .. } => "MonotonicCounterOverflow",
             Self::PendingTurnInputSourceKeyConflict { .. } => "PendingTurnInputSourceKeyConflict",

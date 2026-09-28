@@ -11,7 +11,7 @@ impl RuntimeTurnDriver<'_> {
     /// tokens: the queue could never drain even one row. Drain size is now a
     /// host policy ([`QueuedDrainPolicy`](crate::QueuedDrainPolicy), defaulting
     /// to one row per drain) and the irreducible residue — a single row larger
-    /// than the whole window — is refused as a typed outcome at claim time.
+    /// than the whole window — is refused as a typed outcome at admission time.
     /// Everything in between is the provider's judgement, exactly as for an
     /// ordinary turn.
     ///
@@ -19,7 +19,7 @@ impl RuntimeTurnDriver<'_> {
     /// external or provider-file attachment, whose model-context weight is not
     /// bounded by any bytes Lash can measure.
     fn ensure_queued_work_cost_is_bounded(&self, request: &LlmRequest) -> Result<(), RuntimeError> {
-        if self.pending_queue_claims.is_empty()
+        if self.pending_queued.is_empty()
             || !self.turn_context.enforces_selected_queued_work_cost_bound()
         {
             return Ok(());
@@ -283,15 +283,15 @@ impl RuntimeTurnDriver<'_> {
             Ok(delivery) => {
                 let committed_user_messages = delivery.committed_user_messages.clone();
                 self.handle_machine_response(machine, Response::Checkpoint { id, delivery })?;
-                if let Some(mut claim) = self.pending_checkpoint_turn_input_claim.take() {
-                    claim.record_checkpoint_applications(
+                if let Some(mut admitted) = self.pending_checkpoint_turn_inputs.take() {
+                    admitted.record_checkpoint_applications(
                         &self.turn_id,
                         checkpoint,
                         &committed_user_messages,
                     );
-                    let applications = claim.applications.clone();
-                    let accepted_turn_inputs = claim.accepted_turn_inputs();
-                    self.pending_turn_input_claims.push(claim);
+                    let applications = admitted.applications.clone();
+                    let accepted_turn_inputs = admitted.accepted_turn_inputs();
+                    self.pending_turn_inputs.push(admitted);
                     send_turn_input_applications(
                         event_tx,
                         &mut self.turn_observations,
@@ -323,35 +323,12 @@ impl RuntimeTurnDriver<'_> {
                 }
             }
             Err(err) => {
-                if let Some(claim) = self.pending_checkpoint_turn_input_claim.take()
-                    && let Some(store) = self.session.history_store()
-                {
-                    store
-                        .abandon_turn_input_claim(&claim)
-                        .await
-                        .map_err(crate::runtime::runtime_error_from_store_commit)?;
-                }
-                // FIG-3157: a terminal checkpoint that failed delivers
-                // nothing and starts no follow-on turn, so work withheld
-                // for that follow-on was never delivered and must go back
-                // to the queue claimable.
-                if let Some(withheld) = self.withheld_terminal_work.take_if_any()
-                    && let Some(store) = self.session.history_store()
-                {
-                    if !withheld.queued.is_empty() {
-                        store
-                            .abandon_queued_work_claims(&withheld.queued)
-                            .await
-                            .map_err(crate::runtime::runtime_error_from_store_commit)?;
-                    }
-                    let turn_input_claims = &withheld.turn_inputs;
-                    if !turn_input_claims.is_empty() {
-                        store
-                            .abandon_turn_input_claims(turn_input_claims)
-                            .await
-                            .map_err(crate::runtime::runtime_error_from_store_commit)?;
-                    }
-                }
+                // A failed checkpoint delivers nothing and starts no follow-on
+                // turn. What it admitted stays bound to the root, which never
+                // settles it as delivered: the root's terminal write hands it
+                // back open at its own position (FIG-3927 §2.4).
+                self.pending_checkpoint_turn_inputs = None;
+                drop(self.withheld_terminal_work.take_if_any());
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
             }
         }

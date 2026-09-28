@@ -17,7 +17,7 @@ crate::statements! {
         select_admission = "SELECT admission_json FROM session_roots
              WHERE session_id = ?1 AND root = ?2";
 
-        /// Record the admission in the same transaction as its row claims.
+        /// Record the admission in the same transaction as its row bindings.
         write_admission = "UPDATE session_roots
              SET admission_json = ?3, admitted_generation = ?4
              WHERE session_id = ?1 AND root = ?2 AND admission_json IS NULL";
@@ -75,8 +75,6 @@ pub struct RootVerbStatements {
     pub set_kind: crate::Rendered,
     pub raise_epoch: crate::Rendered,
     pub input: crate::Rendered,
-    pub release_inputs: crate::Rendered,
-    pub release_batches: crate::Rendered,
     pub delete_batch_items: crate::Rendered,
     pub delete_batch: crate::Rendered,
     pub intents: crate::Rendered,
@@ -101,8 +99,6 @@ impl RootVerbStatements {
             intents: group1.intents,
             raise_epoch: group2.raise_epoch,
             input: group3.input,
-            release_inputs: group3.release_inputs,
-            release_batches: group4.release_batches,
             delete_batch: group4.delete_batch,
             delete_batch_items: group5.delete_batch_items,
         }

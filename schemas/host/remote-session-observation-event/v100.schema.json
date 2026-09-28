@@ -124,6 +124,13 @@
     "FailureCode": {
       "type": "string"
     },
+    "RemoteAdmissionBoundary": {
+      "enum": [
+        "active_turn_checkpoint",
+        "idle"
+      ],
+      "type": "string"
+    },
     "RemoteAttachmentRef": {
       "properties": {
         "byte_len": {
@@ -1202,13 +1209,6 @@
         "provider"
       ],
       "type": "object"
-    },
-    "RemoteQueuedWorkClaimBoundary": {
-      "enum": [
-        "active_turn_checkpoint",
-        "idle"
-      ],
-      "type": "string"
     },
     "RemoteResponseTextMeta": {
       "properties": {
@@ -2336,7 +2336,7 @@
               "type": "array"
             },
             "boundary": {
-              "$ref": "#/definitions/RemoteQueuedWorkClaimBoundary"
+              "$ref": "#/definitions/RemoteAdmissionBoundary"
             },
             "causes": {
               "items": {
