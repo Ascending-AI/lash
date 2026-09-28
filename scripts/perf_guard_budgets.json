@@ -121,10 +121,6 @@
               "budget_ms": 0.25,
               "required": false
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.382,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 5.235,
               "required": false
@@ -263,10 +259,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 732.956,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 0.896,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -489,10 +481,6 @@
               "budget_ms": 28.068,
               "required": false
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 0.756,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 1.004,
               "required": false
@@ -637,10 +625,6 @@
             },
             "rlm_lashlang.print_project": {
               "budget_ms": 2.21,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 5.229,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -1063,10 +1047,6 @@
               "budget_ms": 2.601,
               "required": false
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.815,
-              "required": true
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.837,
               "required": true
@@ -1151,10 +1131,6 @@
               "budget_ms": 44.348,
               "required": true
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.892,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.024,
               "required": false
@@ -1221,10 +1197,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 69.435,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 4.198,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -1315,10 +1287,6 @@
               "budget_ms": 3.853,
               "required": true
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 13.46,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.318,
               "required": false
@@ -1385,10 +1353,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 2.32,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.79,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -1473,10 +1437,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 50.408,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.748,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -1570,10 +1530,6 @@
             "rlm_lashlang.print_project": {
               "budget_ms": 11.46,
               "required": true
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 24.894,
-              "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.954,
@@ -1699,10 +1655,6 @@
               "budget_ms": 631.875,
               "required": true
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.366,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.809,
               "required": false
@@ -1827,10 +1779,6 @@
               "budget_ms": 644.048,
               "required": true
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.491,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 3.243,
               "required": false
@@ -1935,10 +1883,6 @@
               "budget_ms": 2.175,
               "required": true
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.143,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.267,
               "required": false
@@ -2025,10 +1969,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 2330.295,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.18,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -2151,10 +2091,6 @@
               "budget_ms": 33.979,
               "required": false
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 2.291,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.484,
               "required": false
@@ -2223,10 +2159,6 @@
               "budget_ms": 2.155,
               "required": false
             },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.691,
-              "required": false
-            },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 2.791,
               "required": false
@@ -2293,10 +2225,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 2.355,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.948,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
@@ -2382,10 +2310,6 @@
             "rlm_lashlang.execute": {
               "budget_ms": 125.86,
               "required": true
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 3.806,
-              "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
               "budget_ms": 7.355,
@@ -3029,10 +2953,6 @@
             },
             "rlm_lashlang.execute": {
               "budget_ms": 3.736,
-              "required": false
-            },
-            "rlm_lashlang.rehydrate_projected_globals": {
-              "budget_ms": 1.58,
               "required": false
             },
             "rlm_lashlang.resolve_projected_bindings": {
