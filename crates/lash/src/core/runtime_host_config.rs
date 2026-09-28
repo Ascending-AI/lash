@@ -63,9 +63,6 @@ impl LashCoreBuilder {
         if let Some(grace) = self.abort_drain_grace.take() {
             core.control.abort_drain_grace = grace;
         }
-        if let Some(timings) = self.lease_timings.take() {
-            core.control.lease_timings = timings;
-        }
         if let Some(provider) = self.provider.clone() {
             core.providers.provider_resolver =
                 Arc::new(facade_support::SingleProviderResolver::new(provider));

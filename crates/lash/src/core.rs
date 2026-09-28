@@ -29,7 +29,7 @@ use work_drivers::{CoreWorkSetup, CoreWorkSlot, WakeDeliveryDriverSetup};
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
 pub struct LashCore {
-    pub(crate) session_execution_owner: lash_core::LeaseOwnerIdentity,
+    pub(crate) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(crate) env: RuntimeEnvironment,
     pub(crate) tool_registry: Arc<lash_core::ToolRegistry>,
     pub(crate) policy: SessionPolicy,
@@ -491,8 +491,7 @@ impl LashCore {
             self.process_lifecycle_available,
         )?;
         env.plugin_host = Some(Arc::new(plugin_host));
-        let runtime =
-            LashRuntime::resume(inner, &env, self.session_execution_owner.clone()).await?;
+        let runtime = LashRuntime::resume(inner, &env, self.drive_owner.clone()).await?;
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
@@ -735,7 +734,7 @@ impl LashCore {
             runtime_host,
             self.substrate_slot.setup.process.clone(),
             Arc::clone(&self.substrate_slot.setup.session_work),
-            self.session_execution_owner.clone(),
+            self.drive_owner.clone(),
         )
         .with_session_policy(self.policy.clone()))
     }
@@ -765,7 +764,6 @@ pub struct LashCoreBuilder {
     tool_providers: Vec<Arc<dyn ToolProvider>>,
     plugin_stack: PluginStack,
     plugin_host: Option<PluginHost>,
-    lease_timings: Option<facade_support::LeaseTimings>,
     recovery_lease: Option<lash_core::engine::RecoveryLeaseConfig>,
     process_tool_visibility_filter: Option<Arc<dyn facade_support::ProcessToolVisibilityFilter>>,
     live_replay_store: Option<Arc<dyn LiveReplayStore>>,
@@ -794,7 +792,6 @@ impl LashCoreBuilder {
             tool_providers: Vec::new(),
             plugin_stack: PluginStack::default(),
             plugin_host: None,
-            lease_timings: None,
             recovery_lease: None,
             process_tool_visibility_filter: None,
             live_replay_store: None,
@@ -939,20 +936,6 @@ impl LashCoreBuilder {
         self
     }
 
-    /// Configure the timing of durable effect-replay leases. Session drive
-    /// admission and queued-work claims are fenced by an epoch, without a TTL.
-    ///
-    /// This controls effect-replay failover latency and false-takeover risk.
-    /// It is an operational deployment decision, so it lives on the main
-    /// builder tier rather than behind [`advanced`](Self::advanced).
-    /// Effect hosts accept the same type at construction (e.g.
-    /// SQLite/Postgres effect-replay options), so a host can share one timing decision across
-    /// that boundary.
-    pub fn lease_timings(mut self, lease_timings: facade_support::LeaseTimings) -> Self {
-        self.lease_timings = Some(lease_timings);
-        self
-    }
-
     /// Configure how this deployment competes for the recovery leader lease
     /// (ADR 0109 §1.6): its build rank — a higher rank preempts a
     /// lower-ranked leader after the minimum tenure, so a rolling deploy that
@@ -975,10 +958,7 @@ impl LashCoreBuilder {
     ///
     /// The owner id is stable for the worker or process and never scoped to a
     /// turn. The incarnation id changes once per process boot.
-    pub fn build(
-        mut self,
-        session_execution_owner: lash_core::LeaseOwnerIdentity,
-    ) -> Result<LashCore> {
+    pub fn build(mut self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
         let protocol_factory = self.protocol_factory.clone();
         if protocol_factory.is_none() && self.plugin_host.is_none() {
             return Err(EmbedError::MissingProtocolPlugin);
@@ -1093,7 +1073,7 @@ impl LashCoreBuilder {
         let (session_driver, installed_driver) = Self::build_session_driver(
             &session_work,
             Arc::clone(&residents),
-            session_execution_owner.clone(),
+            drive_owner.clone(),
             env.clone(),
             policy.clone(),
             protocol_factory.clone(),
@@ -1153,10 +1133,10 @@ impl LashCoreBuilder {
                     }) as futures_util::future::BoxFuture<'static, _>
                 })
             },
-            session_execution_owner.clone(),
+            drive_owner.clone(),
         );
         Ok(LashCore {
-            session_execution_owner,
+            drive_owner,
             env,
             tool_registry,
             policy,
@@ -1187,7 +1167,7 @@ impl LashCoreBuilder {
     fn build_session_driver(
         session_work: &Arc<dyn SessionWorkEngine>,
         residents: Arc<residents::ResidentSessions>,
-        session_execution_owner: lash_core::LeaseOwnerIdentity,
+        drive_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -1197,12 +1177,12 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,
     ) -> (Arc<CoreSessionDriver>, Arc<dyn lash_core::SessionDriver>) {
-        let owner = session_execution_owner.clone();
+        let owner = drive_owner.clone();
         let recovery = Arc::new(recovery::RecoverySlot::new(&env, recovery_lease));
         let driver = Arc::new(CoreSessionDriver::new(Arc::new(CoreSessionDriverConfig {
             recovery,
             residents,
-            session_execution_owner,
+            drive_owner,
             env,
             policy,
             protocol_factory,
@@ -1282,9 +1262,8 @@ impl LashCore {
     /// incarnation is fenced at attach and answered with
     /// `replay_gap(unavailable)`, which sends the reader back for another
     /// snapshot, and round it goes (FIG-3162). This query reads the live-replay
-    /// store only. Like [`Self::sessions`], it never opens a session, claims
-    /// the execution lease, or hydrates a checkpoint, so a host can pair it
-    /// with a lease-free durable read.
+    /// store only. Like [`Self::sessions`], it never opens a session or
+    /// hydrates a checkpoint, so a host can pair it with a durable read.
     pub fn observation_cursor(
         &self,
         session_id: &SessionId,
@@ -1295,8 +1274,8 @@ impl LashCore {
 
     /// Enumerate every durable session catalog entry.
     ///
-    /// This is a read-only catalog query. It does not open sessions, acquire
-    /// execution leases, hydrate checkpoints, or mutate catalog generations.
+    /// This is a read-only catalog query. It does not open sessions, hydrate
+    /// checkpoints, or mutate catalog generations.
     /// Results are ordered by creation time and then session id, and include
     /// permanent deletion tombstones.
     pub async fn sessions(&self) -> Result<Vec<SessionSummary>> {

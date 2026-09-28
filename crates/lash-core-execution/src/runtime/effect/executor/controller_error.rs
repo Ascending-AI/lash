@@ -110,7 +110,7 @@ mod tests {
         for store_error in [
             crate::StoreError::StoredDataCorrupt {
                 record_kind: "RuntimeEffectReplay",
-                message: "negative lease_expires_at_ms".to_string(),
+                message: "negative drive_epoch".to_string(),
             },
             crate::StoreError::MonotonicCounterOverflow {
                 counter: "effect_replay_fence",

@@ -476,7 +476,6 @@ mod tests {
                 stop_sequences: vec![TYPESCRIPT_CLOSE_DELIMITER.to_string()],
                 ..GenerationOptions::default()
             })
-            .lease_timings(crate::lease::sim_runtime_lease_timings())
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .provider(provider)

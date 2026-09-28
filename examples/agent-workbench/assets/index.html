@@ -4025,10 +4025,10 @@
       const kind = document.createElement("div");
       kind.className = "ingress-kind";
       kind.textContent = scope === "active_turn" ? "injected now" : "queued next";
-      if (receipt.status?.kind === "held" && receipt.status.lease_expires_at_ms != null) {
-        const leaseExpiry = String(receipt.status.lease_expires_at_ms);
-        node.dataset.leaseExpiresAtMs = leaseExpiry;
-        kind.textContent += ` · held until ${leaseExpiry} ms`;
+      if (receipt.status?.kind === "held" && receipt.status.drive_epoch != null) {
+        const driveEpoch = String(receipt.status.drive_epoch);
+        node.dataset.driveEpoch = driveEpoch;
+        kind.textContent += ` · held under epoch ${driveEpoch}`;
       }
       const body = document.createElement("div");
       body.className = "ingress-text";

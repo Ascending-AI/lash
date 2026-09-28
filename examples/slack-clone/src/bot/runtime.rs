@@ -42,11 +42,10 @@ pub struct RuntimeConfig {
     pub data_dir: PathBuf,
     /// JSONL trace destination. Defaults to `<data_dir>/trace.jsonl`.
     pub trace_path: Option<PathBuf>,
-    /// Distinguishes this boot from the previous one for lease reclaim.
+    /// Distinguishes this boot from the previous one in the drive-owner
+    /// identity, so this boot's drive supersedes what a crashed boot held.
     pub incarnation: String,
     pub trace_to_stderr: bool,
-    /// Optional deployment-specific lease timings.
-    pub lease_timings: Option<lash::durability::LeaseTimings>,
     /// MCP servers registered into the bot's standard tool catalog.
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
 }
@@ -59,7 +58,6 @@ impl RuntimeConfig {
             trace_path: None,
             incarnation: fresh_incarnation(),
             trace_to_stderr: true,
-            lease_timings: None,
             mcp_servers: BTreeMap::new(),
         }
     }
@@ -148,10 +146,11 @@ pub struct BotRuntime {
 /// A stable, per-boot session-execution owner.
 ///
 /// The owner id is stable across restarts and the incarnation is not, which is
-/// what lets a new boot reclaim the leases a crashed boot left behind instead of
-/// deadlocking against its own ghost. A bot restarted mid-conversation depends on
-/// this: without it, the channel session stays locked to a process that is gone.
-pub fn session_owner(incarnation: &str) -> LeaseOwnerIdentity {
+/// what lets a new boot supersede the drive epoch a crashed boot sealed instead
+/// of deadlocking against its own ghost. A bot restarted mid-conversation
+/// depends on this: without it, the channel session stays fenced to a process
+/// that is gone.
+pub fn drive_owner(incarnation: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque("slack-clone-bot", incarnation)
 }
 
@@ -225,7 +224,7 @@ pub async fn build_core(
             status.last_error.as_ref().map_or("none", |f| f.message())
         );
     }
-    let mut builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let builder = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider)
         // `session_spec` replaces the builder's whole spec, so it must precede
         // `model`, which writes into that same spec.
@@ -243,11 +242,8 @@ pub async fn build_core(
         .trace_sink(trace_sink(config))
         .trace_level(TraceLevel::Extended)
         .plugin(Arc::clone(&mcp) as Arc<dyn lash::plugins::PluginFactory>);
-    if let Some(lease_timings) = config.lease_timings {
-        builder = builder.lease_timings(lease_timings);
-    }
     let core = builder
-        .build(session_owner(&config.incarnation))
+        .build(drive_owner(&config.incarnation))
         .context("build slack-clone bot Lash core")?;
     Ok(BotRuntime { core, mcp, roots })
 }

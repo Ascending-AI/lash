@@ -16,6 +16,16 @@ specifies SQL-engine behaviour: failover that waits out the session-execution
 lease TTL. Those passages stay as written until the PR that deletes the code
 (FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
 
+Superseded 2026-09-28 (FIG-3862, FIG-3864): the session-execution lease this
+ADR's decision gates is deleted — interim claims are fenced by the sealed drive
+epoch rather than a TTL lease under [ADR
+0101](0101-one-session-ingress-carries-every-admitted-item.md)'s claim-free
+admission contract — and `LeaseTimings`, the host lever this ADR defends, is
+removed with it. There is no lease TTL left for an attestation to
+short-circuit. What survives is the principle: fencing is never delegated — the
+drive-epoch seal is still a lash-owned durable fact decided inside the store
+transaction. The body below records the deleted regime.
+
 ## Context
 
 Under durable acceptance ([ADR 0069](0069-durable-acceptance-is-the-sole-turn-ingress.md))

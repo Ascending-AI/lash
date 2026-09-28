@@ -33,7 +33,7 @@ pub fn durable_effect_exactly_once(summary: &AbstractWorldSummary) -> OracleVerd
 pub const HEALTHY_LONG_TURN_LIVENESS_ORACLE: &str = "sim.oracle.healthy-long-turn-liveness.v1";
 
 /// A generated provider turn remained live and committed while its delivered
-/// schedule crossed several production-sized lease TTL windows.
+/// schedule crossed several production-sized failover windows.
 pub fn healthy_long_turn_liveness(events: &[DeliveredBoundary]) -> OracleVerdict {
     let healthy = events
         .iter()
@@ -50,14 +50,14 @@ pub fn healthy_long_turn_liveness(events: &[DeliveredBoundary]) -> OracleVerdict
         return OracleVerdict::passed(
             HEALTHY_LONG_TURN_LIVENESS_ORACLE,
             format!(
-                "provider turn `{}` committed after its delivered schedule crossed at least three production lease TTL windows",
+                "provider turn `{}` committed after its delivered schedule crossed at least three production failover windows",
                 event.boundary_id
             ),
         );
     }
     OracleVerdict::failed(
         HEALTHY_LONG_TURN_LIVENESS_ORACLE,
-        "no successful generated provider turn crossed three production lease TTL windows in the delivered schedule",
+        "no successful generated provider turn crossed three production failover windows in the delivered schedule",
     )
 }
 

@@ -20,7 +20,6 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(provider_handle)
@@ -134,7 +133,6 @@ pub(super) async fn run_live_turn_facts(
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(seed).await?;
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(provider_handle)
@@ -299,7 +297,6 @@ pub(super) async fn prove_pending_tool_completion_on(
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(pending_tool_roundtrip_provider())
@@ -540,7 +537,6 @@ pub(super) async fn prove_final_value_semantic_channel()
         &backend,
     );
     let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(rlm_final_value_provider())

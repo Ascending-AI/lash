@@ -81,11 +81,10 @@ async fn events(State(bot): State<Arc<ChannelBot>>, headers: HeaderMap, body: St
             tokio::spawn(async move {
                 match bot.ingest(*envelope, retry_num).await {
                     Ok(Disposition::Deferred { event_id, .. }) => {
-                        // The admission is fenced to a session-execution lease
-                        // generation this boot cannot take yet — a redelivery
-                        // landing inside the previous boot's lease TTL. Slack's own
-                        // retries are bounded and would all fall inside that
-                        // window, so the bot owns this retry.
+                        // The admission is contended — a redelivery racing
+                        // another writer that still holds the session lane.
+                        // Slack's own retries are bounded and may all land
+                        // inside that window, so the bot owns this retry.
                         log_out!("slack-clone-bot deferred {event_id}; retrying in the background");
                         if let Err(error) = bot
                             .retry_deferred(event_id.clone(), channel::DEFERRED_RETRY_DEADLINE)

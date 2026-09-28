@@ -12,7 +12,7 @@ impl AdvancedLashCoreBuilder {
         self
     }
 
-    pub fn build(self, session_execution_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
-        self.builder.build(session_execution_owner)
+    pub fn build(self, drive_owner: lash_core::LeaseOwnerIdentity) -> Result<LashCore> {
+        self.builder.build(drive_owner)
     }
 }

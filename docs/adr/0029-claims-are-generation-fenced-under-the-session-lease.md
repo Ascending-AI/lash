@@ -21,7 +21,8 @@ refuses admission and settlement and writes nothing".
 Supersedes the claim-renewal language in
 [ADR 0014](0014-operational-policy-stays-with-the-host.md)'s *Lease Timings*
 bullet: queued-work and turn-input claims are no longer leases with a TTL and a
-renewal API. `LeaseTimings` now governs only the three true lease lanes.
+renewal API. `LeaseTimings` governed only the three true lease lanes at that
+point; FIG-3862 deleted the last of them and FIG-3864 removed the knob.
 
 Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) merges
 queued-work and turn-input claims into one ingress claim type with one claim-id

@@ -401,10 +401,6 @@ pub enum RootIntentRefused {
     /// The session is closing: its `CloseSession` intent ends every root.
     #[error("the session is closing")]
     SessionClosing,
-    /// The root owns effect groups that are live or closing (D2 Q4): they
-    /// settle first.
-    #[error("the root owns {count} effect group(s) that are live or closing")]
-    EffectGroupsOpen { count: usize },
     /// The store did not answer.
     #[error(transparent)]
     Store(#[from] super::StoreError),

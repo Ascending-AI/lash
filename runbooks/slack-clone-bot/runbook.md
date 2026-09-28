@@ -442,22 +442,25 @@ Restart the bot (`bash scripts/slack-clone-dev.sh up --port <p>` is idempotent a
 the missing process; launch it non-blocking) and poll the bot's `/healthz`. Boot recovery
 walks the unfinished ledger rows.
 
-**The answer is not immediate, and a deferral is not a failure.** The bot's session-execution
-lease TTL is **15 s** (`examples/slack-clone/src/bot.rs`). Two recovery paths are both
-correct:
+**The answer is not always immediate, and a deferral is not a failure.** The dead
+boot's sealed drive epoch stands until this boot's drive supersedes it, and the
+engine re-drives the interrupted invocation on the restarted endpoint. Two recovery
+paths are both correct:
 
-- **Fast path** (restart inside the dead boot's TTL): recovery cannot take the lease, logs
+- **Deferred path** (the interrupted turn is still re-driving, or the open races a
+  lane still held): recovery logs
   `Deferred { reason: "session_admission_contended" }` or `Deferred { reason: "turn_not_settled" }`,
   leaves the ledger row non-terminal, then a retry settles
   `settled deferred event … Replied { source: Turn }` (or `Transcript`, when this boot's engine
   committed the turn before the retry looked).
-- **Slow path** (restart after the 15 s TTL): the lease has lapsed, so the new boot replies
-  directly (`handled … Replied`). The ledger `reply_ts` is at or after the captured
-  `lease_expires_at_ms`.
+- **Direct path** (the interrupted turn already settled, or this boot's drive has
+  already sealed over the dead epoch): the new boot replies directly
+  (`handled … Replied`).
 
-Gate on outcome facts (exactly one reply in DOM, platform, ledger, and bot log; new
-`lease_fencing_token` > the dead generation; one replacement turn), then classify the path
-from those durable facts. Do not assert a wall-clock latency band.
+Gate on outcome facts (exactly one reply in DOM, platform, ledger, and bot log; a
+newer `session_meta.drive_epoch` than the dead boot's sealed epoch; one replacement
+turn), then classify the path from those durable facts. Do not assert a wall-clock
+latency band.
 
 **Read the final disposition from the settle line.** Three log shapes carry a disposition, and
 a deferred event's outcome only appears in the third:
@@ -470,9 +473,9 @@ phase exists to prove. Require:
   (`Turn` if this boot's engine ran the turn while the retry waited on it, `Transcript` if a
   turn had committed before the retry looked, `Ledger` if the text had been recorded) and
   state why that is consistent with the kill point;
-- record **which path ran** in the extract (`recovery_path`: `fast` or `slow`) and the
+- record **which path ran** in the extract (`recovery_path`: `deferred` or `direct`) and the
   matching log evidence (deferral then settle-from-Turn, or direct handled-Replied after
-  expiry);
+  the epoch superseded);
 - **exactly one** bot row for this mention in both tabs, in `messages`, and in the in-page
   recorder's full history — no duplicate at any instant, which is the recorder's whole purpose;
 - `handled_events` for it at `replied` with a `reply_ts` matching that row;
@@ -502,17 +505,18 @@ In the second half, a turn that has not settled does **not** mean "a previous pr
 answered this" — nothing was committed. The bot must discriminate on committed evidence (a
 turn-input application record) rather than on an unsettled handle:
 `reply_lost_after_commit` is only an honest label when a turn provably consumed the admission.
-Report the incarnation ids, the graph-node count for the turn, and the lease generation the
-claim is pinned to; a stranded claim terminalized as `ReplyLost` is the FIG-1008 regression.
+Report the incarnation ids, the graph-node count for the turn, and the generation the
+claim is pinned to (`claim_session_lease_generation`); a stranded claim terminalized as
+`ReplyLost` is the FIG-1008 regression.
 
 ## Phase 5T — Kill the bot mid-thread mention; recover on the child session
 
 Repeat phase 5 inside the phase-3T thread. Arm row recorders in both tabs, post a fresh thread
 mention, correlate its `app_mention` by `thread_ts = <root-ts>`, poll its ledger row to
-`accepted`, and kill the bot. Reuse every phase-5 lease/deferral gate, with these additional
+`accepted`, and kill the bot. Reuse every phase-5 contention/deferral gate, with these additional
 thread requirements:
 
-- every send, lease diagnostic, turn-input application, trace, and final turn is scoped to
+- every send, claim diagnostic, turn-input application, trace, and final turn is scoped to
   `thread:<C…>:<root-ts>`; the channel session's head, graph, pending rows and turn count are
   unchanged by the thread mention and its recovery;
 - the final reply appears exactly once in each open `#threadStream`, exactly once in
@@ -522,7 +526,7 @@ thread requirements:
 - the ledger retains the original `thread_ts` through `accepted`, any `Deferred`,
   `reply_pending`, and `replied`, and the posted reply metadata names the original event id.
 
-Allow the same lease/retry sequence and load-related delay, and accept `Turn`, `Transcript`, or
+Allow the same contention/retry sequence and load-related delay, and accept `Turn`, `Transcript`, or
 `Ledger` only when the four-layer evidence matches the kill point. `ReplyLost`, a terminal row
 without a reply, a channel-scoped recovery turn, or a reply in the channel surface is a **FAIL**. Save
 `05T-thread-bot-down-both-tabs.png` and `05T-thread-recovered-both-tabs.png`.

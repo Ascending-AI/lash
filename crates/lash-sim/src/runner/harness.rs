@@ -33,7 +33,6 @@ pub(super) fn runtime_core_for_scripts(
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .provider(provider_handle)
         .model(model)
         .build(crate::sim_process_owner())

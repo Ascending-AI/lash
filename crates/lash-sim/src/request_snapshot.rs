@@ -30,7 +30,6 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
         .expect("sim engine");
     let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(provider)

@@ -337,7 +337,7 @@ impl SessionBuilder {
         load_persisted_state_admitted(
             store,
             &self.session_id,
-            &self.core.session_execution_owner,
+            &self.core.drive_owner,
             &uuid::Uuid::new_v4().to_string(),
             self.core.env.core.control.lease_timings.ttl_ms(),
         )
@@ -410,7 +410,7 @@ impl SessionBuilder {
             state,
             Some(binding.store()),
             self.plugin_options.clone(),
-            self.core.session_execution_owner.clone(),
+            self.core.drive_owner.clone(),
         )
         .await?;
         // Fire the protocol materialization hook for this root/builder open

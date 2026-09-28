@@ -16,18 +16,6 @@ pub(crate) const WORKBENCH_MAX_NO_PROGRESS_ATTEMPTS: usize = 12;
 pub(crate) const WORKBENCH_SEARCH_MCP_SERVER: &str = "parallel";
 const WORKBENCH_SEARCH_MCP_URL: &str = "https://search.parallel.ai/mcp";
 
-#[expect(
-    clippy::expect_used,
-    reason = "a 2s TTL renewed every 666ms leaves over three renewal windows, satisfying \
-              LeaseTimings' three-renewal invariant (see the comment below)"
-)]
-pub(crate) fn workbench_lease_timings() -> lash::durability::LeaseTimings {
-    // Workbench-only: keeps takeover terminal inside the 5s attach budget;
-    // tolerates one missed renew; fencing (ADR 0029) bounds stale-owner risk.
-    lash::durability::LeaseTimings::new(Duration::from_secs(2), Duration::from_millis(666))
-        .expect("workbench lease timings satisfy the three-renewal TTL invariant")
-}
-
 pub(crate) fn configure_workbench_plugins(
     plugins: &mut lash::PluginStack,
     mail_world: mail::MailWorld,
@@ -313,7 +301,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     )
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .lease_timings(workbench_lease_timings())
     .trace_sink(Arc::clone(&trace_sink))
     .trace_level(TraceLevel::Extended)
     .provider(provider)
@@ -701,14 +688,6 @@ pub(crate) fn workbench_context_window_tokens() -> usize {
 #[cfg(test)]
 mod startup_tests {
     use super::*;
-
-    #[test]
-    fn workbench_runtime_host_keeps_takeover_inside_terminal_attach_budget() {
-        let timings = workbench_lease_timings();
-
-        assert_eq!(timings.ttl(), Duration::from_secs(2));
-        assert_eq!(timings.renew_interval(), Duration::from_millis(666));
-    }
 
     #[test]
     fn startup_honors_context_window_environment_override() {

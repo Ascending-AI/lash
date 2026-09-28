@@ -111,7 +111,6 @@ async fn probe_session(
         .observing(collector.clone())
         .into();
     let core = lash::LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .charge_safety(charge_safety)

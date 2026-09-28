@@ -125,13 +125,6 @@ pub async fn run(config: BotConfig) -> Result<()> {
     let mut runtime_config = RuntimeConfig::new(config.data_dir.join("lash"))
         .with_demo_mcp_server(&config.api_base_url, &config.bot_token)?;
     runtime_config.trace_path = config.trace_path.clone();
-    #[cfg(feature = "e2e")]
-    if std::env::var("SLACK_CLONE_E2E_PROVIDER").as_deref() == Ok("scripted-v1") {
-        runtime_config.lease_timings = Some(
-            lash::durability::LeaseTimings::from_ttl(Duration::from_secs(15))
-                .context("configure deterministic E2E lease timings")?,
-        );
-    }
     let (provider, model) = configured_provider()?;
     // The engine is the local restate-server's, over the bot's SQLite store
     // set (ADR 0104): the server drives every channel turn in the endpoint's
@@ -213,11 +206,11 @@ pub async fn run(config: BotConfig) -> Result<()> {
         // before the platform is asked to send more. Registration is the last step of
         // boot for exactly this reason.
         //
-        // The pass cannot settle everything synchronously. A boot that restarts inside
-        // the previous boot's session-execution lease TTL cannot take that lease, so an
-        // interrupted turn's admission is still fenced and its event comes back
-        // deferred. Those are retried on a background task rather than blocking boot
-        // for the length of a lease TTL — the endpoint has live traffic to serve.
+        // The pass cannot settle everything synchronously. A boot recovering while
+        // the engine is still re-driving an interrupted turn on this endpoint can
+        // meet a contended admission — another writer's in-flight admission — and
+        // the event comes back deferred. Those are retried on a background task
+        // rather than blocking boot — the endpoint has live traffic to serve.
         match bot.recover().await {
             Ok(report) => {
                 if !report.settled.is_empty() {

@@ -45,7 +45,7 @@ pub(crate) struct CoreToolChildContextSource {
     provider: Option<ProviderHandle>,
     process_lifecycle_available: bool,
     work_ports: CoreWorkPorts,
-    session_execution_owner: lash_core::LeaseOwnerIdentity,
+    drive_owner: lash_core::LeaseOwnerIdentity,
 }
 
 impl CoreToolChildContextSource {
@@ -65,7 +65,7 @@ impl CoreToolChildContextSource {
         provider: Option<ProviderHandle>,
         process_lifecycle_available: bool,
         work_ports: CoreWorkPorts,
-        session_execution_owner: lash_core::LeaseOwnerIdentity,
+        drive_owner: lash_core::LeaseOwnerIdentity,
     ) -> Arc<dyn ToolChildContextSource> {
         let source: Arc<dyn ToolChildContextSource> = Arc::new(Self {
             env: env.clone(),
@@ -74,7 +74,7 @@ impl CoreToolChildContextSource {
             provider,
             process_lifecycle_available,
             work_ports,
-            session_execution_owner,
+            drive_owner,
         });
         let installed = env
             .core
@@ -141,7 +141,7 @@ impl ToolChildContextSource for CoreToolChildContextSource {
             state,
             None,
             execution_env.plugin_options.clone(),
-            self.session_execution_owner.clone(),
+            self.drive_owner.clone(),
         )
         .await
         .map_err(|error| {

@@ -1713,7 +1713,7 @@ async fn a_stalled_turn_does_not_block_competing_recovery_open() {
         state.core.session(session_id.clone()).open(),
     )
     .await
-    .expect("recovery open cannot wait for a lease TTL")
+    .expect("recovery open does not wait out a superseded predecessor")
     .expect("recovery open succeeds while predecessor is stalled");
     release.notify_one();
     wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10)).await;

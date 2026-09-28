@@ -1866,21 +1866,6 @@ async fn live_restate_ingress_owner_restart_resumes_and_remains_cancellable_inne
     data_dirs
 }
 
-/// Session-lease timings this deployment chooses through
-/// [`lash::LashCoreBuilder::lease_timings`].
-///
-/// The whole point of the knob is failover latency: a dead ingress owner's
-/// session-execution lease cannot be superseded until it expires, so the TTL
-/// *is* the floor on how long a replacement waits before it can resume the
-/// turn. The workbench trades a wider false-takeover window for a fast
-/// restart, and the recovery assertion below is written against that trade —
-/// it demands a takeover strictly faster than the stock 30s TTL, which only
-/// the configured timings can deliver.
-fn recovery_e2e_lease_timings() -> lash::durability::LeaseTimings {
-    lash::durability::LeaseTimings::new(Duration::from_millis(300), Duration::from_millis(100))
-        .expect("valid recovery E2E lease timings")
-}
-
 async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) -> PathBuf {
     // Declared before every child/store owner so unwinding kills and reaps those
     // resources before this guard stops libtest from entering another fixture.
@@ -2195,7 +2180,6 @@ async fn live_restate_recovery_child() {
         .expect("open child active-turn routing");
     let sessions =
         WorkbenchSessions::persistent(data_dir.join("session-id")).expect("open child session id");
-    let lease_timings = recovery_e2e_lease_timings();
     let harness = live_workbench_restate_state_with_provider_and_database(
         &data_dir,
         ingress_url,
@@ -2203,7 +2187,6 @@ async fn live_restate_recovery_child() {
         sessions,
         active_turns,
         database_url.as_deref(),
-        lease_timings,
     )
     .await;
     let state = harness.state.clone();

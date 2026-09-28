@@ -593,9 +593,9 @@ What the bot uses today:
 - **A durable, transactional outbox on the platform side** — the message and the
   events it implies commit together, so the retries the bot's design assumes
   actually happen, and no event is lost to a crash between two commits.
-- **Per-boot session-execution leases** (`LeaseOwnerIdentity::opaque` with a fresh
-  incarnation), so a new boot reclaims what a crashed boot held instead of
-  deadlocking against its own ghost.
+- **A per-boot drive-owner identity** (`LeaseOwnerIdentity::opaque` with a fresh
+  incarnation), so a new boot seals a fresh drive epoch and supersedes whatever a
+  crashed boot held instead of deadlocking against its own ghost.
 
 ### What a crash costs, stage by stage
 
@@ -607,8 +607,7 @@ finishes each one:
 | Crash point | Ledger stage | What recovery does |
 | --- | --- | --- |
 | Before any work | `accepted` | Folds an ambient message; for a mention, sends it and waits on its turn, then posts. |
-| **Mid-turn, inside the dead boot's lease TTL** | `accepted` | **Defers.** The dead boot's lease still fences the session, so this boot cannot open it or its turn cannot settle yet. Retried until the lease lapses; never terminalized. |
-| Mid-turn, after the dead boot's lease lapsed | `accepted` | The restate-server kept the interrupted turn and re-drives it on this boot's endpoint, which takes the lane over once the lease lapses and re-runs only the step the crash cut (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). |
+| **Mid-turn** | `accepted` | The restate-server kept the interrupted turn and re-drives it on this boot's endpoint, which replays the recorded steps and re-runs only the step the crash cut (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). An open that races the lane still being held defers and retries — transient contention, never terminalized. |
 | After the turn committed, before the reply text was recorded | `accepted` | Finds the input's committed application and reads the answer back out of the transcript (`ReplySource::Transcript`). |
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
@@ -621,8 +620,9 @@ the durable record:
 
 - **The input has a committed application.** A turn answered it, so the answer is
   in the transcript, or provably nowhere. Terminal.
-- **It has none yet.** The turn may be held by a previous boot's live lease, or
-  still running. The bot waits a bounded time on the handle's outcome and
+- **It has none yet.** The turn may still be re-driving on the engine after a
+  previous boot died, or still running. The bot waits a bounded time on the
+  handle's outcome and
   otherwise defers: nothing was consumed, so the work is **retryable**, and the
   bot re-attaches on its own cadence.
 
@@ -644,16 +644,16 @@ is the one the server re-drives the turn on, from its journal: the steps the dea
 boot recorded are replayed, and only the step the crash cut runs again. What the
 re-driven turn waits for is the session lane.
 
-The lease generation is what fences the stale claim, and it only moves when the
-old lease **lapses**: `acquire_session_execution_lease_conn` sets
-`fencing_token = previous + 1`, and it is reached only after the previous lease
-has expired. A new boot therefore cannot shortcut the wait by acquiring the lease
-first — while the dead lease is live it gets `Busy`, and lash exposes no
-host-supplied liveness assertion that would let a bot declare its own previous
-incarnation dead. So the wait is bounded by the session-execution lease TTL
-(`LeaseTimings`, **30s** by default, host-configurable) and nothing shorter will do.
+The sealed drive epoch is what fences a stale boot. A drive's admission seals
+`epoch + 1` in the store, and every commit carries the epoch it was sealed
+under; a commit from a superseded epoch is refused. A new boot therefore never
+waits out its dead predecessor: the re-driven invocation opens the session
+under a fresh sealed epoch, and anything the dead boot still tries is refused.
+What a boot can still meet is a transient `Contended` — its open raced another
+writer's in-flight admission — and that resolves by retrying, not by waiting
+out a TTL.
 
-`ChannelBot::retry_deferred` therefore re-attempts both lease-fenced admissions and
+`ChannelBot::retry_deferred` therefore re-attempts both contended admissions and
 recoverable thread-root races on an interval with a finite deadline. Each attempt
 is a real, idempotent state test. A foreground thread-open may spend 45s; its
 background continuation gets the remaining 75s, and every root wait inside that
@@ -919,7 +919,7 @@ Tracked for follow-up rather than half-built:
   instead of relying on the metadata lookup. See
   [what the engine covers](#what-the-restate-engine-covers-precisely).
 - **A leased delivery outbox**, for a platform running more than one process.
-- **Shortening the recovery wait.** An interrupted mention is answered within one
-  session-execution lease TTL (30s by default). A bot that wanted faster resumption
-  would lower `LeaseTimings`, trading recovery latency against the risk of losing a
-  live lease during a slow model call.
+- **Shortening the recovery wait.** An interrupted mention is answered once the
+  restate-server re-drives the interrupted invocation on the restarted endpoint —
+  there is no lease TTL to wait out. Faster resumption is an engine retry-cadence
+  question, not a lash configuration.

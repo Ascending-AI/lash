@@ -6,7 +6,7 @@
 //! opening one materialises plugins, restores the tool registry and protocol
 //! state, emits `SessionRestored`, and admits the session's processes. The
 //! *Durable Session* needs only the session's store, and every operation it
-//! owns stays correct while another process holds the Session Execution Lease.
+//! owns stays correct while another process runs the session live.
 //!
 //! Reach one of three ways:
 //!
@@ -290,10 +290,10 @@ impl DurableSession {
         crate::CancelBuilder::new(crate::send::SendTarget::Durable(self.clone()), target)
     }
 
-    /// A held input remains present with the exact expiry of the matching live
-    /// session-execution lease. That status does not prove the holder is alive;
-    /// resubmitting while it is held creates another admission unless the host
-    /// reuses the same source key.
+    /// A held input reports the sealed drive epoch under which its claim was
+    /// taken. That status does not prove the holder is alive; resubmitting
+    /// while it is held creates another admission unless the host reuses the
+    /// same source key.
     pub async fn pending_turn_inputs(&self) -> Result<Vec<PendingTurnInputRead>> {
         let store = self.store().await?;
         Ok(self.ops.pending_turn_inputs(store).await?)
@@ -402,8 +402,8 @@ impl DurableSession {
     /// store matches the claim's `claim_id` *and* `claim_token`, so a
     /// non-holder is refused. A host stopping an external queued-work driver
     /// mid-claim calls this with the claims that driver still holds so the work
-    /// becomes claimable again at once instead of waiting out the claim's lease
-    /// TTL.
+    /// becomes claimable again at once instead of waiting for a superseding
+    /// claim to repair the held rows.
     pub async fn abandon_queued_work_claim(&self, claim: &QueuedWorkClaim) -> Result<()> {
         let store = self.store().await?;
         Ok(self.ops.abandon_queued_work_claim(store, claim).await?)
@@ -419,7 +419,7 @@ impl DurableSession {
     }
 
     /// Read the canonical settled view of this durable session without opening
-    /// a live runtime, acquiring its execution lease, or exposing mutations.
+    /// a live runtime or exposing mutations.
     ///
     /// This is the inspection path for exporters, debuggers, and administrative
     /// tooling that must coexist with a live writer. `Ok(None)` means the

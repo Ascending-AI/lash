@@ -455,10 +455,10 @@ pub(super) async fn assert_failover(
         // reincarnated original worker never re-exits and routinely finishes the
         // turn. That is exactly the retryable-by-contract behaviour the cede
         // ruling ratified, so the witness is the durable one: exactly one
-        // completion, against exactly one acceptance, settled once. The ~38s
-        // lease-TTL residual these failovers now pay is settled by ADR 0080:
-        // substrate exclusivity is not a lease short-circuit, and shortening the
-        // wait is the host's `LeaseTimings` decision (ADR 0014).
+        // completion, against exactly one acceptance, settled once. The
+        // failover residual is the engine's redelivery cadence: the re-invoked
+        // drive seals a new session drive epoch and supersedes the dead owner's
+        // claims (ADR 0080's lease-TTL regime is retired).
         //
         // The crash still has to happen — the marker read below fails the gate
         // if no worker ever exited for this workflow.

@@ -88,7 +88,7 @@ pub enum ThreadSessionOpen {
         session: LashSession,
         inherited_context: String,
     },
-    /// Another runtime owns the lane, so lease-fenced admission must retry.
+    /// Another writer holds the lane, so the contended admission must retry.
     AdmissionContended,
     /// Deterministic child ids are single-use; a deleted child stays retired.
     Retired,

@@ -170,10 +170,9 @@ pub(crate) async fn resume_turn_followers(state: &AppState) {
     }
 }
 
-/// Open the session a claimed turn belongs to and follow its root. A dead
-/// previous owner may still hold the session's lease until it expires, so a
-/// retryable open is retried; any other refusal leaves the claim for an
-/// operator.
+/// Open the session a claimed turn belongs to and follow its root. An open can
+/// race another writer still holding the lane, so a contended open is retried;
+/// any other refusal leaves the claim for an operator.
 async fn resume_turn_follower(state: AppState, session_id: SessionId, turn_id: TurnId) {
     let follows = &state.active_turns.follows;
     if !follows.claim(&session_id, &turn_id) {

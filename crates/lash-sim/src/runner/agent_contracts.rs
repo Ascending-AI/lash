@@ -614,7 +614,6 @@ async fn facade_final_value_execution_inner(
         &backend,
     );
     let mut builder = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(fixed_texts_provider(provider_kind, provider_responses))
@@ -978,7 +977,6 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         .plugin(Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
-        .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(fixed_texts_provider(provider_kind, provider_responses))

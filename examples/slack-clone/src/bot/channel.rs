@@ -48,8 +48,9 @@ type SessionLockRegistry = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>
 
 /// How long [`ChannelBot::retry_deferred`] waits between attempts.
 ///
-/// Short relative to the lease TTL it is waiting out, so the mention is answered
-/// promptly once the lease lapses, and long enough that the poll costs nothing.
+/// Short relative to the engine's redelivery of the interrupted invocation it is
+/// waiting on, so the mention is answered promptly once the lane clears, and long
+/// enough that the poll costs nothing.
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
 
 /// How long a resumed mention waits for its turn before it is deferred to
@@ -58,9 +59,9 @@ const RESUMED_TURN_WAIT: Duration = Duration::from_secs(2);
 
 /// Default deadline for [`ChannelBot::retry_deferred`].
 ///
-/// Four times the default 30s session-execution lease TTL: enough for a lease
-/// whose owner died just after a renewal, with margin, and finite so a genuinely
-/// stuck row is reported instead of retried forever.
+/// Long enough for the restate-server to re-drive an interrupted invocation on
+/// the restarted endpoint and for transient admission contention to clear, and
+/// finite so a genuinely stuck row is reported instead of retried forever.
 pub const DEFERRED_RETRY_DEADLINE: Duration = Duration::from_secs(120);
 /// The app's own identity in the workspace, from `auth.test`.
 #[derive(Clone, Debug)]
@@ -112,9 +113,9 @@ pub enum Disposition {
         source: ReplySource,
     },
     /// The work is real and unfinished, but this attempt could not reach it: the
-    /// admission is claimed under a session-execution lease generation this boot
-    /// cannot take yet. **Never terminal** — the ledger row is left resumable and
-    /// [`ChannelBot::retry_deferred`] re-attempts it.
+    /// session's admission is contended by another writer. **Never terminal** —
+    /// the ledger row is left resumable and [`ChannelBot::retry_deferred`]
+    /// re-attempts it.
     Deferred {
         event_id: String,
         channel: String,
@@ -155,7 +156,8 @@ pub struct RecoveryReport {
     /// Events this pass finished, for logging.
     pub settled: Vec<Disposition>,
     /// Events worth retrying in-process after this pass. This includes admissions
-    /// fenced by a live lease and thread roots that exist but have not finished.
+    /// contended by another writer and thread roots that exist but have not
+    /// finished.
     /// A `thread_root_not_available` row is deliberately excluded: recovery has
     /// already given it one cheap probe this boot.
     pub deferred: Vec<String>,
@@ -350,10 +352,11 @@ impl ChannelBot {
 
     /// Re-attempt a deferred event until it settles or `deadline` passes.
     ///
-    /// Retryable events are either fenced behind a previous boot's live
-    /// session-execution lease, or waiting for a thread root that has not yet
-    /// published its admission boundary. Both conditions are observed through
-    /// durable state on every attempt.
+    /// Retryable events are either contended by another writer's in-flight
+    /// admission — including the drive a restarted boot is still taking over —
+    /// or waiting for a thread root that has not yet published its admission
+    /// boundary. Both conditions are observed through durable state on every
+    /// attempt.
     ///
     /// Each iteration is a real, idempotent attempt whose *result* is the state
     /// test — this polls typed runtime state, it does not sleep for a duration and
@@ -776,8 +779,8 @@ impl ChannelBot {
     /// A resumed mention whose input a committed turn already answered is
     /// read back out of the transcript. A resumed mention whose turn has not
     /// settled within [`RESUMED_TURN_WAIT`] is deferred, never terminalized:
-    /// its root may be held by a previous boot's live session lease, and the
-    /// retry loop re-attaches to the same input until it settles.
+    /// its root may still be re-driving on the engine after a previous boot
+    /// died, and the retry loop re-attaches to the same input until it settles.
     async fn run_mention_turn(
         &self,
         session: &LashSession,

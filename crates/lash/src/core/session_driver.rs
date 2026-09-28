@@ -9,7 +9,7 @@ pub(crate) struct CoreSessionDriverConfig {
     /// The core's seat in the recovery leader election (ADR 0109 §1.6).
     pub(super) recovery: Arc<super::recovery::RecoverySlot>,
     pub(super) residents: Arc<super::residents::ResidentSessions>,
-    pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
+    pub(super) drive_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
     pub(super) policy: SessionPolicy,
     pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
@@ -123,7 +123,7 @@ impl CoreSessionDriver {
             session_id,
             &policy,
             store.as_ref(),
-            &self.config.session_execution_owner,
+            &self.config.drive_owner,
             self.config.env.core.control.lease_timings.ttl_ms(),
         )
         .await
@@ -170,7 +170,7 @@ impl CoreSessionDriver {
             policy,
             state,
             Some(store),
-            self.config.session_execution_owner.clone(),
+            self.config.drive_owner.clone(),
         )
         .await
         .map_err(|error| {

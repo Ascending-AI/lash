@@ -203,9 +203,9 @@ the rendered transcript and `/api/state.messages`, with no active address left. 
 id must differ from the cancelled turn. Screenshot `05-post-restart-completed.png`; save
 state as `05-post-restart-state.json`.
 
-## Phase 5 — FIG-1117 worker-restart lease companion
+## Phase 5 — FIG-1117 worker-restart companion
 
-### Replace the Workbench worker inside the lease TTL
+### Replace the Workbench worker mid-turn
 
 Run this companion after Phase 4, with Restate healthy. It is a separate worker-restart
 geometry: do not count the engine bounce above as either arm.
@@ -215,18 +215,16 @@ that redrives forever, or a composer that refuses further turns — do not simpl
 companion. Either run it on a fresh session on the same live stack and say so in the
 scorecard, or record all three of its rows as **blocked by the Phase 3/4 failure**, naming
 the address and the phase that left it. A Phase 3 failure must never cost three scorecard
-rows with no recorded reason. Record the configured session
-lease TTL from the store row before the restart.
+rows with no recorded reason. Record the session's sealed drive epoch
+(`session_meta.drive_epoch`, below) before the restart; it is what the supersession
+evidence hangs on.
 
-**Do not gate on either commit landing inside that TTL.** The Workbench pins a
-two-second lease TTL (`apply_workbench_lease_timings` in
-`examples/agent-workbench/src/main_sections/bootstrap.rs`, chosen to keep takeover
-terminal inside the 5s attach budget), while replacing the Workbench process costs a
-rebuild and a boot — tens of seconds at best. No live run can commit within two
-seconds of the dead worker's last renewal, so a "commit before `lease_expires_at_ms`"
-gate is unreachable on this host and a run that appeared to satisfy it would be the
-finding. The deterministic companions configure a long recovery TTL precisely because
-they are the ones that can hold that window open.
+**Do not gate on either commit racing the restart's epoch seal.** There is no
+lease TTL a live run must beat: the dead worker's sealed drive epoch stands until
+the replacement drive's admission supersedes it, and replacing the Workbench
+process costs a rebuild and a boot — tens of seconds at best. What the arm must
+show is that the replacement drive seals a newer epoch and the turn still commits
+exactly once.
 
 1. Start a shape-pinned long turn, record its exact session/turn address and the Workbench
    PID, and gate a real `exec_code_started` record. Then run

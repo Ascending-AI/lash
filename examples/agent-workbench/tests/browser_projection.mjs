@@ -3495,14 +3495,14 @@ test("pending ingress receipts survive transcript replay until their turn commit
      renderStateTranscript({
        transcript: [],
        pending_turn_inputs: [
-         ${JSON.stringify(pending("input-now", "active_turn", "injected now", { kind: "held", lease_expires_at_ms: 1735689600123 }))},
+         ${JSON.stringify(pending("input-now", "active_turn", "injected now", { kind: "held", drive_epoch: 7 }))},
          ${JSON.stringify(pending("input-next", "next_turn", "queued next", { kind: "pending" }))}
        ]
      });
      this.initial = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
+       driveEpoch: row.dataset.driveEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3513,7 +3513,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
      this.applied = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
+       driveEpoch: row.dataset.driveEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3525,7 +3525,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
      this.afterFirstSettle = timeline.children.map(row => ({
        inputId: row.dataset.inputId,
        status: row.dataset.status,
-       leaseExpiresAtMs: row.dataset.leaseExpiresAtMs,
+       driveEpoch: row.dataset.driveEpoch,
        kind: row.children[0]?.textContent,
        text: row.children[1]?.textContent
      }));
@@ -3539,8 +3539,8 @@ test("pending ingress receipts survive transcript replay until their turn commit
     {
       inputId: "input-now",
       status: "held",
-      leaseExpiresAtMs: "1735689600123",
-      kind: "injected now · held until 1735689600123 ms",
+      driveEpoch: "7",
+      kind: "injected now · held under epoch 7",
       text: "injected now",
     },
     { inputId: "input-next", status: "pending", kind: "queued next", text: "queued next" },
@@ -3549,7 +3549,7 @@ test("pending ingress receipts survive transcript replay until their turn commit
     {
       inputId: "input-now",
       status: "held",
-      leaseExpiresAtMs: "1735689600123",
+      driveEpoch: "7",
       kind: "applied to turn",
       text: "injected now",
     },

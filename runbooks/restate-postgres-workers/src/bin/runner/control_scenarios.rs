@@ -291,12 +291,9 @@ pub(super) async fn drive_turn_control_scenarios(
     // another authority — and liveness comes from the engine re-invoking against
     // the journaled acceptance. Which worker serves that re-invocation is the
     // engine's business, and it is routinely the restarted original one, because
-    // the dead holder's session-execution lease has to age out first: the
-    // recovered turn takes roughly one lease TTL (~38s) to settle. That latency
-    // is understood and settled, not accidental: ADR 0080 rejects letting a
-    // substrate that already guarantees invocation exclusivity short-circuit the
-    // lease TTL, and leaves failover latency where ADR 0014 put it — the host's
-    // `LeaseTimings`. What must hold is stricter than
+    // failover latency is the engine's redelivery cadence: the re-invoked drive
+    // seals a new session drive epoch and supersedes whatever the dead holder
+    // claimed. What must hold is stricter than
     // the old identity check: the turn completes exactly once, against exactly one
     // acceptance, with no duplicate or conflicting settlement anywhere.
     assert_recovered_turn_converged(storage.pool(), &TurnId::from(recovery.workflow_id)).await?;
@@ -714,8 +711,9 @@ pub(super) async fn drive_break_glass_scenario(
     ingress_url: &str,
     admin_url: &str,
 ) -> Result<()> {
-    // Run this last: a hard-killed handler cannot release its shared-session
-    // execution lease, and no subsequent scenario should depend on that lease.
+    // Run this last: a hard-killed handler leaves its sealed drive epoch
+    // standing, and no subsequent scenario should depend on claims taken under
+    // it.
     // This remains a negative operator gate and must not manufacture a Lash
     // Cancelled terminal. Graceful Restate cancellation cannot interrupt
     // arbitrary local user code blocked inside a running side-effect closure.

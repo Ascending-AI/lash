@@ -16,7 +16,7 @@
 //! * `core.session(id).durable().await` — the **Durable Session**
 //!   ([`DurableSession`]). It builds nothing and creates nothing: the
 //!   session's queue and settled reads, answered from its store, correct while
-//!   another process holds the session's execution lease. Use it to enqueue,
+//!   another process runs the session live. Use it to enqueue,
 //!   list, cancel or reconcile.
 //! * `core.session(id).create().await` — the only verb that **creates**. It
 //!   writes the session's catalog entry and returns its [`DurableSession`],
@@ -393,7 +393,7 @@ pub mod persistence {
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };
-    /// Queued-work state, leases, and execution types.
+    /// Queued-work ordering values and claim-selection helpers.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.
         pub use lash_core::store::queued_work::{

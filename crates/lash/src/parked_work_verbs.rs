@@ -25,8 +25,6 @@ pub enum ParkVerbRefused {
     SessionDeleted,
     #[error("the session is closing")]
     SessionClosing,
-    #[error("the root owns {count} open effect groups")]
-    EffectGroupsOpen { count: usize },
     #[error(transparent)]
     Store(#[from] lash_core::StoreError),
     #[error("fork requires a turn root")]
@@ -47,7 +45,6 @@ impl From<RootIntentRefused> for ParkVerbRefused {
             RootIntentRefused::IntentOpen { intent } => Self::IntentOpen { intent },
             RootIntentRefused::SessionDeleted => Self::SessionDeleted,
             RootIntentRefused::SessionClosing => Self::SessionClosing,
-            RootIntentRefused::EffectGroupsOpen { count } => Self::EffectGroupsOpen { count },
             RootIntentRefused::Store(error) => Self::Store(error),
             other => Self::SubstrateRefused {
                 code: lash_core::RuntimeErrorCode::PluginSessionManager,

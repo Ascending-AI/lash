@@ -1509,13 +1509,13 @@ pub trait TurnInputStore: Send + Sync {
     /// List open user inputs for reconciliation or queue preview.
     ///
     /// Completed and cancelled rows are excluded. A claim matching the
-    /// currently live session-execution-lease generation is returned as
+    /// current sealed drive epoch is returned as
     /// [`PendingTurnInputReadStatus::Held`](crate::PendingTurnInputReadStatus::Held)
-    /// with that lease's exact expiry. Expired, released, and mismatched
-    /// generations are returned as pending under ADR 0029; this read never
-    /// infers whether a holder process is alive. Resubmitting the same input
-    /// while its row is held creates a duplicate admission once the held row's
-    /// original claim returns; hosts must wait out the reported expiry or
+    /// with that epoch. Superseded-epoch, released, and unclaimed rows are
+    /// returned as pending under ADR 0029; this read never infers whether a
+    /// holder process is alive. Resubmitting the same input while its row is
+    /// held creates a duplicate admission once the held row's original claim
+    /// returns; hosts must wait for the claim's epoch to be superseded or
     /// reuse the same source key.
     async fn list_pending_turn_inputs(
         &self,

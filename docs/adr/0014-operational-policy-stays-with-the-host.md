@@ -20,6 +20,11 @@ and [ADR 0110](0110-the-engine-owns-process-recovery.md). The *Lease Timings*
 decision below applies only to the session-execution lease; descriptions of
 the deleted lanes are historical.
 
+Amended 2026-09-28 (FIG-3862, FIG-3864): the session-execution lease — the last
+lane `LeaseTimings` governed — is deleted, and the `LeaseTimings` builder knob
+is removed with it. Interim claims pin the sealed drive epoch instead. The
+*Lease Timings* bullet below is historical; the rest of this ADR stands.
+
 ## Decision
 
 Lash ships no shutdown or drain orchestrator. Operational policy — when to stop

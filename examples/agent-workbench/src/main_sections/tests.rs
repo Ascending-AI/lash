@@ -1645,7 +1645,6 @@ async fn live_workbench_restate_state_with_provider(
         sessions,
         active_turns,
         None,
-        lash::durability::LeaseTimings::default(),
     )
     .await
 }
@@ -1657,7 +1656,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
     sessions: WorkbenchSessions,
     active_turns: ActiveTurns,
     database_url: Option<&str>,
-    lease_timings: lash::durability::LeaseTimings,
 ) -> LiveWorkbenchRestateHarness {
     // An isolated live-test runner may need to retain this exact store when a
     // fixture aborts. Record ownership before opening any replayable handle;
@@ -1730,7 +1728,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
-        .lease_timings(lease_timings)
         .build(crate::test_core_owner())
         .expect("build core");
     let process_worker = lash::durability::DurableProcessWorker::new(

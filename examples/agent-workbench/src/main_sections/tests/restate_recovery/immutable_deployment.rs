@@ -34,7 +34,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         .expect("open fixture A persistent session selection");
     let a_active_turns = ActiveTurns::persistent(a_path.join("active-turns.json"))
         .expect("open fixture A active-turn routing");
-    let a_lease_timings = recovery_e2e_lease_timings();
     let a_provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let (a_retry_entered_tx, mut a_retry_entered_rx) = mpsc::unbounded_channel();
     let a_provider =
@@ -46,7 +45,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         a_sessions,
         a_active_turns,
         None,
-        a_lease_timings,
     )
     .await;
     let mut endpoint_a = LiveRestateEndpoint::start(
@@ -238,11 +236,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         .expect("reopen fixture A persistent session selection");
     let a_active_turns = ActiveTurns::persistent(a_path.join("active-turns.json"))
         .expect("reopen fixture A active-turn routing");
-    let a_restart_lease_timings = recovery_e2e_lease_timings();
-    assert_eq!(
-        a_restart_lease_timings, a_lease_timings,
-        "fixture A restart must retain its original lease configuration"
-    );
     let harness_a = live_workbench_restate_state_with_provider_and_database(
         &a_path,
         ingress_url,
@@ -250,7 +243,6 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner()
         a_sessions,
         a_active_turns,
         None,
-        a_restart_lease_timings,
     )
     .await;
     if mutate_reused_endpoint {
