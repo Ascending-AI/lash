@@ -159,9 +159,14 @@ mod effect_group_contract_tests {
                 "sleep",
                 "95a5b578cf5737d9386728f0149c85973f8bc6e87deac069b7c82d1e2d1793ee",
             ),
+            // Moved by 1ca3e8f42f (FIG-4020): `ExecCode` lost its `language`
+            // field, as a module's identity is its IR rather than its front
+            // end's dialect. Stored shapes change in place under the 1.0
+            // version freeze, so the golden is re-pinned rather than the
+            // hash domain bumped.
             (
                 "exec_code",
-                "7f426da760b9b4e4fbcecbad269ddab57bfecbc805c80552f6aa29e2e27219fc",
+                "fbf856d6a5e06ffba26aa333f7e84770920756b72c2a89900a0d234004cd86f7",
             ),
             // Moved by FIG-3587: the command lost `update_machine_config`, as
             // every sync now carries the environment. A journal holding the

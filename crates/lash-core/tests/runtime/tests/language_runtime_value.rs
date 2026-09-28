@@ -29,11 +29,11 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
     let invocation = RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
             lash_core::ExecutionScope::runtime_operation("language-runtime-test"),
-            "lashlang.runtime:date-now:0",
+            "language.runtime:date-now:0",
         )
         .expect("valid language runtime address"),
         lash_core::RuntimeAttribution::none(),
-        "lashlang.runtime:date-now:0",
+        "language.runtime:date-now:0",
     );
     let command = RuntimeEffectCommand::LanguageRuntimeValue {
         operation: "now".to_string(),
