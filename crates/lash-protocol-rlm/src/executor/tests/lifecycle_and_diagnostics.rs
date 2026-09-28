@@ -173,7 +173,6 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         .expect("open the cell's handler");
     let mut context = None;
     let mut request = ExecRequest {
-        language: "typescript".to_string(),
         code: "finish(1);".to_string(),
     };
     let mut artifact_store: lashlang::LashlangArtifacts =
@@ -425,7 +424,6 @@ pub(super) async fn execute_and_collect_inventory(
         &mut state,
         context,
         ExecRequest {
-            language: language.to_string(),
             code: source.to_string(),
         },
         crate::testing::memory_artifact_store().await,
@@ -540,7 +538,6 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     &double, &handler,
                 )),
                 ExecRequest {
-                    language: language.to_string(),
                     code: successful_code.to_string(),
                 },
                 crate::testing::memory_artifact_store().await,
@@ -571,7 +568,6 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     )
                     .await,
                     ExecRequest {
-                        language: language.to_string(),
                         code: code.to_string(),
                     },
                     crate::testing::memory_artifact_store().await,
@@ -639,7 +635,6 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 &double, &handler,
             )),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "let survives: number = 7;".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -679,7 +674,6 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 &mut state,
                 context,
                 ExecRequest {
-                    language: "typescript".to_string(),
                     code: "let cancelledTail: number = 1; while (true) {}".to_string(),
                 },
                 crate::testing::memory_artifact_store().await,
@@ -755,7 +749,6 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             )
             .await,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "await sleep(3600000); let woke: number = 1;".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -801,7 +794,6 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                     &double, &handler,
                 )),
                 ExecRequest {
-                    language: language.to_string(),
                     code: code.to_string(),
                 },
                 crate::testing::memory_artifact_store().await,
@@ -850,7 +842,6 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                         &double, &handler,
                     )),
                     ExecRequest {
-                        language: language.to_string(),
                         code: code.to_string(),
                     },
                     crate::testing::memory_artifact_store().await,
@@ -911,7 +902,6 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                         &double, &handler,
                     )),
                     ExecRequest {
-                        language: language.to_string(),
                         code: first_code.clone(),
                     },
                     crate::testing::memory_artifact_store().await,
@@ -946,7 +936,6 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                         &double, &handler,
                     )),
                     ExecRequest {
-                        language: language.to_string(),
                         code: tail_code.to_string(),
                     },
                     crate::testing::memory_artifact_store().await,
@@ -1024,24 +1013,28 @@ pub(super) fn native_channel_parse_diagnostic_omits_the_cell_delimiter_hint() {
 /// gate is the diagnostic code, not the fact that compilation failed.
 #[test]
 pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
-    let typo = lash_typescript::parse_with_globals("finish(taks);", &BTreeSet::new())
-        .expect_err("an unbound name is rejected");
+    use crate::dialect::Dialect;
+    let kind = |source: &str| {
+        crate::dialect::TypeScript
+            .parse(source)
+            .expect_err("the source is rejected")
+            .kind
+    };
     assert_eq!(
-        typescript_feedback_kind(&typo),
+        kind("finish(taks);"),
         lash_core::CellFailureKind::Program,
-        "a misspelled name is the program being wrong: {typo}"
+        "a misspelled name is the program being wrong"
     );
-
-    let forbidden = lash_typescript::parse_with_globals("class A {}", &BTreeSet::new())
-        .expect_err("classes are refused");
     assert_eq!(
-        typescript_feedback_kind(&forbidden),
+        kind("class A {}"),
         lash_core::CellFailureKind::Policy,
-        "a construct outside the dialect is a refusal: {forbidden}"
+        "a construct outside the dialect is a refusal"
     );
 
     // And the imperative the Policy branch chooses is only honest when the
     // diagnostic really does name a form.
+    let forbidden = lash_typescript::parse_with_globals("class A {}", &BTreeSet::new())
+        .expect_err("classes are refused");
     assert!(
         !forbidden.suggestions.is_empty(),
         "a Policy classification promises a named form: {forbidden:?}"
@@ -1051,25 +1044,28 @@ pub(super) fn a_wrong_program_and_a_forbidden_construct_are_classified_apart() {
     // the determinism refusals — which the runtime will never run, however
     // the model rewrites them — and for ordinary arity mistakes. Reading
     // the code alone gets one of the two wrong whichever way it is read.
-    let nondeterministic =
-        lash_typescript::parse_with_globals("finish('a'.localeCompare('b'));", &BTreeSet::new())
-            .expect_err("locale ordering is refused");
-    let miscounted = lash_typescript::parse_with_globals("finish([1].map());", &BTreeSet::new())
-        .expect_err("map needs a callback");
+    let nondeterministic = "finish('a'.localeCompare('b'));";
+    let miscounted = "finish([1].map());";
     assert_eq!(
-        nondeterministic.code.as_str(),
-        miscounted.code.as_str(),
+        lash_typescript::parse_with_globals(nondeterministic, &BTreeSet::new())
+            .expect_err("locale ordering is refused")
+            .code
+            .as_str(),
+        lash_typescript::parse_with_globals(miscounted, &BTreeSet::new())
+            .expect_err("map needs a callback")
+            .code
+            .as_str(),
         "the premise of this check is that one code carries both"
     );
     assert_eq!(
-        typescript_feedback_kind(&nondeterministic),
+        kind(nondeterministic),
         lash_core::CellFailureKind::Policy,
-        "the runtime will never run this: {nondeterministic}"
+        "the runtime will never run this"
     );
     assert_eq!(
-        typescript_feedback_kind(&miscounted),
+        kind(miscounted),
         lash_core::CellFailureKind::Program,
-        "the method exists and the call is wrong: {miscounted}"
+        "the method exists and the call is wrong"
     );
 }
 
@@ -1113,19 +1109,18 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default())
             .with_globals(["text"]);
 
-    let shadowed_source = "text.sha256({});";
-    let shadowed = lash_typescript::parse_cell(shadowed_source, &environment)
+    use crate::dialect::Dialect;
+    let shadowed = crate::dialect::TypeScript
+        .parse_cell("text.sha256({});", &environment)
         .expect_err("the cache parse does not carry the module catalog");
-    let shadowed = refine_typescript_method_diagnostic(shadowed_source, &environment, shadowed);
     assert_eq!(
         shadowed.message,
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
 
-    let ordinary_source = "const s = 'a,b'; s.anchor(',');";
-    let ordinary = lash_typescript::parse_cell(ordinary_source, &environment)
+    let ordinary = crate::dialect::TypeScript
+        .parse_cell("const s = 'a,b'; s.anchor(',');", &environment)
         .expect_err("an ordinary local method remains unsupported");
-    let ordinary = refine_typescript_method_diagnostic(ordinary_source, &environment, ordinary);
     assert_eq!(
         ordinary.message,
         "method `anchor` is not in the TypeScript runtime surface"
@@ -1338,7 +1333,6 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         &mut RlmExecutionState::new(),
         context,
         ExecRequest {
-            language: "typescript".to_string(),
             code: r#"await control.continue_as({ task: "continue deterministically" });"#
                 .to_string(),
         },
@@ -1452,10 +1446,7 @@ pub(super) async fn execute_test_code(
     let response = Box::pin(execute_code_unbounded_with_test_render(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
-        ExecRequest {
-            language: "typescript".to_string(),
-            code,
-        },
+        ExecRequest { code },
         crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         None,
@@ -1591,7 +1582,6 @@ pub(super) async fn execute_with_host_environment(
         &mut state,
         ctx,
         ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         crate::testing::fresh_memory_artifact_store().await,
@@ -1626,7 +1616,6 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
                 &double, &handler,
             )),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -1661,7 +1650,6 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
                 &double, &handler,
             )),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "const value = 1;".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -1691,7 +1679,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
-            language: "typescript".to_string(),
             code: "finish(1);".to_string(),
         };
         let surface = || {

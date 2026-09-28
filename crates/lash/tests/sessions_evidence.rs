@@ -893,10 +893,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::plugins::ExecRequest| {
         let _ = &value.code;
     });
-    // W0260: lash::plugins::ExecRequest::language [field]
-    field_witness(|value: &lash::plugins::ExecRequest| {
-        let _ = &value.language;
-    });
     // W0261: lash::persistence::LiveReplayOutcome [enum]
     type_witness::<lash::persistence::LiveReplayOutcome>();
     // W0262: lash::persistence::LiveReplayOutcome::Gap [variant]

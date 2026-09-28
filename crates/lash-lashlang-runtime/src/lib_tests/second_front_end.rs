@@ -1,16 +1,16 @@
 //! Law L12 (FIG-3571): observation is language-agnostic.
 //!
-//! `Mini` is a test-only front end with no TypeScript anywhere in this
-//! crate's dependency graph. It lowers its own statements straight to IR under
-//! its own `SourceLanguage`, and marks the structure it generates with the
-//! language-neutral forms: an iteration whose `bind` destructures each element
-//! and whose body is a completion list holding a branch, an attribute
-//! assignment and an attribute update, a scope, a collection transform, a
-//! lifted process wrapped as a process body, a sleep effect, and private slots
-//! for its own temporaries. Its programs get complete maps (L1), identical
-//! sites and events across relink, a stored reload through a real store's
-//! decoder, and redrive (L2), and working process observation, with nothing
-//! in the runtime knowing what a `Mini` program looked like.
+//! `Mini` is a test-only front end with no TypeScript anywhere in this crate's
+//! dependency graph. It lowers its own statements straight to IR, which records
+//! no front end (a module's identity is its IR, FIG-4020), and marks the
+//! structure it generates with the language-neutral forms: an iteration whose
+//! `bind` destructures each element and whose body is a completion list holding
+//! a branch, an attribute assignment and an attribute update, a scope, a
+//! collection transform, a lifted process wrapped as a process body, a sleep
+//! effect, and private slots for its own temporaries. Its programs get complete
+//! maps (L1), identical sites and events across relink, a stored reload through
+//! a real store's decoder, and redrive (L2), and working process observation,
+//! with nothing in the runtime knowing what a `Mini` program looked like.
 
 use super::*;
 
@@ -62,8 +62,6 @@ enum Mini {
     Done(lashlang::Expr),
 }
 
-const MINI_LANGUAGE: &str = "mini";
-
 /// The front end: statement lists lower to completion lists, and each
 /// construct to the IR form or structural role that says what it does.
 struct MiniLowerer {
@@ -78,7 +76,6 @@ impl MiniLowerer {
             private: Default::default(),
         };
         let mut program = b::program(lowerer.statements(statements));
-        program.language = lashlang::SourceLanguage::new(MINI_LANGUAGE);
         program.private_bindings = std::mem::take(&mut lowerer.private);
         program
     }
@@ -376,7 +373,6 @@ fn map_sites(map: &lash_trace::TraceLanguageExecutionMap) -> BTreeSet<SiteKey> {
 #[test]
 fn a_second_front_end_gets_complete_maps_for_main_and_its_lifted_process() {
     let output = mini_module();
-    assert_eq!(output.artifact.ir().language.as_str(), MINI_LANGUAGE);
     let worker = lifted_worker(&output.artifact);
     let worker_ref = output
         .artifact

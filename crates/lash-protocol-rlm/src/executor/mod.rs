@@ -122,6 +122,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     Box::pin(execute_code_with_channel_and_bounds_with_trigger_resolver(
+        crate::dialect::rlm_dialect(),
         state,
         ctx,
         request,
@@ -140,6 +141,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
+    dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     request: ExecRequest,
@@ -163,6 +165,7 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     let seal_ctx = Box::new(ctx.clone());
     let prints = Arc::new(std::sync::Mutex::new(Vec::new()));
     let mut response = Box::pin(execute_code_inner(
+        dialect,
         state,
         ctx,
         Arc::clone(&cell),
@@ -302,7 +305,7 @@ impl RlmCheckpointPerfFixture {
         binding_count: usize,
         payload_bytes: usize,
     ) -> Result<Self, SessionError> {
-        let mut state = RlmExecutionState::for_engine("typescript");
+        let mut state = RlmExecutionState::for_engine(crate::dialect::rlm_dialect().language_id());
         // The snapshot's globals became a read-only projection when the heap
         // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
@@ -356,10 +359,7 @@ impl RlmCheckpointPerfFixture {
                 as Arc<dyn lash_core::RuntimeEffectController>)
             .build()
             .into_runtime(),
-            ExecRequest {
-                language: "typescript".to_string(),
-                code,
-            },
+            ExecRequest { code },
             self.artifact_store.clone(),
             LashlangSurface::default(),
             None,
@@ -378,7 +378,8 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
-        let mut restored = RlmExecutionState::for_engine("typescript");
+        let mut restored =
+            RlmExecutionState::for_engine(crate::dialect::rlm_dialect().language_id());
         restored
             .restore_execution_state(state, lash_core::FleetFormat::current())
             .map_err(|error| SessionError::Protocol(error.to_string()))
@@ -401,6 +402,7 @@ fn clean_model_code(code: &str) -> String {
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_code_inner(
+    dialect: &dyn crate::dialect::Dialect,
     state: &mut RlmExecutionState,
     ctx: RuntimeExecutionContext<'_>,
     cell: Arc<Result<cell_run::CellRun, cell_run::LashlangCellOpener>>,
@@ -419,7 +421,7 @@ async fn execute_code_inner(
     let execution_checkpoint = state.execution_checkpoint();
     state.begin_code_execution(execution_checkpoint);
     select_deferred_resolution_link(state, &ctx);
-    let parsed_program = lash_typescript::parse(code).ok();
+    let parsed_program = dialect.parse(code).ok();
 
     // gather → journal → mask → fold: every parsed resource-bearing cell first
     // consults the deferred journal, even if no live resolver and no checkpoint
@@ -581,29 +583,23 @@ async fn execute_code_inner(
     // forbidden construct both fail here and need opposite advice.
     let compile_result: Result<_, (lash_core::CellFailureKind, String)> = {
         let _phase = ctx.named_phase("rlm_lashlang.compile_link");
-        // TypeScript is parsed here rather than by the cache, so the cache
-        // is asked first: otherwise every cell would pay a full parse even
-        // when its linked program is already cached.
+        // The cell is parsed here rather than by the cache, so the cache is
+        // asked first: otherwise every cell would pay a full parse even when
+        // its linked program is already cached.
         match state
             .linked_programs
             .cached_linked_program(code, &host_environment)
         {
             Some(program) => Ok(program),
             // Parsed with the session's live globals, so a cell can read
-            // what an earlier cell bound: TypeScript resolves names at parse,
-            // so the names have to arrive here. `host_environment` already
-            // carries them — it is the same set the linker will check against.
-            // Rendered against the cell source, not `to_string()`: the
-            // diagnostic carries a span and the model needs the line it wrote.
-            None => lash_typescript::parse_cell(code, &host_environment)
+            // what an earlier cell bound. `host_environment` already carries
+            // them — it is the same set the linker will check against.
+            None => dialect
+                .parse_cell(code, &host_environment)
                 .map_err(|error| {
-                    let error = refine_typescript_method_diagnostic(code, &host_environment, error);
                     (
-                        typescript_feedback_kind(&error),
-                        format_rlm_parse_diagnostic(
-                            lash_typescript::format_diagnostic(code, &error),
-                            channel,
-                        ),
+                        error.kind,
+                        format_rlm_parse_diagnostic(error.rendered, channel),
                     )
                 })
                 .and_then(|program| {
@@ -683,7 +679,7 @@ async fn execute_code_inner(
         &ctx,
         &linked_module.artifact,
         &lashlang_execution_trace_config,
-        crate::dialect::typescript::LANGUAGE_ID,
+        dialect.language_id(),
     );
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_started(trace, &linked_module.artifact);
@@ -835,38 +831,6 @@ fn exec_response_from(
         error,
         degraded_bindings: Vec::new(),
         terminal_finish,
-    }
-}
-
-/// Whether a TypeScript rejection refuses a construct or reports a wrong
-/// program.
-///
-/// Asked of the diagnostic, not of its code. Three codes carry both families —
-/// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
-/// the site that emitted it knows, and it records the answer at construction.
-fn typescript_feedback_kind(error: &lash_typescript::Diagnostic) -> lash_core::CellFailureKind {
-    if error.is_dialect_refusal() {
-        lash_core::CellFailureKind::Policy
-    } else {
-        lash_core::CellFailureKind::Program
-    }
-}
-
-/// Re-lowers method failures with the host catalog that the cache-oriented
-/// parse entry point does not accept. Valid cells still take the single-parse
-/// path; only a method diagnostic pays this retry to distinguish a real module
-/// shadow from an ordinary local receiver.
-fn refine_typescript_method_diagnostic(
-    source: &str,
-    host: &lashlang::LashlangHostEnvironment,
-    error: lash_typescript::Diagnostic,
-) -> lash_typescript::Diagnostic {
-    if error.code != lash_typescript::DiagnosticCode::MethodUnsupported {
-        return error;
-    }
-    match lash_typescript::link(source, host) {
-        Err(contextual) if contextual.code == error.code => contextual,
-        _ => error,
     }
 }
 

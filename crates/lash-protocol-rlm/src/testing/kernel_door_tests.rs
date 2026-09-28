@@ -98,7 +98,6 @@ async fn run_cell(
         &mut crate::executor::RlmExecutionState::for_engine("typescript"),
         context.with_recorded_render(super::recorded_test_render()),
         lash_core::ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         super::memory_artifact_store().await,

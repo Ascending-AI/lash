@@ -1062,7 +1062,7 @@ impl LashlangProcessHost<'_> {
     ) -> Result<lashlang::Value, ExecutionHostError> {
         let commands = self.commands();
         let command = commands.issue()?;
-        if let Some(checked) = crate::typescript_runtime_operation(&receiver, &operation, &args) {
+        if let Some(checked) = crate::language_runtime_operation(&receiver, &operation, &args) {
             let runtime_operation = match checked {
                 Ok(runtime_operation) => runtime_operation,
                 Err(error) => {
@@ -1073,7 +1073,7 @@ impl LashlangProcessHost<'_> {
             let in_flight = commands.enter(command, crate::CommandShape::Value).await?;
             let key = in_flight.command.key.as_str().to_string();
             let result = self
-                .typescript_runtime_value(&in_flight, runtime_operation, call_site.as_ref(), key)
+                .language_runtime_value(&in_flight, runtime_operation, call_site.as_ref(), key)
                 .await;
             commands.finish(&in_flight)?;
             return result;

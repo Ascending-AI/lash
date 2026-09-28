@@ -1638,7 +1638,6 @@ fn compile_labeled_process_with_historical_context(
         .process(process_name)
         .expect("historical process should exist");
     let process_program = Program {
-        language: linked.artifact.ir().language.clone(),
         declarations: linked.artifact.ir().declarations.clone(),
         main: process.body.clone(),
         private_bindings: Default::default(),

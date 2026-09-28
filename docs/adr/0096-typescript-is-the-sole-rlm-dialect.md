@@ -15,13 +15,25 @@ verbatim; there is no normalized or renamed copy, and `module_ref` hashes its
 binder names along with its structure and hidden process arguments. Two
 alpha-variant cells are therefore two distinct modules with two refs, each
 stored immutably (law L9); the earlier normalizer that made them share a ref is
-deleted. The program's `language` (the front end that lowered it) is part of
-the identity, so two front ends never share a module ref, and so is each
-binding's visibility role (a front end's private slots never reach session
-globals). Number literals follow one rule in identity and storage: `0` and
+deleted. Each binding's visibility role is part of the identity (a front end's
+private slots never reach session globals). Number literals follow one rule in identity and storage: `0` and
 `-0` are distinct, every NaN is one, and non-finite values store losslessly.
 The measured cost on a multi-session corpus was about 1.3% more artifacts and
 stored bytes.
+
+Amended by FIG-4020 (arc FIG-3476, ruled by Sam on 2026-09-29): each dialect
+defines its own semantics and targets the IR; no dialect emulates another's.
+A module's identity is therefore its IR, not the dialect that produced it: the
+program records no front-end language, and the module ref and source identity
+write the dialect-neutral atom `lashlang-ir` where a front end's name used to
+stand, so two dialects that lower to the same program share one module ref.
+The journaled clock and random-source module every host environment registers
+is `__lashlang_runtime`, its receiver resource type `lashlang.Runtime` and its
+host operation `lashlang.runtime`, all dialect-neutral. The protocol layer
+reaches the TypeScript front end through a dialect trait rather than calling it
+directly, and neither `ExecRequest` nor the exec-code effect command carries
+a language string. All three moves happen in place under the pre-1.0 version
+freeze, with no compatibility path.
 
 ## Context
 
@@ -116,9 +128,9 @@ Ruled by Sam on 2026-09-13, following the processes-are-values design session
   them moves durable identity; that reason is unchanged, and this ADR renames
   nothing. What changes is that they are no longer *foreign* words in a
   prompt — they are the substrate's name, under the only dialect there is.
-- **The `__` namespace stays reserved.** `__typescript_runtime` and its
-  siblings remain hidden from the model rather than renamed, for the same
-  durability reason ADR 0063 gave.
+- **The `__` namespace stays reserved.** The journaled runtime module (now
+  `__lashlang_runtime`, FIG-4020) and its siblings remain hidden from the
+  model.
 - **Tool prose stays dialect-neutral by default, but the guard changes
   shape.** With one registered dialect, a registration check that refuses any
   registered dialect's identity would refuse the only correct spelling. Prose

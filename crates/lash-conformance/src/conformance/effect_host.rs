@@ -598,7 +598,6 @@ where
                 "code-cell-reexecution:cell",
             ),
             RuntimeEffectCommand::ExecCode {
-                language: "conformance".to_string(),
                 code: "const value = await nested();".to_string(),
             },
         );

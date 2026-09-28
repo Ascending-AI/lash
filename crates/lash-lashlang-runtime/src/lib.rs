@@ -30,10 +30,9 @@ mod trace_waits;
 mod trigger_commands;
 pub use trace_waits::TraceWaitBookkeeping;
 pub use trigger_commands::execute_trigger_operation;
-mod typescript_runtime;
-pub use typescript_runtime::{
-    is_typescript_runtime_receiver, journaled_typescript_runtime_value,
-    typescript_runtime_operation,
+mod language_runtime;
+pub use language_runtime::{
+    is_language_runtime_receiver, journaled_language_runtime_value, language_runtime_operation,
 };
 
 pub use lash_trace::{
@@ -454,11 +453,11 @@ fn lashlang_host_environment_from_resources(
     for (operation, host_operation) in [
         (
             lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
-            "typescript.runtime.now",
+            "lashlang.runtime.now",
         ),
         (
             lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
-            "typescript.runtime.random",
+            "lashlang.runtime.random",
         ),
     ] {
         resources.add_module_operation_contract(

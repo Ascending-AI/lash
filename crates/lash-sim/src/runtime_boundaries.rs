@@ -456,10 +456,7 @@ impl RuntimeBoundaryHarness {
                 RuntimeAttribution::for_session(event.actor_alias.clone()),
                 format!("exec-code:{}", event.boundary_id),
             ),
-            RuntimeEffectCommand::ExecCode {
-                language: "lash-sim-script".to_string(),
-                code,
-            },
+            RuntimeEffectCommand::ExecCode { code },
         );
         let response = ExecResponse {
             observations: vec![lash_core::Observation {

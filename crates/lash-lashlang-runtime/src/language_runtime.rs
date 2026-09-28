@@ -10,21 +10,21 @@
 /// This is invoked only while resolving a VM `ResourceOperation` ability. That
 /// suspension is the journal boundary: the sampled value is committed as the
 /// ability outcome and replay never samples the clock or RNG again.
-pub fn is_typescript_runtime_receiver(receiver: &lashlang::Value) -> bool {
+pub fn is_language_runtime_receiver(receiver: &lashlang::Value) -> bool {
     matches!(
         receiver,
         lashlang::Value::Resource(handle) if handle.resource_type == lashlang::LANGUAGE_RUNTIME_RESOURCE_TYPE
     )
 }
 
-/// The host operation a TypeScript runtime call's replay key names, and the
+/// The host operation a language runtime call's replay key names, and the
 /// one its durable effect-summary record carries.
-pub(crate) const TYPESCRIPT_RUNTIME_HOST_OPERATION: &str = "typescript.runtime";
+pub(crate) const LANGUAGE_RUNTIME_HOST_OPERATION: &str = "lashlang.runtime";
 
-/// The TypeScript runtime operation a call names, checked before anything
+/// The language runtime operation a call names, checked before anything
 /// reaches the journal: `None` when `receiver` is not the runtime, a refusal
 /// for arguments or an operation the runtime does not have.
-pub fn typescript_runtime_operation<'op>(
+pub fn language_runtime_operation<'op>(
     receiver: &lashlang::Value,
     operation: &'op str,
     args: &[lashlang::Value],
@@ -37,7 +37,7 @@ pub fn typescript_runtime_operation<'op>(
     }
     if !args.is_empty() {
         return Some(Err(lashlang::ExecutionHostError::new(format!(
-            "TypeScript runtime `{operation}` expects no arguments"
+            "language runtime `{operation}` expects no arguments"
         ))));
     }
     if ![
@@ -47,16 +47,16 @@ pub fn typescript_runtime_operation<'op>(
     .contains(&operation)
     {
         return Some(Err(lashlang::ExecutionHostError::new(format!(
-            "unknown TypeScript runtime operation `{operation}`"
+            "unknown language runtime operation `{operation}`"
         ))));
     }
     Some(Ok(operation))
 }
 
-/// Journals one checked TypeScript runtime operation at `key` and answers
+/// Journals one checked language runtime operation at `key` and answers
 /// its value. The outer error is the journal's — a replay mismatch among
 /// them, which a bridge stops the run on — and the inner one the value's.
-pub async fn journaled_typescript_runtime_value(
+pub async fn journaled_language_runtime_value(
     ctx: &lash_core::RuntimeExecutionContext<'_>,
     key: String,
     operation: &str,
@@ -69,7 +69,7 @@ pub async fn journaled_typescript_runtime_value(
         .await?;
     Ok(value.as_f64().map(lashlang::Value::Number).ok_or_else(|| {
         lashlang::ExecutionHostError::new(format!(
-            "journaled TypeScript runtime `{operation}` returned a non-number"
+            "journaled language runtime `{operation}` returned a non-number"
         ))
     }))
 }

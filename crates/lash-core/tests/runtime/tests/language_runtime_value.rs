@@ -15,7 +15,7 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
     let recorder = RecordingEffectController::default().with_replay_by_key();
     let handler = double
         .open_handler(lash_core::AdmittedScope::runtime_operation(
-            "typescript-runtime-test",
+            "language-runtime-test",
         ))
         .await
         .expect("open the operation's handler");
@@ -28,12 +28,12 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
     let clock = Arc::new(lash_core::testing::TestClock::new(1_234));
     let invocation = RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
-            lash_core::ExecutionScope::runtime_operation("typescript-runtime-test"),
-            "typescript.runtime:date-now:0",
+            lash_core::ExecutionScope::runtime_operation("language-runtime-test"),
+            "lashlang.runtime:date-now:0",
         )
         .expect("valid language runtime address"),
         lash_core::RuntimeAttribution::none(),
-        "typescript.runtime:date-now:0",
+        "lashlang.runtime:date-now:0",
     );
     let command = RuntimeEffectCommand::LanguageRuntimeValue {
         operation: "now".to_string(),

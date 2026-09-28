@@ -189,19 +189,18 @@ impl LashlangProcessHost<'_> {
         self.record_effect_outcome(call_site, host_operation, outcome_class, code, replay_key);
     }
 
-    /// Journals one checked TypeScript runtime value at `key` under the
+    /// Journals one checked language runtime value at `key` under the
     /// command in flight, and incorporates its outcome into the durable
     /// effect summary when the call site names the node it belongs to.
-    pub(super) async fn typescript_runtime_value(
+    pub(super) async fn language_runtime_value(
         &self,
         in_flight: &crate::CommandInFlight<'_>,
         operation: &str,
         call_site: Option<&lashlang::LashlangExecutionCallSite>,
         key: String,
     ) -> Result<lashlang::Value, ExecutionHostError> {
-        let host_operation = crate::typescript_runtime::TYPESCRIPT_RUNTIME_HOST_OPERATION;
-        match crate::journaled_typescript_runtime_value(&in_flight.ctx, key.clone(), operation)
-            .await
+        let host_operation = crate::language_runtime::LANGUAGE_RUNTIME_HOST_OPERATION;
+        match crate::journaled_language_runtime_value(&in_flight.ctx, key.clone(), operation).await
         {
             Ok(value) => {
                 if let Some(call_site) = call_site {
@@ -248,7 +247,7 @@ impl LashlangProcessHost<'_> {
 
     /// One aggregate of this process's pending operations: one command, its
     /// leaves keyed under it by first-appearance index (FIG-3586). Every leaf
-    /// the bridge settles itself — a TypeScript runtime value, a trigger
+    /// the bridge settles itself — a language runtime value, a trigger
     /// operation, a leaf refused before dispatch — joins the immediate prefix,
     /// every tool call and timer is admitted as a group child, and the whole
     /// is answered in the VM's reply algebra (ADR 0099 §10, §11). Each tool
@@ -300,14 +299,14 @@ impl LashlangProcessHost<'_> {
                     continue;
                 }
             };
-            if let Some(checked) = crate::typescript_runtime_operation(
+            if let Some(checked) = crate::language_runtime_operation(
                 &operation.receiver,
                 &operation.operation,
                 &operation.args,
             ) {
                 let result = match checked {
                     Ok(runtime_operation) => {
-                        self.typescript_runtime_value(
+                        self.language_runtime_value(
                             &in_flight,
                             runtime_operation,
                             operation.call_site.as_ref(),

@@ -261,8 +261,8 @@ twice.
 
 `WorkflowGraph::source_identity` is `ModuleArtifact::source_identity`: a
 digest, under `lash-workflow-source/v4`, of the same deterministic atom stream
-the module ref hashes for the program (its language and its span-free linked
-IR, names verbatim, number literals by the one IR number rule: distinct `-0`,
+the module ref hashes for the program (the dialect-neutral IR atom and its
+span-free linked IR, names verbatim, number literals by the one IR number rule: distinct `-0`,
 one canonical NaN, lossless non-finite values). It is never a digest of
 printed text or of a serializer's spelling, and there is no fallback. A draft
 projected from source for editing (`workflow_graph_from_source`) claims no

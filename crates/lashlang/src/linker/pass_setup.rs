@@ -181,7 +181,6 @@ impl<'module> Linker<'module> {
             declarations.push(declaration);
         }
         Ok(Program {
-            language: self.program.language.clone(),
             declarations,
             main,
             private_bindings: self.program.private_bindings.clone(),

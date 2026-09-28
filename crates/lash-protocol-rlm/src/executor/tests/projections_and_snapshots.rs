@@ -426,7 +426,6 @@ pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_ser
                 &double, &handler,
             )),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -1068,7 +1067,6 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             &mut state,
             ctx,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "let scratch_note = \"after execution\";".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -1131,10 +1129,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
         let response = execute_code_unbounded_with_test_render(
             &mut state,
             ctx,
-            ExecRequest {
-                language: "typescript".to_string(),
-                code,
-            },
+            ExecRequest { code },
             crate::testing::memory_artifact_store().await,
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),

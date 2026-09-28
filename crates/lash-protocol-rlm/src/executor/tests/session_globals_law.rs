@@ -64,7 +64,6 @@ async fn run_in(
         state,
         context,
         ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         crate::testing::memory_artifact_store().await,

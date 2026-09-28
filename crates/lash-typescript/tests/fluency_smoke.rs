@@ -66,7 +66,7 @@ fn process_handle(label: &str) -> Value {
 /// Answers one host resource operation.
 ///
 /// `Date.now()` and `Math.random()` are journaled reads on the
-/// `__typescript_runtime` resource and `triggers.register` is a call on the
+/// `__lashlang_runtime` resource and `triggers.register` is a call on the
 /// trigger registry — host operations rather than language builtins, so the
 /// host has to answer each in its own declared shape. Everything else is a
 /// tool call and gets the corpus's page payload.
@@ -126,7 +126,7 @@ fn trigger_registration_value() -> Value {
 ///
 /// This mirrors what the real RLM host builds in
 /// `lash_lashlang_runtime::lashlang_host_environment_from_tool_catalog`: the
-/// `__typescript_runtime` `now`/`random` bindings behind `Date.now()` and
+/// `__lashlang_runtime` `now`/`random` bindings behind `Date.now()` and
 /// `Math.random()`, and — with triggers enabled — the trigger resource
 /// operations behind `triggers.register`. A bare catalog cannot reach any of the
 /// three, so a corpus built on one was silently unable to exercise three
@@ -136,11 +136,11 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
     for (operation, host_operation) in [
         (
             lashlang::LANGUAGE_RUNTIME_NOW_OPERATION,
-            "typescript.runtime.now",
+            "lashlang.runtime.now",
         ),
         (
             lashlang::LANGUAGE_RUNTIME_RANDOM_OPERATION,
-            "typescript.runtime.random",
+            "lashlang.runtime.random",
         ),
     ] {
         catalog

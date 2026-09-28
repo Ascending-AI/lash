@@ -121,7 +121,6 @@ async fn execute_with_deferred_trigger(
             ),
         ),
         ExecRequest {
-            language: language.to_string(),
             code: code.to_string(),
         },
         crate::testing::fresh_memory_artifact_store().await,
@@ -331,7 +330,6 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
                 ),
             ),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                     const remember = async (change: calendar.Change) => true;
                     const unused = async () => { await web.fetch({}); return true; };
@@ -501,7 +499,6 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         &mut state,
         ctx,
         ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         crate::testing::fresh_memory_artifact_store().await,
@@ -687,7 +684,6 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         const remember = async (tick: timer.Tick) => tick.fired_at;
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
@@ -883,7 +879,6 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                 crate::testing::memory_process_registry().await,
             ),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         const remember = async (tick: timer.Tick) => tick.fired_at;
                         const source = timer.Schedule({ expr: "0 8 * * *", tz: "UTC" });
@@ -934,7 +929,6 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
                 crate::testing::memory_process_registry().await,
             ),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         console.log("unrelated observation");
                         finish(42);
@@ -1014,7 +1008,6 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             &mut state,
             context,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "finish(42);".to_string(),
             },
             crate::testing::fresh_memory_artifact_store().await,
@@ -1303,7 +1296,6 @@ async fn execute_trigger_process_with_originator(
         &mut state,
         ctx,
         ExecRequest {
-            language: language.to_string(),
             code: code.to_string(),
         },
         artifact_store,
@@ -1889,6 +1881,12 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// per-index `HasProperty` probe and writes `map`'s output positionally.
 /// This source spells no array callback, so the artifact's IR is unchanged
 /// and only the hashes moved.
+///
+/// FIG-4020 re-pinned them again: a module's identity is its IR, so the program
+/// no longer records its front end's `language`, and the module ref writes the
+/// dialect-neutral `lashlang-ir` atom where `typescript` stood. The `language`
+/// key left the IR and the module ref moved with it; the host-requirement
+/// hash, the lifted name, the component hash and the compiled program did not.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
@@ -2076,7 +2074,6 @@ async fn execute_typescript_with_capturing_trigger_effects(
             crate::testing::memory_process_registry().await,
         ),
         ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         store,

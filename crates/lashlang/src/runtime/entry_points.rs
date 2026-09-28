@@ -76,7 +76,6 @@ pub fn compile(
                 })
                 .unwrap_or_default();
             let process_program = Program {
-                language: program.language.clone(),
                 declarations: program.declarations.clone(),
                 main: process.body.clone(),
                 // A process body's bindings never reach session globals.

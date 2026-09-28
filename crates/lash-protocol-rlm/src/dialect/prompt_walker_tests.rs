@@ -110,10 +110,10 @@ const RETIRED_SURFACE_MARKERS: &[&str] = &[
 /// change and is tracked separately; until then the honest prompt is the one
 /// that matches the wire.
 ///
-/// The other durable cross-dialect identifier, the `__typescript_runtime`
-/// module the TypeScript lowerer resolves `Date.now()`/`Math.random()` through,
-/// is deliberately **not** here: nothing about it has to reach a model, so ADR
-/// 0063 hides it from the prompt instead of carving it out.
+/// The `__lashlang_runtime` module the TypeScript lowerer resolves
+/// `Date.now()`/`Math.random()` through is deliberately **not** here: nothing
+/// about it has to reach a model, so ADR 0063 hides it from the prompt instead
+/// of carving it out.
 /// The second carve-out is a durable process identity. A TypeScript session's
 /// processes are compiled against the Lashlang VM substrate and their ids are
 /// `process:lashlang:v3:blake3:…` — journal identity, visible to a host through

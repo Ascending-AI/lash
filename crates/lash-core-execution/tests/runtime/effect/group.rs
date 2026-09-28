@@ -86,7 +86,6 @@ mod effect_group_contract_tests {
                 "exec_code",
                 RuntimeEffectKind::ExecCode,
                 RuntimeEffectCommand::ExecCode {
-                    language: "typescript".to_string(),
                     code: "1 + 1".to_string(),
                 },
             ),

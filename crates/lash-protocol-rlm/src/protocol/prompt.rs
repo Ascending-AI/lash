@@ -22,17 +22,14 @@ impl Default for RlmPromptFeatures {
 /// (the TypeScript lowerer's generated bindings share it), so this is a rule
 /// about a namespace rather than a list of names to keep in sync. It exists
 /// because `lashlang_host_environment_from_tool_catalog` binds
-/// `__typescript_runtime` — how the TypeScript lowerer reaches journaled
-/// `Date.now()`/`Math.random()` — into *every* Lashlang host, and this section
-/// advertised it: a Lashlang reader was handed
-/// `await __typescript_runtime.now(any)? -> float`, an internal name in another
-/// dialect's vocabulary.
+/// `__lashlang_runtime` — how a front end reaches the journaled clock and
+/// random source (TypeScript's `Date.now()`/`Math.random()`) — into *every*
+/// host, and this section once advertised it: a reader was handed
+/// `await __typescript_runtime.now(any)? -> float`, an internal name no cell
+/// writes.
 ///
-/// Hiding rather than renaming is deliberate. The module path is a durable
-/// link-time identifier: it is embedded in every lowered TypeScript program,
-/// including the persisted bodies of durable processes that must still resolve
-/// when a worker wakes them after a restart. ADR 0063 records the rule and the
-/// carve-out list.
+/// The module is the substrate's, not a reader's, so it is hidden rather than
+/// documented. ADR 0063 records the rule.
 fn module_is_runtime_internal(path: &[String]) -> bool {
     path.first()
         .is_some_and(|segment| segment.starts_with("__"))

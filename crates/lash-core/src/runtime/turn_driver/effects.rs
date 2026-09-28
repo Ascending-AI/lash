@@ -465,7 +465,6 @@ impl RuntimeTurnDriver<'_> {
         &mut self,
         machine: &mut TurnMachine,
         invocation: crate::RuntimeEffectInvocation,
-        language: String,
         code: String,
         event_tx: &TurnObserver,
     ) -> Result<Result<crate::ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError>
@@ -473,10 +472,7 @@ impl RuntimeTurnDriver<'_> {
         self.execute_typed_turn_effect(
             machine,
             event_tx,
-            RuntimeEffectEnvelope::new(
-                invocation,
-                RuntimeEffectCommand::ExecCode { language, code },
-            ),
+            RuntimeEffectEnvelope::new(invocation, RuntimeEffectCommand::ExecCode { code }),
             RuntimeEffectOutcome::into_exec_code,
         )
         .await
@@ -687,7 +683,6 @@ impl RuntimeTurnDriver<'_> {
 
     pub(in crate::runtime) async fn run_exec_code(
         &self,
-        language: String,
         code: &str,
         chronological_projection: Arc<crate::facade_support::ChronologicalProjection>,
         protocol_iteration: usize,
@@ -710,7 +705,6 @@ impl RuntimeTurnDriver<'_> {
                 .execute_code(
                     context.clone(),
                     crate::ExecRequest {
-                        language,
                         code: code.to_string(),
                     },
                 )

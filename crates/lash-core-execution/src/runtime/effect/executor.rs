@@ -1673,7 +1673,6 @@ mod task_boundary_tests {
                         "exec",
                     ),
                     RuntimeEffectCommand::ExecCode {
-                        language: "text".to_string(),
                         code: String::new(),
                     },
                 ))

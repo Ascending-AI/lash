@@ -1,7 +1,7 @@
 //! The one mapping from a Lashlang aggregate to the runtime's durable group
 //! and back (ADR 0099 §10, §11; FIG-3397), shared by both bridges.
 //!
-//! A bridge resolves each of its leaves in its own way — a TypeScript runtime
+//! A bridge resolves each of its leaves in its own way — a language runtime
 //! value journaled in place, a trigger operation, a leaf refused before
 //! dispatch, a tool call, a timer — and hands the result here as a
 //! [`BridgeAggregateLeaf`]. This module forms one

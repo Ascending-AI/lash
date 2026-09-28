@@ -187,12 +187,6 @@ impl RlmRuntimeState {
         ctx: lash_core::RuntimeExecutionContext<'_>,
         request: lash_core::ExecRequest,
     ) -> Result<lash_core::ExecResponse, SessionError> {
-        if request.language != self.dialect.language_id() {
-            return Err(SessionError::Protocol(format!(
-                "RLM language `{}` is not registered",
-                request.language
-            )));
-        }
         let session_projected_bindings = self.session_projected_bindings.lock().await.clone();
         // The guard is held across the whole cell: a second caller waits for
         // the cell to finish instead of being told the state is busy, and a
@@ -542,7 +536,6 @@ mod tests {
 
     fn cell(code: &str) -> lash_core::ExecRequest {
         lash_core::ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         }
     }
@@ -804,7 +797,6 @@ mod tests {
                 execute_cell(
                     &state,
                     lash_core::ExecRequest {
-                        language: "typescript".to_string(),
                         code: "let scratch_note = \"after execution\";".to_string(),
                     },
                 )
@@ -859,7 +851,7 @@ mod tests {
     }
 
     #[test]
-    fn execute_code_uses_the_selected_typescript_dialect_and_rejects_unknown_languages() {
+    fn execute_code_runs_a_typescript_cell() {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -868,57 +860,12 @@ mod tests {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
                 let response = execute_cell(
                     &state,
-                    lash_core::ExecRequest {
-                        language: "typescript".to_string(),
-                        code: "const answer: number = 40 + 2; finish(answer);".to_string(),
-                    },
+                    cell("const answer: number = 40 + 2; finish(answer);"),
                 )
                 .await
-                .expect("selected TypeScript dialect must execute");
+                .expect("the TypeScript dialect must execute");
                 assert_eq!(response.error, None);
                 assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
-
-                let error = execute_cell(
-                    &state,
-                    lash_core::ExecRequest {
-                        language: "python".to_string(),
-                        code: "finish(42)".to_string(),
-                    },
-                )
-                .await
-                .expect_err("unregistered language must be rejected");
-
-                assert!(matches!(
-                    error,
-                    SessionError::Protocol(message)
-                        if message == "RLM language `python` is not registered"
-                ));
-
-                // The retired surface is the one unregistered language that
-                // matters: a session that executed a `<lashlang>` cell would be
-                // running the surface FIG-3021 deleted. TypeScript is now the
-                // only registered language, so the refusal arrives through the
-                // same unregistered-language path as `python` — the cell is
-                // still refused, which is what `runbooks/RULES.md` treats as
-                // mandatory.
-                let inactive = execute_cell(
-                    &state,
-                    lash_core::ExecRequest {
-                        language: "lashlang".to_string(),
-                        code: "finish(42)".to_string(),
-                    },
-                )
-                .await
-                .expect_err("the retired surface must be rejected");
-
-                assert!(
-                    matches!(
-                        &inactive,
-                        SessionError::Protocol(message)
-                            if message == "RLM language `lashlang` is not registered"
-                    ),
-                    "{inactive:?}"
-                );
             });
     }
 

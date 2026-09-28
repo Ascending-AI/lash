@@ -37,9 +37,6 @@ pub fn parse_unguarded_for_measurement(source: &str) -> Result<lashlang::Program
 pub fn measure_source_nesting_charge(source: &str) -> usize {
     adapter::nesting::measure_source_nesting_charge(source)
 }
-/// The source language this front end records on every program it lowers.
-pub const TYPESCRIPT_LANGUAGE: &str = "typescript";
-
 /// The prefix on every binding the lowerer generates. Source identifiers that
 /// start with it are rejected. It is this front end's own namespace: the
 /// lowered program marks every generated binding private, so no caller needs

@@ -154,7 +154,6 @@ impl Session {
     /// observations as well as its failure and terminal value.
     pub(crate) fn run_observed(&mut self, code: &str) -> lash_core::ExecResponse {
         let request = ExecRequest {
-            language: LANGUAGE_ID.to_string(),
             code: code.to_string(),
         };
         let state = &mut self.state;

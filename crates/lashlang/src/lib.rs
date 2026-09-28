@@ -36,9 +36,9 @@ pub use ast::{
     LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
     MethodKey, NestingTooDeep, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
     ProcessSignalDecl, ProcessSignature, ProcessSignatureError, ProcessType, Program,
-    ResourceRefExpr, SourceLanguage, StructuralRole, TryExpr, TypeDecl, TypeExpr, TypeField,
-    UnaryOp, UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
-    lifted_process_identity, process_wrapper_run_path, validate_ast, walk_expr,
+    ResourceRefExpr, StructuralRole, TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp, UnionMembers,
+    check_ast_nesting_depth, fold_expr_children, format_type_expr, lifted_process_identity,
+    process_wrapper_run_path, validate_ast, walk_expr,
 };
 pub use ast::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, CollectionTransformParts, UpdateOperator,
@@ -114,13 +114,13 @@ pub use span::Span;
 
 /// The module path under which a host registers a front end's journaled
 /// language-runtime values (the clock and the random source), and the alias a
-/// linked receiver rewrites to. The spellings are the wire values every
-/// journal and replay key already carries.
-pub const LANGUAGE_RUNTIME_MODULE_PATH: &str = "__typescript_runtime";
+/// linked receiver rewrites to. The spellings are dialect-neutral wire values
+/// that every journal and replay key carries.
+pub const LANGUAGE_RUNTIME_MODULE_PATH: &str = "__lashlang_runtime";
 
 /// The reserved resource type of the language-runtime receiver a front end
 /// mints for its clock and random-source reads.
-pub const LANGUAGE_RUNTIME_RESOURCE_TYPE: &str = "typescript.Runtime";
+pub const LANGUAGE_RUNTIME_RESOURCE_TYPE: &str = "lashlang.Runtime";
 
 /// The journaled language-runtime clock read.
 pub const LANGUAGE_RUNTIME_NOW_OPERATION: &str = "now";

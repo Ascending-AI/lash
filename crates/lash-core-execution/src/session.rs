@@ -340,7 +340,6 @@ impl SessionError {
 
 #[derive(Clone, Debug)]
 pub struct ExecRequest {
-    pub language: String,
     pub code: String,
 }
 

@@ -16,16 +16,13 @@ mod roles;
 pub(crate) use roles::check_unique_declarations;
 pub use roles::{
     AttributeAssignParts, AttributeStep, AttributeUpdate, BindingVisibility,
-    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, SourceLanguage,
-    StructuralRole, UpdateOperator, lifted_process_identity, process_wrapper_run_path,
+    CollectionTransformParts, LIFTED_PROCESS_NAME_PREFIX, ProcessOrigin, StructuralRole,
+    UpdateOperator, lifted_process_identity, process_wrapper_run_path,
 };
 use roles::{check_process_origins, check_program_roles};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Program {
-    /// The front end the program was lowered from. It is part of a module's
-    /// identity: two front ends never share a module ref.
-    pub language: SourceLanguage,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<Declaration>,
     pub main: Expr,
@@ -389,7 +386,6 @@ impl Program {
     /// A program authored directly as IR.
     pub fn block(expressions: Vec<Expr>) -> Self {
         Self {
-            language: SourceLanguage::ir(),
             declarations: Vec::new(),
             main: Expr::Block(expressions),
             private_bindings: BTreeSet::new(),
@@ -409,8 +405,7 @@ impl Program {
 
 impl PartialEq for Program {
     fn eq(&self, other: &Self) -> bool {
-        self.language == other.language
-            && self.declarations == other.declarations
+        self.declarations == other.declarations
             && self.main == other.main
             && self.private_bindings == other.private_bindings
     }

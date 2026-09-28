@@ -28,7 +28,6 @@ fn printed_cell_refuses_missing_or_mismatched_recorded_renderer() {
                 &mut RlmExecutionState::for_engine("typescript"),
                 context,
                 ExecRequest {
-                    language: "typescript".to_string(),
                     code: "print('value');".to_string(),
                 },
                 crate::testing::memory_artifact_store().await,
@@ -97,7 +96,6 @@ fn bounded_test_entry_uses_the_recorded_params_and_supplied_renderer() {
             &mut RlmExecutionState::for_engine("typescript"),
             context,
             ExecRequest {
-                language: "typescript".into(),
                 code: "print('abcdefgh');".into(),
             },
             crate::testing::memory_artifact_store().await,
@@ -162,7 +160,6 @@ fn journaled_prints_replay_without_calling_the_renderer() {
                         &mut RlmExecutionState::for_engine("typescript"),
                         context,
                         ExecRequest {
-                            language: "typescript".into(),
                             code: "print('journaled');".into(),
                         },
                         crate::testing::memory_artifact_store().await,
@@ -276,7 +273,6 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             &mut state,
             context,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                     const settled = await Promise.allSettled([
                         approval.request({ reason: "settled deploy" })
@@ -370,7 +366,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::double_ports(&double, &handler), Arc::new(PolicyDeniedToolProvider), lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]), lash_core::testing::exec_code_invocation(
                         "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
                     )),
-                ExecRequest { language: "typescript".into(), code: code.into() },
+                ExecRequest { code: code.into() },
                 crate::testing::memory_artifact_store().await,
                 LashlangSurface::default(),
                 None,
@@ -479,7 +475,6 @@ async fn execute_typescript_test_cell(
         &mut state,
         lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest {
-            language: "typescript".to_string(),
             code: code.to_string(),
         },
         crate::testing::memory_artifact_store().await,
@@ -717,7 +712,6 @@ fn code_mode_receives_the_structured_tool_value_and_ignores_its_view() {
             &mut RlmExecutionState::for_engine("typescript"),
             context,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: "finish(await echo.say({ text: 'structured' }));".to_string(),
             },
             crate::testing::memory_artifact_store().await,
@@ -770,7 +764,6 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             &mut state,
             context,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                     async function pair() {
                         return await Promise.all([

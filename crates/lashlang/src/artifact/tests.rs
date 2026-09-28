@@ -161,8 +161,8 @@ fn a_recorded_compilation_dialect_is_refused_as_a_retired_field() {
 
 #[test]
 fn frozen_predecessor_artifact_is_refused_by_its_shape() {
-    // A pre-FIG-3571 artifact carries a renamed `canonical_ir` and no program
-    // `language`; the one-carrier shape refuses it before any identity check.
+    // A pre-FIG-3571 artifact carries a renamed `canonical_ir`; the
+    // one-carrier shape refuses it before any identity check.
     let mut raw: serde_json::Value = serde_json::from_str(include_str!(
         "../../tests/fixtures/module-artifact-old.json"
     ))
@@ -190,7 +190,7 @@ fn future_shape_refuses_before_serde_reaches_unknown_variants() {
     ))
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
-    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
+    raw["ir"] = serde_json::json!({"main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),
@@ -208,7 +208,7 @@ fn unchanged_dialect_with_unknown_nested_variant_is_a_future_shape_refusal() {
         "../../tests/fixtures/module-artifact-old.json"
     ))
     .expect("frozen fixture should be JSON");
-    raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
+    raw["ir"] = serde_json::json!({"main": {"FutureExpr": null}});
 
     let error = ModuleArtifact::from_store_bytes(
         &serde_json::to_vec(&raw).expect("future fixture should encode"),

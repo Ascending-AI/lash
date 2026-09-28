@@ -511,7 +511,7 @@ impl HostBridge<'_> {
         let commands = self.commands()?;
         let command = commands.issue()?;
         if let Some(checked) =
-            lash_lashlang_runtime::typescript_runtime_operation(&receiver, &operation, &args)
+            lash_lashlang_runtime::language_runtime_operation(&receiver, &operation, &args)
         {
             let runtime_operation = match checked {
                 Ok(runtime_operation) => runtime_operation,
@@ -521,7 +521,7 @@ impl HostBridge<'_> {
                 }
             };
             let in_flight = commands.enter(command, CommandShape::Value).await?;
-            let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
+            let value = lash_lashlang_runtime::journaled_language_runtime_value(
                 &in_flight.ctx,
                 in_flight.command.key.as_str().to_string(),
                 runtime_operation,
@@ -677,11 +677,11 @@ impl HostBridge<'_> {
                 call_site,
             } = operation;
             if let Some(checked) =
-                lash_lashlang_runtime::typescript_runtime_operation(&receiver, &operation, &args)
+                lash_lashlang_runtime::language_runtime_operation(&receiver, &operation, &args)
             {
                 let result = match checked {
                     Ok(runtime_operation) => {
-                        match lash_lashlang_runtime::journaled_typescript_runtime_value(
+                        match lash_lashlang_runtime::journaled_language_runtime_value(
                             &in_flight.ctx,
                             format!(
                                 "{}:{}",

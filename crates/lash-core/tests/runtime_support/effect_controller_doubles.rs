@@ -646,11 +646,11 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await
             }
-            RuntimeEffectCommand::ExecCode { language, code } if self.execute_code_locally => {
+            RuntimeEffectCommand::ExecCode { code } if self.execute_code_locally => {
                 let outcome = local_executor
                     .execute(RuntimeEffectEnvelope::new(
                         envelope.invocation,
-                        RuntimeEffectCommand::ExecCode { language, code },
+                        RuntimeEffectCommand::ExecCode { code },
                     ))
                     .await;
                 if self.fail_exec_after_local.swap(false, Ordering::SeqCst) {

@@ -9,12 +9,67 @@ use lash_lashlang_runtime::{
 };
 use lash_rlm_types::RlmGlobalsPatchPluginBody;
 
-pub(crate) use typescript::TypescriptDialect;
+pub(crate) use typescript::{TypeScript, TypescriptDialect};
 
 use crate::executor::{
     RlmExecutionState, execute_code_with_channel_and_bounds_with_trigger_resolver,
 };
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
+
+/// A dialect's refusal of a program, rendered against the source it refused.
+#[derive(Clone, Debug)]
+pub(crate) struct DialectDiagnostic {
+    /// Whether the dialect refuses a construct
+    /// ([`lash_core::CellFailureKind::Policy`]) or reports a wrong program
+    /// ([`lash_core::CellFailureKind::Program`]).
+    pub(crate) kind: lash_core::CellFailureKind,
+    /// What the dialect refused, and nothing else.
+    pub(crate) message: String,
+    pub(crate) span: Option<lashlang::Span>,
+    /// The refusal rendered against the source, with the line the model wrote.
+    pub(crate) rendered: String,
+}
+
+/// The language a cell is written in, as the protocol layer reaches it.
+///
+/// Each dialect defines its own semantics and targets the IR: it lowers its
+/// source to a Lashlang [`lashlang::Program`], explains its own refusals, and
+/// spells the host's schemas in its own syntax. No module in this crate calls a
+/// dialect's front end except that dialect's own implementation of this trait.
+pub(crate) trait Dialect: Send + Sync {
+    /// The id the dialect names itself by.
+    fn language_id(&self) -> &'static str;
+
+    /// Lowers `source` with no host: enough to read what a cell references
+    /// before the host it links against is assembled.
+    fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic>;
+
+    /// Lowers one cell against the host it will link against, including the
+    /// session globals the cell may read.
+    fn parse_cell(
+        &self,
+        source: &str,
+        host: &lashlang::LashlangHostEnvironment,
+    ) -> Result<lashlang::Program, DialectDiagnostic>;
+
+    /// A catalog tool's callable signature, in this dialect's syntax.
+    fn tool_signature(
+        &self,
+        call_path: &str,
+        input_schema: &serde_json::Value,
+        output_schema: &serde_json::Value,
+    ) -> String;
+
+    /// Refuses a tool call path that no cell in this dialect can call as a
+    /// tool.
+    fn ensure_tool_call_path_addressable(&self, call_path: &str) -> Result<(), String>;
+}
+
+/// The dialect every RLM session is served in. TypeScript is the only one
+/// (ADR 0096).
+pub(crate) fn rlm_dialect() -> &'static dyn Dialect {
+    &TypeScript
+}
 
 /// Everything one execution session needs from the host that opened it.
 ///
@@ -69,11 +124,10 @@ impl BoundVariablesPromptRender {
 
 /// One RLM execution session.
 ///
-/// The session runs the TypeScript surface over the Lashlang IR and VM: the
-/// engine id it seeds its state from, the vocabulary its bound-variable prompt
-/// is written in and the lowering prefix that prompt hides are all facts of
-/// that one language, so none of them is a parameter any more.
+/// The session runs its dialect over the Lashlang IR and VM, and seeds its
+/// state's engine id from that dialect.
 pub(crate) struct DialectSession {
+    dialect: &'static dyn Dialect,
     state: RlmExecutionState,
     surface: lash_lashlang_runtime::LashlangSurface,
     services: RlmDialectServices,
@@ -85,11 +139,13 @@ impl DialectSession {
     /// later process reads back, which is why it stays a named constant rather
     /// than a spelling each call site repeats.
     pub(crate) fn new(
+        dialect: &'static dyn Dialect,
         surface: lash_lashlang_runtime::LashlangSurface,
         services: RlmDialectServices,
     ) -> Self {
-        let state = RlmExecutionState::for_engine(typescript::LANGUAGE_ID);
+        let state = RlmExecutionState::for_engine(dialect.language_id());
         Self {
+            dialect,
             state,
             surface,
             services,
@@ -112,6 +168,7 @@ impl DialectSession {
             .prepare_runtime_code_execution()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
+            self.dialect,
             &mut self.state,
             ctx,
             request,
@@ -367,8 +424,11 @@ mod tests {
         async fn parse_failure_feedback(channel: crate::plugin::RlmChannel) -> String {
             let mut services = test_dialect_services();
             services.channel = channel;
-            let mut session =
-                DialectSession::new(lash_lashlang_runtime::LashlangSurface::default(), services);
+            let mut session = DialectSession::new(
+                rlm_dialect(),
+                lash_lashlang_runtime::LashlangSurface::default(),
+                services,
+            );
             let double =
                 crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
                     .await;
@@ -382,7 +442,6 @@ mod tests {
                         &double, &handler,
                     )),
                     ExecRequest {
-                        language: "typescript".to_string(),
                         code: "const payload = `".to_string(),
                     },
                     crate::projection::RlmProjectedBindings::default(),

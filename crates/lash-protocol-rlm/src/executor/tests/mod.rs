@@ -76,6 +76,7 @@ async fn execute_code_with_trigger_test_render(
     code_renderer: crate::render::CodeRendererSlot,
 ) -> ExecResponse {
     super::execute_code_with_channel_and_bounds_with_trigger_resolver(
+        crate::dialect::rlm_dialect(),
         state,
         test_render_context(ctx),
         request,

@@ -11,9 +11,9 @@ use thiserror::Error;
 #[path = "artifact_hash_writer.rs"]
 mod hash_writer;
 use hash_writer::HashWriter;
-#[path = "artifact_dialect.rs"]
-mod dialect;
-use dialect::module_ref;
+#[path = "artifact_identity.rs"]
+mod identity;
+use identity::{IR_ATOM, module_ref};
 #[path = "artifact_requirements.rs"]
 mod requirements;
 #[path = "artifact_write_helpers.rs"]
@@ -231,19 +231,19 @@ impl ModuleArtifact {
     /// The definition identity a trace and an admitted graph both name
     /// (ADR 0100 R6): a digest, under `lash-workflow-source/v4`, of the same
     /// deterministic atom stream the module ref hashes for the program (its
-    /// language and its span-free IR, names and number literals by the one IR
-    /// number rule). It never depends on how a dialect would print the program
-    /// or on a serializer's spelling.
+    /// span-free IR, names and number literals by the one IR number rule). It
+    /// never depends on which dialect lowered the program, how a dialect would
+    /// print it, or a serializer's spelling.
     pub fn source_identity(&self) -> String {
         let mut writer = HashWriter::for_source_identity();
         writer.atom("source");
-        writer.atom(self.ir.language.as_str());
+        writer.atom(IR_ATOM);
         write_program(&mut writer, &self.ir);
         writer.finish().as_str().to_string()
     }
 
-    /// The module's identity: a hash of its language, host requirements,
-    /// exports and complete program.
+    /// The module's identity: a hash of its host requirements, exports and
+    /// complete program. No dialect's name is part of it.
     pub fn module_ref(&self) -> &ModuleRef {
         &self.module_ref
     }

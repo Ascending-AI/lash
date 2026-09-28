@@ -446,7 +446,6 @@ impl lash_lashlang_runtime::DeferredToolResolver for BindingDeferredResolver {
 
 pub(super) fn deferred_matrix_request() -> ExecRequest {
     ExecRequest {
-        language: "typescript".to_string(),
         code: "await web.fetch({});\nawait mystery.x({});".to_string(),
     }
 }
@@ -659,7 +658,6 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             &mut state,
             ctx.clone(),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         const result = await web.fetch({ url: "https://example.test" });
                         finish(result);
@@ -764,7 +762,6 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "typescript".into(),
                 code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
             },
             crate::testing::memory_artifact_store().await,
@@ -827,7 +824,6 @@ async fn run_deferred_fault_boundary(
             replay_key,
         ),
         request: ExecRequest {
-            language: "typescript".into(),
             code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
         },
         resolver: Some(resolver),
@@ -914,7 +910,6 @@ pub(super) fn fault_before_registration_reinstalls_recorded_route_on_the_replay(
                 "exec-code:registration",
             ),
             request: ExecRequest {
-                language: "typescript".into(),
                 code: r#"finish(await web.fetch({ url: "https://example.test" }));"#.into(),
             },
             resolver: Some(resolver),
@@ -1067,7 +1062,6 @@ pub(super) fn replay_serves_a_positive_before_an_ambient_collision_from_the_jour
                 enumerations: Default::default(),
             });
         let request = ExecRequest {
-            language: "typescript".into(),
             code: r#"
                 if (false) {
                     const ignored = await web.fetch({ url: "https://example.test" });
@@ -1300,7 +1294,6 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 &mut state,
                 ctx.clone(),
                 ExecRequest {
-                    language: "typescript".to_string(),
                     code: "const result = await web.fetch({ url: 'https://example.test' }); finish(result);".to_string(),
                 },
                 crate::testing::memory_artifact_store().await,
@@ -1388,7 +1381,6 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             &mut RlmExecutionState::new(),
             ctx,
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         console.log("printed before failure");
                         await web.fetch({ url: "https://example.test" });
@@ -1479,7 +1471,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let request = || ExecRequest {
-            language: "typescript".to_string(),
             code: r#"const later = async () => { return 1; };
             finish(1);"#
                 .to_string(),
@@ -1560,7 +1551,6 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
                 &double, &handler,
             )),
             ExecRequest {
-                language: "typescript".to_string(),
                 code: r#"
                         const worker = async (input: unknown) => { return input; };
                         finish(1);
@@ -2179,7 +2169,6 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         &mut state,
         ctx.clone(),
         ExecRequest {
-            language: "typescript".to_string(),
             code: r#"
                     const worker = async () => await waitSignal("ready");
                     const handle = await processes.start({ definition: worker });
@@ -2313,7 +2302,6 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         &mut state,
         ctx.clone(),
         ExecRequest {
-            language: "typescript".to_string(),
             code: r#"
                     const worker = async () => { return "done"; };
                     const handle = await processes.start({ definition: worker });
@@ -2350,7 +2338,6 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                         "test-session:test-turn:0:1:exec_code:1",
                     )),
                     ExecRequest {
-                        language: "typescript".to_string(),
                         code: "finish(await handle);".to_string(),
                     },
                     artifact_store,
@@ -2431,7 +2418,6 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         &mut RlmExecutionState::for_engine("typescript"),
         ctx,
         ExecRequest {
-            language: "typescript".to_string(),
             code: r#"
                     const worker = async () => { return "done"; };
                     const handle = await processes.start({ definition: worker });

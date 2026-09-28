@@ -425,7 +425,6 @@ pub enum RuntimeEffectCommand {
     /// nested effect the cell issues is journaled and replayed on its own
     /// replay key (ADR 0103). See [`Self::replays_by_reexecution`].
     ExecCode {
-        language: String,
         code: String,
     },
     /// Write the Pending Turn Input row that admits a turn (ADR 0069 §1),

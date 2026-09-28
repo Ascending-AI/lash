@@ -127,7 +127,6 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
         &mut state,
         context,
         ExecRequest {
-            language: "typescript".to_string(),
             code: source.to_string(),
         },
         crate::testing::memory_artifact_store().await,
@@ -485,7 +484,6 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         &mut state,
         ctx,
         ExecRequest {
-            language: "typescript".to_string(),
             code: PROCESS_CORPUS.to_string(),
         },
         cell_store,

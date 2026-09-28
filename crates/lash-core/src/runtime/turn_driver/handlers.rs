@@ -589,13 +589,7 @@ impl RuntimeTurnDriver<'_> {
         // Completed activity and its trace mirror take the live window here.
         let cell_started = self.host.core.clock.now();
         let result = match self
-            .invoke_turn_exec_effect(
-                machine,
-                invocation,
-                language.clone(),
-                code.clone(),
-                event_tx,
-            )
+            .invoke_turn_exec_effect(machine, invocation, code.clone(), event_tx)
             .await
         {
             Ok(result) => result,

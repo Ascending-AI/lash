@@ -267,16 +267,15 @@ impl RlmProtocolPluginFactory {
                     diagnostic: Some(err.to_string()),
                 })
             })?;
-        let program = lash_typescript::parse(&request.source).map_err(|diagnostic| {
-            lashlang::ModuleCompileError::parse_failure(
-                diagnostic.span.map(|span| lashlang::Span {
-                    start: span.start,
-                    end: span.end,
-                }),
-                diagnostic.message.clone(),
-                lash_typescript::format_diagnostic(&request.source, &diagnostic),
-            )
-        })?;
+        let program = crate::dialect::rlm_dialect()
+            .parse(&request.source)
+            .map_err(|diagnostic| {
+                lashlang::ModuleCompileError::parse_failure(
+                    diagnostic.span,
+                    diagnostic.message,
+                    diagnostic.rendered,
+                )
+            })?;
         lashlang::compile_module(lashlang::ModuleCompileRequest {
             source: &request.source,
             program,

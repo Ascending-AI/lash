@@ -101,10 +101,7 @@ async fn run_step_with_sink(
     let response = execute_code_unbounded_with_test_render(
         &mut RlmExecutionState::new(),
         ctx,
-        ExecRequest {
-            language: "typescript".into(),
-            code: code.into(),
-        },
+        ExecRequest { code: code.into() },
         crate::testing::memory_artifact_store().await,
         LashlangSurface::default(),
         Some(Arc::new(InboxResolver)),

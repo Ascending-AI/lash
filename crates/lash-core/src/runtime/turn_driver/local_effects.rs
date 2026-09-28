@@ -96,11 +96,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         events,
                     },
                 ),
-            RuntimeEffectCommand::ExecCode { language, code } => {
+            RuntimeEffectCommand::ExecCode { code } => {
                 let result = runner
                     .driver
                     .run_exec_code(
-                        language,
                         &code,
                         Arc::new(
                             crate::facade_support::ChronologicalProjection::from_turn_view(

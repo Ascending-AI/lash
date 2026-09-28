@@ -7,12 +7,12 @@ use super::*;
 /// process body.
 ///
 /// The TypeScript lowerer mints these as a module call on the reserved
-/// `typescript.Runtime` receiver, and linking rewrites that receiver's alias
-/// from the lowerer's `builtin` to the module-path key `__typescript_runtime`.
+/// `lashlang.Runtime` receiver, and linking rewrites that receiver's alias
+/// from the lowerer's `builtin` to the module-path key `__lashlang_runtime`.
 /// While the process host gated its journaled short-circuit on the `builtin`
 /// alias, a lifted body fell through to catalog tool resolution and failed with
 /// "module operation `now` resolved to unavailable host operation
-/// `typescript.runtime.now`" before the process could complete.
+/// `typescript.runtime.now`" (the operation's name before FIG-4020) before the process could complete.
 #[tokio::test]
 pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomness() {
     let artifact_store: lashlang::LashlangArtifacts =
@@ -77,7 +77,6 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         &mut state,
         ctx.clone(),
         ExecRequest {
-            language: "typescript".to_string(),
             code: r#"
                     const worker = async () => {
                       const stamp = new Date().toISOString();
@@ -158,7 +157,7 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
 }
 
 /// FIG-3079: the journaled clock and RNG never re-sample on replay, and the
-/// linked receiver alias (`__typescript_runtime`) reaches the journal the same
+/// linked receiver alias (`__lashlang_runtime`) reaches the journal the same
 /// way the lowerer's `builtin` alias does.
 #[test]
 pub(super) fn typescript_runtime_values_replay_from_the_journal_after_a_crash() {
@@ -196,16 +195,16 @@ pub(super) fn typescript_runtime_values_replay_from_the_journal_after_a_crash() 
                         lashlang::LANGUAGE_RUNTIME_MODULE_PATH,
                     ));
                     let number = async |operation: &str| {
-                        let operation = lash_lashlang_runtime::typescript_runtime_operation(
+                        let operation = lash_lashlang_runtime::language_runtime_operation(
                             &receiver,
                             operation,
                             &[],
                         )
                         .expect("the linked runtime receiver is recognised")
                         .expect("the runtime has the operation");
-                        let value = lash_lashlang_runtime::journaled_typescript_runtime_value(
+                        let value = lash_lashlang_runtime::journaled_language_runtime_value(
                             &ctx,
-                            format!("typescript.runtime:{operation}"),
+                            format!("lashlang.runtime:{operation}"),
                             operation,
                         )
                         .await

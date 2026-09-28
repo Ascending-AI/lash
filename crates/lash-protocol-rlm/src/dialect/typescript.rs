@@ -1,9 +1,99 @@
 use lash_core::SessionError;
 use lash_lashlang_runtime::LashlangSurface;
 
-use super::{CellTags, DialectSession, RlmDialectServices};
+use super::{CellTags, Dialect, DialectDiagnostic, DialectSession, RlmDialectServices};
 
 pub(crate) const LANGUAGE_ID: &str = "typescript";
+
+/// The TypeScript front end, reached through [`Dialect`]: the only module in
+/// this crate that parses, links or diagnoses TypeScript. [`TypescriptDialect`]
+/// carries the prompt and session side of the same language.
+pub(crate) struct TypeScript;
+
+impl Dialect for TypeScript {
+    fn language_id(&self) -> &'static str {
+        LANGUAGE_ID
+    }
+
+    fn parse(&self, source: &str) -> Result<lashlang::Program, DialectDiagnostic> {
+        lash_typescript::parse(source).map_err(|error| diagnostic(source, error))
+    }
+
+    /// Parsed with the session's live globals, which the host environment
+    /// carries: TypeScript resolves names at parse, so the names have to
+    /// arrive here.
+    fn parse_cell(
+        &self,
+        source: &str,
+        host: &lashlang::LashlangHostEnvironment,
+    ) -> Result<lashlang::Program, DialectDiagnostic> {
+        lash_typescript::parse_cell(source, host)
+            .map_err(|error| diagnostic(source, refine_method_diagnostic(source, host, error)))
+    }
+
+    fn tool_signature(
+        &self,
+        call_path: &str,
+        input_schema: &serde_json::Value,
+        output_schema: &serde_json::Value,
+    ) -> String {
+        let input = lash_typescript::render_schema_type(input_schema);
+        let input = if input == "Record<string, never>" {
+            "{}"
+        } else {
+            &input
+        };
+        let output = lash_typescript::render_schema_type(output_schema);
+        format!("{call_path}({input}): Promise<{output}>")
+    }
+
+    fn ensure_tool_call_path_addressable(&self, call_path: &str) -> Result<(), String> {
+        lash_typescript::ensure_tool_call_path_addressable(call_path)
+            .map_err(|error| error.to_string())
+    }
+}
+
+/// A TypeScript rejection, classified and rendered while it is still typed.
+///
+/// Whether it refuses a construct or reports a wrong program is asked of the
+/// diagnostic, not of its code. Three codes carry both families —
+/// `TS_METHOD_UNSUPPORTED` covers `Promise.then` and `[].map()` alike — so only
+/// the site that emitted it knows, and it records the answer at construction.
+/// It is rendered against the source, not `to_string()`: the diagnostic
+/// carries a span and the model needs the line it wrote.
+fn diagnostic(source: &str, error: lash_typescript::Diagnostic) -> DialectDiagnostic {
+    DialectDiagnostic {
+        kind: if error.is_dialect_refusal() {
+            lash_core::CellFailureKind::Policy
+        } else {
+            lash_core::CellFailureKind::Program
+        },
+        rendered: lash_typescript::format_diagnostic(source, &error),
+        span: error.span.map(|span| lashlang::Span {
+            start: span.start,
+            end: span.end,
+        }),
+        message: error.message,
+    }
+}
+
+/// Re-lowers method failures with the host catalog that the cache-oriented
+/// parse entry point does not accept. Valid cells still take the single-parse
+/// path; only a method diagnostic pays this retry to distinguish a real module
+/// shadow from an ordinary local receiver.
+fn refine_method_diagnostic(
+    source: &str,
+    host: &lashlang::LashlangHostEnvironment,
+    error: lash_typescript::Diagnostic,
+) -> lash_typescript::Diagnostic {
+    if error.code != lash_typescript::DiagnosticCode::MethodUnsupported {
+        return error;
+    }
+    match lash_typescript::link(source, host) {
+        Err(contextual) if contextual.code == error.code => contextual,
+        _ => error,
+    }
+}
 
 pub(crate) struct TypescriptDialect {
     surface: LashlangSurface,
@@ -379,6 +469,11 @@ impl TypescriptDialect {
         LANGUAGE_ID
     }
 
+    /// The front end this dialect's cells are parsed and diagnosed by.
+    pub(crate) fn language(&self) -> &'static dyn Dialect {
+        &TypeScript
+    }
+
     pub(crate) fn prompt_vocabulary(&self) -> crate::dialect::DialectPromptVocabulary {
         TYPESCRIPT_PROMPT_VOCABULARY
     }
@@ -449,7 +544,7 @@ impl TypescriptDialect {
     }
 
     pub(crate) fn create_session(&self) -> DialectSession {
-        DialectSession::new(self.surface.clone(), self.services.clone())
+        DialectSession::new(self.language(), self.surface.clone(), self.services.clone())
     }
 
     pub(crate) fn render_execution_section(
@@ -1158,7 +1253,6 @@ mod tests {
                             &double, &handler,
                         )),
                         ExecRequest {
-                            language: "typescript".to_string(),
                             code: "const answer: number = 40 + 2; finish(answer);".to_string(),
                         },
                         RlmProjectedBindings::new(),

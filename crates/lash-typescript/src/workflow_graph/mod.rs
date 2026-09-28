@@ -734,7 +734,6 @@ fn graph_to_program(
     let mut main = subgraph_to_block(&graph.main, context)?;
     splice_lifted_bodies(&mut main, lifted, context)?;
     Ok(Program {
-        language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations,
         main,
         // A graph renders to source, which the lowering re-admits; the

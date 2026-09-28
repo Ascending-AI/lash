@@ -265,7 +265,6 @@ fn lower_pass(
 
 fn finish(mut lowerer: Lowerer, main: LashExpr) -> LashProgram {
     let mut program = LashProgram {
-        language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
         declarations: std::mem::take(&mut lowerer.declarations),
         main,
         private_bindings: std::mem::take(&mut lowerer.private_bindings)

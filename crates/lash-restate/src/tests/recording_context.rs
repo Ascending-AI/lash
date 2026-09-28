@@ -77,7 +77,6 @@ pub(super) fn restate_command_execution_plan_is_explicit_for_every_command() {
         ),
         (
             RuntimeEffectCommand::ExecCode {
-                language: "code".to_string(),
                 code: "1 + 1".to_string(),
             },
             // The interpreter is composite: it can issue nested timers,

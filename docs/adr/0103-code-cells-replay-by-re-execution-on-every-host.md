@@ -184,7 +184,7 @@ also replay by re-execution.
 
 **Identity is the issue ordinal; the compiler cannot move it.** Each command
 that leaves the VM through `ExecutionHost::perform` toward the effect host — a
-resource operation (a `typescript.runtime` value included), a whole aggregate,
+resource operation (a `lashlang.runtime` value included), a whole aggregate,
 a sleep, an await of a handle, a trigger, and in a process body a signal wait
 or event — takes the run's next issue ordinal `k` when it is issued, before
 anything can fail in the bridge. Host-injected sub-effects (attempts after the

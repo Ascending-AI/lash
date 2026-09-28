@@ -14,7 +14,7 @@ pub(crate) fn rlm_tool_catalog(
     dialect: &TypescriptDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
-    validate_rlm_language_bindings(&ctx.tools)?;
+    validate_rlm_language_bindings(&ctx.tools, dialect.language())?;
     validate_dialect_neutral_tool_prose(&ctx, dialect)?;
     Ok(ToolCatalogContribution::default())
 }
@@ -67,14 +67,11 @@ pub(crate) fn rlm_prompt_tool_docs(
             }
             let markdown = compact.render_markdown();
             let (_, notes) = markdown.split_once('\n').unwrap_or((&markdown, ""));
-            let input = lash_typescript::render_schema_type(contract.input_schema.canonical());
-            let input = if input == "Record<string, never>" {
-                "{}"
-            } else {
-                &input
-            };
-            let output = lash_typescript::render_schema_type(contract.output_schema.canonical());
-            let signature = format!("{call_path}({input}): Promise<{output}>");
+            let signature = dialect.language().tool_signature(
+                &call_path,
+                contract.input_schema.canonical(),
+                contract.output_schema.canonical(),
+            );
             format!("`{signature}`\n{notes}")
         })
         .collect::<Vec<_>>();
@@ -422,7 +419,10 @@ fn prose_token_occurrences(text: &str) -> Vec<ProseTokenOccurrence> {
     occurrences
 }
 
-fn validate_rlm_language_bindings(tools: &[lash_core::ToolManifest]) -> Result<(), PluginError> {
+fn validate_rlm_language_bindings(
+    tools: &[lash_core::ToolManifest],
+    language: &dyn crate::dialect::Dialect,
+) -> Result<(), PluginError> {
     for tool in tools {
         if tool.activation == ToolActivation::Internal {
             continue;
@@ -436,7 +436,7 @@ fn validate_rlm_language_bindings(tools: &[lash_core::ToolManifest]) -> Result<(
         // global namespace, a refused method name — can only be advertised as a
         // callable nothing, so it is refused here instead (FIG-1444).
         let call_path = typescript.call_path();
-        lash_typescript::ensure_tool_call_path_addressable(&call_path).map_err(|err| {
+        language.ensure_tool_call_path_addressable(&call_path).map_err(|err| {
             PluginError::Registration(format!(
                 "tool `{}` has a `typescript.tool` binding no TypeScript cell can call as `{call_path}`: {err}",
                 tool.name
