@@ -90,9 +90,6 @@ pub(crate) async fn record_turn_park_tx(
     let session_id = &write.session_id;
     super::lock_session_history_mutation_tx(tx, session_id).await?;
     let turn_parks = &crate::turn_ingress::turn_ingress_sql().turn_parks;
-    // The row lock first: a concurrent park of this session waits here, and
-    // a terminal written by a concurrent commit is visible to the read after.
-    let stored = turn_park_for_update(tx, session_id).await?;
     if let Some(terminal) =
         crate::session_roots::root_terminal_conn(tx, session_id, &write.turn_id).await?
     {
@@ -102,6 +99,31 @@ pub(crate) async fn record_turn_park_tx(
             by: Box::new(terminal.cause),
         });
     }
+    // Withdrawal locks input rows before deleting the park. Take these locks
+    // first too, so either withdrawal clears this park or the stale writer
+    // observes that every bound input was cancelled.
+    let states: Vec<String> = sqlx::query_scalar(
+        crate::turn_ingress::turn_ingress_sql()
+            .family_postgres
+            .root_bound_input_states
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .bind(write.turn_id.as_str())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if !states.is_empty()
+        && states.iter().all(|state| {
+            state == lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()
+        })
+    {
+        return Err(StoreError::RootInputWithdrawn {
+            session_id: session_id.clone(),
+            root: write.turn_id.clone(),
+        });
+    }
+    let stored = turn_park_for_update(tx, session_id).await?;
     let reason_code = write.reason.code().as_str();
     let reason_json =
         serde_json::to_string(&write.reason).map_err(|error| StoreError::RecordEncodingFailed {

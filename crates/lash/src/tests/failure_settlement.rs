@@ -261,7 +261,12 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
         "{cancelled:?}"
     );
     let status = core.drain_status(false).await?;
-    assert_eq!((status.parked_turns, status.in_flight_turns), (0, 0));
+    assert_eq!(
+        (status.parked_turns, status.in_flight_turns),
+        (0, 0),
+        "pending inputs after withdrawal: {:?}",
+        session.durable().pending_turn_inputs().await?
+    );
     assert!(status.drained(), "withdrawing the input settles the park");
     Ok(())
 }

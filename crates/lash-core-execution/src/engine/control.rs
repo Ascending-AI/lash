@@ -261,7 +261,7 @@ pub enum EngineParkRecorded {
     /// The target already has terminal evidence: the engine should release
     /// its execution.
     TargetTerminal,
-    /// The target is gone (its session deleted, or the process pruned): the
+    /// The target is gone (its session deleted, root input withdrawn, or process pruned): the
     /// engine should release its execution.
     TargetGone,
     /// A redrive owns the execution: it resumed it after the engine listed

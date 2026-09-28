@@ -502,6 +502,13 @@ pub enum StoreError {
         root: crate::TurnId,
         by: Box<super::RootTerminalCause>,
     },
+    /// Withdrawal settled every input bound to this root before its stale
+    /// execution tried to park. No park was written.
+    #[error("root `{root}` of session `{session_id}` has only withdrawn inputs")]
+    RootInputWithdrawn {
+        session_id: SessionId,
+        root: crate::TurnId,
+    },
     /// The session is closing: its `CloseSession` intent committed, so it
     /// accepts no input and admits no root. Deletion only retries from here
     /// (FIG-3600 S7).
@@ -954,6 +961,7 @@ impl StoreError {
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
             Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
+            Self::RootInputWithdrawn { .. } => "RootInputWithdrawn",
             Self::SessionClosing { .. } => "SessionClosing",
             Self::ControlIntentUnknown { .. } => "ControlIntentUnknown",
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",

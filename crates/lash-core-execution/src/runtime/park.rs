@@ -134,6 +134,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 Ok(EngineParkRecorded::Parked(park.park_id))
             }
             Err(StoreError::RootAlreadyTerminal { .. }) => Ok(EngineParkRecorded::TargetTerminal),
+            Err(StoreError::RootInputWithdrawn { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(StoreError::SessionDeleted { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(error) => Err(error),
         }
@@ -237,6 +238,7 @@ impl StoreParkRecovery<'_> {
                 Ok(EngineParkRecorded::Parked(park.park_id))
             }
             Err(StoreError::RootAlreadyTerminal { .. }) => Ok(EngineParkRecorded::NothingToPark),
+            Err(StoreError::RootInputWithdrawn { .. }) => Ok(EngineParkRecorded::NothingToPark),
             Err(StoreError::SessionDeleted { .. }) => Ok(EngineParkRecorded::TargetGone),
             Err(error) => Err(error),
         }

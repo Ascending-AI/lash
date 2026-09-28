@@ -4,6 +4,14 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only PostgreSQL
     /// issues.
     pub(crate) struct TurnIngressPostgresStatements @ "turn_ingress" {
+        /// Lock root `?2`'s bound inputs in queue order before a park write,
+        /// so withdrawal either follows the park or prevents it.
+        root_bound_input_states = "SELECT pti.state FROM session_root_inputs binding
+             JOIN pending_turn_inputs pti
+               ON pti.session_id = binding.session_id AND pti.input_id = binding.input_id
+             WHERE binding.session_id = ?1 AND binding.root = ?2
+             ORDER BY pti.enqueue_seq FOR UPDATE OF pti";
+
         /// Whether session `?1` has checkpoint work for turn `?3` at generation
         /// `?2`, at the `after_work` checkpoint: an admitted active-turn input
         /// while `?4` inputs may still be claimed, or a non-command item behind

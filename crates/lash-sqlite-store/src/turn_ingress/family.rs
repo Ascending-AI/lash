@@ -4,6 +4,14 @@ lash_store_sql::statements! {
     /// Statements over more than one of the family's tables, only SQLite
     /// issues.
     pub(crate) struct TurnIngressSqliteStatements @ "turn_ingress" {
+        /// States of inputs bound to root `?2` in session `?1`, read under
+        /// the write transaction that records its park.
+        root_bound_input_states = "SELECT pti.state FROM session_root_inputs binding
+             JOIN pending_turn_inputs pti
+               ON pti.session_id = binding.session_id AND pti.input_id = binding.input_id
+             WHERE binding.session_id = ?1 AND binding.root = ?2
+             ORDER BY pti.input_id";
+
         /// Whether session `?1` has checkpoint work for turn `?3`, generation
         /// `?2`, at the `after_work` checkpoint: an admitted active-turn input
         /// while `?4` inputs may still be claimed, or a non-command item

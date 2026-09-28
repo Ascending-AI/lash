@@ -178,6 +178,8 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
 
     // Another turn's commit leaves the park; the parked turn's own commit
     // settles it, in its own transaction.
+    let withdrawn_root = parked_turn;
+    let parked_turn = TurnId::from("parked-after-withdrawal");
     let cutover = store
         .record_turn_park(&park(
             &session_id,
@@ -228,5 +230,20 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
             .expect("read the park after the commit"),
         None,
         "the parked turn's commit settles it"
+    );
+    assert!(
+        matches!(
+            store
+                .record_turn_park(&park(
+                    &session_id,
+                    &withdrawn_root,
+                    crate::store::ParkReason::ReplayDivergence {
+                        message: "stale retry after withdrawal".to_string(),
+                    },
+                ))
+                .await,
+            Err(crate::StoreError::RootInputWithdrawn { .. })
+        ),
+        "a retry cannot restore a park after its only input was withdrawn"
     );
 }

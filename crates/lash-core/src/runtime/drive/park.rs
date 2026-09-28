@@ -110,6 +110,12 @@ impl LashRuntime {
                 "a root with terminal evidence refused its park; the aborting execution is \
                  released"
             ),
+            Err(StoreError::RootInputWithdrawn { .. }) => tracing::info!(
+                session_id = %self.state.session_id,
+                root = %root,
+                event = "turn.park_refused_withdrawn",
+                "a root whose input was withdrawn refused its stale park"
+            ),
             Err(error) => tracing::warn!(
                 session_id = %self.state.session_id,
                 root = %root,

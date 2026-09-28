@@ -37,8 +37,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     let failure = error
                         .clone()
                         .into_turn_failure(crate::RuntimeErrorCode::ProtocolBeforeLlmCall);
-                    if failure.turn_failure_cause().aborts_invocation()
-                        && !failure.is_session_retirement()
+                    if matches!(
+                        failure.turn_failure_cause(),
+                        crate::TurnFailureCause::LiveFault
+                    ) && !failure.is_session_retirement()
                     {
                         return Err(RuntimeEffectControllerError::from(failure)
                             .retryable_uncommitted_derivation());

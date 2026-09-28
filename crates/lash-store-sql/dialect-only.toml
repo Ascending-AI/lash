@@ -121,6 +121,18 @@ family owns the whole predicate and reads the root family's binding inside it.
 """
 
 [[cross_family]]
+statement = "turn_ingress.root_bound_input_states"
+owner = "crates/lash-sqlite-store/src/turn_ingress/family.rs"
+touches = ["session_root_inputs"]
+reason = "The park write reads root bindings in the same write transaction as its input-state check."
+
+[[cross_family]]
+statement = "turn_ingress.root_bound_input_states"
+owner = "crates/lash-postgres-store/src/postgres/turn_ingress/family.rs"
+touches = ["session_root_inputs"]
+reason = "The park write locks bound input rows before withdrawal can settle them and remove the park."
+
+[[cross_family]]
 statement = "turn_ingress.count_unsettled_turns"
 owner = "crates/lash-store-sql/src/turn_ingress.rs"
 touches = ["control_intents"]
@@ -3434,6 +3446,12 @@ Concurrent appends to the affected-input receipts serialize on this row so
 their ordinals cannot collide. SQLite rewrites the one document under its write
 lock and needs no counterpart.
 """
+
+[[dialect_only]]
+statement = "turn_ingress.root_bound_input_states"
+backends = ["sqlite", "postgres"]
+kind = "FOR UPDATE"
+reason = "A park locks bound input rows against withdrawal on PostgreSQL; SQLite holds its write lock."
 
 [[dialect_only]]
 statement = "turn_ingress.checkpoint_work_pending_after_work"

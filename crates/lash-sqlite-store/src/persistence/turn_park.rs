@@ -143,6 +143,32 @@ pub(crate) fn record_turn_park_conn(
             by: Box::new(terminal.cause),
         });
     }
+    let mut states = conn
+        .prepare(
+            crate::turn_ingress::turn_ingress_sql()
+                .family_sqlite
+                .root_bound_input_states
+                .sql(),
+        )
+        .map_err(sqlite_error)?;
+    let states = states
+        .query_map(
+            params![session_id.as_str(), write.turn_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    if !states.is_empty()
+        && states.iter().all(|state| {
+            state == lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str()
+        })
+    {
+        return Err(StoreError::RootInputWithdrawn {
+            session_id: session_id.clone(),
+            root: write.turn_id.clone(),
+        });
+    }
     let reason_code = write.reason.code().as_str();
     let reason_json =
         serde_json::to_string(&write.reason).map_err(|error| StoreError::RecordEncodingFailed {
