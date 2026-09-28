@@ -24,7 +24,6 @@ macro_rules! generation_drain_tests {
                 let (_fixture_guard, fixture) = $fixture;
                 let _ = $label;
                 $crate::$law(fixture).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };

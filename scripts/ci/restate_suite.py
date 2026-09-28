@@ -17,18 +17,19 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   invoker's inactivity timeout to zero, so an invocation suspends at every
   await and every resumption replays its journal from the start: the leg that
   proves a handler deterministic (upstream's `alwaysSuspending` suites).
-* Retries off: Restate's default policy retries a failing invocation 70 times
-  over most of an hour, so a law whose handler failed for good used to hold
-  the job until GitHub cancelled it. A shard's server kills a failed
-  invocation on its first failure. The laws that exercise redelivery on
-  purpose are named in the suite registry and run on a server that retries on
-  a short, bounded schedule.
+* Bounded retries: Restate's default policy retries a failing invocation 70
+  times over most of an hour, so a law whose handler failed for good used to
+  hold the job until GitHub cancelled it. Every shard's server retries on a
+  short, bounded schedule instead -- long enough that the laws which crash a
+  handler attempt on purpose still see the redelivery they exercise, short
+  enough that a permanently failing invocation is killed in about half a
+  minute.
 * Each test runs in its own process under a wall-clock bound, so a hung law
   fails in minutes with its own output and the server's log, and one law's
   process state cannot leak into the next law.
 
-The suites themselves -- the Bazel label of the test binary, the filters, the
-endpoints each shard binds and the redelivery laws -- live in
+The suites themselves -- the Bazel label of the test binary, the filters and
+the endpoints each shard binds -- live in
 `scripts/restate-suites.toml`; the replay leg's known divergences live one
 ticket per file under `scripts/restate-divergences/`.
 
@@ -104,13 +105,10 @@ LEGS: dict[str, dict[str, str]] = {
     "live": {},
     "replay": {"RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT": "0s"},
 }
-RETRIES_OFF = {
-    "RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS": "1",
-    "RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS": "kill",
-}
-# For the laws that crash a handler attempt on purpose: redelivery within tens
-# of milliseconds, and a permanently failing invocation killed in about half a
-# minute instead of retried for most of an hour.
+# Every shard's retry policy: redelivery within tens of milliseconds (the laws
+# that crash a handler attempt on purpose need it), and a permanently failing
+# invocation killed in about half a minute instead of retried for most of an
+# hour.
 RETRIES_BOUNDED = {
     "RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL": "50ms",
     "RESTATE_DEFAULT_RETRY_POLICY__EXPONENTIATION_FACTOR": "2.0",
@@ -426,12 +424,10 @@ class Suite:
     cwd: str
     filters: tuple[str, ...]
     skips: tuple[str, ...]
-    parked_crate: str | None
     endpoints: tuple[str, ...]
     env: dict[str, str]
     shards: int
     timeout_seconds: float
-    redelivery_laws: tuple[str, ...]
     panic_gate: bool
     leg_server_env: dict[str, dict[str, str]]
     replay_divergent: dict[str, str]
@@ -498,12 +494,10 @@ def load_suite(name: str) -> Suite:
         cwd=raw["cwd"],
         filters=tuple(raw["filters"]),
         skips=tuple(raw.get("skips", ())),
-        parked_crate=raw.get("parked_crate"),
         endpoints=tuple(raw.get("endpoints", ())),
         env=dict(raw.get("env", {})),
         shards=int(raw.get("shards", 1)),
         timeout_seconds=float(raw.get("timeout_seconds", 300)),
-        redelivery_laws=tuple(raw.get("redelivery_laws", ())),
         panic_gate=bool(raw.get("panic_gate", False)),
         leg_server_env={leg: dict(raw.get(leg, {}).get("server_env", {})) for leg in LEGS},
         replay_divergent=dict(raw.get("replay", {}).get("divergent", {})),
@@ -513,16 +507,17 @@ def load_suite(name: str) -> Suite:
     )
 
 
-def parked_skips(crate: str) -> list[str]:
-    """Deferred-law invocations parked in scripts/deferred-laws/ shards."""
-    output = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check_law_execution_receipts.py"), "--parked-skips", crate],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.split()
-    return [value for value in output if value != "--skip"]
+def divergence_shard(suite: Suite, law: str) -> str:
+    """The file a held law's divergent entry lives in, for strict-xfail output.
+
+    A shard's reasons end in `(FIG-n)` naming the ticket file that holds them;
+    an inline `[suites.<name>.replay.divergent]` entry is edited in the
+    registry itself.
+    """
+    match = re.search(r"\((FIG-\d+)\)\s*$", suite.replay_divergent.get(law, ""))
+    if match:
+        return f"{DIVERGENCE_DIR.relative_to(ROOT)}/{match.group(1)}.toml"
+    return str(REGISTRY.relative_to(ROOT))
 
 
 def list_tests(binary: Path, cwd: Path, filters: Sequence[str], skips: Sequence[str]) -> list[str]:
@@ -597,8 +592,6 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     artifacts.mkdir(parents=True)
 
     skips = list(suite.skips)
-    if suite.parked_crate:
-        skips += parked_skips(suite.parked_crate)
     every = list_tests(binary, cwd, suite.filters, skips)
     listed = list_tests(binary, cwd, args.only, skips) if args.only else every
     if not listed:
@@ -607,30 +600,25 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
 
     # A registry entry naming a law that no longer exists is an exemption
     # nobody can see; refuse it.
-    stale = sorted(name for name in (*suite.replay_divergent, *suite.redelivery_laws) if name not in every)
+    stale = sorted(name for name in suite.replay_divergent if name not in every)
     if stale:
         for name in stale:
             print(f"STALE: {name} is named in {REGISTRY.relative_to(ROOT)} but is not a test of {suite.label}")
         return 1
+    # Strict xfail: a law the replay leg holds back still runs, so a hold whose
+    # divergence is fixed cannot hide -- a held law that passes fails the run.
     divergent = suite.replay_divergent if leg == "replay" and not args.include_divergent else {}
-    held_back = [name for name in listed if name in divergent]
-    to_run = [name for name in listed if name not in divergent]
-    redelivery = [name for name in to_run if name in suite.redelivery_laws]
-    plain = [name for name in to_run if name not in suite.redelivery_laws]
+    held = [name for name in listed if name in divergent]
+    to_run = list(listed)
 
     leg_config = {**LEGS[leg], **suite.leg_server_env.get(leg, {})}
     overrides = dict(assignment.split("=", 1) for assignment in args.server_env)
     shards: list[ShardPlan] = []
     shared: queue.Queue[str] = queue.Queue()
-    for name in plain:
+    for name in to_run:
         shared.put(name)
-    for index in range(max(1, min(args.shards or suite.shards, len(plain))) if plain else 0):
-        shards.append(ShardPlan(f"{leg}-{index}", {**leg_config, **RETRIES_OFF, **overrides}, shared))
-    if redelivery:
-        own: queue.Queue[str] = queue.Queue()
-        for name in redelivery:
-            own.put(name)
-        shards.append(ShardPlan(f"{leg}-redelivery", {**leg_config, **RETRIES_BOUNDED, **overrides}, own))
+    for index in range(max(1, min(args.shards or suite.shards, len(to_run))) if to_run else 0):
+        shards.append(ShardPlan(f"{leg}-{index}", {**leg_config, **RETRIES_BOUNDED, **overrides}, shared))
 
     # Reserve every port the suite binds before the first consumer starts:
     # reservations stay bound until claimed, so no allocation of this run --
@@ -643,11 +631,11 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
 
     timeout = args.timeout or suite.timeout_seconds
     log(
-        f"{suite.name} {leg}: {len(to_run)} tests over {len(shards)} server(s) "
-        f"({len(redelivery)} with redelivery), {timeout:.0f}s bound each"
+        f"{suite.name} {leg}: {len(to_run)} tests over {len(shards)} server(s), "
+        f"{timeout:.0f}s bound each"
     )
-    for name in held_back:
-        print(f"HELD BACK under replay: {name}\n    {divergent[name]}")
+    for name in held:
+        print(f"HELD under replay (expected to diverge): {name}\n    {divergent[name]}")
 
     outcomes: list[Outcome] = []
     failures: list[str] = []
@@ -678,9 +666,12 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
             status, seconds = run_one(binary, cwd, name, env, timeout, log_path, suite.panic_gate)
             with lock:
                 outcomes.append(Outcome(name, plan.name, status, seconds, log_path))
-                mark = {"ok": "ok", "failed": "FAILED", "panicked": "PANICKED", "timeout": "TIMED OUT"}[status]
+                if name in divergent:
+                    mark = "HEALED" if status == "ok" else "held"
+                else:
+                    mark = {"ok": "ok", "failed": "FAILED", "panicked": "PANICKED", "timeout": "TIMED OUT"}[status]
                 print(f"[{len(outcomes)}/{len(to_run)}] {mark:9} {seconds:7.2f}s  {name}", flush=True)
-                if status != "ok":
+                if status != "ok" and name not in divergent:
                     print(f"----- {name}: output tail -----\n{tail(log_path, args.tail_lines)}")
                     print(f"----- {server.name}: server log tail -----\n{tail(server.log_path, 40)}\n-----", flush=True)
 
@@ -706,7 +697,9 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
                 reservation.close()
     wall = time.monotonic() - started
 
-    bad = [outcome for outcome in outcomes if outcome.status != "ok"]
+    healed = [outcome for outcome in outcomes if outcome.name in divergent and outcome.status == "ok"]
+    still_held = [outcome for outcome in outcomes if outcome.name in divergent and outcome.status != "ok"]
+    bad = [outcome for outcome in outcomes if outcome.name not in divergent and outcome.status != "ok"]
     missing = sorted(set(to_run) - {outcome.name for outcome in outcomes})
     ordered = sorted(outcomes, key=lambda outcome: -outcome.seconds)
     summary = {
@@ -717,14 +710,15 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
         "tests": [
             {"name": o.name, "status": o.status, "seconds": round(o.seconds, 2), "shard": o.shard} for o in ordered
         ],
-        "held_back": held_back,
+        "held": held,
+        "healed": [outcome.name for outcome in healed],
         "not_run": missing,
     }
     (artifacts / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(
-        f"\n{suite.name} {leg}: {len(outcomes) - len(bad)}/{len(to_run)} ok in {wall:.1f}s "
+        f"\n{suite.name} {leg}: {len(outcomes) - len(bad) - len(still_held)}/{len(to_run)} ok in {wall:.1f}s "
         f"({sum(o.seconds for o in outcomes):.1f}s of test time on {len(shards)} server(s)); "
-        f"{len(held_back)} held back"
+        f"{len(still_held)} still held, {len(healed)} held law(s) now pass"
     )
     print("slowest:")
     for outcome in ordered[:10]:
@@ -735,13 +729,15 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
         print(f"{outcome.status.upper()}: {outcome.name} (log: {outcome.log})")
     for name in missing:
         print(f"NOT RUN: {name}")
-    if bad or missing or failures:
+    for outcome in healed:
+        print(f"{outcome.name}: held law now passes: remove it from {divergence_shard(suite, outcome.name)}")
+    if bad or missing or failures or healed:
         reason = suite.report_only.get(leg)
         if reason is None:
             return 1
         # Report-only: visible in the log and as a CI annotation, never green
         # by omission, but not a failed run.
-        count = len(bad) + len(missing) + len(failures)
+        count = len(bad) + len(missing) + len(failures) + len(healed)
         print(f"::warning title={suite.name} {leg} leg (report-only)::{count} law(s) failed; {reason}")
         return 0
     for outcome in outcomes:
@@ -825,7 +821,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     suite.add_argument("--only", action="append", default=[], help="a test-name filter replacing the suite's")
     suite.add_argument("--shards", type=int, help="servers to shard over (default: the suite's)")
     suite.add_argument("--timeout", type=float, help="per-test bound in seconds (default: the suite's)")
-    suite.add_argument("--include-divergent", action="store_true", help="also run the laws the replay leg holds back")
+    suite.add_argument(
+        "--include-divergent",
+        action="store_true",
+        help="run the laws the replay leg holds back as ordinary gating tests "
+        "(default: they run as expected failures, and a pass fails the run)",
+    )
     suite.add_argument("--server-env", action="append", default=[], help="KEY=VALUE server override (diagnostics)")
     suite.add_argument("--tail-lines", type=int, default=60)
 

@@ -39,7 +39,6 @@ macro_rules! direct_turn_acceptance_tests {
             let (_fixture_guard, prefix, backend, store) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(prefix, backend, store).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

@@ -122,9 +122,8 @@ default-filter = '''
 # default, so a CI nextest call that forgets the flag still reports in full.
 fail-fast = false
 # A test that only passes on retry is still a defect. Nothing in this file sets
-# `retries`, so this is a standing guard rather than a counterweight: should a
-# retry ever be added here, it must first earn a `.github/test-quarantines.json`
-# entry (ADR 0008), and even then a flaky outcome fails the run.
+# `retries`, so this is a standing guard rather than a counterweight: a flaky
+# outcome fails the run (ADR 0008).
 flaky-result = "fail"
 
 # CI bounds an ordinary test at five minutes: the baseline P99 was 1.209s and

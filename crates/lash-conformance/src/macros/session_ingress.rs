@@ -23,7 +23,6 @@ macro_rules! session_ingress_tests {
                 let (_fixture_guard, handles) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(handles).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };

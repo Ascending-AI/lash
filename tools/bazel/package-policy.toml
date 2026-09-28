@@ -41,8 +41,7 @@ reason = "proves nothing without a live PostgreSQL or S3 server; the service job
 # ran 441-578 s and the integration binary 122-140 s of a 610-940 s step.
 # Each shard runs through `//tools/bazel:postgres_slot_runner`, which gives it
 # a database of its own, so shards run in parallel without sharing the tables
-# `reset()` truncates. `scripts/ci/check_test_shard_coverage.py` proves the
-# shards of each label partition the full `--list`.
+# `reset()` truncates.
 [[rule]]
 packages = ["lash-internal-postgres-store"]
 kinds = ["test"]

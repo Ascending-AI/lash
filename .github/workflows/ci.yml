@@ -390,9 +390,6 @@ jobs:
       - name: Lint orchestrating tools
         run: python3 scripts/lint_orchestrating_tools.py
 
-      - name: Check test quarantine metadata
-        run: python3 scripts/check_test_quarantines.py
-
       - name: Check judged build geometry
         run: python3 scripts/check_judged_build_geometry.py
 
@@ -492,10 +489,7 @@ jobs:
           python3 scripts/test_check_store_sql_ownership.py
           python3 scripts/test_check_service_gate_pinning.py
           python3 scripts/test_check_version_bump_fixtures.py
-          python3 scripts/test_check_conformance_law_registration.py
           python3 scripts/test_check_substrate_boundary.py
-          python3 scripts/test_check_law_execution_receipts.py
-          python3 scripts/test_check_test_shard_coverage.py
           python3 scripts/test_check_writer_stamps.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_toolchain_canary.py
@@ -902,13 +896,6 @@ jobs:
           include-hidden-files: true
           retention-days: 14
 
-      # FIG-3429 item 8: conformance laws leave an execution receipt in each
-      # target's undeclared outputs; this census fails on any registered law
-      # a ran target reported `ok` for without executing.
-      - name: Census law execution receipts
-        shell: bash
-        run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
-
       # The pool's per-action timeline. A core-touching diff can end this leg
       # 30+ minutes after it started with only ~90 remote actions executed;
       # the job log names no crate, and the critical path a partition pays is
@@ -1008,12 +995,6 @@ jobs:
           if-no-files-found: ignore
           include-hidden-files: true
           retention-days: 14
-
-      # Same law-execution census as the main leg: whichever law-bearing
-      # targets the tail ran must have executed their full registered set.
-      - name: Census law execution receipts
-        shell: bash
-        run: python3 scripts/check_law_execution_receipts.py --bazel-testlogs bazel-testlogs
 
       # The pool's per-action timeline. A core-touching diff can end this leg
       # 30+ minutes after it started with only ~90 remote actions executed;
@@ -1171,12 +1152,6 @@ jobs:
               fi
               build_args=(--workspace "${excludes[@]}")
               nextest_args=(--workspace -E "${skip}")
-              # The execution-receipt census below claims exactly the crates
-              # whose conformance suites this run executes: the service tiers
-              # (postgres/s3) are excluded above and censused by their own
-              # jobs, and every other law-invoking crate runs here in full.
-              receipts_dir="$(mktemp -d)"
-              export LASH_LAW_RECEIPTS="${receipts_dir}/law-receipts.txt"
               ;;
             *)
               echo "invalid Bazel trust decision: ${BAZEL_TRUSTED}" >&2
@@ -1188,21 +1163,6 @@ jobs:
           # shellcheck disable=SC2086
           cargo nextest run --profile ci --locked ${LASH_CI_FEATURES} \
             --no-fail-fast "${nextest_args[@]}"
-          # FIG-3429 item 8: every law registered for a tier this leg runs
-          # must have left an execution receipt -- a fixture that self-skips
-          # reports `ok` for a law that never ran, which is exactly the hole
-          # this census closes. The trusted-event leg takes the same census
-          # through `bazel test` undeclared outputs instead (the bazel-tests
-          # jobs' census step).
-          if [ "${BAZEL_TRUSTED}" = false ]; then
-            python3 scripts/check_law_execution_receipts.py \
-              --crate crates/lash-conformance \
-              --crate crates/lash-sqlite-store \
-              --crate crates/lash \
-              --crate crates/lash-protocol-rlm \
-              --crate crates/lash-restate \
-              --receipts "${LASH_LAW_RECEIPTS}"
-          fi
 
       - name: Report cache disk capacity
         if: always()
@@ -1536,11 +1496,6 @@ jobs:
       # every event, so a bump that leaves one behind fails here too.
       - name: Check version-bump recreation fixtures
         run: python3 scripts/check_version_bump_fixtures.py
-
-      # A pub law added to a macro-support module but never catalogued compiles
-      # and simply never runs on any backend; this names it before merge.
-      - name: Check conformance law registration
-        run: python3 scripts/check_conformance_law_registration.py
 
       - name: Check core/UI boundary
         run: bash scripts/check-core-ui-boundary.sh

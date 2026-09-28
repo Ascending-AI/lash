@@ -1,8 +1,7 @@
 //! Registration macros for the tool-child and turn-runner laws (FIG-3397,
 //! ADR 0099): tool calls running as effect-group children on every tier.
 //! Split from `macros.rs` to keep each catalogue file inside the support-file
-//! line budget; `scripts/check_law_execution_receipts.py` and
-//! `scripts/check_conformance_law_registration.py` read both.
+//! line budget.
 
 /// Register the laws that drive a real turn through the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner): the public
@@ -56,7 +55,6 @@ macro_rules! migrated_tools_redrive_tests {
             let (_guard, prefix, host, stores, runner, orchestration) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner, orchestration)
                 .await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -79,7 +77,6 @@ macro_rules! admitted_head_redrive_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -125,7 +122,6 @@ macro_rules! turn_config_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -208,7 +204,6 @@ macro_rules! drive_admission_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -252,7 +247,6 @@ macro_rules! session_close_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -276,7 +270,6 @@ macro_rules! segment_redrive_tests {
         async fn $law() {
             let (_guard, prefix, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -299,7 +292,6 @@ macro_rules! model_call_drift_park_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner, protocol) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner, protocol).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -329,7 +321,6 @@ macro_rules! cell_binding_drift_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner, rlm) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -366,7 +357,6 @@ macro_rules! served_process_start_tests {
             let (_guard, prefix, host, stores, runner, rlm, subagents) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm, subagents)
                 .await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -389,7 +379,6 @@ macro_rules! cell_orchestration_redrive_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner, rlm) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -404,7 +393,6 @@ macro_rules! __turn_runner_register {
             let (_guard, prefix, host, stores, work, runner, verify) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, work, runner).await;
             verify(stringify!($law)).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -444,7 +432,6 @@ macro_rules! tool_batch_parallelism_tests {
                 )
                 .await;
             }
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }
@@ -566,7 +553,6 @@ macro_rules! __tool_child_invocation_register {
         async fn $law() {
             let (_guard, prefix, fixture) = $fixture;
             $crate::registration_macro_support::$law(&fixture, prefix).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

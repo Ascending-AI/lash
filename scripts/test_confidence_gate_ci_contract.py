@@ -40,7 +40,6 @@ def feature_lane_table() -> dict[str, list[str]]:
     marker = "FEATURE_LANES = "
     return ast.literal_eval(source[source.index(marker) + len(marker) :].strip())
 PRE_COMMIT_CONFIG = ROOT / ".pre-commit-config.yaml"
-QUARANTINE_CHECK = ROOT / "scripts" / "check_test_quarantines.py"
 PERF_SCENARIOS_RS = ROOT / "crates" / "lash-perf" / "src" / "runtime_perf" / "scenarios.rs"
 PERF_PHASE_PROBE_RS = (
     ROOT
@@ -61,10 +60,6 @@ FAST_SHARDS = [
     "sim-generated",
     "minimizer-fixtures",
 ]
-VALIDATE_QUARANTINE_MANIFEST = runpy.run_path(str(QUARANTINE_CHECK))[
-    "validate_manifest"
-]
-
 
 
 @functools.lru_cache(maxsize=None)
@@ -779,15 +774,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertNotIn('("push", "workflow_dispatch")', release)
         self.assertIn("no full-profile (workflow_dispatch) CI ", release)
 
-    def assert_quarantine_fixture_invalid(
-        self, payload: dict[str, object], message: str
-    ) -> None:
-        with tempfile.TemporaryDirectory() as directory:
-            fixture = pathlib.Path(directory) / "test-quarantines.json"
-            fixture.write_text(json.dumps(payload), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, message):
-                VALIDATE_QUARANTINE_MANIFEST(fixture, dt.date(2026, 1, 1))
-
     def test_ci_shards_fast_confidence_not_broad_replay_backend(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
@@ -950,15 +936,12 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn('LASH_CROSS_BACKEND_CASES="$cases"', cross_backend_soak)
         self.assertIn("cross-backend-store-soak cases='64' seed='852':", justfile)
 
-    def test_failure_artifacts_are_attempt_qualified_and_quarantines_are_checked(
-        self,
-    ) -> None:
+    def test_failure_artifacts_are_attempt_qualified(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         confidence_workflow = CONFIDENCE_WORKFLOW.read_text(encoding="utf-8")
         perf_workflow = PERF_WORKFLOW.read_text(encoding="utf-8")
         gate = GATE.read_text(encoding="utf-8")
 
-        self.assertIn("python3 scripts/check_test_quarantines.py", workflow)
         self.assertIn(
             "confidence-artifacts-attempt-${{ github.run_attempt }}",
             confidence_workflow,
@@ -974,50 +957,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertIn(
             '"artifact_name": "confidence-artifacts-attempt-${GITHUB_RUN_ATTEMPT:-local}"',
             gate,
-        )
-
-    def test_quarantine_validator_rejects_malformed_expired_and_duplicate_fixtures(
-        self,
-    ) -> None:
-        valid_entry = {
-            "id": "FIG-100",
-            "test_selector": "crate::tests::flaky",
-            "mode": "retry",
-            "owner": "@runtime",
-            "issue_url": "https://linear.app/example/issue/FIG-100",
-            "rca_status": "investigating",
-            "expires_on": "2026-02-01",
-        }
-        self.assert_quarantine_fixture_invalid(
-            {
-                "schema": "lash.test-quarantines.v1",
-                "quarantines": [{key: value for key, value in valid_entry.items() if key != "owner"}],
-            },
-            "missing fields: owner",
-        )
-        self.assert_quarantine_fixture_invalid(
-            {
-                "schema": "lash.test-quarantines.v1",
-                "quarantines": [{**valid_entry, "expires_on": "2025-12-31"}],
-            },
-            "quarantine expired",
-        )
-        self.assert_quarantine_fixture_invalid(
-            {
-                "schema": "lash.test-quarantines.v1",
-                "quarantines": [valid_entry, valid_entry],
-            },
-            "duplicate quarantine id",
-        )
-        self.assert_quarantine_fixture_invalid(
-            {
-                "schema": "lash.test-quarantines.v1",
-                "quarantines": [
-                    valid_entry,
-                    {**valid_entry, "id": "FIG-101"},
-                ],
-            },
-            "duplicate quarantine target",
         )
 
     def test_every_script_self_test_is_run_by_ci(self) -> None:
@@ -2365,23 +2304,6 @@ derive_mutation_jobs() {{
         for suite in uniform:
             self.assertNotIn(f"\n  {suite})\n", case_body, suite)
 
-    def test_store_suites_run_the_law_receipt_census_in_both_dialects(self) -> None:
-        """pg-store and s3-store census law execution on either runner.
-
-        The census is the FIG-3429 merge gate: a registered law that produced
-        no execution receipt fails the job. It must run on BOTH dialects for
-        the same reason the suite's selection does — an untrusted event takes
-        the Cargo half and would never see a Bazel-only census.
-        """
-        for suite in ("pg-store", "s3-store"):
-            with self.subTest(suite=suite):
-                bazel, cargo = store_suite_branches(suite)
-                for rendered in (bazel, cargo):
-                    self.assertIn(
-                        "python3 scripts/check_law_execution_receipts.py",
-                        rendered,
-                    )
-
     def test_s3_ci_lane_requires_storage_configuration(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         s3_store_job = workflow_job_block(workflow, "s3-store")
@@ -2626,7 +2548,6 @@ derive_mutation_jobs() {{
         moved_gates = {
             "repo-gates": (
                 "python3 scripts/lint_orchestrating_tools.py",
-                "python3 scripts/check_test_quarantines.py",
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),

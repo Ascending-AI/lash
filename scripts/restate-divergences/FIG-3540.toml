@@ -1,11 +1,6 @@
-# Replay-leg divergences held back under the ticket that brings them back:
-# `scripts/restate-divergences/<ticket>.toml`, one file per ticket, so a new
-# divergence never edits `scripts/restate-suites.toml`. Each entry is the
-# law's libtest name and the reason it is held, ending `(FIG-n)` -- the
-# shard's own ticket. The runner refuses an entry that names no test, and
-# `--include-divergent` runs them.
-
+# On replay the restarted ingress owner's redriven turn diverges from its
+# journal -- the first execution recorded a `call` where the replayed run
+# issues a `run` -- so Restate pauses the invocation on the mismatch and the
+# recovered turn times out awaiting its cancellation terminal.
 [suites.agent-workbench.replay.divergent]
-# The replacement owner cannot supersede the dead owner's SQL session-execution
-# lease within the law's window.
-"tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable" = "the SQL session-execution lease does not supersede on replay; S8's drive_epoch replaces it (FIG-3540)"
+"tests::restate_recovery_tests::live_restate_ingress_owner_restart_resumes_and_remains_cancellable" = "the redriven turn's replay diverges from its journal (recorded `call` at index 15, replay attempts `run`); Restate pauses the invocation on the journal mismatch and the recovered turn times out awaiting its cancellation terminal (FIG-3540)"

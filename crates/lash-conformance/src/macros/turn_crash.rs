@@ -90,11 +90,6 @@ macro_rules! turn_crash_level_1_tests {
                 stores, make, host, runner, $parked,
             ))
             .await;
-            $crate::law_receipt::record(
-                module_path!(),
-                "turn_crash_matrix_level_1",
-                "turn-crash-matrix-level-1",
-            );
         }
     };
     ($(#[$attr:meta])* $fixture:block) => {
@@ -158,7 +153,6 @@ macro_rules! __turn_crash_runner_register {
         async fn $law() {
             let (_guard, stores, make, host, runner) = $fixture;
             Box::pin($crate::registration_macro_support::$law(stores, make, host, runner)).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

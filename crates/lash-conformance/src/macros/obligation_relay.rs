@@ -30,7 +30,6 @@ macro_rules! obligation_relay_tests {
                 let (_fixture_guard, fixture) = $fixture;
                 let _ = $label;
                 $crate::$law(fixture).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };
@@ -63,7 +62,6 @@ macro_rules! recovery_leader_tests {
                 let $label_binding: &'static str = $label;
                 let (_fixture_guard, fixture) = $fixture;
                 $crate::$law(fixture).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };

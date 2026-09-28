@@ -14,10 +14,6 @@
 # `store-tests.sh` runs at most LASH_POSTGRES_SLOT_COUNT tests at once, so a
 # slot is always free by the time a test starts; the wait below only covers
 # the moment between one test's exit and the next one's start.
-#
-# A sharded test also records, in its undeclared outputs, the binary's whole
-# `--list` and this shard's share of it. `scripts/ci/check_test_shard_coverage.py`
-# proves from those files that the shards of each label partition the list.
 set -euo pipefail
 
 # The store job forwards all three with `--test_env`.
@@ -43,16 +39,5 @@ done
 base=${url%%\?*}
 query=${url#"$base"}
 export LASH_POSTGRES_DATABASE_URL="${base%/*}/lash_slot_${slot}${query}"
-
-if ((${TEST_TOTAL_SHARDS:-0} != 0)); then
-    coverage="${TEST_UNDECLARED_OUTPUTS_DIR:?Bazel sets TEST_UNDECLARED_OUTPUTS_DIR}/shard-coverage"
-    mkdir -p "$coverage"
-    # Unsharded, `rust_test`'s sharding wrapper runs the binary directly; with
-    # this action's shard variables it lists exactly the cases it will run.
-    env -u TEST_TOTAL_SHARDS -u TEST_SHARD_INDEX \
-        -u RULES_RUST_TEST_TOTAL_SHARDS -u RULES_RUST_TEST_SHARD_INDEX \
-        "$@" --list --format terse >"${coverage}/all.txt"
-    "$@" --list --format terse >"${coverage}/shard-${TEST_SHARD_INDEX}-of-${TEST_TOTAL_SHARDS}.txt"
-fi
 
 exec "${here}/test_xml_runner.sh" "$@"

@@ -563,12 +563,11 @@ UNCONSUMED_CI_PATHS: Mapping[str, str] = {
     "scripts/tool-batch-baseline.sh": "run by hand for the tool-batch baseline measurement",
 }
 
-# Directories a CI script reads whole, one file per change -- the deferred-law
-# shards, the replay-divergence shards. Name matching cannot see the glob, so
-# each directory declares its reader here: every tracked file under the key is
+# Directories a CI script reads whole, one file per change -- the
+# replay-divergence shards. Name matching cannot see the glob, so each
+# directory declares its reader here: every tracked file under the key is
 # consumed by the value, which passes its own families on transitively.
 SHARD_DIR_READERS: Mapping[str, str] = {
-    "scripts/deferred-laws": "scripts/check_law_execution_receipts.py",
     "scripts/restate-divergences": "scripts/ci/restate_suite.py",
 }
 

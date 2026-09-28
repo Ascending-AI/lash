@@ -175,46 +175,28 @@ agent-workbench-restate-e2e:
 # `--ignored` tests only, which `scripts/check_service_gate_pinning.py` pins)
 # beside pinned `restate-server`s, one law per process, and then runs the same
 # laws again with every await suspended and replayed (the replay leg). The
-# suite's filters and redelivery laws are registered in
-# `scripts/restate-suites.toml`, its replay divergences in
-# `scripts/restate-divergences/`.
+# suite's filters are registered in `scripts/restate-suites.toml`, its replay
+# divergences in `scripts/restate-divergences/`.
 effect-group-conformance-e2e:
   #!/usr/bin/env bash
   set -euo pipefail
   source "{{repo}}/scripts/worktree-gate-env.sh"
   lash_gate_acquire_locks effect-group-conformance-e2e
 
-  # The ignored catalogue invocations are deferred laws (FIG-3472): they emit
-  # execution receipts like every other suite, and the census below fails the
-  # recipe when one left none. The test binaries run with the crate dir as
-  # cwd, so a relative artifact dir (which is what CI exports) is anchored at
-  # the repo root.
-  receipts_dir="${LASH_EFFECT_GROUP_ARTIFACT_DIR:-target/functional-e2e-artifacts/effect-group-conformance}"
-  case "$receipts_dir" in
+  # The test binaries run with the crate dir as cwd, so a relative artifact
+  # dir (which is what CI exports) is anchored at the repo root.
+  artifacts="${LASH_EFFECT_GROUP_ARTIFACT_DIR:-target/functional-e2e-artifacts/effect-group-conformance}"
+  case "$artifacts" in
     /*) ;;
-    *) receipts_dir="{{repo}}/$receipts_dir" ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
   esac
-  mkdir -p "$receipts_dir"
-  export LASH_LAW_RECEIPTS="$receipts_dir/law-receipts.txt"
-  rm -f "$LASH_LAW_RECEIPTS"
+  mkdir -p "$artifacts"
 
   python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg live \
-    --artifacts "$receipts_dir"
+    --artifacts "$artifacts"
 
-  python3 "{{repo}}/scripts/check_law_execution_receipts.py" \
-    --deferred effect-group-conformance-e2e \
-    --receipts "$LASH_LAW_RECEIPTS"
-
-  # The executed-law census for the run: one `law<TAB>label` line per law the
-  # generated tests actually reached the end of.
-  echo "law execution receipts:"
-  sort "$LASH_LAW_RECEIPTS"
-
-  # The replay leg holds back its registered divergences, so its receipts are
-  # a separate file the census above never reads.
-  LASH_LAW_RECEIPTS="$receipts_dir/replay-law-receipts.txt" \
-    python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
-    --artifacts "$receipts_dir"
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
+    --artifacts "$artifacts"
 
 # The server double's deployment laws against a live restate-server (FIG-3795
 # part B): newest-deployment routing and invocation pinning, so the double

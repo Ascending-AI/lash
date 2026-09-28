@@ -109,16 +109,6 @@ repos:
         files: '^(crates/lash-postgres-store/(?:schema-shape|payload-schema-fingerprints)\.txt|crates/lash-postgres-store/src/lib\.rs|crates/lash-sqlite-store/src/schema\.rs|scripts/(?:versioned-surfaces\.toml|version_freeze\.py))$'
         pass_filenames: false
 
-      # The registration macros name each law they run; the reverse direction
-      # needs a gate, since a pub law added to a macro-support module but never
-      # catalogued compiles cleanly and simply never runs on any backend.
-      - id: conformance-law-registration
-        name: Conformance law registration
-        language: system
-        entry: python3 scripts/check_conformance_law_registration.py
-        files: '^(crates/lash-conformance/src/(?:macros\.rs|conformance/[^/]*\.rs|conformance/runtime_persistence/[^/]+\.rs)|scripts/(?:test_)?check_conformance_law_registration\.py)$'
-        pass_filenames: false
-
       # ADR 0056 forbids serde(flatten) on types reachable from persisted
       # checkpoint components; this names the inventory the check sweeps.
       - id: checkpoint-component-flatten

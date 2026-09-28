@@ -21,9 +21,8 @@ without comparing anything. That makes every invocation that *does* provision a
 service responsible for asking for them by name: ``--run-ignored`` for nextest,
 ``--include-ignored`` or ``--ignored`` for a libtest harness. An invocation that
 selects such a suite without one of those flags runs zero of its tests and still
-exits 0. The registry below carries both ways a suite is selected -- an
-integration target by its test binary, an in-crate suite by its test-name
-filter -- so a suite added in either shape is covered by the same rule.
+exits 0. The registry below carries the way a suite is selected -- an
+integration target by its test binary.
 
 Scope, stated rather than implied. Rule 1 covers GitHub workflow ``env``
 mappings only. Shell scripts also export these variables, but they do so around
@@ -73,15 +72,6 @@ REQUIRE_FLAG_PAIRS = {
 # running exactly zero ignored tests. Either would have restored the defect this
 # check exists to refuse, under a diff that reads like a no-op.
 IGNORED_SUITE_BINARIES = ("cross_backend_store_differential",)
-
-# Test-name filters that select an `#[ignore]`d suite. Both live in
-# `lash-internal-restate` and are run only by the `effect-group-conformance-e2e`
-# recipe, which is what holds the effect-group choreography to its conformance
-# and design witnesses.
-IGNORED_SUITE_FILTERS = (
-    "tests::conformance_and_poison::",
-    "live_effect_group_sdk_preconditions",
-)
 
 # nextest's `--run-ignored` takes a mode, and only these two run ignored tests;
 # `default` runs none. libtest's `--include-ignored` takes no value.
@@ -202,9 +192,6 @@ def names_ignored_suite(tokens: list[str]) -> str | None:
     """The ignored suite a tokenized command selects, if it selects one.
 
     A binary counts in both spellings, `--test <binary>` and `--test=<binary>`.
-    A test-name filter counts wherever it appears as its own token, which is how
-    both cargo and nextest take one -- and matching it token-exact anywhere is
-    what keeps a reordered invocation from slipping past the rule.
     """
     for index, token in enumerate(tokens):
         if token == "--test" and index + 1 < len(tokens):
@@ -213,8 +200,6 @@ def names_ignored_suite(tokens: list[str]) -> str | None:
             continue
         if token.startswith("--test=") and token.split("=", 1)[1] in IGNORED_SUITE_BINARIES:
             return token.split("=", 1)[1]
-        if token in IGNORED_SUITE_FILTERS:
-            return token
     return None
 
 

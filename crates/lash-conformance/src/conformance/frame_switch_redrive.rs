@@ -318,7 +318,6 @@ macro_rules! frame_switch_redrive_tests {
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
             $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
-            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

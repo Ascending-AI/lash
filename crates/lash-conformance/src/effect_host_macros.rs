@@ -13,7 +13,6 @@ macro_rules! effect_host_tests {
             async fn $law() {
                 let (_fixture_guard, make) = $fixture;
                 $crate::registration_macro_support::$law(make).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };

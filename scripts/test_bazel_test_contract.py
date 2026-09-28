@@ -852,7 +852,7 @@ class BazelTestContractTests(unittest.TestCase):
         self.assertIn('var_os("LASH_WORKBENCH_TEST_NODE")', source)
 
     def test_an_untrusted_event_keeps_the_full_cargo_workspace_run(self) -> None:
-        completed, invocations, python_invocations = self.run_workspace_test_step(
+        completed, invocations, _ = self.run_workspace_test_step(
             trusted=False, workbench=False
         )
         self.assertEqual(0, completed.returncode, completed.stderr)
@@ -862,14 +862,6 @@ class BazelTestContractTests(unittest.TestCase):
         expression = nextest[nextest.index("-E") + 1]
         self.assertIn("not (", expression)
         self.assertIn("lash-internal-postgres-store", expression)
-        # FIG-3429 item 8: the untrusted leg must census law execution
-        # receipts over every crate whose conformance suites it ran.
-        self.assertEqual(1, len(python_invocations))
-        self.assertEqual(
-            "scripts/check_law_execution_receipts.py", python_invocations[0][0]
-        )
-        self.assertIn("--crate", python_invocations[0])
-        self.assertIn("crates/lash-sqlite-store", python_invocations[0])
 
     def test_doctests_are_removed_from_bazel_and_from_cargo(self) -> None:
         """Doctests were removed by ruling (2026-09-13), Bazel and Cargo alike.

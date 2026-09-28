@@ -98,9 +98,8 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual({}, MODULE.LEGS["live"])
         self.assertEqual({"RESTATE_WORKER__INVOKER__INACTIVITY_TIMEOUT": "0s"}, MODULE.LEGS["replay"])
 
-    def test_plain_shards_kill_a_failed_invocation_at_once(self) -> None:
-        self.assertEqual("1", MODULE.RETRIES_OFF["RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS"])
-        self.assertEqual("kill", MODULE.RETRIES_OFF["RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS"])
+    def test_every_shard_retries_on_a_short_bounded_schedule(self) -> None:
+        self.assertEqual("30", MODULE.RETRIES_BOUNDED["RESTATE_DEFAULT_RETRY_POLICY__MAX_ATTEMPTS"])
         self.assertEqual("kill", MODULE.RETRIES_BOUNDED["RESTATE_DEFAULT_RETRY_POLICY__ON_MAX_ATTEMPTS"])
 
 
@@ -266,39 +265,79 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual("ok", self.run_one("tests::panics_in_background"))
         self.assertEqual("panicked", self.run_one("tests::panics_in_background", panic_gate=True))
 
-    def test_a_registry_entry_naming_no_test_is_refused_before_any_server_starts(self) -> None:
-        suite = MODULE.Suite(
+    def suite(self, replay_divergent: dict[str, str]) -> object:
+        return MODULE.Suite(
             name="fake",
             label="//fake:fake",
             cwd=str(self.root),
             filters=("tests::",),
             skips=(),
-            parked_crate=None,
             endpoints=(),
             env={},
             shards=1,
             timeout_seconds=5,
-            redelivery_laws=("tests::renamed_long_ago",),
             panic_gate=False,
             leg_server_env={"live": {}, "replay": {}},
-            replay_divergent={},
+            replay_divergent=replay_divergent,
             report_only={},
         )
-        args = argparse.Namespace(
-            binary=str(self.fake.path),
-            artifacts=str(self.root / "artifacts"),
-            only=[],
-            shards=None,
-            timeout=None,
-            include_divergent=False,
-            server_env=[],
-            tail_lines=5,
+
+    def args(self, **overrides) -> argparse.Namespace:
+        return argparse.Namespace(
+            **{
+                **dict(
+                    binary=str(self.fake.path),
+                    artifacts=str(self.root / "artifacts"),
+                    only=[],
+                    shards=None,
+                    timeout=None,
+                    include_divergent=False,
+                    server_env=[],
+                    tail_lines=5,
+                ),
+                **overrides,
+            }
         )
+
+    def test_a_registry_entry_naming_no_test_is_refused_before_any_server_starts(self) -> None:
+        suite = self.suite({"tests::renamed_long_ago": "held back (FIG-9)"})
         output = io.StringIO()
         with mock.patch.object(MODULE, "RestateServer") as server, contextlib.redirect_stdout(output):
-            self.assertEqual(1, MODULE.run_suite(suite, "live", args))
+            self.assertEqual(1, MODULE.run_suite(suite, "replay", self.args()))
         server.assert_not_called()
         self.assertIn("STALE: tests::renamed_long_ago", output.getvalue())
+
+    def test_a_held_law_that_passes_fails_the_replay_leg(self) -> None:
+        suite = self.suite({"tests::passes": "held back (FIG-9)"})
+        output = io.StringIO()
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(output):
+            self.assertEqual(1, MODULE.run_suite(suite, "replay", self.args(only=["tests::passes"])))
+        self.assertIn("tests::passes: held law now passes: remove it from ", output.getvalue())
+        self.assertIn("FIG-9.toml", output.getvalue())
+
+    def test_a_held_law_that_still_fails_does_not_fail_the_replay_leg(self) -> None:
+        suite = self.suite({"tests::fails": "held back (FIG-9)"})
+        output = io.StringIO()
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(output):
+            self.assertEqual(0, MODULE.run_suite(suite, "replay", self.args(only=["tests::fails"])))
+        self.assertIn("held", output.getvalue())
+
+    def test_a_held_law_failing_the_live_leg_fails_the_run(self) -> None:
+        suite = self.suite({"tests::fails": "held back (FIG-9)"})
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(1, MODULE.run_suite(suite, "live", self.args(only=["tests::fails"])))
+
+    def test_include_divergent_gates_held_laws_ordinarily(self) -> None:
+        suite = self.suite({"tests::passes": "held back (FIG-9)"})
+        output = io.StringIO()
+        with mock.patch.object(MODULE, "RestateServer"), contextlib.redirect_stdout(output):
+            self.assertEqual(
+                0,
+                MODULE.run_suite(
+                    suite, "replay", self.args(only=["tests::passes"], include_divergent=True)
+                ),
+            )
+        self.assertNotIn("held law now passes", output.getvalue())
 
 
 if __name__ == "__main__":

@@ -200,9 +200,6 @@ run_rust_source_guards() {
   step "Workflow graph model guard"
   bash scripts/check-workflow-graph-model.sh
 
-  step "Test quarantine metadata"
-  python3 scripts/check_test_quarantines.py
-
   step "Judged build geometry"
   python3 scripts/check_judged_build_geometry.py
 

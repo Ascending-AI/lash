@@ -11,7 +11,7 @@ use lash_core::store::RuntimePersistence;
 use super::{reset, storage};
 
 lash_conformance::restored_claim_cede_tests!(
-    #[ignore = "FIG-3862: claims and claim ceding are deleted by B5"]
+    #[ignore = "parked: claim ceding remains until the claim-free engine-journaled selection and settlement contract lands; FIG-3927"]
     {
         let Some((database_lock, storage)) = storage().await else {
             eprintln!(

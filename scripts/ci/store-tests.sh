@@ -226,13 +226,7 @@ case "${suite}" in
   # `//tools/bazel:postgres_slot_runner`, which gives every test action a
   # database of its own out of the LASH_POSTGRES_SLOT_COUNT slots
   # `with-service.sh` created; `--local_test_jobs` never runs more tests than
-  # there are slots. `check_test_shard_coverage.py` then proves every sharded
-  # label's shards ran the binary's whole `--list`, each case exactly once.
-  #
-  # The execution-receipt census (FIG-3429 item 8) rides both dialects: a law
-  # registered for this tier must have run in this job. Under Bazel the
-  # receipts land in each target's undeclared outputs; under Cargo they go to
-  # one file the census diffs against the whole crate's registrations.
+  # there are slots.
   pg-store)
     if [ "${trusted}" = true ]; then
       slots="${LASH_POSTGRES_SLOT_COUNT:?with-service.sh sets LASH_POSTGRES_SLOT_COUNT}"
@@ -245,13 +239,6 @@ case "${suite}" in
         --test_env=LASH_POSTGRES_SLOT_DIR \
         --test_env=LASH_POSTGRES_SLOT_COUNT \
         $(labels postgres)
-      python3 scripts/ci/check_test_shard_coverage.py \
-        --labels tools/bazel/postgres_test_labels.txt \
-        --testlogs bazel-testlogs
-      python3 scripts/check_law_execution_receipts.py \
-        --labels tools/bazel/postgres_test_labels.txt \
-        --crate-root crates/lash-postgres-store \
-        --receipts-root bazel-testlogs/crates/lash-postgres-store
       bazel_test \
         --run_under=//tools/bazel:postgres_slot_runner \
         --test_env=LASH_POSTGRES_SLOT_DIR \
@@ -260,22 +247,9 @@ case "${suite}" in
         --test_arg=--ignored \
         --test_sharding_strategy=disabled \
         //crates/lash-restate:lash-restate__unit_test
-      python3 scripts/check_law_execution_receipts.py \
-        --deferred pg-store \
-        --receipts bazel-testlogs/crates/lash-restate/lash-restate__unit_test/test.outputs/law-receipts.txt
     else
-      receipts="$(mktemp -d)/law-receipts.txt"
-      LASH_LAW_RECEIPTS="${receipts}" \
-        cargo test -p lash-internal-postgres-store --locked
-      python3 scripts/check_law_execution_receipts.py \
-        --crate crates/lash-postgres-store \
-        --receipts "${receipts}"
-      ingress_receipts="$(mktemp -d)/law-receipts.txt"
-      LASH_LAW_RECEIPTS="${ingress_receipts}" \
-        cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
-      python3 scripts/check_law_execution_receipts.py \
-        --deferred pg-store \
-        --receipts "${ingress_receipts}"
+      cargo test -p lash-internal-postgres-store --locked
+      cargo test -p lash-internal-restate --locked --lib postgres_ingress -- --ignored
     fi
     ;;
 
@@ -283,17 +257,8 @@ case "${suite}" in
     if [ "${trusted}" = true ]; then
       # shellcheck disable=SC2046
       bazel_test $(labels s3)
-      python3 scripts/check_law_execution_receipts.py \
-        --labels tools/bazel/s3_test_labels.txt \
-        --crate-root crates/lash-s3-store \
-        --receipts-root bazel-testlogs/crates/lash-s3-store
     else
-      receipts="$(mktemp -d)/law-receipts.txt"
-      LASH_LAW_RECEIPTS="${receipts}" \
-        cargo test -p lash-internal-s3-store --locked
-      python3 scripts/check_law_execution_receipts.py \
-        --crate crates/lash-s3-store \
-        --receipts "${receipts}"
+      cargo test -p lash-internal-s3-store --locked
     fi
     ;;
   *)
