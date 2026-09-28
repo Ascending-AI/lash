@@ -51,11 +51,10 @@ fn text(text: impl Into<String>) -> LlmResponse {
     }
 }
 
-fn build_core(
+fn core_builder(
     backend: &RestateTestBackend,
     provider: lash_core::facade_support::ProviderHandle,
-    owner: &str,
-) -> lash::LashCore {
+) -> lash::LashCoreBuilder {
     lash::LashCore::standard_builder(backend.lash_backend(), lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -66,6 +65,14 @@ fn build_core(
                 .build()
                 .expect("model spec"),
         )
+}
+
+fn build_core(
+    backend: &RestateTestBackend,
+    provider: lash_core::facade_support::ProviderHandle,
+    owner: &str,
+) -> lash::LashCore {
+    core_builder(backend, provider)
         .build(lash_core::LeaseOwnerIdentity::opaque(
             "lash-restate-test",
             owner,
@@ -455,6 +462,157 @@ async fn dropping_the_handle_stops_nothing() {
     let outcome = attach(&world.backend, &session_id, request_of(&input_id)).await;
     assert_eq!(answers(&outcome), ["answer 1"]);
     assert_eq!(world.calls.load(Ordering::SeqCst), 1);
+}
+
+/// A tool that holds the turn calling it until the law releases it: the
+/// turn's tool group child is in flight while the law acts.
+#[derive(Default)]
+struct GatedTool {
+    runs: AtomicUsize,
+    reached: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
+fn gated_tool_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:hold_turn",
+        "hold_turn",
+        "Hold the calling turn until released.",
+        lash_core::ToolDefinition::default_input_schema(),
+        serde_json::json!({ "type": "object" }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for GatedTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![gated_tool_definition().manifest()]
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == "hold_turn").then(|| Arc::new(gated_tool_definition().contract()))
+    }
+
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        self.runs.fetch_add(1, Ordering::SeqCst);
+        self.reached.notify_one();
+        self.release.notified().await;
+        lash_core::ToolOutcome::ok(serde_json::json!({ "result": "released" })).into()
+    }
+}
+
+/// A child session's turn is the engine's, as a root session's is
+/// (FIG-3823): dropping the child's session handle and its turn's handle
+/// while the turn's tool group child is in flight stops nothing, and leaves
+/// the child session reusable. The dropped turn finishes on the engine, its
+/// tool running once, and the child's next turn runs after it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_dropped_child_turn_leaves_the_child_session_reusable() {
+    let backend = lash_restate_test::backend(0x5508, ServerConfig::default())
+        .await
+        .expect("build the Restate test backend");
+    let calls = Arc::new(AtomicUsize::new(0));
+    let provider = {
+        let calls = Arc::clone(&calls);
+        lash_core::testing::TestProvider::builder()
+            .kind("dropped-child")
+            .complete(move |_request: LlmRequest| {
+                let call = calls.fetch_add(1, Ordering::SeqCst) + 1;
+                async move {
+                    Ok::<_, LlmTransportError>(match call {
+                        1 => LlmResponse {
+                            parts: vec![LlmOutputPart::ToolCall {
+                                call_id: "hold-1".into(),
+                                tool_name: "hold_turn".into(),
+                                input_json: "{}".into(),
+                                replay: None,
+                            }],
+                            ..Default::default()
+                        },
+                        2 => text("dropped turn finished"),
+                        call => text(format!("answer {call}")),
+                    })
+                }
+            })
+            .build()
+            .into_handle()
+    };
+    let tool = Arc::new(GatedTool::default());
+    let core = core_builder(&backend, provider)
+        .tools(Arc::clone(&tool) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque(
+            "lash-restate-test",
+            "dropped-child",
+        ))
+        .expect("build the lash core");
+    let _parent = core
+        .session("dropped-child-parent")
+        .open()
+        .await
+        .expect("open the parent");
+    let first = {
+        let child = core
+            .session("dropped-child")
+            .parent("dropped-child-parent")
+            .open()
+            .await
+            .expect("open the child");
+        assert_eq!(child.parent_session_id(), Some("dropped-child-parent"));
+        let handle = child
+            .send(lash::TurnInput::text("hold the child turn"))
+            .await
+            .expect("accept the child's first input");
+        let input_id = handle.input_id().clone();
+        let mut outcome = Box::pin(handle.outcome());
+        tokio::select! {
+            reached = tokio::time::timeout(Duration::from_secs(20), tool.reached.notified()) => {
+                reached.expect("the child's tool group child is in flight");
+            }
+            outcome = outcome.as_mut() => panic!("the held child turn must not settle: {outcome:?}"),
+        }
+        input_id
+    };
+
+    let child = tokio::time::timeout(
+        Duration::from_secs(20),
+        core.session("dropped-child").open(),
+    )
+    .await
+    .expect("the child reopens while its dropped turn runs")
+    .expect("reopen the child");
+    assert_eq!(child.parent_session_id(), Some("dropped-child-parent"));
+    let next = child
+        .send(lash::TurnInput::text("after the dropped turn"))
+        .await
+        .expect("accept the child's next input");
+    let next_input = next.input_id().clone();
+    tool.release.notify_one();
+    let output = tokio::time::timeout(Duration::from_secs(20), next.output())
+        .await
+        .expect("the child's next turn runs")
+        .expect("the next turn's output");
+    assert_eq!(output.assistant_message(), Some("answer 3"));
+
+    assert_eq!(tool.runs.load(Ordering::SeqCst), 1, "the tool ran once");
+    assert_eq!(calls.load(Ordering::SeqCst), 3, "no model call re-ran");
+    let applied: Vec<_> = child
+        .durable()
+        .turn_input_applications()
+        .await
+        .expect("applications")
+        .into_iter()
+        .map(|application| application.input_id)
+        .collect();
+    assert_eq!(applied, [first, next_input]);
+    let transcript = transcript(&child).await;
+    let at = |needle: &str| {
+        transcript
+            .find(needle)
+            .unwrap_or_else(|| panic!("`{needle}` is in the transcript: {transcript}"))
+    };
+    assert!(at("hold the child turn") < at("dropped turn finished"));
+    assert!(at("dropped turn finished") < at("after the dropped turn"));
+    assert!(at("after the dropped turn") < at("answer 3"));
 }
 
 /// L-S11: a row committed whose immediate delivery was lost (its process
