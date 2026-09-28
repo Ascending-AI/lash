@@ -175,9 +175,9 @@ impl DoubleProcessHarness {
         self.double.install_process_worker(worker);
     }
 
-    /// Register `registration` and admit it: the engine's ingress sweep
-    /// submits the row to the deployment, whose workflow runs it on the
-    /// installed worker.
+    /// Register `registration` and admit it: the armed `ProcessStart`
+    /// obligation's own-commit attempt delivers the row to the deployment,
+    /// whose workflow runs it on the installed worker.
     pub(crate) async fn admit(
         &self,
         registration: lash_core::ProcessRegistration,
@@ -192,13 +192,25 @@ impl DoubleProcessHarness {
         process_id
     }
 
-    /// Deliver one registered process to the installed worker.
+    /// Deliver one registered process to the installed worker through the
+    /// `ProcessStart` obligation's relay — the one production delivery path.
     pub(crate) async fn drive_pending(&self, process_id: &lash_core::ProcessId) {
-        self.wiring
-            .port()
-            .deliver_process_start(process_id, "test:1")
+        let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+            self.backend
+                .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+            self.registry(),
+            Arc::clone(self.wiring.port()),
+            self.backend.clock(),
+        );
+        let verdict = relay
+            .deliver_start(process_id)
             .await
             .expect("deliver the harness process");
+        assert_eq!(
+            verdict,
+            lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+            "the armed start delivers: {verdict:?}"
+        );
     }
 
     /// Await the process's terminal registry record.

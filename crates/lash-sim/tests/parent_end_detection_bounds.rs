@@ -58,6 +58,13 @@ impl ScriptedPort {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for ScriptedPort {
+    async fn deliver_process_start(
+        &self,
+        record: &lash_core::ProcessRecord,
+    ) -> Result<(), PluginError> {
+        self.inner.deliver_process_start(record).await
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

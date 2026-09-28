@@ -162,6 +162,14 @@ pub type ProcessOutcomeObserver =
 pub struct ProcessLocalExecution {
     pub registry: Arc<dyn ProcessRegistry>,
     pub process_work: Arc<dyn crate::ProcessWorkSubstrate>,
+    /// The relay a committed `Start` makes its own-commit delivery attempt
+    /// through (ADR 0109 §1.5): claim the armed row and deliver it now, so a
+    /// registered process starts here instead of waiting for the reconcile
+    /// tick. `None` where no ProcessStart ledger is bound — the reconcile
+    /// pass still retries the armed row. Public because a journaled engine
+    /// (Restate) delivers a start through its own journaled send and settles
+    /// the row itself.
+    pub process_starts: Option<Arc<crate::runtime::process_start::ProcessStartRelay>>,
     pub process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     pub process_engines: Option<crate::ProcessEngineRegistry>,
     pub turn_cancellation: Option<ProcessTurnCancellation>,
@@ -648,6 +656,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
                 ProcessLocalExecution {
                     registry,
                     process_work,
+                    process_starts: None,
                     process_env_store: None,
                     process_engines: None,
                     turn_cancellation: None,
@@ -658,6 +667,31 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
             replay_trace: None,
             served_only: None,
         }
+    }
+
+    /// Binds the `ProcessStart` obligation ledger a committed `Start`
+    /// delivers through (ADR 0109 §1.5): the start's one production delivery
+    /// path is claim + deliver through the obligation relay, and a host with
+    /// the backend's ledger calls this so the start does not wait for the
+    /// reconcile tick.
+    pub fn with_process_starts(
+        mut self,
+        ledger: Arc<dyn crate::store::ObligationLedger>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        if let RuntimeEffectLocalExecutorState::Target(LocalTarget::Process(execution)) =
+            &mut self.state
+        {
+            execution.process_starts = Some(Arc::new(
+                crate::runtime::process_start::ProcessStartRelay::new(
+                    ledger,
+                    Arc::clone(&execution.registry),
+                    Arc::clone(&execution.process_work),
+                    clock,
+                ),
+            ));
+        }
+        self
     }
 
     /// Binds the process-definition registry for the journaled

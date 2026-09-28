@@ -569,6 +569,13 @@ struct LosesFirstReply {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessWorkSubstrate for LosesFirstReply {
+    async fn deliver_process_start(
+        &self,
+        record: &lash_core::ProcessRecord,
+    ) -> Result<(), lash_core::PluginError> {
+        self.inner.deliver_process_start(record).await
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

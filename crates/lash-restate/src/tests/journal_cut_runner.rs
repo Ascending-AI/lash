@@ -285,6 +285,13 @@ mod served_only_outside_a_run {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
+        async fn deliver_process_start(
+            &self,
+            record: &lash_core::ProcessRecord,
+        ) -> Result<(), lash_core::PluginError> {
+            panic!("unexpected process start for {}", record.id)
+        }
+
         async fn await_process_terminal(
             &self,
             process_id: &ProcessId,

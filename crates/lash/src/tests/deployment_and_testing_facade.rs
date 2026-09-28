@@ -165,6 +165,10 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
 /// through one cursor, and `drain_status` counts the parked processes.
 #[tokio::test]
 async fn parked_work_merges_parked_turns_and_processes() {
+    // Explicit reconcile: registration arms the process's `ProcessStart`
+    // obligation, and a ticking backend's relay would deliver it between this
+    // test's `register_process` and `park_process_with_authority`, racing the
+    // parked-row fixture the law is written against.
     let backend: lash_core::Backend = double_backend_explicit_reconcile().await;
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();

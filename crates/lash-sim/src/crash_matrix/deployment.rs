@@ -872,12 +872,9 @@ fn port_failure(effect: ArmEffect, site: HostSite) -> lash_core::PluginError {
 impl lash_core::ProcessWorkSubstrate for CrashProcessPort {
     async fn deliver_process_start(
         &self,
-        process_id: &lash_core::ProcessId,
-        delivery_key: &str,
+        record: &lash_core::ProcessRecord,
     ) -> Result<(), lash_core::PluginError> {
-        self.inner
-            .deliver_process_start(process_id, delivery_key)
-            .await
+        self.inner.deliver_process_start(record).await
     }
 
     async fn await_process_terminal(

@@ -338,6 +338,12 @@ impl Processes {
                     lash_core::RuntimeEffectCommand::process(command),
                 ),
                 lash_core::RuntimeEffectLocalExecutor::processes(registry, process_work)
+                    .with_process_starts(
+                        self.core
+                            .backend
+                            .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                        Arc::clone(&self.core.env.core.clock),
+                    )
                     .with_process_env_store(Arc::clone(
                         &self.core.env.core.durability.process_env_store,
                     ))
@@ -445,28 +451,10 @@ impl Processes {
                 "process start returned the wrong outcome".to_string(),
             )));
         };
-        let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
-        let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
-            self.core
-                .backend
-                .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
-            self.registry(),
-            process_work,
-        );
-        let id = lash_core::store::process_start_obligation_id(&record.id);
-        if let Err(error) = lash_core::runtime::drive::relay::deliver_now(
-            &relay,
-            &id,
-            self.core.env.core.clock.as_ref(),
-        )
-        .await
-        {
-            tracing::warn!(
-                process_id = %record.id,
-                %error,
-                "process start registered; immediate delivery failed, the obligation relay owns the run"
-            );
-        }
+        // The start's one delivery path ran inside the effect: registration
+        // armed the obligation and the executor's `with_process_starts`
+        // relay claimed and delivered it (ADR 0109 §1.5). A row it could not
+        // deliver is settled on the ledger for the reconcile tick.
         Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
     }
 
@@ -1016,6 +1004,13 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl lash_core::ProcessWorkSubstrate for ReattachOnce {
+        async fn deliver_process_start(
+            &self,
+            _record: &lash_core::ProcessRecord,
+        ) -> std::result::Result<(), lash_core::PluginError> {
+            unreachable!("terminal-wait witness does not deliver starts")
+        }
+
         async fn await_process_terminal(
             &self,
             process_id: &lash_core::ProcessId,

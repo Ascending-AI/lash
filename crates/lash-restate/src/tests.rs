@@ -29,6 +29,7 @@ use crate::process::{
 use bytes::Bytes;
 use http_body_util::{BodyExt, Empty};
 use lash_core::ProcessWorkSubstrate as _;
+use lash_core::StoreSet as _;
 use lash_core::testing::store_fixtures::{durable_admission, recorded_process_admission};
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress, EffectHost,
@@ -138,6 +139,9 @@ pub(super) struct MemoryProcessStores {
     pub(super) registry: Arc<lash_core::testing::ProcessRegistryFaults>,
     pub(super) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     pub(super) env_store: Arc<dyn ProcessExecutionEnvStore>,
+    /// The `ProcessStart` obligation ledger `register_process` arms.
+    pub(super) start_ledger: Arc<dyn lash_core::store::ObligationLedger>,
+    pub(super) clock: Arc<dyn Clock>,
 }
 
 pub(super) async fn memory_process_stores() -> MemoryProcessStores {
@@ -151,7 +155,56 @@ pub(super) async fn memory_process_stores() -> MemoryProcessStores {
         )),
         continuations: registry,
         env_store: stores.process_env_store(),
+        start_ledger: stores.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+        clock: stores.clock(),
     }
+}
+
+/// Deliver `process_id`'s armed `ProcessStart` obligation through the relay —
+/// the one production delivery path's own-commit attempt (ADR 0109 §1.5).
+pub(super) async fn deliver_process_start_now(
+    start_ledger: &Arc<dyn lash_core::store::ObligationLedger>,
+    registry: &Arc<dyn ProcessRegistry>,
+    port: &Arc<dyn lash_core::ProcessWorkSubstrate>,
+    clock: &Arc<dyn Clock>,
+    process_id: &ProcessId,
+) -> lash_core::runtime::drive::relay::RelayVerdict {
+    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+        Arc::clone(start_ledger),
+        Arc::clone(registry),
+        Arc::clone(port),
+        Arc::clone(clock),
+    );
+    relay
+        .deliver_start(process_id)
+        .await
+        .expect("the start delivery's ledger settle")
+}
+
+/// The session-control recovery pass's park settle, over the paused `run`
+/// invocations `admin` lists — what `RestateSessionControl::reconcile_parks`
+/// runs each tick.
+pub(super) async fn reconcile_parked_processes(
+    admin: &RestateAdminClient,
+    registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
+) -> crate::process::park_reconcile::ProcessParkReconcileReport {
+    let paused = admin
+        .paused_invocations(
+            &crate::services::DEFAULT_NAMESPACE
+                .stable(crate::services::LashService::ProcessWorkflow)
+                .name(),
+        )
+        .await
+        .expect("list paused process invocations");
+    crate::process::park_reconcile::reconcile_process_invocations(
+        admin,
+        registry,
+        continuations,
+        paused,
+    )
+    .await
+    .expect("reconcile paused processes")
 }
 
 /// A root session store for `session_id` over a fresh SQLite memory backend.

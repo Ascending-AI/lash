@@ -384,6 +384,10 @@ pub struct TriggerRouter {
     process_work: crate::ProcessWorkWiring,
     process_env_store: Option<Arc<dyn crate::ProcessExecutionEnvStore>>,
     process_engines: Option<crate::ProcessEngineRegistry>,
+    process_starts: Option<(
+        Arc<dyn crate::store::ObligationLedger>,
+        Arc<dyn crate::Clock>,
+    )>,
     route_restorer: Option<Arc<dyn TriggerRouteRestorer>>,
 }
 
@@ -394,12 +398,25 @@ impl TriggerRouter {
             process_work,
             process_env_store: None,
             process_engines: None,
+            process_starts: None,
             route_restorer: None,
         }
     }
 
     pub fn with_route_restorer(mut self, restorer: Arc<dyn TriggerRouteRestorer>) -> Self {
         self.route_restorer = Some(restorer);
+        self
+    }
+
+    /// The `ProcessStart` ledger the trigger's own start attempts claim
+    /// through: a router wired with one tries the armed obligation at once
+    /// (ADR 0109 §1.5); one without it leaves the row to the reconcile tick.
+    pub fn with_process_starts(
+        mut self,
+        ledger: Arc<dyn crate::store::ObligationLedger>,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        self.process_starts = Some((ledger, clock));
         self
     }
 
@@ -691,6 +708,10 @@ impl TriggerRouter {
                         process_registry,
                         Arc::clone(self.process_work.port()),
                     );
+                    if let Some((ledger, clock)) = self.process_starts.as_ref() {
+                        executor =
+                            executor.with_process_starts(Arc::clone(ledger), Arc::clone(clock));
+                    }
                     if let Some(store) = self.process_env_store.as_ref() {
                         executor = executor.with_process_env_store(Arc::clone(store));
                     }

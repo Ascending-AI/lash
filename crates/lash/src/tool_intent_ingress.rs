@@ -1349,6 +1349,12 @@ impl ToolIntentIngress {
                     registry,
                     std::sync::Arc::clone(self.core.substrate_slot.ports().await.process.port()),
                 )
+                .with_process_starts(
+                    self.core
+                        .backend
+                        .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+                    std::sync::Arc::clone(&self.core.env.core.clock),
+                )
                 .with_process_env_store(std::sync::Arc::clone(
                     &self.core.env.core.durability.process_env_store,
                 ))

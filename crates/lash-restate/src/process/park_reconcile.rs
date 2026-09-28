@@ -78,32 +78,19 @@ pub struct ProcessParkReconcileReport {
     pub unchanged: usize,
 }
 
-/// Park the process of every paused `LashProcessWorkflow` segment in
-/// `namespace`.
+/// Settle the paused `LashProcessWorkflow` invocations `paused` (ADR 0109
+/// §3): park each one's live process on its kept journal, or release a
+/// terminal one's invocation once its terminal publication is delivered.
+/// The session-control pass feeds each paused invocation it listed through
+/// here; `paused` is already the engine's listing, so this asks Restate
+/// nothing.
 ///
 /// Idempotent: a process whose park already refuses is left as it is, so a
 /// repeated pass over the same pause writes nothing.
 ///
 /// # Errors
-/// When Restate's admin query or the registry fails; a pass that failed
+/// When the registry or a Restate admin verb fails; a pass that failed
 /// part-way is retried whole by the next one.
-pub async fn reconcile_process_parks(
-    admin: &RestateAdminClient,
-    namespace: &crate::RestateNamespace,
-    registry: &Arc<dyn ProcessRegistry>,
-    continuations: &Arc<dyn ProcessContinuationStore>,
-) -> Result<ProcessParkReconcileReport, PluginError> {
-    let paused = admin
-        .paused_invocations(&namespace.stable(LashService::ProcessWorkflow).name())
-        .await
-        .map_err(|error| {
-            PluginError::Session(format!(
-                "read paused process invocations from Restate: {error}"
-            ))
-        })?;
-    reconcile_process_invocations(admin, registry, continuations, paused).await
-}
-
 pub(crate) async fn reconcile_process_invocations(
     admin: &RestateAdminClient,
     registry: &Arc<dyn ProcessRegistry>,
@@ -270,7 +257,7 @@ pub(crate) async fn end_lost_process_runs(
             if held || pass.resubmitted.len() >= limit.get() {
                 continue;
             }
-            match starts.submit_record(record.clone(), "lost_run").await {
+            match starts.submit_record(record).await {
                 Ok(()) => pass.resubmitted.push(record.id.clone()),
                 Err(error) => pass.failed.push((key, error.to_string())),
             }

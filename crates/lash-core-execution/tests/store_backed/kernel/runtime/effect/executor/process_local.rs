@@ -462,8 +462,7 @@ mod tests {
     impl crate::ProcessWorkSubstrate for PokeAlwaysFails {
         async fn deliver_process_start(
             &self,
-            _process_id: &crate::ProcessId,
-            _delivery_key: &str,
+            _record: &crate::ProcessRecord,
         ) -> Result<(), crate::PluginError> {
             self.pokes.fetch_add(1, Ordering::SeqCst);
             Err(crate::PluginError::Invoke(
@@ -521,6 +520,10 @@ mod tests {
             Arc::clone(&registry),
             Arc::clone(&process_work) as Arc<dyn crate::ProcessWorkSubstrate>,
         )
+        .with_process_starts(
+            backend.obligation_ledger(crate::store::ObligationKind::ProcessStart),
+            backend.clock(),
+        )
         .with_process_env_store(backend.process_env_store());
 
         let outcome = runtime_controller(&backend)
@@ -559,6 +562,21 @@ mod tests {
             stored.cancel_request.is_none(),
             "a failed nudge is not a start failure and must not request cancel"
         );
+
+        // The failed poke is durable, not dropped: the armed obligation keeps
+        // the attempt count and stays due for the reconcile's retry.
+        let standing = backend
+            .obligation_ledger(crate::store::ObligationKind::ProcessStart)
+            .standing(&crate::store::process_start_obligation_id(&record.id))
+            .await
+            .expect("read the start obligation")
+            .expect("the start obligation stands");
+        assert_eq!(
+            standing.state,
+            crate::store::ObligationState::Due,
+            "a retryable poke failure leaves the start due, never lost"
+        );
+        assert_eq!(standing.attempts, 1, "the failed attempt is counted");
     }
 
     /// ADR 0107: a lash-derived start key is trusted. A retry under a

@@ -47,6 +47,7 @@ impl ProcessLocalExecution {
         let Self {
             registry,
             process_work,
+            process_starts,
             process_env_store,
             process_engines,
             turn_cancellation,
@@ -81,20 +82,45 @@ impl ProcessLocalExecution {
                 let realization = started.realization();
                 let disposition = started.disposition;
                 let record = started.record;
-                // The registration obligation survives a failed immediate
-                // attempt and the relay retries it after this effect returns.
-                if let Err(error) = process_work
-                    .deliver_process_start(
-                        &record.id,
-                        &format!("process_start:{}:direct", record.id),
-                    )
-                    .await
-                {
-                    tracing::warn!(
-                        process_id = %record.id,
-                        %error,
-                        "process start registered; immediate delivery failed, the obligation relay owns the run"
-                    );
+                // The start's one delivery path is its obligation: claim the
+                // armed row and deliver it now (ADR 0109 §1.5). A failed
+                // attempt settles on the row — retried with `last_error`, or
+                // stalled — and the reconcile tick retries it after this
+                // effect returns. `NotDue` means a prior attempt already
+                // claimed or delivered it.
+                if let Some(starts) = &process_starts {
+                    match starts.deliver_start(&record.id).await {
+                        Ok(crate::runtime::drive::relay::RelayVerdict::NotDue) => {}
+                        Ok(
+                            verdict @ (crate::runtime::drive::relay::RelayVerdict::Retried {
+                                ..
+                            }
+                            | crate::runtime::drive::relay::RelayVerdict::Stalled(_)),
+                        ) => {
+                            // The first attempt failed: the settlement wrote
+                            // `last_error` on the row, which the reconcile
+                            // pass retries and an operator reads.
+                            tracing::warn!(
+                                process_id = %record.id,
+                                ?verdict,
+                                "process start delivery failed; the obligation row carries the failure"
+                            );
+                        }
+                        Ok(verdict) => {
+                            tracing::debug!(
+                                process_id = %record.id,
+                                ?verdict,
+                                "process start delivered through its obligation"
+                            );
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                process_id = %record.id,
+                                %error,
+                                "process start registered; immediate delivery failed, the obligation relay owns the run"
+                            );
+                        }
+                    }
                 }
                 Ok((
                     ProcessEffectOutcome::Start {
@@ -438,6 +464,13 @@ mod terminal_wait_tests {
 
     #[async_trait::async_trait]
     impl crate::ProcessWorkSubstrate for ReattachOnce {
+        async fn deliver_process_start(
+            &self,
+            _record: &crate::ProcessRecord,
+        ) -> Result<(), crate::PluginError> {
+            unreachable!("terminal-wait witness does not deliver starts")
+        }
+
         async fn await_process_terminal(
             &self,
             process_id: &crate::ProcessId,

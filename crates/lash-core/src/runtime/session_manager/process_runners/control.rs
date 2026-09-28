@@ -282,6 +282,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
                 .cloned()
                 .expect("process service requires process-work wiring"),
         )
+        .with_process_starts(
+            self.current
+                .host
+                .core
+                .backend()
+                .obligation_ledger(crate::store::ObligationKind::ProcessStart),
+            Arc::clone(&self.current.host.core.clock),
+        )
         .with_process_env_store(Arc::clone(
             &self.current.host.core.durability.process_env_store,
         ))

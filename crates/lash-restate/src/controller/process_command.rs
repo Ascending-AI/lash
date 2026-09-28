@@ -337,6 +337,7 @@ where
             let registration = registration.with_execution_env_ref(started.env_ref.clone());
             let (record, realization) = schedule_restate_process(
                 Arc::clone(&registry),
+                execution.process_starts.clone(),
                 started,
                 registration,
                 *execution_context,

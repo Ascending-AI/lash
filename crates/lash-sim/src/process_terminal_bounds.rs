@@ -30,7 +30,8 @@ use lash_core::runtime::process_terminal::ProcessTerminalRelay;
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::testing::TestClock;
 use lash_core::{
-    PluginError, ProcessAwaitOutput, ProcessId, ProcessRegistry, ProcessWorkSubstrate, StoreSet,
+    PluginError, ProcessAwaitOutput, ProcessId, ProcessRecord, ProcessRegistry,
+    ProcessWorkSubstrate, StoreSet,
 };
 use lash_sansio::sync::MutexExt;
 
@@ -84,6 +85,13 @@ impl ScriptedEngine {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for ScriptedEngine {
+    async fn deliver_process_start(&self, record: &ProcessRecord) -> Result<(), PluginError> {
+        Err(PluginError::Session(format!(
+            "the scripted engine does not start `{}`",
+            record.id
+        )))
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

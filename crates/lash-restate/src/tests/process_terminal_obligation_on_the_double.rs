@@ -13,7 +13,6 @@
 
 use super::*;
 
-use lash_core::StoreSet as _;
 use lash_core::runtime::drive::relay::relay_due;
 use lash_core::runtime::process_start::ProcessStartRelay;
 use lash_core::runtime::process_terminal::ProcessTerminalRelay;
@@ -140,6 +139,7 @@ impl World {
             stores.obligation_ledger(ObligationKind::ProcessStart),
             Arc::clone(&registry),
             Arc::clone(&port),
+            stores.clock(),
         );
         let relay = ProcessTerminalRelay::new(
             stores.obligation_ledger(ObligationKind::ProcessTerminal),
@@ -174,14 +174,7 @@ impl World {
         )
         .await
         .expect("deliver due process starts");
-        crate::process::reconcile_process_parks(
-            &self.admin,
-            &crate::services::DEFAULT_NAMESPACE,
-            &self.registry,
-            &self.continuations,
-        )
-        .await
-        .expect("reconcile paused processes");
+        reconcile_parked_processes(&self.admin, &self.registry, &self.continuations).await;
         crate::process::park_reconcile::end_lost_process_runs(
             &self.admin,
             &self.ingress,

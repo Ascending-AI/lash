@@ -205,15 +205,15 @@ impl ObligationKey {
             ObligationKind::SessionDelete => Self::SessionDelete {
                 session_id: SessionId::from(next_text(&mut columns, kind, "session_id")?),
             },
-            ObligationKind::ProcessStart | ObligationKind::ProcessTerminal => {
+            kind @ (ObligationKind::ProcessStart | ObligationKind::ProcessTerminal) => {
                 let process_id = ProcessId::parse(&next_text(&mut columns, kind, "process_id")?)
                     .map_err(|error| UndecodableObligation {
                         detail: error.to_string(),
                     })?;
-                if kind == ObligationKind::ProcessStart {
-                    Self::ProcessStart { process_id }
-                } else {
-                    Self::ProcessTerminal { process_id }
+                match kind {
+                    ObligationKind::ProcessStart => Self::ProcessStart { process_id },
+                    ObligationKind::ProcessTerminal => Self::ProcessTerminal { process_id },
+                    _ => unreachable!("the matched kinds are ProcessStart and ProcessTerminal"),
                 }
             }
             ObligationKind::ControlIntent => {

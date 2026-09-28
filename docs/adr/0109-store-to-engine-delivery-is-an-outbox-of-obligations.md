@@ -13,7 +13,12 @@ S8 process start (FIG-3918).
 **Process start is implemented.** Registration arms `ProcessStart` on each
 Lash-executed process in the same SQL transaction. The relay submits its
 current segment to the engine and settles the obligation after ingress accepts
-it. Restate coalesces repeated `run` submissions by workflow key; its workflow
+it. It is also the only delivery path: the registering transaction's own
+attempt is `deliver_now` against the armed row, and a journaled engine that
+must carry its own submission context (Restate's process-start workflow send,
+with its execution context and causal invocation) claims the row, sends, and
+settles through the same ledger — no path submits a start outside a claim.
+Restate coalesces repeated `run` submissions by workflow key; its workflow
 `run` handler rejects an idempotency-key header, so the relay's attempt key
 remains local to Lash's claim. The obligation is delivered once and nothing
 re-arms it. Lost or paused runs remain the engine recovery pass's

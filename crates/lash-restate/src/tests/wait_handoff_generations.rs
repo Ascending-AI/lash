@@ -1104,6 +1104,16 @@ struct RecordedWakes {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessWorkSubstrate for RecordedWakes {
+    async fn deliver_process_start(
+        &self,
+        record: &lash_core::ProcessRecord,
+    ) -> Result<(), lash_core::PluginError> {
+        Err(lash_core::PluginError::Invoke(format!(
+            "no process start for `{}` in the slot law",
+            record.id
+        )))
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

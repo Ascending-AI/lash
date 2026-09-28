@@ -363,6 +363,58 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         ))
         .context("build Lash core")?;
     let shutdown_core = core.clone();
+    // A stalled obligation is the durable, operator-actionable face of what
+    // the removed worker-fault channel reported: a delivery the relay refused
+    // or exhausted stays on the ledger with its reason, attempts and last
+    // error until someone rearms it. The workbench polls the ledgers and
+    // writes each new stall to the stderr process log — the same sink the
+    // fault notices used — because a stall is an operator signal, not a UI
+    // row. First-attempt failures stay retryable, so they warn at the relay
+    // and leave the row `Due`; only the durable stall reaches this feed.
+    let stalled_core = core.clone();
+    let mut stalled_shutdown = host_shutdown.subscribe();
+    let stalled_task = tokio::spawn(async move {
+        let mut reported = std::collections::HashSet::new();
+        let mut interval = tokio::time::interval(Duration::from_secs(30));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tokio::select! {
+                biased;
+                changed = stalled_shutdown.changed() => {
+                    if changed.is_err() || *stalled_shutdown.borrow() {
+                        break;
+                    }
+                }
+                _ = interval.tick() => {
+                    for kind in lash::ObligationKind::ALL {
+                        let stalled = stalled_core
+                            .stalled_obligations(kind, None, std::num::NonZeroUsize::MAX)
+                            .await;
+                        match stalled {
+                            Ok(stalled) => {
+                                for stalled in stalled {
+                                    if reported.insert((kind, stalled.id.clone())) {
+                                        eprintln!(
+                                            "agent-workbench obligation stalled: kind={} id={} reason={:?} attempts={} last_error={}",
+                                            kind.label(),
+                                            stalled.id.as_str(),
+                                            stalled.reason,
+                                            stalled.attempts,
+                                            stalled.last_error.as_deref().unwrap_or("none"),
+                                        );
+                                    }
+                                }
+                            }
+                            Err(error) => eprintln!(
+                                "agent-workbench obligation ledger fault: {} list_stalled failed: {error}",
+                                kind.label()
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    });
     let operation = async {
         let process_worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
@@ -557,8 +609,13 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     }
     .await;
     let _ = host_shutdown.send(true);
-    if let Err(error) = process_event_task.await {
-        eprintln!("agent-workbench: process event logger task join failed: {error}");
+    for (name, task) in [
+        ("process event logger", process_event_task),
+        ("stalled obligation logger", stalled_task),
+    ] {
+        if let Err(error) = task.await {
+            eprintln!("agent-workbench: {name} task join failed: {error}");
+        }
     }
     let cleanup = shutdown_workbench(&shutdown_core, &shutdown_provider).await;
     match (operation, cleanup) {

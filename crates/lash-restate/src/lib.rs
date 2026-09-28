@@ -146,7 +146,7 @@ pub use process::{
     RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
     RestateProcessIngressRunner, RestateProcessServing, RestateProcessWorkerSlot,
     RestateProcessWorkflowInput, RestateProcessWorkflowOutput, RestateProcessWorkflowPayload,
-    SegmentStarted, reconcile_process_parks, resume_parked_process,
+    SegmentStarted, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
 pub use serve::serve_endpoint;

@@ -41,6 +41,7 @@ impl ProcessWorkflowStartFailure {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
+    starts: Option<Arc<lash_core::runtime::process_start::ProcessStartRelay>>,
     started: lash_core::runtime::RegisteredProcessStart,
     registration: lash_core::ProcessRegistration,
     execution_context: lash_core::ProcessExecutionContext,
@@ -63,6 +64,33 @@ where
     let created_here = started.disposition == lash_core::ProcessRegistrationDisposition::Created;
     let record = started.record;
     let process_id = record.id.clone();
+    // Registration armed the row's `ProcessStart` obligation; the journaled
+    // send below is that obligation's delivery, so claim the row first
+    // (ADR 0109 §1.5): the reconcile relay does not deliver it under us, and
+    // the settle after the send is the delivery's commit. A `None` relay or
+    // a `None` claim — the row was already taken — leaves the reconcile pass
+    // its row; the send below coalesces on the workflow key either way.
+    let claim_token = match &starts {
+        Some(starts) => {
+            let starts = Arc::clone(starts);
+            let claimed_id = process_id.clone();
+            let Json(token) = context
+                .run_json_or_retry_send(
+                    process_command_journal_name(invocation, "process-start-claim"),
+                    async move {
+                        starts
+                            .claim_start(&claimed_id)
+                            .await
+                            .map(|token| token.map(|token| token.as_str().to_owned()))
+                            .map_err(|error| error.to_string())
+                    },
+                )
+                .await
+                .map_err(|error| process_command_journal_error("start claim", error))?;
+            token
+        }
+        None => None,
+    };
     let invocation_id = match context
         .start_process_workflow(
             namespace,
@@ -101,6 +129,26 @@ where
                     created_here,
                     "Restate process submission failed without licensing a start-failed compensation; recovery owns the row"
                 );
+                // The claim this start took on the armed row goes back due:
+                // the failure stays readable on the row as `last_error`, and
+                // the reconcile pass retries the delivery — an ambiguous
+                // failure may already be running, and a retained row's start
+                // belongs to the attempt that created it.
+                if let (Some(starts), Some(token)) = (&starts, claim_token.clone()) {
+                    settle_start_claim(
+                        starts,
+                        context,
+                        invocation,
+                        &process_id,
+                        token,
+                        lash_core::store::ObligationSettlement::Retry {
+                            due_at_ms: 0,
+                            error: submit_error.to_string(),
+                        },
+                        "process-start-settle",
+                    )
+                    .await?;
+                }
                 return Ok((record, realization));
             }
             let compensation_registry = Arc::clone(&registry);
@@ -139,6 +187,30 @@ where
                 )
                 .await
                 .map_err(|error| process_command_journal_error("start compensation", error))?;
+            // The claim settles with the verdict the row ended at: the
+            // compensated row is terminal, so nothing remains to deliver;
+            // one whose compensation could not be written goes back due
+            // with the failure recorded for the reconcile pass.
+            if let (Some(starts), Some(token)) = (&starts, claim_token.clone()) {
+                let settlement = if compensated {
+                    lash_core::store::ObligationSettlement::Delivered
+                } else {
+                    lash_core::store::ObligationSettlement::Retry {
+                        due_at_ms: 0,
+                        error: submit_error.to_string(),
+                    }
+                };
+                settle_start_claim(
+                    starts,
+                    context,
+                    invocation,
+                    &process_id,
+                    token,
+                    settlement,
+                    "process-start-settle",
+                )
+                .await?;
+            }
             return if compensated {
                 Err(submit_error.into())
             } else {
@@ -151,6 +223,7 @@ where
     let route = namespace
         .stable(crate::LashService::ProcessWorkflow)
         .to_string();
+    let settle_id = process_id.clone();
     let Json(record) = context
         .run_json_or_retry_send(
             process_command_journal_name(invocation, "process-start-external-ref"),
@@ -188,7 +261,57 @@ where
         )
         .await
         .map_err(|error| process_command_journal_error("start external reference", error))?;
+    // The journaled send delivered the armed row; the claim settles
+    // `Delivered` so the reconcile pass never submits it a second time.
+    if let (Some(starts), Some(token)) = (&starts, claim_token) {
+        settle_start_claim(
+            starts,
+            context,
+            invocation,
+            &settle_id,
+            token,
+            lash_core::store::ObligationSettlement::Delivered,
+            "process-start-settle",
+        )
+        .await?;
+    }
     Ok((record?, realization))
+}
+
+/// Settle a start obligation claimed at the top of
+/// [`schedule_restate_process`]: `Delivered` once the journaled send (or the
+/// compensation that replaced it) is the row's terminal answer, `Retry` when
+/// the send's verdict left the row for the reconcile pass. Journaled like
+/// the claim that minted `token`.
+async fn settle_start_claim<'ctx, C>(
+    starts: &Arc<lash_core::runtime::process_start::ProcessStartRelay>,
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    process_id: &lash_core::ProcessId,
+    token: String,
+    settlement: lash_core::store::ObligationSettlement,
+    step: &'static str,
+) -> Result<(), RuntimeEffectControllerError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+{
+    let starts = Arc::clone(starts);
+    let process_id = process_id.clone();
+    let Json(()) = context
+        .run_json_or_retry_send(process_command_journal_name(invocation, step), async move {
+            starts
+                .settle_start(
+                    &process_id,
+                    lash_core::store::ClaimToken::new(token),
+                    settlement,
+                )
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| process_command_journal_error("start settle", error))?;
+    Ok(())
 }
 
 async fn compensate_failed_process_submission(

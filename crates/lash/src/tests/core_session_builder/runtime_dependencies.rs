@@ -295,6 +295,13 @@ struct NoopProcessWork;
 
 #[async_trait]
 impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
+    async fn deliver_process_start(
+        &self,
+        record: &lash_core::ProcessRecord,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        panic!("unexpected process start for {}", record.id)
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &lash_core::ProcessId,

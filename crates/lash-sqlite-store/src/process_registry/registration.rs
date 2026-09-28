@@ -93,7 +93,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                                 process_id: record.id.clone(),
                             },
                             &lash_core_execution::store::process_start_obligation_id(&record.id),
-                            0,
+                            crate::obligation_ledger::DUE_AT_ONCE_MS,
                         )
                         .map_err(|error| {
                             lash_core_execution::PluginError::Session(error.to_string())

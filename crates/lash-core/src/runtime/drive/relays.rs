@@ -193,6 +193,7 @@ pub fn obligation_relays(
                     backend.obligation_ledger(kind),
                     Arc::clone(wiring.registry()),
                     Arc::clone(wiring.port()),
+                    Arc::clone(&clock),
                 ))
             }
             ObligationKind::ProcessTerminal => {

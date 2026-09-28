@@ -247,6 +247,13 @@ struct RegistryReadCancel;
 #[cfg(test)]
 #[async_trait::async_trait]
 impl lash_core::ProcessWorkSubstrate for RegistryReadCancel {
+    async fn deliver_process_start(&self, record: &ProcessRecord) -> Result<(), PluginError> {
+        Err(PluginError::Session(format!(
+            "a test workflow's parent-end delivery does not start process `{}`",
+            record.id
+        )))
+    }
+
     async fn await_process_terminal(
         &self,
         process_id: &ProcessId,

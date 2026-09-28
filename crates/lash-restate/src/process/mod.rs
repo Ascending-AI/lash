@@ -15,9 +15,7 @@ mod workflow;
 mod stamped_requests;
 pub use admission::{JOURNAL_LOGIC_EPOCH, RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
 pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
-pub use park_reconcile::{
-    ProcessParkReconcileReport, reconcile_process_parks, resume_parked_process,
-};
+pub use park_reconcile::{ProcessParkReconcileReport, resume_parked_process};
 pub(crate) use stamped_requests::attach::StampedAttachRequest;
 
 use std::sync::Arc;
@@ -522,11 +520,11 @@ impl RestateProcessIngressRunner {
         }
     }
 
-    async fn submit_record(
-        &self,
-        record: ProcessRecord,
-        _delivery_key: &str,
-    ) -> Result<(), PluginError> {
+    /// Submit `record`'s registered process to the `run` handler. `record`
+    /// is the armed row as its ProcessStart delivery read it, so this is the
+    /// one read of a delivery; a repeat submission of the same row coalesces
+    /// on the workflow key below.
+    async fn submit_record(&self, record: &ProcessRecord) -> Result<(), PluginError> {
         let process_id = record.id.clone();
         // Externally-owned rows are never executed by Lash (ADR 0110).
         // Defensively refuse to POST a run for one even when reached directly,
@@ -537,13 +535,8 @@ impl RestateProcessIngressRunner {
                 "externally owned process `{process_id}` cannot be started by Lash"
             )));
         }
-        // Re-read before submitting: the row may have moved since delivery
-        // claimed its obligation.
-        let Some(current) = self.registry.get_process(&process_id).await? else {
-            return Ok(());
-        };
         // Idempotent by process id: never re-submit a finished process.
-        if current.is_terminal() {
+        if record.is_terminal() {
             return Ok(());
         }
         // A standing cancel request is not a reason to withhold the submission.
@@ -591,15 +584,15 @@ impl RestateProcessIngressRunner {
             .as_ref()
             .and_then(|handover| handover.written_generation.clone());
         let registration = ProcessRegistration {
-            start_key: record.start_key,
-            input: record.input,
-            lifetime: record.lifetime,
-            ancestry: record.ancestry,
-            session_capability: record.session_capability,
-            identity: record.identity,
-            event_types: record.event_types,
+            start_key: record.start_key.clone(),
+            input: record.input.clone(),
+            lifetime: record.lifetime.clone(),
+            ancestry: record.ancestry.clone(),
+            session_capability: record.session_capability.clone(),
+            identity: record.identity.clone(),
+            event_types: record.event_types.clone(),
             provenance: record.provenance.clone(),
-            env_ref: record.env_ref,
+            env_ref: record.env_ref.clone(),
             wake_session_id: None,
         };
         let execution_context = ProcessExecutionContext::default();
@@ -704,16 +697,8 @@ impl RestateProcessIngressRunner {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for RestateProcessIngressRunner {
-    async fn deliver_process_start(
-        &self,
-        process_id: &ProcessId,
-        delivery_key: &str,
-    ) -> Result<(), PluginError> {
-        let record = self.registry.get_process(process_id).await?;
-        if let Some(record) = record {
-            self.submit_record(record, delivery_key).await?;
-        }
-        Ok(())
+    async fn deliver_process_start(&self, record: &ProcessRecord) -> Result<(), PluginError> {
+        self.submit_record(record).await
     }
 
     async fn await_process_terminal(
@@ -1093,9 +1078,10 @@ impl RestateProcessServing {
     /// that run the same artifact with and without forced segmentation; the
     /// production default remains 10,000 completed effects per incarnation.
     /// Pause a segment's `run` invocation after `max_attempts` attempts
-    /// instead of the default [`PROCESS_HANDLER_MAX_ATTEMPTS`]. A paused
-    /// segment's process is parked by the park reconcile with
-    /// `ParkReason::EngineRetryExhausted`, and a resume retries it.
+    /// instead of the default [`PROCESS_HANDLER_MAX_ATTEMPTS`]. The
+    /// session-control recovery pass's invocation reconcile parks a paused
+    /// segment's process with `ParkReason::EngineRetryExhausted`, and a
+    /// resume retries it.
     pub fn with_retry_max_attempts(mut self, max_attempts: u64) -> Self {
         self.retry_max_attempts = max_attempts.max(1);
         self

@@ -37,10 +37,10 @@ When an invocation is in flight, the durable substrate — Restate, Temporal,
 or whatever a host implements against the contracts — owns continuation:
 redrive after a crash, retry policy, and backpressure. Lash never re-drives
 engine-owned work. The Restate tier conforms today: live starts submit engine
-invocations, the ingress sweep only *submits* `run/send` per row and executes
-nothing, execution happens inside engine invocations where parked waits
-suspend natively, and a 10,000-row recovery is throttled by the engine's
-invoker, not by lash. This is the same rule that already governs durability
+invocations, the `ProcessStart` obligation relay only *submits* `run/send` per
+armed row and executes nothing (ADR 0109), execution happens inside engine
+invocations where parked waits suspend natively, and a 10,000-row recovery is
+throttled by the engine's invoker, not by lash. This is the same rule that already governs durability
 (effect-host gaps close on the engine side) and work-item waits (await lives
 on the work-driver seam); this document names the general principle those
 rulings were instances of.
@@ -177,11 +177,13 @@ Restate v1.7.0 refuses to purge an invocation or its journal while the
 invocation is not completed, so (b) and (c) arise from endpoint crashes and
 lost journal storage, not from ordinary purges.
 
-The ingress sweep therefore submits every live row under its latest segment's
+The recovery resubmit therefore sends a live row under its latest segment's
 key, whatever its external reference says: Restate coalesces a submission onto
 a live or retained workflow, and a key it no longer holds runs the admission,
 which starts a segment that never started and refuses one that did. The
-external reference is observational. A boundary still writes its successor's
+external reference is observational. The first send of a registered row is the
+armed `ProcessStart` obligation's one delivery (ADR 0109); what resubmits an
+already-started row is the recovery pass's lost-run scan, not the relay. A boundary still writes its successor's
 reference before the handover and the send, and a store fault there is
 retried by Restate, never logged and dropped.
 

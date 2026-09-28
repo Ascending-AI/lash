@@ -863,8 +863,7 @@ struct CountingProcessWork {
 impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
     async fn deliver_process_start(
         &self,
-        _process_id: &lash_core::ProcessId,
-        _delivery_key: &str,
+        _record: &lash_core::ProcessRecord,
     ) -> std::result::Result<(), lash_core::PluginError> {
         self.counters
             .process_admissions

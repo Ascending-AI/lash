@@ -1550,17 +1550,19 @@ pub(super) async fn run_registration_runs_a_fresh_process() {
 /// FIG-2964, as FIG-3588 leaves it: submission is keyed by segment, and
 /// Restate's workflow key is the only coalescing point.
 ///
-/// Every scan submits every live row under its latest segment's key. The
-/// repeat scan's submission reaches the same key, and Restate coalesces it onto
-/// the run already in flight (`PreviouslyAccepted`); a key Restate no longer
-/// holds runs the segment's admission instead, which is how the sweep reaches
-/// a lost workflow whose reference still names it.
+/// The armed `ProcessStart` obligation admits the row once (`Delivered`); a
+/// repeat relay pass finds nothing due (`NotDue`). The repeat send that still
+/// reaches the same workflow key — the lost-run scan's recovery resubmit —
+/// coalesces onto the run already in flight (`PreviouslyAccepted`); a key
+/// Restate no longer holds runs the segment's admission instead, which is how
+/// the sweep reaches a lost workflow whose reference still names it.
 #[tokio::test]
 pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
     // A non-terminal, Lash-executed process is the durable registry row the
     // ingress runner must submit. Externally-owned rows are never submitted
     // (ADR 0110), so the submittable case uses a lash-executed row.
-    let registry = process_registry();
+    let stores = memory_process_stores().await;
+    let registry = stores.registry.clone() as Arc<dyn ProcessRegistry>;
     let task_1_id = registry
         .register_process(executed_registration())
         .await
@@ -1579,22 +1581,55 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     ])
     .await;
 
-    let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store());
-    runner
-        .deliver_process_start(&task_1_id, "test:1")
+    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> = Arc::new(
+        RestateProcessIngressRunner::new(base_url, registry.clone(), continuation_store()),
+    );
+    let first = deliver_process_start_now(
+        &stores.start_ledger,
+        &registry,
+        &runner,
+        &stores.clock,
+        &task_1_id,
+    )
+    .await;
+    assert_eq!(
+        first,
+        lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+        "the armed start is admitted: {first:?}"
+    );
+    let repeat = deliver_process_start_now(
+        &stores.start_ledger,
+        &registry,
+        &runner,
+        &stores.clock,
+        &task_1_id,
+    )
+    .await;
+    assert_eq!(
+        repeat,
+        lash_core::runtime::drive::relay::RelayVerdict::NotDue,
+        "the settled start defers on the repeat scan: {repeat:?}"
+    );
+
+    // The repeat send Restate coalesces is the lost-run scan's recovery
+    // resubmit — a port send against the same workflow key, not another
+    // obligation delivery.
+    let record = registry
+        .get_process(&task_1_id)
         .await
-        .expect("drive pending");
+        .expect("read the row")
+        .expect("the row is retained");
     runner
-        .deliver_process_start(&task_1_id, "test:2")
+        .deliver_process_start(&record)
         .await
-        .expect("drive pending again");
+        .expect("the lost-run resubmit");
     server.await.expect("mock ingress server task");
 
     let requests = captured.lock_recover().clone();
     assert_eq!(
         requests.len(),
         2,
-        "each scan submits the live row: {requests:?}"
+        "the relay admits once and the recovery resubmit reaches the same key: {requests:?}"
     );
     for request in &requests {
         assert!(
@@ -1632,19 +1667,21 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
 }
 
 /// FIG-2964: a host crash between registration and submission leaves exactly
-/// the row the sweep is meant to own, and the sweep starts it exactly once.
+/// the row the armed `ProcessStart` obligation is meant to own, and the relay
+/// starts it exactly once.
 ///
 /// A row carrying a standing cancel request is submitted too. Only a
 /// `StartFailed` request is terminal on the spot; every other origin is
-/// recorded and waits for a run to honour it, and the sweep never writes a
+/// recorded and waits for a run to honour it, and the relay never writes a
 /// terminal of its own. Withholding the submission would therefore leave the
 /// row permanently non-terminal — `await_process_terminal` would never return
 /// and retention would never reclaim it. The run settles it instead
 /// (`fig779_suspended_process_redrive_observes_durable_cancellation` pins that
 /// a redriven segment observes its durable cancellation and terminalises).
 #[tokio::test]
-pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_cancelling_row() {
-    let registry = process_registry();
+pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_cancelling_row() {
+    let stores = memory_process_stores().await;
+    let registry = stores.registry.clone() as Arc<dyn ProcessRegistry>;
     let crashed_before_submit_id = registry
         .register_process(executed_registration())
         .await
@@ -1678,16 +1715,45 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
         },
     ])
     .await;
-    let runner =
-        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
-    runner
-        .deliver_process_start(&crashed_before_submit_id, "test:1")
-        .await
-        .expect("deliver crashed row");
-    runner
-        .deliver_process_start(&cancelling.id, "test:1")
-        .await
-        .expect("deliver cancelling row");
+    let runner: Arc<dyn lash_core::ProcessWorkSubstrate> = Arc::new(
+        RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store()),
+    );
+    for (process_id, label) in [
+        (&crashed_before_submit_id, "crashed"),
+        (&cancelling.id, "cancelling"),
+    ] {
+        let verdict = deliver_process_start_now(
+            &stores.start_ledger,
+            &registry,
+            &runner,
+            &stores.clock,
+            process_id,
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            lash_core::runtime::drive::relay::RelayVerdict::Delivered,
+            "the armed {label} start is admitted: {verdict:?}"
+        );
+    }
+    for (process_id, label) in [
+        (&crashed_before_submit_id, "crashed"),
+        (&cancelling.id, "cancelling"),
+    ] {
+        let verdict = deliver_process_start_now(
+            &stores.start_ledger,
+            &registry,
+            &runner,
+            &stores.clock,
+            process_id,
+        )
+        .await;
+        assert_eq!(
+            verdict,
+            lash_core::runtime::drive::relay::RelayVerdict::NotDue,
+            "the settled {label} start defers on the repeat scan: {verdict:?}"
+        );
+    }
     server.await.expect("mock ingress server task");
 
     let requests = captured.lock_recover().clone();

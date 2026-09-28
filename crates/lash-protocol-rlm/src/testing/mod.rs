@@ -103,6 +103,7 @@ impl DoubleProcesses {
                 .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
             self.registry(),
             Arc::clone(self.backend.process_work().port()),
+            Arc::new(lash_core::facade_support::SystemClock),
         );
         lash_core::runtime::drive::relay::relay_due(
             &relay,

@@ -1,7 +1,7 @@
 use super::*;
 
 #[tokio::test]
-pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
+pub(super) async fn start_delivery_addresses_latest_segment_without_a_segment_zero_send() {
     let (registry, continuations) = process_stores();
     let mid_chain_id = registry
         .register_process(executed_registration())
@@ -30,11 +30,16 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
         body: r#"{"invocationId":"inv_mid_chain_3","status":"Accepted"}"#,
     }])
     .await;
-    let runner = RestateProcessIngressRunner::new(base_url, registry, continuations);
-    runner
-        .deliver_process_start(&mid_chain_id, "test:1")
+    let runner = RestateProcessIngressRunner::new(base_url, registry.clone(), continuations);
+    let record = registry
+        .get_process(&mid_chain_id)
         .await
-        .expect("drive pending");
+        .expect("read the row")
+        .expect("the row is retained");
+    runner
+        .deliver_process_start(&record)
+        .await
+        .expect("submit the row");
     server.await.expect("capture server");
 
     let requests = captured.lock_recover();
@@ -60,8 +65,8 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
 }
 
 #[tokio::test]
-pub(super) async fn ingress_sweep_skips_externally_owned_rows() {
-    // ADR 0110 at the Restate tier: the ingress sweep never POSTs a run for an
+pub(super) async fn start_delivery_refuses_externally_owned_rows() {
+    // ADR 0110 at the Restate tier: no delivery path POSTs a run for an
     // externally-owned row (Lash does not execute it) and never closes one: its
     // external owner does. A lash-executed row alongside them still submits, so
     // exactly one ingress call fires and it is for that row.
@@ -93,24 +98,65 @@ pub(super) async fn ingress_sweep_skips_externally_owned_rows() {
     .await;
     let runner =
         RestateProcessIngressRunner::new(base_url, Arc::clone(&registry), continuation_store());
+    let executed = registry
+        .get_process(&executed_id)
+        .await
+        .expect("read the executed row")
+        .expect("the executed row is retained");
     runner
-        .deliver_process_start(&executed_id, "test:1")
+        .deliver_process_start(&executed)
         .await
         .expect("submit the executed row");
     server.await.expect("mock ingress server task");
 
-    assert!(
-        runner
-            .deliver_process_start(&ext_first_id, "test:2")
+    // Skipped is not silent: an externally-owned row is a typed terminal
+    // refusal on this tier too — the relay refuses it before the port is
+    // reached (`DeliveryFailure::Refused`, never `Retryable`), and the port's
+    // own defensive refusal is the same typed `PluginError::Session`.
+    for id in [&ext_first_id, &ext_second_id] {
+        let refusal = runner
+            .deliver_process_start(
+                &registry
+                    .get_process(id)
+                    .await
+                    .expect("read the externally-owned row")
+                    .expect("the externally-owned row is retained"),
+            )
             .await
-            .is_err()
+            .expect_err("the port refuses it");
+        assert!(
+            matches!(refusal, PluginError::Session(ref message) if message.contains("externally owned")),
+            "the port's defensive refusal stays typed: {refusal:?}"
+        );
+    }
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a store set for the relay's ledger");
+    let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
+        stores.obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
+        Arc::clone(&registry),
+        Arc::new(runner),
+        stores.clock(),
     );
-    assert!(
-        runner
-            .deliver_process_start(&ext_second_id, "test:3")
-            .await
-            .is_err()
-    );
+    for id in [&ext_first_id, &ext_second_id] {
+        let failure = lash_core::runtime::drive::relay::ObligationRelay::deliver(
+            &relay,
+            &lash_core::store::process_start_obligation_id(id),
+            &lash_core::store::ObligationKey::ProcessStart {
+                process_id: id.clone(),
+            },
+            0,
+        )
+        .await
+        .expect_err("an externally-owned row is refused, not delivered");
+        assert!(
+            matches!(
+                failure,
+                lash_core::runtime::drive::relay::DeliveryFailure::Refused(_)
+            ),
+            "the refusal is the typed terminal one: {failure:?}"
+        );
+    }
 
     let requests = captured.lock_recover().clone();
     assert_eq!(
@@ -1583,9 +1629,14 @@ pub(super) async fn a_failed_process_start_delivery_is_retryable() {
         body: r#"{"message":"ingress unavailable"}"#,
     }])
     .await;
+    let record = registry
+        .get_process(&process_id)
+        .await
+        .expect("read the row")
+        .expect("the row is retained");
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
     let error = runner
-        .deliver_process_start(&process_id, "test:1")
+        .deliver_process_start(&record)
         .await
         .expect_err("submit fails");
     server.await.expect("mock ingress server task");

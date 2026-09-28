@@ -385,6 +385,14 @@ impl RuntimeSessionServices {
                         Arc::clone(&self.current.host.core.durability.process_env_store),
                         self.current.host.core.process_engines.clone(),
                     )
+                    .with_process_starts(
+                        self.current
+                            .host
+                            .core
+                            .backend()
+                            .obligation_ledger(crate::store::ObligationKind::ProcessStart),
+                        Arc::clone(&self.current.host.core.clock),
+                    )
             })
     }
 
