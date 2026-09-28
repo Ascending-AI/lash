@@ -48,7 +48,7 @@ impl From<lash_core::PromptTemplateSection> for RemotePromptTemplateSection {
     fn from(value: lash_core::PromptTemplateSection) -> Self {
         let lash_core::PromptTemplateSection { title, entries } = value;
         Self {
-            title,
+            title: title.map(Into::into),
             entries: entries.into_iter().map(Into::into).collect(),
         }
     }
@@ -58,8 +58,46 @@ impl From<RemotePromptTemplateSection> for lash_core::PromptTemplateSection {
     fn from(value: RemotePromptTemplateSection) -> Self {
         let RemotePromptTemplateSection { title, entries } = value;
         Self {
-            title,
+            title: title.map(Into::into),
             entries: entries.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<lash_core::PromptSectionTitle> for RemotePromptSectionTitle {
+    fn from(value: lash_core::PromptSectionTitle) -> Self {
+        match value {
+            lash_core::PromptSectionTitle::Text(text) => Self::Text(text),
+            lash_core::PromptSectionTitle::Builtin { builtin } => Self::Builtin {
+                builtin: builtin.into(),
+            },
+        }
+    }
+}
+
+impl From<RemotePromptSectionTitle> for lash_core::PromptSectionTitle {
+    fn from(value: RemotePromptSectionTitle) -> Self {
+        match value {
+            RemotePromptSectionTitle::Text(text) => Self::Text(text),
+            RemotePromptSectionTitle::Builtin { builtin } => Self::Builtin {
+                builtin: builtin.into(),
+            },
+        }
+    }
+}
+
+impl From<lash_core::PromptTitleBuiltin> for RemotePromptTitleBuiltin {
+    fn from(value: lash_core::PromptTitleBuiltin) -> Self {
+        match value {
+            lash_core::PromptTitleBuiltin::Execution => Self::Execution,
+        }
+    }
+}
+
+impl From<RemotePromptTitleBuiltin> for lash_core::PromptTitleBuiltin {
+    fn from(value: RemotePromptTitleBuiltin) -> Self {
+        match value {
+            RemotePromptTitleBuiltin::Execution => Self::Execution,
         }
     }
 }

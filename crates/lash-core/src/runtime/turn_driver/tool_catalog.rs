@@ -43,6 +43,7 @@ impl PreparedExecutionEnvironment {
             crate::PromptBuildInput {
                 template_fingerprint: crate::prompt_template_fingerprint(&resolved.template),
                 template: resolved.template,
+                execution_title: Arc::clone(&self.turn_driver_preamble.execution_title),
                 execution_prompt_fingerprint: crate::prompt_text_fingerprint(
                     &self.turn_driver_preamble.execution_prompt,
                 ),

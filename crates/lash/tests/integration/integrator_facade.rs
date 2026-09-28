@@ -94,6 +94,7 @@ impl ProtocolDriverPlugin for Driver {
             tool_specs,
             tool_names,
             tool_names_fingerprint,
+            execution_title: Arc::from("Execution"),
             execution_prompt: Arc::from("facade protocol witness"),
             prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,

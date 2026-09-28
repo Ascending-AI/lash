@@ -422,12 +422,16 @@ fn remote_model_intent_and_process_model_spec_round_trip_reasoning_selections() 
 
 #[test]
 fn prompt_layer_round_trips_without_protocol_crate_depending_on_core_by_default() {
-    let template = lash_core::PromptTemplate::new(vec![lash_core::PromptTemplateSection::titled(
-        "Custom",
-        vec![lash_core::PromptTemplateEntry::slot(
-            lash_core::PromptSlot::Guidance,
-        )],
-    )]);
+    let mut template =
+        lash_core::PromptTemplate::new(vec![lash_core::PromptTemplateSection::titled(
+            "Custom",
+            vec![lash_core::PromptTemplateEntry::slot(
+                lash_core::PromptSlot::Guidance,
+            )],
+        )]);
+    template
+        .sections
+        .extend(lash_core::facade_support::default_prompt_template().sections);
     let prompt = lash_core::PromptLayer::with_template(template)
         .with_contribution(lash_core::PromptContribution::guidance("Guide", "remote"));
 

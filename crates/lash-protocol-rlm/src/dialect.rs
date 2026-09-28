@@ -255,6 +255,8 @@ impl DialectSession {
 pub(crate) struct DialectPromptVocabulary {
     /// How the prompt names the language in prose.
     pub(crate) language_name: &'static str,
+    /// The heading of the prompt template's execution section.
+    pub(crate) execution_title: &'static str,
     /// The opening cell tag, quoted in prose that points at cells.
     pub(crate) cell_open_tag: &'static str,
     /// What the prompt calls one unit of code.

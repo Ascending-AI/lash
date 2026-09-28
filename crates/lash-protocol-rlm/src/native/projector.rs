@@ -1,7 +1,6 @@
 use super::history::{RlmHistoryRenderInput, build_rlm_history_messages_from_turn};
 use crate::dialect::TypescriptDialect;
 use crate::driver::RlmPreambleConfig;
-use crate::execution_prompt::render_system_prompt;
 use crate::rlm_support::{decode_rlm_options, effective_budget_tokens};
 use lash_core::llm::types::{LlmRequestScope, LlmToolChoice};
 use lash_core::sansio::ContextProjector;
@@ -51,6 +50,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_specs: Arc::new(vec![super::tool::tool_spec(dialect.as_ref())]),
         tool_names,
         tool_names_fingerprint,
+        execution_title: Arc::from(dialect.prompt_vocabulary().execution_title),
         execution_prompt: Arc::from(execution),
         prompt_contributions,
         writer_formats: input.writer_formats,
@@ -115,7 +115,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for NativeContextProjector {
 
         Arc::new(LlmRequest {
             model: ctx.config.model.clone(),
-            instructions: render_system_prompt(&ctx.config.system_prompt, self.dialect.as_ref()),
+            instructions: (!ctx.config.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.config.system_prompt.trim())),
             messages,
             resolved_stored: Default::default(),
             tools: Arc::new(vec![super::tool::tool_spec(self.dialect.as_ref())]),

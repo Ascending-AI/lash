@@ -90,13 +90,11 @@ fn system_with(
             .render_execution_section(features, &catalog, crate::plugin::RlmChannel::Cell)
             .unwrap()
     };
-    let prompt = lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
+    lash_core::PromptTemplate::default().render(&lash_sansio::PromptContext {
+        execution_title: dialect.prompt_vocabulary().execution_title.into(),
         execution_prompt: execution.into(),
         ..Default::default()
-    });
-    crate::execution_prompt::render_system_prompt(&prompt, dialect)
-        .unwrap()
-        .to_string()
+    })
 }
 
 #[test]

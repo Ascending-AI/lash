@@ -50,10 +50,23 @@ pub enum RemotePromptTemplateEntry {
     Slot { slot: RemotePromptSlot },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemotePromptTitleBuiltin {
+    Execution,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum RemotePromptSectionTitle {
+    Text(String),
+    Builtin { builtin: RemotePromptTitleBuiltin },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct RemotePromptTemplateSection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub title: Option<RemotePromptSectionTitle>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<RemotePromptTemplateEntry>,
 }

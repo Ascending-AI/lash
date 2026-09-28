@@ -115,6 +115,7 @@ fn is_plain_identifier(text: &str) -> bool {
 pub(crate) const TYPESCRIPT_PROMPT_VOCABULARY: crate::dialect::DialectPromptVocabulary =
     crate::dialect::DialectPromptVocabulary {
         language_name: "TypeScript",
+        execution_title: "TypeScript execution",
         cell_open_tag: "<typescript>",
         cell_noun: "cell",
         print_call: "console.log",

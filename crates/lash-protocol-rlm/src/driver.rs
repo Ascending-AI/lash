@@ -1,4 +1,3 @@
-use crate::execution_prompt::render_system_prompt;
 pub(crate) mod history;
 
 use std::sync::Arc;
@@ -119,6 +118,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_specs: Arc::new(Vec::new()),
         tool_names,
         tool_names_fingerprint,
+        execution_title: Arc::from(dialect.prompt_vocabulary().execution_title),
         execution_prompt: Arc::from(execution),
         prompt_contributions,
         writer_formats: input.writer_formats,
@@ -312,7 +312,8 @@ impl ContextProjector<lash_core::HostTurnProtocol> for RlmContextProjector {
         generation.suppress_stop_sequences_for_protocol();
 
         Arc::new(LlmRequest {
-            instructions: render_system_prompt(&ctx.config.system_prompt, self.dialect.as_ref()),
+            instructions: (!ctx.config.system_prompt.trim().is_empty())
+                .then(|| Arc::from(ctx.config.system_prompt.trim())),
             model: ctx.config.model.clone(),
             messages,
             resolved_stored: Default::default(),

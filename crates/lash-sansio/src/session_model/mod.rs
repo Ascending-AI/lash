@@ -11,9 +11,9 @@ pub use message::{
     messages_are_prompt_resume_safe, render_prompt, render_transcript_prompt, shared_parts,
 };
 pub use prompt::{
-    MAIN_AGENT_INTRO, PromptBuiltin, PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate,
-    PromptTemplateEntry, PromptTemplateSection, ResolvedPromptLayer, default_prompt_template,
-    resolve_prompt_layers,
+    MAIN_AGENT_INTRO, PromptBuiltin, PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer,
+    PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin,
+    ResolvedPromptLayer, default_prompt_template, resolve_prompt_layers,
 };
 
 use std::sync::Arc;

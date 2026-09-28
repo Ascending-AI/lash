@@ -80,18 +80,45 @@ impl PromptTemplateEntry {
     }
 }
 
+/// A section heading whose words the turn's protocol supplies.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum PromptTitleBuiltin {
+    /// The protocol's name for its execution instructions.
+    Execution,
+}
+
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(untagged)]
+pub enum PromptSectionTitle {
+    Text(String),
+    Builtin { builtin: PromptTitleBuiltin },
+}
+
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
 pub struct PromptTemplateSection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
+    pub title: Option<PromptSectionTitle>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<PromptTemplateEntry>,
 }
 
 impl PromptTemplateSection {
-    pub fn new(title: Option<String>, entries: Vec<PromptTemplateEntry>) -> Self {
+    pub fn new(title: Option<PromptSectionTitle>, entries: Vec<PromptTemplateEntry>) -> Self {
         Self { title, entries }
     }
 
@@ -104,7 +131,14 @@ impl PromptTemplateSection {
 
     pub fn titled(title: impl Into<String>, entries: Vec<PromptTemplateEntry>) -> Self {
         Self {
-            title: Some(title.into()),
+            title: Some(PromptSectionTitle::Text(title.into())),
+            entries,
+        }
+    }
+
+    pub fn builtin_titled(builtin: PromptTitleBuiltin, entries: Vec<PromptTemplateEntry>) -> Self {
+        Self {
+            title: Some(PromptSectionTitle::Builtin { builtin }),
             entries,
         }
     }
@@ -277,8 +311,8 @@ pub fn default_prompt_template() -> PromptTemplate {
             PromptTemplateEntry::builtin(PromptBuiltin::MainAgentIntro),
             PromptTemplateEntry::slot(PromptSlot::Intro),
         ]),
-        PromptTemplateSection::titled(
-            "Execution",
+        PromptTemplateSection::builtin_titled(
+            PromptTitleBuiltin::Execution,
             vec![
                 PromptTemplateEntry::builtin(PromptBuiltin::ExecutionInstructions),
                 PromptTemplateEntry::slot(PromptSlot::Execution),
@@ -377,8 +411,13 @@ fn render_section(
     let mut rendered = Vec::new();
     if let Some(title) = section
         .title
-        .as_deref()
-        .map(str::trim)
+        .as_ref()
+        .map(|title| match title {
+            PromptSectionTitle::Text(text) => text.trim(),
+            PromptSectionTitle::Builtin {
+                builtin: PromptTitleBuiltin::Execution,
+            } => prompt.execution_title.trim(),
+        })
         .filter(|s| !s.is_empty())
     {
         rendered.push(format!("## {title}"));
@@ -424,6 +463,7 @@ mod tests {
 
     fn prompt() -> PromptContext {
         PromptContext {
+            execution_title: std::sync::Arc::from("Protocol execution"),
             execution_prompt: std::sync::Arc::from("protocol execution"),
             ..PromptContext::default()
         }
@@ -435,8 +475,7 @@ mod tests {
         ctx.tool_names = std::sync::Arc::new(vec!["ask".to_string()]);
         let text = default_prompt_template().render(&ctx);
         assert!(text.contains(MAIN_AGENT_INTRO));
-        assert!(text.contains("## Execution"));
-        assert!(text.contains("protocol execution"));
+        assert!(text.contains("## Protocol execution\n\nprotocol execution"));
         assert!(text.contains("## Guidance"));
         // Interactive context: the "ask when blocked" guidance is in play.
         assert!(text.contains("Ask only when progress is blocked"));
@@ -529,6 +568,22 @@ mod tests {
         let text = template.render(&prompt());
         assert!(text.is_empty());
     }
+
+    #[test]
+    fn section_titles_keep_plain_strings_on_the_wire_beside_builtin_titles() {
+        let template = default_prompt_template();
+        let wire = serde_json::to_value(&template).unwrap();
+        assert_eq!(
+            wire["sections"][1]["title"],
+            serde_json::json!({ "builtin": "execution" })
+        );
+        assert_eq!(wire["sections"][2]["title"], serde_json::json!("Guidance"));
+        assert_eq!(
+            serde_json::from_value::<PromptTemplate>(wire).unwrap(),
+            template
+        );
+    }
+
     #[test]
     fn contribution_body_preserves_authoring_slot_through_map_key() {
         let authored = PromptContribution::new(

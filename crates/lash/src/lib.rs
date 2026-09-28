@@ -729,8 +729,9 @@ pub mod remote {
     pub mod prompt {
         pub use lash_remote_protocol::prompt::{
             RemotePromptBuiltin, RemotePromptContribution, RemotePromptContributionGate,
-            RemotePromptLayer, RemotePromptSlot, RemotePromptSlotLayer, RemotePromptTemplate,
-            RemotePromptTemplateEntry, RemotePromptTemplateSection,
+            RemotePromptLayer, RemotePromptSectionTitle, RemotePromptSlot, RemotePromptSlotLayer,
+            RemotePromptTemplate, RemotePromptTemplateEntry, RemotePromptTemplateSection,
+            RemotePromptTitleBuiltin,
         };
     }
 
@@ -960,8 +961,9 @@ pub mod runtime {
 pub mod prompt {
     pub use lash_core::{
         PromptBuiltin, PromptContribution, PromptContributionBody, PromptContributionGate,
-        PromptLayer, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
-        PromptTemplateSection, facade_support::default_prompt_template,
+        PromptLayer, PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate,
+        PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin,
+        facade_support::default_prompt_template,
     };
 }
 

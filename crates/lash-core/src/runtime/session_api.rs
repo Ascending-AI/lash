@@ -886,6 +886,7 @@ impl LashRuntime {
         let rendered = lash_sansio::build_prompt(crate::PromptBuildInput {
             template_fingerprint: crate::prompt_template_fingerprint(&resolved.template),
             template: resolved.template,
+            execution_title: Arc::from("Execution"),
             execution_prompt_fingerprint: crate::prompt_text_fingerprint(""),
             execution_prompt: Arc::from(""),
             tool_names_fingerprint: lash_sansio::prompt_tool_names_fingerprint(&[]),

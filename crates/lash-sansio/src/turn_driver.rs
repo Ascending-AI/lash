@@ -88,6 +88,9 @@ pub struct TurnDriverPreamble<M: TurnProtocol = UnitTurnProtocol> {
     pub tool_specs: Arc<Vec<LlmToolSpec>>,
     pub tool_names: Arc<Vec<String>>,
     pub tool_names_fingerprint: PromptFingerprint,
+    /// The heading the protocol gives its execution instructions, rendered
+    /// wherever the prompt template places `PromptTitleBuiltin::Execution`.
+    pub execution_title: Arc<str>,
     pub execution_prompt: Arc<str>,
     pub prompt_contributions: Vec<PromptContribution>,
     /// The fleet's writer-version table (FIG-3796): the turn machine hands it

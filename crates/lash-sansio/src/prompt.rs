@@ -68,6 +68,7 @@ impl Default for PromptContributionSet {
 pub struct PromptBuildInput {
     pub template: PromptTemplate,
     pub template_fingerprint: PromptFingerprint,
+    pub execution_title: Arc<str>,
     pub execution_prompt: Arc<str>,
     pub execution_prompt_fingerprint: PromptFingerprint,
     pub tool_names: Arc<Vec<String>>,
@@ -77,6 +78,8 @@ pub struct PromptBuildInput {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct PromptContext {
+    #[serde(default)]
+    pub execution_title: Arc<str>,
     #[serde(default)]
     pub execution_prompt: Arc<str>,
     pub tool_names: Arc<Vec<String>>,
@@ -128,6 +131,7 @@ pub fn build_prompt(input: PromptBuildInput) -> PreparedPrompt {
 
 pub fn build_prompt_cached(input: PromptBuildInput, cache: Option<&PromptCache>) -> PreparedPrompt {
     let context = PromptContext {
+        execution_title: Arc::clone(&input.execution_title),
         execution_prompt: Arc::clone(&input.execution_prompt),
         tool_names: Arc::clone(&input.tool_names),
         contributions: input.contributions.as_arc(),
@@ -172,6 +176,7 @@ pub fn prompt_tool_names_fingerprint(tool_names: &[String]) -> PromptFingerprint
 fn hash_prompt_inputs(input: &PromptBuildInput) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     input.template_fingerprint.write(&mut hasher);
+    input.execution_title.hash(&mut hasher);
     input.execution_prompt_fingerprint.write(&mut hasher);
     input.tool_names_fingerprint.write(&mut hasher);
     input.contributions.fingerprint().write(&mut hasher);
@@ -258,6 +263,7 @@ mod tests {
         PromptBuildInput {
             template_fingerprint: prompt_template_fingerprint(&template),
             template,
+            execution_title: Arc::from("Execution"),
             execution_prompt_fingerprint: prompt_text_fingerprint(&execution_prompt),
             execution_prompt,
             tool_names_fingerprint: prompt_tool_names_fingerprint(&tool_names),
@@ -324,6 +330,23 @@ mod tests {
         );
         assert!(!Arc::ptr_eq(&first.system_prompt, &second.system_prompt));
         assert_ne!(first.system_prompt, second.system_prompt);
+    }
+
+    #[test]
+    fn build_prompt_cached_renders_again_when_the_execution_title_changes() {
+        let cache = PromptCache::new();
+        let titled = |title: &str| PromptBuildInput {
+            execution_title: Arc::from(title),
+            ..input(default_prompt_template(), "Use tools.", vec![], vec![])
+        };
+        build_prompt_cached(titled("Execution"), Some(&cache));
+        let renamed = build_prompt_cached(titled("TypeScript execution"), Some(&cache));
+        assert!(
+            renamed
+                .system_prompt
+                .contains("## TypeScript execution\n\nUse tools.")
+        );
+        assert!(!renamed.system_prompt.contains("## Execution"));
     }
 
     fn template_with_text(text: &str) -> PromptTemplate {

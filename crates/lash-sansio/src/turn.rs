@@ -161,6 +161,7 @@ mod tests {
             tool_specs: tool_catalog.model_tool_specs(),
             tool_names: tool_catalog.tool_names(),
             tool_names_fingerprint: tool_catalog.tool_names_fingerprint(),
+            execution_title: Arc::from("Execution"),
             execution_prompt: Arc::from("test prompt"),
             prompt_contributions: Vec::new(),
             writer_formats: crate::build_newest_writer_formats(),
@@ -171,6 +172,7 @@ mod tests {
         let prepared_prompt = build_prompt(PromptBuildInput {
             template_fingerprint: prompt_template_fingerprint(&template),
             template,
+            execution_title: Arc::clone(&turn_driver_preamble.execution_title),
             execution_prompt_fingerprint: prompt_text_fingerprint(
                 &turn_driver_preamble.execution_prompt,
             ),

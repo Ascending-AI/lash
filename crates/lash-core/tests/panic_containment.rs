@@ -524,6 +524,7 @@ impl ProtocolDriverPlugin for MinimalProtocolDriver {
             tool_specs: input.tool_catalog.model_tool_specs(),
             tool_names: input.tool_catalog.tool_names(),
             tool_names_fingerprint: input.tool_catalog.tool_names_fingerprint(),
+            execution_title: Arc::from("Execution"),
             execution_prompt: Arc::from(""),
             prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,

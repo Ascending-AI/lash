@@ -53,6 +53,7 @@ use serde_json::Value;
 #[cfg(test)]
 use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
 
+const STANDARD_EXECUTION_TITLE: &str = "Execution";
 const STANDARD_EXECUTION_SECTION: &str = "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (up to 25); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.";
 
 const BATCH_MAX_TOOL_CALLS: usize = 25;
@@ -202,6 +203,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             },
             tool_names,
             tool_names_fingerprint,
+            execution_title: Arc::from(STANDARD_EXECUTION_TITLE),
             execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
             prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,
