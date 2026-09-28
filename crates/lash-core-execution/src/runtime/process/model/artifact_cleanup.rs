@@ -26,6 +26,18 @@ impl ProcessArtifactCleanup {
             input: Arc::clone(&record.input),
         }
     }
+
+    /// The owner the process's start staged its artifacts under, when it was
+    /// started under a key. A process registered without a key staged nothing
+    /// under a key, and the keyless owner is shared by every such start, so
+    /// there is no staging owner of its own to retire.
+    pub fn start_staging_owner(&self) -> Option<super::ArtifactOwner> {
+        self.start_key.as_ref().map(|start_key| {
+            super::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(Some(
+                start_key,
+            )))
+        })
+    }
 }
 
 /// Result of acknowledging one durable process-artifact cleanup record.

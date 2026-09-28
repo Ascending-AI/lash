@@ -252,7 +252,7 @@ lash_store_sql::statements! {
         /// Prune candidates: retired rows older than `?1`, at or below change
         /// sequence `?2`, with no wake still owed. The survey half, which
         /// locks nothing.
-        list_prunable_terminal = "SELECT process_id, record_json FROM processes
+        list_prunable_terminal = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
@@ -269,7 +269,7 @@ lash_store_sql::statements! {
         /// Two statements rather than one built with a suffix: the survey must
         /// not lock, and the prune must hold its candidates from selection
         /// through the delete.
-        list_prunable_terminal_for_update = "SELECT process_id, record_json FROM processes
+        list_prunable_terminal_for_update = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
@@ -445,19 +445,25 @@ lash_store_sql::statements! {
                 )";
 
         /// Prune the process rows named by the id array `?1`, stamping their
-        /// tombstones `?2`; reports the events and the rows it removed.
+        /// tombstones `?2` and recording the artifact cleanup array `?3`,
+        /// aligned with `?1`; reports the events and the rows it removed.
         ///
         /// One statement for the whole prune, where SQLite issues eight under
         /// its write lock. Every part has to see the same snapshot: the clock
         /// is bumped once for the batch, the tombstones take their change
-        /// sequences from that bump in candidate order, the artifact cleanup
-        /// rows are derived from the tombstones, and the process delete runs
-        /// only if both counts match the candidate count. Splitting it would
-        /// let a status writer land between the parts.
+        /// sequences from that bump in candidate order, a cleanup row is
+        /// written beside each tombstone, and the process delete runs only if
+        /// both counts match the candidate count. Splitting it would let a
+        /// status writer land between the parts.
+        ///
+        /// The cleanup records are the caller's, built from the locked
+        /// candidate rows by `ProcessArtifactCleanup::from_record` exactly as
+        /// SQLite builds them, never assembled here field by field: a field
+        /// the SQL forgot would silently deserialize to its default.
         prune_rows = "WITH candidates AS (
-             SELECT process_id, ordinality
-             FROM unnest(?1::TEXT[]) WITH ORDINALITY
-                  AS candidate(process_id, ordinality)
+             SELECT process_id, cleanup_json, ordinality
+             FROM unnest(?1::TEXT[], ?3::TEXT[]) WITH ORDINALITY
+                  AS candidate(process_id, cleanup_json, ordinality)
          ),
          deleted_events AS (
              DELETE FROM process_events AS event
@@ -494,14 +500,9 @@ lash_store_sql::statements! {
              INSERT INTO process_artifact_cleanup (
                  process_id, cleanup_json
              )
-             SELECT tombstone.process_id,
-                    jsonb_build_object(
-                        'process_id', process.process_id,
-                        'env_ref', process.record_json::jsonb -> 'env_ref',
-                        'input', process.record_json::jsonb -> 'input'
-                    )::text
+             SELECT tombstone.process_id, candidate.cleanup_json
              FROM inserted_tombstones AS tombstone
-             JOIN processes AS process USING (process_id)
+             JOIN candidates AS candidate USING (process_id)
              RETURNING process_id
          ),
          deleted_processes AS (

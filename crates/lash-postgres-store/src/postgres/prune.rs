@@ -1,9 +1,9 @@
 use crate::*;
-use lash_sansio::ProcessId;
+use lash_core_execution::ProcessArtifactCleanup;
 
 pub(super) async fn prune_process_rows_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_ids: &[ProcessId],
+    cleanups: &[ProcessArtifactCleanup],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, PluginError> {
     // Candidate process rows remain locked from selection through this
@@ -12,6 +12,11 @@ pub(super) async fn prune_process_rows_tx(
     // Events are deleted explicitly for the report count; the final set-based
     // process delete cascades observers, leases, handovers, and terminal wake
     // deliveries through their existing foreign keys.
+    let cleanup_json = cleanups
+        .iter()
+        .map(serde_json::to_string)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(process_decode_error)?;
     let (pruned_events, pruned_processes) = sqlx::query_as::<_, (i64, i64)>(
         crate::process_sql::process_sql()
             .registry_postgres
@@ -19,20 +24,21 @@ pub(super) async fn prune_process_rows_tx(
             .sql(),
     )
     .bind(
-        process_ids
+        cleanups
             .iter()
-            .map(ProcessId::as_str)
+            .map(|cleanup| cleanup.process_id.as_str())
             .collect::<Vec<_>>(),
     )
     .bind(pruned_at_ms)
+    .bind(cleanup_json)
     .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
 
-    if pruned_processes != process_ids.len() as i64 {
+    if pruned_processes != cleanups.len() as i64 {
         return Err(PluginError::Session(format!(
             "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
-            process_ids.len()
+            cleanups.len()
         )));
     }
 
@@ -100,8 +106,19 @@ mod tests {
         .await
         .expect("read process clock before divergent prune");
 
+        let cleanup = ProcessArtifactCleanup::from_record(
+            &registry
+                .get_process(&process_id)
+                .await
+                .expect("read process before divergent prune")
+                .expect("the completed process is retained"),
+        );
+        let ghost = ProcessArtifactCleanup {
+            process_id: ghost_id,
+            ..cleanup.clone()
+        };
         let mut tx = storage.pool().begin().await.expect("begin divergent prune");
-        let error = prune_process_rows_tx(&mut tx, &[process_id.clone(), ghost_id], 123_456)
+        let error = prune_process_rows_tx(&mut tx, &[cleanup, ghost], 123_456)
             .await
             .expect_err("candidate/tombstone divergence must abort the prune transaction");
         assert!(

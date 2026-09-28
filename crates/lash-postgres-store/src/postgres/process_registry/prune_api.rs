@@ -16,7 +16,7 @@ async fn select_prunable<'c>(
     cutoff: i64,
     max_change_seq: Option<i64>,
     filter: Option<&lash_core_execution::ProcessListFilter>,
-) -> Result<Vec<ProcessId>, PluginError> {
+) -> Result<Vec<ProcessRecord>, PluginError> {
     let rows = sqlx::query(sql)
         .bind(cutoff)
         .bind(max_change_seq)
@@ -25,12 +25,11 @@ async fn select_prunable<'c>(
         .map_err(plugin_sqlx_error)?;
     let mut prunable = Vec::new();
     for row in rows {
-        let process_id = crate::stored_process_id(&row.get::<String, _>(0))?;
-        let record_json: String = row.get(1);
+        let record_json: String = row.get(0);
         let record: ProcessRecord =
             serde_json::from_str(&record_json).map_err(process_decode_error)?;
         if filter.is_none_or(|filter| filter.matches_record(&record)) {
-            prunable.push(process_id);
+            prunable.push(record);
         }
     }
     Ok(prunable)
@@ -45,14 +44,17 @@ pub(super) async fn prunable_terminal_processes(
     watermark: lash_core_execution::ProjectionWatermark,
 ) -> Result<Vec<ProcessId>, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-    select_prunable(
+    Ok(select_prunable(
         &registry.pool,
         process_sql().process_postgres.list_prunable_terminal.sql(),
         cutoff,
         watermark_change_seq(watermark),
         filter.as_ref(),
     )
-    .await
+    .await?
+    .into_iter()
+    .map(|record| record.id)
+    .collect())
 }
 
 pub(super) async fn complete_process_artifact_cleanup(
@@ -142,10 +144,15 @@ pub(super) async fn prune_terminal_processes(
         });
     }
 
-    let process_ids = prunable;
-    let session_ids = process_ids
+    // The candidates stay locked from selection through the prune, so the
+    // cleanup built from each row read here is the cleanup of the row pruned.
+    let cleanups = prunable
         .iter()
-        .flat_map(facade_support::process_runtime_session_ids)
+        .map(lash_core_execution::ProcessArtifactCleanup::from_record)
+        .collect::<Vec<_>>();
+    let session_ids = cleanups
+        .iter()
+        .flat_map(|cleanup| facade_support::process_runtime_session_ids(&cleanup.process_id))
         .collect::<Vec<_>>();
     let blob_reclaim = delete_process_sessions_tx(&mut tx, &session_ids)
         .await
@@ -156,7 +163,7 @@ pub(super) async fn prune_terminal_processes(
             ))
         })?;
 
-    let report = prune_process_rows_tx(&mut tx, &process_ids, pruned_at_ms).await?;
+    let report = prune_process_rows_tx(&mut tx, &cleanups, pruned_at_ms).await?;
     tx.commit().await.map_err(plugin_sqlx_error)?;
     tracing::debug!(
         enumerated_blob_count = blob_reclaim.enumerated_blob_count,

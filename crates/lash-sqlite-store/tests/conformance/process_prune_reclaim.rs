@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use lash_core_execution::{ProcessRegistry, SessionStoreFactory};
+use lash_core_execution::{ProcessExecutionEnvStore, ProcessRegistry, SessionStoreFactory};
 use lash_sqlite_store::SqliteDatabase;
 
 use super::SUBSTRATE;
@@ -22,4 +22,11 @@ lash_conformance::process_prune_reclaim_tests!({
         None,
     ));
     (backend, "sqlite", factory, registry, probe)
+});
+
+lash_conformance::process_prune_start_staging_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
+    let env_store = backend.blocking_store() as Arc<dyn ProcessExecutionEnvStore>;
+    (backend, registry, env_store)
 });

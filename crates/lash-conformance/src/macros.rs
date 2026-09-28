@@ -1194,6 +1194,27 @@ macro_rules! process_prune_reclaim_tests {
     };
 }
 
+/// Register the process-prune start-staging law. The fixture yields
+/// `(guard, process registry, process-environment store)`.
+#[macro_export]
+macro_rules! process_prune_start_staging_tests {
+    ($fixture:block) => {
+        $crate::process_prune_start_staging_tests!(@catalogue $fixture; [
+            (process_prune_retires_the_start_staging_owner, "process-prune-start-staging"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, registry, env_store) = $fixture;
+                let _ = $label;
+                $crate::registration_macro_support::$law(registry, env_store).await;
+            }
+        )*
+    };
+}
+
 #[macro_export]
 macro_rules! attachment_store_tests {
     ($fixture:block) => {

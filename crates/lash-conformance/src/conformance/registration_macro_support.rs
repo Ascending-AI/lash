@@ -32,6 +32,7 @@ pub use super::process_event_batch::*;
 pub use super::process_filters::*;
 pub use super::process_park_feed::*;
 pub use super::process_prune_reclaim::*;
+pub use super::process_prune_start_staging::*;
 pub use super::process_references::*;
 pub use super::process_registry::status_filters::*;
 pub use super::process_registry::*;

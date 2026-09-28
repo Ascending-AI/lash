@@ -810,10 +810,7 @@ impl Processes {
             // process registered without a key staged nothing under a key, and
             // the keyless owner is shared by every such start, so it is never
             // fenced here.
-            if let Some(start_key) = cleanup.start_key.as_ref() {
-                let staging_owner = lash_core::ArtifactOwner::process_start(
-                    &lash_core::ProcessCommand::start_effect_id(Some(start_key)),
-                );
+            if let Some(staging_owner) = cleanup.start_staging_owner() {
                 self.core
                     .env
                     .core

@@ -79,6 +79,18 @@ lash_conformance::process_prune_reclaim_tests!({
     (database_lock, "postgres", factory, registry, probe)
 });
 
+lash_conformance::process_prune_start_staging_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres process-prune start-staging law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let env_store = Arc::new(storage.process_env_store())
+        as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>;
+    (database_lock, registry, env_store)
+});
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
