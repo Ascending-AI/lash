@@ -503,7 +503,9 @@ no probe that fires it fails that test.
   value keeps ECMA `ToString`, which is already the useful text for numbers,
   booleans, `null`, `undefined`, dates, regexps and errors — a `Map` or `Set`
   prints as `[object Map]`/`[object Set]` because it has no JSON body. Node's
-  inspector formatting is still not reproduced.
+  inspector formatting is still not reproduced. A call whose text renders
+  empty (`console.log()`, `console.log('')`) makes no observation: the RLM
+  host drops an empty print where Node writes a blank line.
 - String coercion is ECMA-262's (FIG-3652): `"" + value`, `` `${value}` ``
   and `String(value)` run ToPrimitive, so an object's own `valueOf`/`toString`
   answer in hint order (`+` asks `valueOf` first; a template and `String()`

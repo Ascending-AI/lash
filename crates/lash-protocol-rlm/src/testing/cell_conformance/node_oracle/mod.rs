@@ -97,9 +97,11 @@ struct Observation {
 }
 
 impl Observation {
-    /// The observation without what is reported but never compared, and
-    /// with every content hash (a 64-digit hex run) spelled `<hash>`: a hash
-    /// is an identity the artifact derives, not something a cell observes.
+    /// The observation without what is reported but never compared, with
+    /// every content hash (a 64-digit hex run) spelled `<hash>` — a hash is
+    /// an identity the artifact derives, not something a cell observes — and
+    /// without empty printed lines: the RLM host drops a print that renders
+    /// empty, so it reaches no one (register entry 13, FIG-4011).
     fn comparable(&self) -> Self {
         Self {
             detail: None,
@@ -107,6 +109,7 @@ impl Observation {
             prints: self
                 .prints
                 .iter()
+                .filter(|text| !text.is_empty())
                 .map(|text| without_hashes(text))
                 .collect(),
             probes: self

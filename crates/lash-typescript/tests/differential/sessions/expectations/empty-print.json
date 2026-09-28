@@ -1,0 +1,29 @@
+{
+  "id": "empty-print",
+  "about": "a print that renders empty is no observation; the lines around it are",
+  "probe": [
+    "blank"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const blank = '';\nconsole.log(blank);\nconsole.log();\nconsole.warn([].join('-'));\nconsole.log('after', blank.length);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "",
+          "",
+          "",
+          "after 0"
+        ],
+        "probes": {
+          "blank": "string \"\""
+        },
+        "closures": []
+      }
+    }
+  ]
+}

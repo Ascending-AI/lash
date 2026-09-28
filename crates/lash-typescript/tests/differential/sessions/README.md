@@ -38,7 +38,8 @@ A cell is a Script, observed as:
 
 - its printed lines, under the host printer of deviation register entry 13
   (arguments joined by a space, a plain object or array as compact JSON,
-  anything else as ECMA `ToString`);
+  anything else as ECMA `ToString`), except an empty line, which the RLM host
+  drops and so is no observation;
 - how it ended: normally, through `finish(value)` (which ends the cell; a cell
   never catches it), or by an uncaught error of a class — a fault in an
   operation ECMA-262 specifies to throw is that ECMA class, and a VM fault

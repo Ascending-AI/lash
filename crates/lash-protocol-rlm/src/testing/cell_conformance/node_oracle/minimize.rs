@@ -60,6 +60,19 @@ fn is_whole_statement(line: &str) -> bool {
     line.ends_with(';') && balance('{', '}') && balance('(', ')') && balance('[', ']')
 }
 
+/// Whether a candidate may delete `line` of `statement`: a whole statement
+/// that is not a generated loop's counter step (`turn1++;` of a
+/// `while (turn1 < 2)` or a `do ... while (turn1 < 2);`). Without its step the
+/// loop never ends, in Node as in lash, and the minimizer hangs on the
+/// candidate instead of rejecting it (FIG-4011).
+fn deletable(statement: &str, line: &str) -> bool {
+    let steps_a_loop = line
+        .trim()
+        .strip_suffix("++;")
+        .is_some_and(|counter| statement.contains(&format!("while ({counter} < ")));
+    is_whole_statement(line) && !steps_a_loop
+}
+
 /// The smallest session showing `divergence`, rendered as a corpus row.
 pub(super) fn minimize(
     oracle: &mut NodeOracle,
@@ -114,7 +127,8 @@ pub(super) fn minimize(
                     let Some(text) = lines.get(line) else {
                         continue;
                     };
-                    if lines.len() < 2 || !is_whole_statement(text) {
+                    if lines.len() < 2 || !deletable(&best.cells[cell].statements[statement], text)
+                    {
                         continue;
                     }
                     let mut candidate = best.clone();
@@ -185,4 +199,38 @@ fn corpus_row(
     ));
     row.push("end".to_string());
     row.join("\n")
+}
+
+/// A candidate never deletes a generated loop's counter step, so every
+/// candidate of a terminating session terminates; the loop's other whole
+/// statements stay deletable. Seed 156260291's minimization deleted
+/// `turn1++;` and hung on the loop that was left (FIG-4011).
+#[test]
+fn a_candidate_keeps_every_loop_counter_step() {
+    let while_loop = "while (turn1 < 2) {\n  turn1++;\n  console.warn(iota.join('-').slice(0, 2));\n  {\n    theta++;\n    iota.unshift('b.c'.length);\n  }\n}";
+    let do_while =
+        "do {\n  turn4++;\n  sigma = /(?<head>[a-z])(?<tail>[a-z]*)/;\n} while (turn4 < 2);";
+    for (statement, step, other) in [
+        (
+            while_loop,
+            "  turn1++;",
+            "  console.warn(iota.join('-').slice(0, 2));",
+        ),
+        (while_loop, "  turn1++;", "    iota.unshift('b.c'.length);"),
+        (while_loop, "  turn1++;", "    theta++;"),
+        (
+            do_while,
+            "  turn4++;",
+            "  sigma = /(?<head>[a-z])(?<tail>[a-z]*)/;",
+        ),
+    ] {
+        assert!(
+            !deletable(statement, step),
+            "`{step}` steps its loop:\n{statement}"
+        );
+        assert!(
+            deletable(statement, other),
+            "`{other}` is a whole statement of its own:\n{statement}"
+        );
+    }
 }
