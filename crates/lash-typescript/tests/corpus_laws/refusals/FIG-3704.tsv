@@ -4,12 +4,6 @@
 # until it is deleted or corrected.
 # program id	refusal	reason
 differential:FIG-3704:10	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
-differential:FIG-3704:11	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3704:12	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3704:13	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3704:14	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3704:15	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
-differential:FIG-3704:16	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3704:17	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3704:18	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3704:19	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
@@ -33,7 +27,6 @@ differential:FIG-3704:35	generated binding `__typescript_heap_new` has no author
 differential:FIG-3704:36	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3704:37	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 differential:FIG-3704:38	cannot render a block in expression position as TypeScript	the expression lowers to a statement sequence (operand conversions, a computed key or a short circuit), which has no expression spelling
-differential:FIG-3704:39	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3704:5	generated binding `__typescript_regexp` has no authored TypeScript spelling	a RegExp call lowers to the regexp builtin, which the lens printer does not re-sugar
 differential:FIG-3704:6	generated binding `__typescript_regexp` has no authored TypeScript spelling	a RegExp call lowers to the regexp builtin, which the lens printer does not re-sugar
 differential:FIG-3704:7	generated binding `__typescript_regexp` has no authored TypeScript spelling	a RegExp call lowers to the regexp builtin, which the lens printer does not re-sugar

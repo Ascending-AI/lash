@@ -16,7 +16,6 @@ differential:FIG-3707:18	generated binding `__typescript_cell_0` has no authored
 differential:FIG-3707:19	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
 differential:FIG-3707:2	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
 differential:FIG-3707:20	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
-differential:FIG-3707:21	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 differential:FIG-3707:22	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
 differential:FIG-3707:23	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
 differential:FIG-3707:25	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar

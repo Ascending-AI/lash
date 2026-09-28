@@ -10,13 +10,16 @@
 //!
 //! * A process body in the process-wrapper role prints back as
 //!   `const <name> = async (..) => { .. };`.
-//! * `Print(__typescript_stdlib("__consoleObservationText", x))` prints back as
-//!   `console.log(x)`.
+//! * `Print(__typescript_stdlib("__consoleObservationText", ..))` prints back
+//!   as `console.log(..)`, with however many arguments were authored.
 //! * `__typescript_await_array([..], "all")` prints back as
 //!   `await Promise.all([..])`, and likewise for `allSettled`, `race` and
 //!   `any`; `__typescript_pending_timer(ms)` prints back as `sleep(ms)`.
 //! * A collection-transform role prints back as `receiver.<operation>(fn)`.
 //! * An attribute-assignment role prints back as `object.field = value`.
+//! * `__typescript_stdlib("<method>", receiver, ..)`, for a method of the
+//!   instance standard-library surface, prints back as
+//!   `receiver.<method>(..)`.
 //! * An iteration whose bind copies the element into one authored binding
 //!   prints back as `for (const x of source)` or `for (const x in source)`.
 //!
@@ -50,6 +53,7 @@ use std::cell::Cell;
 
 use crate::GENERATED_BINDING_PREFIX;
 use crate::node_label::render_label_comment;
+use crate::signatures::INSTANCE_STDLIB_SIGNATURES;
 
 /// Error returned when canonical IR has no TypeScript spelling.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -863,15 +867,12 @@ impl<'p> Printer<'p> {
                 operation,
                 args,
             } => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expression(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self.arguments(args)?;
                 Ok(format!(
                     "{}.{}({})",
                     self.member_target(receiver)?,
                     self.identifier("operation", operation.as_str())?,
-                    args.join(", ")
+                    args
                 ))
             }
             Expr::Await(value) => Ok(format!("await {}", self.unary_operand(value)?)),
@@ -888,45 +889,32 @@ impl<'p> Printer<'p> {
             Expr::Finish(value) => Ok(format!("finish({})", self.expression(value)?)),
             Expr::Fail(value) => Ok(format!("fail({})", self.expression(value)?)),
             Expr::FunctionCall { function, args } => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expression(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self.arguments(args)?;
                 Ok(format!(
                     "{}({})",
                     self.identifier("function", function.as_str())?,
-                    args.join(", ")
+                    args
                 ))
             }
             Expr::Call { function, args } => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expression(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(format!(
-                    "{}({})",
-                    self.member_target(function)?,
-                    args.join(", ")
-                ))
+                let args = self.arguments(args)?;
+                Ok(format!("{}({})", self.member_target(function)?, args))
             }
             Expr::MethodCall {
                 receiver,
                 method,
                 args,
             } => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expression(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self.arguments(args)?;
                 let receiver = self.member_target(receiver)?;
                 Ok(match method {
                     MethodKey::Field(field) => format!(
                         "{receiver}.{}({})",
                         self.identifier("method", field.as_str())?,
-                        args.join(", ")
+                        args
                     ),
                     MethodKey::Index(key) => {
-                        format!("{receiver}[{}]({})", self.expression(key)?, args.join(", "))
+                        format!("{receiver}[{}]({})", self.expression(key)?, args)
                     }
                 })
             }
@@ -1013,14 +1001,11 @@ impl<'p> Printer<'p> {
                 self.expression(right)?
             )),
             Expr::BuiltinCall { name, args } => {
-                let args = args
-                    .iter()
-                    .map(|arg| self.expression(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self.arguments(args)?;
                 Ok(format!(
                     "{}({})",
                     self.identifier("builtin", name.as_str())?,
-                    args.join(", ")
+                    args
                 ))
             }
             Expr::Block(_) => Err(TypeScriptSourceError::Unrepresentable {
@@ -1076,9 +1061,8 @@ impl<'p> Printer<'p> {
         }
         if let Expr::Print(inner) = expression
             && let Some(args) = stdlib_call(inner, "__consoleObservationText")
-            && let [value] = args
         {
-            return Ok(Some(format!("console.log({})", self.expression(value)?)));
+            return Ok(Some(format!("console.log({})", self.arguments(args)?)));
         }
         if let Expr::BuiltinCall { name, args } = expression
             && name.as_str() == "__typescript_await_array"
@@ -1130,7 +1114,31 @@ impl<'p> Printer<'p> {
                 self.expression(value)?
             )));
         }
+        // An instance standard-library call, `receiver.method(..)`.
+        if let Expr::BuiltinCall { name, args } = expression
+            && name.as_str() == "__typescript_stdlib"
+            && let [Expr::String(method), receiver, args @ ..] = args.as_slice()
+            && INSTANCE_STDLIB_SIGNATURES
+                .iter()
+                .any(|signature| signature.method == method.as_str())
+        {
+            let args = self.arguments(args)?;
+            return Ok(Some(format!(
+                "{}.{method}({})",
+                self.member_target(receiver)?,
+                args
+            )));
+        }
         Ok(None)
+    }
+
+    /// A call's arguments, comma-separated.
+    fn arguments(&self, args: &[Expr]) -> Printed {
+        let args = args
+            .iter()
+            .map(|arg| self.expression(arg))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(args.join(", "))
     }
 
     /// A closure prints as an arrow, and as an `async` arrow when its own body
