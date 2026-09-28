@@ -644,7 +644,8 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             }),
             // The sync is the only way a turn machine gets its environment
             // and its tool surface, so the double runs it as the host does.
-            command @ (RuntimeEffectCommand::SyncExecutionEnvironment
+            command @ (RuntimeEffectCommand::BeforeLlmCall { .. }
+            | RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
             | RuntimeEffectCommand::InspectAdmittedHead { .. }

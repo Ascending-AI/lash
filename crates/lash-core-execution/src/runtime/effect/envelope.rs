@@ -335,6 +335,10 @@ pub enum SleepSpec {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectCommand {
+    /// Record the protocol's decision before the paired model call.
+    BeforeLlmCall {
+        request: Box<CoreLlmRequest>,
+    },
     LlmCall {
         /// The provider the turn's policy names for this call. With the
         /// request's model it is the recorded policy the call runs under, so a
@@ -564,6 +568,7 @@ impl RuntimeEffectCommand {
 
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
+            Self::BeforeLlmCall { .. } => RuntimeEffectKind::BeforeLlmCall,
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,
@@ -1134,6 +1139,9 @@ pub enum AdmittedHeadVerdict {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEffectOutcome {
+    BeforeLlmCall {
+        decision: Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
+    },
     LlmCall {
         result: Box<Result<LlmResponse, LlmCallError>>,
         text_streamed: bool,
@@ -1439,6 +1447,21 @@ pub struct ServedExecutionEnvironmentSync {
 }
 
 impl RuntimeEffectOutcome {
+    pub fn into_before_llm_call(
+        self,
+    ) -> Result<
+        Result<Option<crate::ProtocolLlmCallAction>, crate::PluginError>,
+        RuntimeEffectControllerError,
+    > {
+        match self {
+            Self::BeforeLlmCall { decision } => Ok(decision),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::BeforeLlmCall,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_llm_call(self) -> Result<RuntimeLlmCallOutcome, RuntimeEffectControllerError> {
         match self {
             Self::LlmCall {
@@ -1692,6 +1715,7 @@ impl RuntimeEffectOutcome {
     /// Exposes kind to effect-host implementors while executing or replaying a runtime effect.
     pub fn kind(&self) -> RuntimeEffectKind {
         match self {
+            Self::BeforeLlmCall { .. } => RuntimeEffectKind::BeforeLlmCall,
             Self::LlmCall { .. } => RuntimeEffectKind::LlmCall,
             Self::AssistantResponseHooks { .. } => RuntimeEffectKind::AssistantResponseHooks,
             Self::Direct { .. } => RuntimeEffectKind::Direct,

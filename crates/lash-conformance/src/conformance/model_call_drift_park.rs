@@ -322,8 +322,8 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
         panic!("the park names an effect replay divergence: {park:?}");
     };
     assert_eq!(
-        effect_kind, "llm_call",
-        "the park names the diverged effect"
+        effect_kind, "before_llm_call",
+        "the park names the first request-bearing effect that diverged"
     );
     assert_eq!(
         calls.load(Ordering::SeqCst),

@@ -26,6 +26,8 @@ crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  futures_util::
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  handle: crate::task::AbortHandle,  |  1  # RECORDED abort handle of the recorded LlmCall step body's provider task
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  llm_stream_rx: &mut crate::session_model::LlmStreamEventRx,  |  1  # RECORDED stream receiver of the recorded LlmCall step body
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  llm_task: &mut crate::task::JoinHandle<T>,  |  1  # RECORDED provider task handle of the recorded LlmCall step body
+crates/lash-core/src/runtime/turn_driver/local_effects.rs  |  .run_before_llm_call(runner.messages, runner.protocol_iteration, &request)  |  1  # RECORDED protocol hook runs only in the BeforeLlmCall effect body; replay serves the decision
+crates/lash-core/src/runtime/turn_driver/tool_catalog.rs  |  .before_llm_call(  |  1  # RECORDED protocol invocation is called only by the BeforeLlmCall effect body's runner
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: crate::task::AbortHandle) -> Self {  |  1  # RECORDED abort guard of the recorded LlmCall step body's provider task
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> lash_sansio::future::SendBoxFuture<'a, Result<(), LashlangRuntimeError>> {  |  1  # BENIGN SB-pure validate_process_claims recursion box; no production caller outside tests
 crates/lash-lashlang-runtime/src/process.rs  |  lash_sansio::future::SendBoxFuture<'a, Result<lashlang::AbilityResult, ExecutionHostError>>;  |  1  # RECORDED SB3 ability-call reply box; the reply arrives through the journaled ability protocol

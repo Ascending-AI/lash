@@ -74,6 +74,9 @@ pub trait ProtocolSessionPlugin: Send + Sync {
         Ok(())
     }
 
+    /// Runs inside a recorded turn effect. Replay serves its recorded decision
+    /// without invoking the hook again. A crash before the effect commits may
+    /// invoke it again, so writes made through the context must be idempotent.
     async fn before_llm_call(
         &self,
         _ctx: ProtocolBeforeLlmCallContext,
@@ -204,7 +207,7 @@ pub struct ProtocolBeforeLlmCallContext {
 /// changes, where inlining them all commits the whole 1.09 MB every turn.
 pub const EXECUTION_STATE_LEAF_MIN_BODY_BYTES: usize = 512;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ProtocolLlmCallAction {
     SwitchAgentFrame {
         frame_key: crate::FrameKey,

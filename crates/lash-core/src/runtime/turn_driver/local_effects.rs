@@ -15,7 +15,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     fn uses_task_boundary(&self, command: &RuntimeEffectCommand) -> bool {
         matches!(
             command,
-            RuntimeEffectCommand::LlmCall { .. }
+            RuntimeEffectCommand::BeforeLlmCall { .. }
+                | RuntimeEffectCommand::LlmCall { .. }
                 | RuntimeEffectCommand::AssistantResponseHooks { .. }
                 | RuntimeEffectCommand::ExecCode { .. }
         )
@@ -27,6 +28,24 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let mut runner = *self;
         match envelope.command {
+            RuntimeEffectCommand::BeforeLlmCall { request } => {
+                let decision = runner
+                    .driver
+                    .run_before_llm_call(runner.messages, runner.protocol_iteration, &request)
+                    .await;
+                if let Err(error) = &decision {
+                    let failure = error
+                        .clone()
+                        .into_turn_failure(crate::RuntimeErrorCode::ProtocolBeforeLlmCall);
+                    if failure.turn_failure_cause().aborts_invocation()
+                        && !failure.is_session_retirement()
+                    {
+                        return Err(RuntimeEffectControllerError::from(failure)
+                            .retryable_uncommitted_derivation());
+                    }
+                }
+                Ok(RuntimeEffectOutcome::BeforeLlmCall { decision })
+            }
             RuntimeEffectCommand::LlmCall {
                 provider_id: _,
                 request,

@@ -536,7 +536,8 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
             // recorded environment and presentation, and the turn machine's
             // environment comes from its sync; this double runs all four
             // locally, as the shared recording double does.
-            command @ (RuntimeEffectCommand::IncorporateGroupSettlements { .. }
+            command @ (RuntimeEffectCommand::BeforeLlmCall { .. }
+            | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
             | RuntimeEffectCommand::LoadExecutionEnv { .. }
             | RuntimeEffectCommand::PresentToolResult { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }

@@ -69,7 +69,25 @@ impl RuntimeTurnDriver<'_> {
         request: Arc<LlmRequest>,
         event_tx: &TurnObserver,
     ) -> Result<(), RuntimeError> {
-        match self.before_llm_call(machine, &request).await {
+        self.trace_before_llm_call(machine, &request);
+        let invocation = self
+            .turn_effect_invocation(machine, id, RuntimeEffectKind::BeforeLlmCall)
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        let decision = self
+            .execute_typed_turn_effect(
+                machine,
+                event_tx,
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::BeforeLlmCall {
+                        request: Box::new((*request).clone()),
+                    },
+                ),
+                RuntimeEffectOutcome::into_before_llm_call,
+            )
+            .await
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?;
+        match decision {
             Ok(Some(crate::ProtocolLlmCallAction::SwitchAgentFrame { frame_key, task })) => {
                 machine.finish_with_outcome(crate::TurnOutcome::AgentFrameSwitch {
                     frame_key,

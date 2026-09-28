@@ -1634,7 +1634,7 @@ impl RuntimeEffectControllerError {
             .retryable_uncommitted_derivation()
     }
 
-    /// Only the host derivations — the assistant-response hooks, the
+    /// Only the host derivations — the before-LLM-call and assistant-response hooks, the
     /// execution-environment sync and the execution-environment load — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
@@ -1647,7 +1647,8 @@ impl RuntimeEffectControllerError {
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
         if matches!(
             kind,
-            RuntimeEffectKind::AssistantResponseHooks
+            RuntimeEffectKind::BeforeLlmCall
+                | RuntimeEffectKind::AssistantResponseHooks
                 | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::AdmitDrive

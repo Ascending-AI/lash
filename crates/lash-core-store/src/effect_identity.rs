@@ -28,6 +28,8 @@ pub fn process_transfer_set_identity(process_ids: &[ProcessId]) -> String {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeEffectKind {
+    /// The protocol's recorded decision before a model call.
+    BeforeLlmCall,
     LlmCall,
     /// Phase 2 of the staged LLM-call boundary: host response hooks derive a
     /// transformed response from the raw completion phase 1 already journaled.
@@ -95,6 +97,7 @@ impl RuntimeEffectKind {
     /// The stable snake-case kind label persisted in replay diagnostics.
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::BeforeLlmCall => "before_llm_call",
             Self::LlmCall => "llm_call",
             Self::AssistantResponseHooks => "assistant_response_hooks",
             Self::Direct => "direct",

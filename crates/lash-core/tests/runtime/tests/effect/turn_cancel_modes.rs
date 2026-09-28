@@ -60,6 +60,10 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
                 "root:llm-cancel-boundary:1:0:sync_execution_environment:1".to_string()
             ),
             (
+                RuntimeEffectKind::BeforeLlmCall,
+                "root:llm-cancel-boundary:1:0:before_llm_call:2".to_string()
+            ),
+            (
                 RuntimeEffectKind::LlmCall,
                 "root:llm-cancel-boundary:1:0:llm_call:2".to_string()
             ),
@@ -68,7 +72,7 @@ async fn durable_cancel_landing_during_llm_is_observed_after_the_journaled_run()
                 "turn_cancel.after_llm.0".to_string()
             ),
         ],
-        "the deployed LLM command must stay first within the iteration and the durable cancel observation must follow it"
+        "the recorded protocol decision must precede the LLM command and the durable cancel observation must follow it"
     );
 }
 

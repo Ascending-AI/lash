@@ -368,7 +368,9 @@ fi
 # and LlmStreamEventRx (a Tokio mpsc), the task:: spawn/JoinHandle/AbortHandle/
 # JoinError re-exports, the SendBoxFuture/JournaledStepFuture boxed-future
 # aliases, and the cancel-watch seams retry_cancel_watch() (a Tokio sleep
-# ladder) and run_step_body_until_cancelled() (a Tokio select) (FIG-3904). A
+# ladder) and run_step_body_until_cancelled() (a Tokio select) (FIG-3904).
+# A before_llm_call invocation in the drive is forbidden unless it is inside
+# a recorded step body. The runner call is pinned for the same reason.
 # `dyn Future` whose `+ Send` bound spills onto a following line is caught by
 # the second alternative, which flags any `dyn Future` the line leaves
 # unterminated (no `;` or `+` after it).
@@ -415,6 +417,7 @@ drive_paths=(
 )
 
 drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(futures(_util)?::)?select_biased!|futures(_util)?::select!|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|dyn[[:space:]]+Future[^;+]*$|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)|drive_sync[[:space:]]*\(|system_clock[[:space:]]*\(|journaled_nonce[[:space:]]*\(|restate_now_ms[[:space:]]*\(|ProfileMark::now|llm_stream_channel[[:space:]]*\(|(^|[^[:alnum:]_])(SendBoxFuture|JournaledStepFuture|LlmStreamEventRx)([^[:alnum:]_]|$)|task::(spawn|JoinHandle|AbortHandle|JoinError)|retry_cancel_watch[[:space:]]*\(|run_step_body_until_cancelled[[:space:]]*\('
+drive_forbidden="${drive_forbidden}|[.]before_llm_call[[:space:]]*\(|[.]run_before_llm_call[[:space:]]*\("
 drive_allowlist=scripts/drive-determinism-allowlist.txt
 
 # Rule 6 — drive store-call ratchet (FIG-3824).

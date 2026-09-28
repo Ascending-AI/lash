@@ -205,6 +205,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
+        | RuntimeEffectCommand::BeforeLlmCall { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {
             envelope: RuntimeEffectEnvelope {

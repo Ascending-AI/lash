@@ -273,11 +273,7 @@ impl RuntimeTurnDriver<'_> {
         })
     }
 
-    pub(super) async fn before_llm_call(
-        &mut self,
-        machine: &TurnMachine,
-        request: &LlmRequest,
-    ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
+    pub(super) fn trace_before_llm_call(&mut self, machine: &TurnMachine, request: &LlmRequest) {
         if self.host.core.tracing.trace_sink.is_some() {
             let tool_fingerprints = self.session.composition_tool_fingerprints(&request.tools);
             let fingerprint =
@@ -297,6 +293,14 @@ impl RuntimeTurnDriver<'_> {
                 );
             }
         }
+    }
+
+    pub(super) async fn run_before_llm_call(
+        &mut self,
+        messages: crate::MessageSequence,
+        protocol_iteration: usize,
+        request: &LlmRequest,
+    ) -> Result<Option<crate::ProtocolLlmCallAction>, PluginError> {
         let latest_prompt_usage = self.latest_prompt_usage.clone();
         self.session
             .plugins()
@@ -308,10 +312,7 @@ impl RuntimeTurnDriver<'_> {
                     session_graph: self.session_services.graph_service(),
                     processes: self.session_services.process_service(),
                     state: self
-                        .checkpoint_state_view(
-                            machine.message_sequence(),
-                            machine.protocol_iteration(),
-                        )
+                        .checkpoint_state_view(messages, protocol_iteration)
                         .map_err(|error| PluginError::Session(error.to_string()))?,
                     latest_prompt_usage,
                 },

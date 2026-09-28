@@ -18,7 +18,9 @@ impl lash_core::plugin::ProtocolSessionPlugin for RefusingBeforeLlmCall {
         _ctx: lash_core::plugin::ProtocolBeforeLlmCallContext,
         _request: &lash_core::LlmRequest,
     ) -> Result<Option<lash_core::ProtocolLlmCallAction>, lash_core::PluginError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
+        if self.calls.fetch_add(1, Ordering::SeqCst) != 0 {
+            return Ok(None);
+        }
         Err(lash_core::PluginError::Invoke(
             "the protocol refuses this request".to_string(),
         ))
@@ -107,9 +109,8 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
     assert_recorded_before_llm_failure(&first_turn);
     assert!(!context.runs().is_empty());
 
-    // The handler is redriven over the same journal: the refusal is a
-    // function of the journaled inputs, so the replay reaches the same failed
-    // turn and the store recognises the one commit it already holds.
+    // The hook would proceed on a second invocation. The replay must serve
+    // the first refusal from the journal without invoking it again.
     context.start_replay();
     let retry_store: Arc<dyn lash_core::RuntimePersistence> =
         Arc::new(CommitRetryStore::new(Arc::clone(&store)));
@@ -126,7 +127,7 @@ pub(super) async fn restate_before_llm_refusal_is_a_recorded_failed_turn_that_re
         run_restate_replay_turn(&mut replay, Arc::clone(&context), &session_id, &turn_id).await;
     assert_recorded_before_llm_failure(&replay_turn);
     assert_eq!(replay_turn.outcome, first_turn.outcome);
-    assert_eq!(protocol.calls.load(Ordering::SeqCst), 2);
+    assert_eq!(protocol.calls.load(Ordering::SeqCst), 1);
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     let conn = rusqlite::Connection::open(dir.path().join("session.db"))
         .expect("open raw session sqlite store");
