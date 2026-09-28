@@ -89,6 +89,9 @@ async fn core_prompt_redeploy_reaches_persisted_session_without_session_prompt()
     let session = core_v1.session("core-prompt-redeploy").open().await?;
     session.send(TurnInput::text("commit V1")).output().await?;
     drop(session);
+    // V1's drive outlives the answer while it closes the root's scope, and
+    // holds V1's driver on the engine until it ends (FIG-3979).
+    settle_session_drive(&core_v1, "core-prompt-redeploy").await;
     drop(core_v1);
 
     let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(

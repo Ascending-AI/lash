@@ -191,19 +191,9 @@ impl SimEngine {
     /// new input would then depend on task timing; a world that wants one
     /// grant order per seed sends into a settled session.
     pub async fn settle_session_drive(&self, session: &lash::LashSession) {
-        let prefix = format!(
-            "{}/{}/",
-            lash_restate_test::SESSION_DRIVER_SERVICE,
-            session.session_id()
-        );
-        let server = self.restate.server();
-        while server
-            .invocations()
-            .iter()
-            .any(|view| view.target.starts_with(&prefix) && view.status != "completed")
-        {
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-        }
+        self.restate
+            .settle_session_drive(&session.session_id())
+            .await;
     }
 
     /// Hold the engine's drive of `session` on the server double

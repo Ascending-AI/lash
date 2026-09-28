@@ -112,6 +112,7 @@ impl LashRuntime {
             events: bound.events_or_noop(),
             turn_events: bound.turn_events_or_noop(),
             local_stop: bound.local_stop().clone(),
+            settled: &crate::runtime::drive::NoopRootSettledSink,
         };
         let drive = Box::pin(self.drive_until(
             &controller,

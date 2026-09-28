@@ -124,6 +124,16 @@ pub(crate) fn held_double(core: &crate::LashCore) -> Option<lash_restate_test::R
     })
 }
 
+/// Wait until the held double `core` runs over has no drive of `session` in
+/// flight ([`settle_session_drive`](lash_restate_test::RestateTestBackend::settle_session_drive)):
+/// a handle answers before its root's scope closes (FIG-3979).
+pub(crate) async fn settle_session_drive(core: &crate::LashCore, session: &str) {
+    held_double(core)
+        .expect("the core runs on a held double")
+        .settle_session_drive(&lash_core::SessionId::from(session))
+        .await;
+}
+
 /// Serve process segments on the held double `core` runs over, with `core`'s
 /// own worker: the double's process workflow runs a segment only once a
 /// worker is installed, as a deployment's endpoint does. A core over a

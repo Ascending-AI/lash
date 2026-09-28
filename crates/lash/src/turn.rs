@@ -46,24 +46,48 @@ pub(crate) async fn run_admitted_root_observed(
 ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
     let session = admitted.session().clone();
     // Marked before the root can commit: a handle that sees its commit waits
-    // for the deposit below while the run is under way.
+    // for the deposit while the run is under way.
     let _running = crate::send::running(binding, &session, admitted.root());
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
     let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
+    let settled = DepositSettledRoot {
+        runtime,
+        binding,
+        session: &session,
+    };
     let sinks = lash_core::drive::DriveSinks {
         events: &lash_core::runtime::NoopEventSink,
         turn_events: &observation_sink,
         local_stop: LocalTurnStop::default(),
+        settled: &settled,
     };
-    let report =
-        lash_core::drive::run_admitted_root_reporting(&mut writer, controller, admitted, sinks)
-            .await;
+    let outcome =
+        lash_core::drive::run_admitted_root_with(&mut writer, controller, admitted, sinks).await;
     runtime.publish_from(&writer);
-    let report = report?;
-    let outcome = report.outcome.clone();
-    crate::send::deposit_settled_root(binding, &session, report);
-    Ok(outcome)
+    outcome
+}
+
+/// Deposits a committed root's report the moment the drive hands it over,
+/// before the root's scope closes (FIG-3979), and publishes the runtime's
+/// observation of the commit first, so a handle answered from the deposit
+/// reads the committed head without waiting for the drive to return.
+struct DepositSettledRoot<'a> {
+    runtime: &'a RuntimeHandle,
+    binding: &'a lash_core::StoreBindingId,
+    session: &'a lash_core::SessionId,
+}
+
+#[async_trait]
+impl lash_core::drive::RootSettledSink for DepositSettledRoot<'_> {
+    async fn settled(
+        &self,
+        runtime: &crate::support::LashRuntime,
+        root: lash_core::drive::SettledRoot<'_>,
+    ) {
+        self.runtime.publish_from(runtime);
+        crate::send::deposit_settled_root(self.binding, self.session, root, self.runtime);
+    }
 }
 
 /// Records every turn activity on the session's observation, addressed to

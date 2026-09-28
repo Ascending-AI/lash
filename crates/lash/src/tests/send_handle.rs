@@ -204,6 +204,147 @@ async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
     Ok(())
 }
 
+/// A scope-close ledger that holds every claim until released, as a close
+/// the scope owner is slow to take: the root's recorded close step waits on
+/// its claim, and so does a reconcile pass. It counts the closes settled.
+struct HeldScopeCloses {
+    inner: Arc<dyn lash_core::store::ObligationLedger>,
+    released: tokio::sync::watch::Receiver<bool>,
+    settled: Arc<AtomicUsize>,
+}
+
+impl HeldScopeCloses {
+    async fn held(&self) {
+        let mut released = self.released.clone();
+        let _ = released.wait_for(|released| *released).await;
+    }
+}
+
+#[async_trait]
+impl lash_core::store::ObligationLedger for HeldScopeCloses {
+    fn kind(&self) -> lash_core::store::ObligationKind {
+        self.inner.kind()
+    }
+
+    async fn arm(
+        &self,
+        key: &lash_core::store::ObligationKey,
+        now_ms: u64,
+    ) -> std::result::Result<Option<lash_core::store::ObligationId>, lash_core::StoreError> {
+        self.inner.arm(key, now_ms).await
+    }
+
+    async fn claim_due(
+        &self,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::ClaimedObligation>, lash_core::StoreError> {
+        self.held().await;
+        self.inner.claim_due(now_ms, claim_ttl_ms, limit).await
+    }
+
+    async fn claim(
+        &self,
+        id: &lash_core::store::ObligationId,
+        now_ms: u64,
+        claim_ttl_ms: u64,
+    ) -> std::result::Result<Option<lash_core::store::ClaimedObligation>, lash_core::StoreError>
+    {
+        self.held().await;
+        self.inner.claim(id, now_ms, claim_ttl_ms).await
+    }
+
+    async fn settle(
+        &self,
+        id: &lash_core::store::ObligationId,
+        token: &lash_core::store::ClaimToken,
+        settlement: lash_core::store::ObligationSettlement,
+        now_ms: u64,
+    ) -> std::result::Result<lash_core::store::SettleOutcome, lash_core::StoreError> {
+        let outcome = self.inner.settle(id, token, settlement, now_ms).await;
+        self.settled.fetch_add(1, Ordering::SeqCst);
+        outcome
+    }
+
+    async fn rearm(
+        &self,
+        id: &lash_core::store::ObligationId,
+        now_ms: u64,
+    ) -> std::result::Result<bool, lash_core::StoreError> {
+        self.inner.rearm(id, now_ms).await
+    }
+
+    async fn list_stalled(
+        &self,
+        after: Option<&lash_core::store::ObligationId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::StalledObligation>, lash_core::StoreError> {
+        self.inner.list_stalled(after, limit).await
+    }
+
+    async fn count_stalled(&self) -> std::result::Result<u64, lash_core::StoreError> {
+        self.inner.count_stalled().await
+    }
+
+    async fn standing(
+        &self,
+        id: &lash_core::store::ObligationId,
+    ) -> std::result::Result<Option<lash_core::store::ObligationStanding>, lash_core::StoreError>
+    {
+        self.inner.standing(id).await
+    }
+}
+
+/// A root's report is handed to its handle at the root's final commit,
+/// before the root's scope closes (FIG-3979): the handle answers the live
+/// report while the close is still held, and the close runs after. Before,
+/// the report was deposited only once the close returned, so the handle
+/// waited out the live-report grace and answered the durable report.
+async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
+    let (release, released) = tokio::sync::watch::channel(false);
+    let settled = Arc::new(AtomicUsize::new(0));
+    let fixture = fixture_over(1, {
+        let settled = Arc::clone(&settled);
+        move |backend| {
+            crate::testing::LayeredBackend::over(backend)
+                .map_obligation_ledgers(move |kind, inner| {
+                    if kind == lash_core::store::ObligationKind::ScopeClose {
+                        Arc::new(HeldScopeCloses {
+                            inner,
+                            released: released.clone(),
+                            settled: Arc::clone(&settled),
+                        }) as Arc<dyn lash_core::store::ObligationLedger>
+                    } else {
+                        inner
+                    }
+                })
+                .into_backend()
+        }
+    })
+    .await?;
+    let session = fixture.core.session("send-before-close").open().await?;
+
+    let handle = session
+        .send(TurnInput::text("answer me"))
+        .id("before-close-root")
+        .await?;
+    let output = tokio::time::timeout(std::time::Duration::from_secs(3), handle.output())
+        .await
+        .expect("the handle answers while its root's scope close is held")?;
+    assert_eq!(output.result.source, crate::ReportSource::Live);
+    assert_eq!(output.assistant_message(), Some("echo: answer me"));
+    assert_eq!(
+        settled.load(Ordering::SeqCst),
+        0,
+        "the root's scope had not closed when its handle answered"
+    );
+
+    release.send_replace(true);
+    reaches(&settled, 1, "the root's scope closes once released").await;
+    Ok(())
+}
+
 /// A send under a host id whose root already settled commits nothing and
 /// answers from that root's evidence (D2 Q6).
 async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence() -> Result<()> {
@@ -899,6 +1040,11 @@ macro_rules! send_handle_laws {
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn a_settled_root_no_run_here_can_report_answers_at_once() -> Result<()> {
                 super::a_settled_root_no_run_here_can_report_answers_at_once().await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_send_answers_before_its_roots_scope_closes() -> Result<()> {
+                super::a_send_answers_before_its_roots_scope_closes().await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

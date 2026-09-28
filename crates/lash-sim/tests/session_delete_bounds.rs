@@ -189,6 +189,11 @@ impl Deployment {
             .await
             .expect("run the root");
         drop(handle);
+        // The handle answered at the root's final commit; its close step
+        // runs after (FIG-3979).
+        self.double
+            .settle_session_drive(&SessionId::from(session))
+            .await;
         let id = lash_core::store::scope_close_obligation_id(
             &SessionId::from(session),
             &TurnId::from(root),

@@ -10,7 +10,8 @@
 //! - The successor-sealed refusal (Q-B3): a root whose admission a successor
 //!   sealed over commits nothing, and a later drive of it commits once.
 //! - L-C1: the root's scope closes after its evidence is durable, at least
-//!   once across a crash between the two, and never for a parked root.
+//!   once across a crash between the two — inside the close, or at the
+//!   report handover before it (FIG-3979) — and never for a parked root.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -787,6 +788,164 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         "the process living until the parked root owes nothing"
     );
     assert_eq!(parts.calls(), 0, "the parked root ran nothing");
+}
+
+/// A report sink that crashes the execution at its first root's report
+/// handover: it fires `crash` and never returns, so nothing after the
+/// handover runs — the root's scope close included — the way a process that
+/// dies after its root's `TurnPersisted` and before the close leaves it.
+struct CrashingHandover {
+    crash: crate::ConformanceCrash,
+    armed: AtomicBool,
+    handed: Mutex<Vec<TurnId>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::drive::RootSettledSink for CrashingHandover {
+    async fn settled(
+        &self,
+        _runtime: &crate::LashRuntime,
+        root: lash_core::drive::SettledRoot<'_>,
+    ) {
+        self.handed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(root.root.clone());
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.crash.fire();
+            std::future::pending::<()>().await;
+        }
+    }
+}
+
+/// L-C1 across the report handover (FIG-3979): a root's report is handed
+/// over after its final commit and `TurnPersisted`, before its recorded
+/// scope close. An execution that dies at the handover has written the
+/// root's evidence and armed its `ScopeClose` obligation, and has closed
+/// nothing: the tier's redrive, or the obligation's due pass, still closes
+/// the root's scope, once, after its evidence is durable, and the process
+/// living `Until` the root is owed its cancel.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_root_crashed_at_its_report_handover_still_closes_its_scope(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let registry = stores.process_registry();
+    let mut parts = DriveParts::new(prefix, "root-handover-crash", &effect_host, &stores, 8).await;
+    let crash = crate::ConformanceCrash::new();
+    let closes = Arc::new(CrashingRegistryScopeClose {
+        registry: crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock()),
+        store: Arc::clone(&parts.store),
+        crash: crash.clone(),
+        armed: AtomicBool::new(false),
+        closes: Mutex::new(Vec::new()),
+    });
+    parts.host.control.scope_close = closes.clone();
+    let handover = Arc::new(CrashingHandover {
+        crash: crash.clone(),
+        armed: AtomicBool::new(true),
+        handed: Mutex::new(Vec::new()),
+    });
+    let root = TurnId::from("root-handover-crash");
+    let child = until_root(&registry, &parts.session_id, &root).await;
+    parts.enqueue("ask", Some(root.as_str())).await;
+    let request = parts.request("root-handover-crash-drive");
+    let crashing = parts.clone();
+    let crashing_request = request.clone();
+    let crashing_handover = Arc::clone(&handover);
+    runner
+        .run_turn_until_crash(
+            driver_scope(&parts),
+            Arc::new(move |scope| {
+                let parts = crashing.clone();
+                let request = crashing_request.clone();
+                let handover = Arc::clone(&crashing_handover);
+                Box::pin(async move {
+                    let mut runtime = parts.runtime().await;
+                    let sinks = lash_core::drive::DriveSinks {
+                        settled: handover.as_ref(),
+                        ..lash_core::drive::DriveSinks::default()
+                    };
+                    let _ =
+                        lash_core::drive::drive_session_with(&mut runtime, &scope, &request, sinks)
+                            .await;
+                    crate::ConformanceTurnEnd::Settled
+                })
+            }),
+            crash.clone(),
+        )
+        .await;
+    assert!(
+        crash.has_fired(),
+        "the execution died at the report handover"
+    );
+    assert_eq!(
+        handover
+            .handed
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone(),
+        vec![root.clone()],
+        "the root's report was handed over once, before the crash"
+    );
+    let evidence = terminal(&parts, &root)
+        .await
+        .expect("the root's terminal commit landed before the handover");
+    assert_eq!(evidence.kind, RootTerminalKind::Answered);
+    assert_eq!(
+        scope_close_state(&stores, &parts.session_id, &root).await,
+        Some(lash_core::store::ObligationState::Due),
+        "the terminal transaction armed the root's scope-close obligation, \
+         and nothing claimed it before the crash"
+    );
+    assert!(
+        closes.closes().is_empty(),
+        "the crash came before the close: {:?}",
+        closes.closes()
+    );
+    assert!(
+        root_close_row(&registry, &parts.session_id, &root)
+            .await
+            .is_none(),
+        "the root's scope is still open"
+    );
+
+    // The tier's recovery: the redelivered execution replays the root to
+    // the close step its crashed execution never recorded, and runs it. A
+    // due pass after it finds nothing left to close.
+    let _ = on_tier(&runner, &parts, move |runtime, scope| {
+        drive_once(runtime, scope, request.clone())
+    })
+    .await;
+    let relay = scope_close_relay(&stores, closes.clone());
+    reconcile_tick(&stores, &relay, parts.host.clock.as_ref()).await;
+    assert_eq!(
+        closes.closes(),
+        vec![(root.clone(), true)],
+        "the root's scope closed once, after its evidence was durable"
+    );
+    assert_eq!(
+        scope_close_state(&stores, &parts.session_id, &root).await,
+        Some(lash_core::store::ObligationState::Delivered),
+        "the close settled the root's obligation"
+    );
+    recovery_pass(&stores).await;
+    assert!(
+        root_close_row(&registry, &parts.session_id, &root)
+            .await
+            .is_some(),
+        "recovery closed the root's scope"
+    );
+    assert!(
+        owes_cancel(&registry, &child.id).await,
+        "the process living until the ended root is owed its cancel"
+    );
+    assert_eq!(parts.calls(), 1, "the root ran once");
 }
 
 /// A redelivered command root replays its recorded journal (FIG-3893, ADR
