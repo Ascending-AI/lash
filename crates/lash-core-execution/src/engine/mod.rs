@@ -1,34 +1,14 @@
-//! The engine contract: the drive is deterministic workflow code
-//! (ADR 0105, `docs/adr/0105-the-drive-is-deterministic-workflow-code.md`).
+//! Engine-neutral drive values, recorded commands, and observations.
 //!
-//! A drive awaits only operations of an engine-supplied context. Admission is
-//! unfenced and separate from fenced execution; every other durable operation
-//! is reachable only through a [`Fenced`] handle built from a recorded
-//! verdict. Commands are serializable, run by registered executors inside the
-//! engine's recorded body, and never in drive code.
-//!
-//! This module names no engine. It holds traits and types only; engines
-//! implement them in their own crates, and the drive body that consumes them
-//! lands with the slices ADR 0105 lists.
-//!
-//! Rules every implementor and every drive-side caller keeps:
-//!
-//! - No `dyn Future` on the workflow-side chain. Every future a drive awaits
-//!   is an engine's [`EngineContext::Op`], so a drive is `Send` exactly when
-//!   its engine's ops are.
-//! - A race reborrows both arms and keeps its loser; an op is given up only
-//!   by [`EngineContext::dispose`], and a dropped op means abandon.
-//! - Deadlines are absolute [`EpochMs`] read from [`EngineContext::now_ms`].
-//! - Observation is synchronous and never decides anything.
+//! The drive uses [`crate::RuntimeEffectController`]. Restate records its
+//! effects and cancel races (ADR 0105).
 
 mod admission;
 mod commands;
-mod commit;
 mod context;
 mod contracts;
 mod control;
 mod drive;
-mod groups;
 mod ingress;
 mod reconcile;
 /// The determinism harness every slice that makes the drive deterministic
@@ -39,31 +19,14 @@ pub mod testing;
 pub use crate::store::{
     ControlIntentId, ControlIntentKind, RootTerminal, RootTerminalCause, RootTerminalKind,
 };
+pub use crate::store::{ParkId, RootTerminalWrite, SessionHeadRef, TurnCommitId};
 pub use admission::{
-    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, CancelGate, ChildOutcome,
-    ChildStart, DriveAdmission, DriveContext, DriveFence, DriveRequestId, FenceSource, Fenced,
-    InheritVerdict, InheritedAuthority, ParkRef, RootStartNonce, SealVerdict, TurnCancelSignal,
+    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveFence, DriveRequestId,
+    ParkRef, RootStartNonce, SealVerdict,
 };
-pub use commands::{
-    AdmissionCommand, AdmissionExecutors, AdmissionResult, AdmissionStepContext, CooperativeCancel,
-    EffectCommand, EffectExecutors, EffectResult, GatedObservationSink, Heartbeat,
-    NullObservationSink, ObservationCursor, ObservationSink, SessionServices, StepContext,
-};
-pub use commit::{
-    CancellationSettlement, CommitTurnOutcome, CommittedAttachments, CommittedGraphNode,
-    DurableTurnState, ExecutionStateUpdate, IngressSettlement, ParkId, RecordedPluginStates,
-    RootTerminalWrite, SessionGraphDelta, SessionHeadRef, TurnCommitId, TurnCommitRequest,
-    UsageDelta,
-};
-pub use context::{
-    Disposed, Disposition, DriveObservation, DurableOp, EngineContext, EngineFault, EngineRetry,
-    EngineTerminal, EpochMs, ObservedEvent, ReplayKey, Winner, activity_projection,
-};
-pub use contracts::{
-    BuildGeneration, BuildGenerationParseError, DriveHandover, DriveRequest, Never,
-    PendingResolution, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild,
-    UpgradePolicy,
-};
+pub use commands::{GatedObservationSink, NullObservationSink, ObservationCursor, ObservationSink};
+pub use context::{DriveObservation, ObservedEvent, ReplayKey, activity_projection};
+pub use contracts::{BuildGeneration, BuildGenerationParseError, DriveRequest, UpgradePolicy};
 pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
     NoScopeClose, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, ScopeCloseSink,
@@ -75,12 +38,8 @@ pub use drive::{
     drive_close_root_replay_key, drive_continuation_request, drive_root_scope,
     drive_root_start_replay_key, drive_seal_replay_key,
 };
-pub use groups::{ChildCancelSignal, DriveGroups, GroupClosed, GroupKey};
 pub use ingress::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
 pub use reconcile::{
     ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, RecoveryLeaseConfig,
     RecoveryLeaseTimings, RelayPass, SlotPass,
 };
-
-#[cfg(test)]
-mod tests;

@@ -14,8 +14,8 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 
 use super::admission::{Admitted, AdmittedWork, DriveRequestId, ParkRef, SealVerdict};
-use super::commit::TurnCommitId;
 use super::contracts::DriveRequest;
+use crate::store::TurnCommitId;
 use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
 
 /// The prefix of the queue-drain id a drive's admission steps are recorded

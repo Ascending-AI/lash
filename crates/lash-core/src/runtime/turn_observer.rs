@@ -273,7 +273,7 @@ impl TurnObservations {
     }
 }
 
-/// `EngineContext::observe` on today's controller path: a keyed observation
+/// On the controller path, a keyed observation
 /// is published synchronously, and every activity it yields takes its id from
 /// its `(replay key, ordinal)`, never from a random source.
 impl ObservationSink for TurnObserver {

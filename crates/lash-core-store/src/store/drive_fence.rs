@@ -25,9 +25,8 @@ use crate::SessionId;
 /// the store's own seal ([`DriveEpochStore::seal_drive_epoch`]); the store's
 /// read of the current fence ([`current_drive_fence`]),
 /// which a writer beside the drive presents so that it never writes over a
-/// later admission; and serde decoding of a recorded `SealVerdict::Sealed`
-/// or `InheritVerdict::Valid` from the drive's journal. `Deserialize` exists
-/// only for that recorded-verdict path; nothing else may decode a fence. A decoded fence
+/// later admission; and serde decoding of a recorded `SealVerdict::Sealed` from the drive's journal. `Deserialize` exists only for that recorded-verdict path; nothing
+/// else may decode a fence. A decoded fence
 /// still authorizes nothing by itself: every fenced store operation checks
 /// its epoch *and* admission against the session's `session_meta` row in its
 /// own transaction. It is never part of an envelope hash (ADR 0105 law

@@ -4,6 +4,7 @@
 
 use std::future::Future;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
@@ -315,24 +316,28 @@ static CONTROLLER_BODIES: AtomicUsize = AtomicUsize::new(0);
 /// Drive code as it is today: effects issued through a scoped controller.
 fn controller_drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
     Box::pin(async move {
+        // A drive may keep thread-local state while its recorded controller
+        // operations remain Send and run on the execution side.
+        let local_outcomes = Rc::new(std::cell::RefCell::new(Vec::new()));
         let controller = cx
             .controller(admitted())
             .unwrap_or_else(|error| panic!("{error}"));
-        let mut outcomes = Vec::new();
         for (key, duration_ms) in [("sleep-a", 5), ("sleep-b", 9)] {
-            let outcome = controller
-                .controller()
-                .execute_effect(
-                    sleep_envelope(key, duration_ms),
-                    RuntimeEffectLocalExecutor::testing(|_| async {
-                        CONTROLLER_BODIES.fetch_add(1, Ordering::SeqCst);
-                        Ok(RuntimeEffectOutcome::Sleep)
-                    }),
-                )
-                .await;
-            outcomes.push(matches!(outcome, Ok(RuntimeEffectOutcome::Sleep)));
+            let operation = controller.controller().execute_effect(
+                sleep_envelope(key, duration_ms),
+                RuntimeEffectLocalExecutor::testing(|_| async {
+                    CONTROLLER_BODIES.fetch_add(1, Ordering::SeqCst);
+                    Ok(RuntimeEffectOutcome::Sleep)
+                }),
+            );
+            fn assert_send<T: Send>(_: &T) {}
+            assert_send(&operation);
+            let outcome = operation.await;
+            local_outcomes
+                .borrow_mut()
+                .push(matches!(outcome, Ok(RuntimeEffectOutcome::Sleep)));
         }
-        cx.record_commit(&outcomes);
+        cx.record_commit(&*local_outcomes.borrow());
     })
 }
 

@@ -157,15 +157,16 @@ is infallible until a construction check exists. Before FIG-3861 removed the
 SQLite engine, `SqliteBackend` was its `EffectEngine`, and
 `EffectEngine::process_work` returned `None` for it.
 
-**The execution seam.** The driver exposes replayable decisions and
-registered, serializable effect commands; adapters own scheduling and I/O
-execution. Engines like Temporal need it: their workflow code must schedule
-deterministically, and every I/O runs as an activity. Today lash hands the
-controller a borrowed local runner and runs effects on Tokio, and running a
-whole drive as one activity would record no per-effect history. The seam is
-proven on paper against Temporal before FIG-3600's S5 freezes the drive API.
-Deterministic logical operation ids are neutral; engine invocation ids stay
-opaque to lash.
+**The execution seam.** The adopted drive uses `RuntimeEffectController`
+through a scoped controller. Restate records effect envelopes and outcomes,
+admission and root claims, timers, keyed waits, group operations, and cancel
+races. The drive's commit and park paths use fenced, idempotent store writes;
+commit replay also checks the stored receipt. They are not separate command
+variants. The local determinism harness implements the same controller to
+compare fresh and replayed decisions. ADR 0105 records the detailed contract.
+A future engine must implement these observable outcomes through the
+controller and pass its laws. This ADR does not require a second context
+trait layer.
 
 The rules:
 
