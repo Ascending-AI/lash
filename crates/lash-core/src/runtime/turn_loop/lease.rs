@@ -310,7 +310,6 @@ impl LashRuntime {
     /// of the pre-named one - delivery timing, never a dropped input.
     /// The follow-on the durable head owes, read once per repair pass.
     async fn owed_follow_on(
-        &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         owed: &mut Option<Option<crate::store::PendingFollowOn>>,
     ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
@@ -327,13 +326,13 @@ impl LashRuntime {
     }
 
     pub(in crate::runtime) async fn defer_orphaned_turn_inputs_before_drain(
-        &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,
         resumable_turn_id: &TurnId,
         scoped_effect_controller: &crate::ScopedEffectController<'_>,
+        session_id: &SessionId,
+        turn_control_host: &dyn crate::EffectHost,
     ) -> Result<usize, RuntimeError> {
-        let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
         let turn_control_binding = turn_control_host
             .turn_control_binding(scoped_effect_controller)
             .await?;
@@ -345,11 +344,11 @@ impl LashRuntime {
         // commands, input acceptance, model calls, or other session work.
         let pending = store
             .pending_turn_cancel_closures(
-                &self.state.session_id,
+                session_id,
                 fence,
                 binding_id,
                 &crate::runtime::effect::executor::admitted_turn_cancel_scope(
-                    &crate::TurnAddress::new(&self.state.session_id, resumable_turn_id),
+                    &crate::TurnAddress::new(session_id, resumable_turn_id),
                     scoped_effect_controller.execution_scope(),
                     binding_id,
                 ),
@@ -364,8 +363,7 @@ impl LashRuntime {
         for authorization in pending {
             let resumes_here =
                 is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id)
-                    || self
-                        .owed_follow_on(store, &mut owed)
+                    || Self::owed_follow_on(store, &mut owed)
                         .await?
                         .is_some_and(|owed| owed.is_turn(authorization.turn_id()));
             if resumes_here {
@@ -391,7 +389,7 @@ impl LashRuntime {
                     .map_err(super::runtime_error_from_store_commit)?;
                 match store
                     .repair_orphaned_active_turn_inputs(
-                        &self.state.session_id,
+                        session_id,
                         fence,
                         authorization.turn_id(),
                         &observed,
@@ -411,7 +409,7 @@ impl LashRuntime {
 
         let turn_ids = store
             .orphaned_active_turn_ids(
-                &self.state.session_id,
+                session_id,
                 fence,
                 crate::OrphanedTurnInputScope::LaneGeneration {
                     resumable_turn_id: Some(resumable_turn_id),
@@ -422,13 +420,13 @@ impl LashRuntime {
         let owed = if turn_ids.is_empty() {
             None
         } else {
-            self.owed_follow_on(store, &mut owed).await?
+            Self::owed_follow_on(store, &mut owed).await?
         };
         for turn_id in turn_ids
             .into_iter()
             .filter(|turn_id| !owed.as_ref().is_some_and(|owed| owed.is_turn(turn_id)))
         {
-            let address = crate::TurnAddress::new(&self.state.session_id, &turn_id);
+            let address = crate::TurnAddress::new(session_id, &turn_id);
             'discover: loop {
                 let observed = store
                     .turn_cancel_request_intent(&address)
@@ -474,7 +472,7 @@ impl LashRuntime {
                 loop {
                     match store
                         .repair_orphaned_active_turn_inputs(
-                            &self.state.session_id,
+                            session_id,
                             fence,
                             &turn_id,
                             &repair_observed,

@@ -1653,6 +1653,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::ClaimAcceptedTurnInput
+                | RuntimeEffectKind::InspectAdmittedHead
                 | RuntimeEffectKind::ResolveTurnConfig
                 | RuntimeEffectKind::CloseRootScope
                 | RuntimeEffectKind::BeginSessionClose

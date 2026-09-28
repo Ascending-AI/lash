@@ -10,18 +10,15 @@
 //! admission and the seal, and the root replays its recorded claim and the
 //! head that claim was admitted on (FIG-3682).
 //!
-//! What it does not yet guarantee: between admission and the root's claim the
-//! root still reads and writes live store state no step records. That covers
-//! adopting the admitted head (the resident head after the lease refresh,
-//! `committed_turn_exists`, the pending inputs), the orphaned-input repair
-//! that runs before the claim, and the session-state version read ahead of
-//! `AdmitDrive`. These are fenced by the session's execution lease, and a
-//! replay re-evaluates them. Moving them into recorded steps is FIG-3824.
-//! The substrate lint's rule 6 pins every direct store call in this module
-//! and its children, tagged `RECORDED` when a recorded step's body makes it
-//! and `FIG-3824` when the drive makes it outside any step, so a new
-//! unrecorded read cannot land unseen. It cannot see a helper the drive
-//! calls that reaches the store itself, such as the orphaned-input repair.
+//! The root's claim body repairs orphaned inputs before it claims the admitted
+//! head. A separate `InspectAdmittedHead` step records whether that head is
+//! ready, ceded, or divergent. A redrive reads both outcomes from its journal
+//! and issues no second repair. It revalidates a `Ready` verdict under its
+//! current execution lease before any turn effect: a root whose claim lost
+//! authority while the handler was down can only cede or park. This fenced
+//! check cannot select new work or change the claim's recorded base (ADR 0105
+//! §2). Rule 6 of the substrate lint pins direct store calls and the
+//! orphan-repair helper in the drive.
 //!
 //! Serialization is the SQL session execution lease's until S8: the drive
 //! epoch the seal raises answers a stale admission `Superseded`, but claims

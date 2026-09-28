@@ -146,6 +146,25 @@ pub trait DriveAdmission: EngineContext {
   the admission nonce: a later admission of the same root replays the same
   claim step.
 
+- **Implemented (FIG-3824): the claim and head inspection record drive
+  decisions.** The `ClaimAcceptedTurnInput` body repairs orphaned inputs
+  before claiming the root. It runs the store repair and any idempotent
+  await-event resolution inside that recorded body; a replay serves its claim
+  outcome and issues no second repair. After the claim, `InspectAdmittedHead`
+  records `Ready`, `Ceded`, or `Diverged` from the refreshed resident head,
+  committed-root evidence and pending input rows. Replay serves that verdict.
+  A `Ready` verdict is revalidated under the current session execution lease
+  before any turn effect: if another claimant advanced the head while this
+  handler was down, the root can only cede when its head input is gone or park
+  as divergent when it remains. If this root's own commit advanced the head,
+  its committed evidence lets replay continue. The fenced read never chooses
+  new work or changes the claim's recorded base; this stop-only re-evaluation
+  is safe across attempts. The resident-head refresh may run again on replay,
+  but its values only feed recorded steps and this fenced stop check. Loading
+  the retained base may be re-evaluated safely:
+  success reconstructs the same immutable head, while a missing base parks
+  before a turn effect. It never selects different work.
+
 Every other durable operation is reachable only through `Fenced`, which is
 built only from a recorded `SealVerdict::Sealed` or `InheritVerdict::Valid`:
 

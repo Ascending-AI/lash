@@ -200,6 +200,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
+        | RuntimeEffectCommand::InspectAdmittedHead { .. }
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
         | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::BeginSessionClose { .. }

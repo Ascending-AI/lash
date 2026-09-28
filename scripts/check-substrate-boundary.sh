@@ -424,17 +424,17 @@ drive_allowlist=scripts/drive-determinism-allowlist.txt
 # (the step's output is what a replay reads), but a line lint cannot tell a
 # step body from the drive code around it, so every direct call to a
 # persistence-trait method in the session drive is pinned, tagged with where
-# it runs: `RECORDED` for a call inside a recorded step's body, a ticket id
-# for one the drive still makes outside any step. The scope is the session
+# it runs: `RECORDED` for a call inside a recorded step's body, `FENCED` for
+# a stop-only revalidation documented in ADR 0105, or a ticket id for a call
+# the drive still makes outside any step. The scope is the session
 # drive only -- the kernel's drive modules and the Restate session driver:
 #
 #   crates/lash-core/src/runtime/drive{.rs,/**}
 #   crates/lash-restate/src/session_driver.rs
 #
 # The pattern names the methods of the traits `RuntimePersistence` composes
-# and the session store factory's opener, called as methods. It sees direct
-# calls only: a helper the drive calls that reaches the store itself is
-# pinned where it is defined, if at all, not here. Entries use the rule-5
+# and the session store factory's opener, called as methods. It also names
+# the orphan-repair helper that wraps several persistence calls. Entries use the rule-5
 # format in scripts/drive-store-allowlist.txt. Its count file caps the
 # occurrences made outside any recorded step (every tag but RECORDED), which
 # may only shrink; a new call inside a recorded step's body is pinned
@@ -445,7 +445,7 @@ drive_store_paths=(
   crates/lash-restate/src/session_driver.rs
 )
 drive_store_methods='abandon_queued_work_claims?|abandon_turn_input_claims?|admit_and_bind_session|admit_session_state|authorize_turn_cancel_closure|begin_or_resume_queued_run|cancel_pending_turn_inputs?|cancel_pending_turn_input_suffix|cancel_queued_work_batch|claim_active_turn_inputs|claim_checkpoint_work|claim_leading_ready_session_command|claim_next_turn_inputs|claim_root_inputs|claim_ready_queued_work(_by_batch_ids)?|commit_runtime_state|committed_turn_exists|drain_end_exists|drive_epoch|enqueue_pending_turn_input|enqueue_queued_work(_with_outcome)?|get_session_execution_lease|list_pending_queued_work|list_turn_input_applications|list_pending_turn_inputs|list_queued_work|load_pending_follow_on|load_session|load_session_at|load_session_head_meta|load_session_meta|load_turn_park|open_existing_store_by_id|orphaned_active_turn_ids|pending_queued_run|pending_session_work_ordering|pending_turn_cancel_closure_pins|pending_turn_cancel_closures|queued_run|queued_work_batch_completed|raise_pending_follow_on_attempts|read_session_state_version|reconcile_turn_cancel_winner|record_turn_cancel_request|record_turn_park|release_session_execution_lease|renew_session_execution_lease|repair_orphaned_active_turn_inputs|retain_admission_base|save_session_meta|seal_drive_epoch|select_queued_run|settle_queued_run|try_claim_session_execution_lease(_with_token)?|turn_cancel_request(_intent)?|turn_is_committed|validate_turn_cancellation_binding'
-drive_store_forbidden="\\.(${drive_store_methods})[[:space:]]*(::<[^>]*>)?\\("
+drive_store_forbidden="\\.(${drive_store_methods})[[:space:]]*(::<[^>]*>)?\\(|(\\.|::)defer_orphaned_turn_inputs_before_drain[[:space:]]*\\("
 drive_store_allowlist=scripts/drive-store-allowlist.txt
 
 # Always grep -E, never ripgrep: the two engines disagree on these patterns,

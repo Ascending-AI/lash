@@ -46,11 +46,12 @@ pub use lash_core_effect::await_event_identity;
 mod validation;
 
 pub use envelope::{
-    AssistantResponseHookEvents, AssistantStreamHookState, CheckpointClaimSet, LlmRequestSpec,
-    LlmStreamRecord, ProcessCommand, ProcessEffectOutcome, RuntimeAssistantResponseHooksOutcome,
-    RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectOutcome, RuntimeInvocation, RuntimeLlmCallOutcome, ServedExecutionEnvironmentSync,
-    SleepSpec, ToolAttemptEffectOutcome, ToolAttemptLaunch, ToolInvocationEffectOutcome,
+    AdmittedHeadVerdict, AssistantResponseHookEvents, AssistantStreamHookState, CheckpointClaimSet,
+    LlmRequestSpec, LlmStreamRecord, ProcessCommand, ProcessEffectOutcome,
+    RuntimeAssistantResponseHooksOutcome, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectOutcome, RuntimeInvocation,
+    RuntimeLlmCallOutcome, ServedExecutionEnvironmentSync, SleepSpec, ToolAttemptEffectOutcome,
+    ToolAttemptLaunch, ToolInvocationEffectOutcome,
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{

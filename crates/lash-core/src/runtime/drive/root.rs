@@ -20,6 +20,7 @@ use crate::runtime::turn_loop::TurnStopwatch;
 use crate::{
     RuntimeError, RuntimeErrorCode, ScopedEffectController, SessionError, TurnId, TurnInput,
 };
+use lash_core_execution::runtime::effect::AdmittedHeadVerdict;
 
 impl LashRuntime {
     /// Claim the input prefix `admitted` names and drive it as the root's
@@ -90,13 +91,6 @@ impl LashRuntime {
                     "a store-backed root holds the session execution lease",
                 ))
             })?;
-        if let Err(error) = self
-            .defer_orphaned_turn_inputs_before_drain(&store, &fence, &root, root_controller)
-            .await
-        {
-            self.release_root_lease(lease.as_ref()).await;
-            return Err(abort(error));
-        }
         // The claim is the root's admission onto a head: its first execution
         // records the head and the turn index, so the resident head is
         // brought current under the lease first; a replay reads both from the
@@ -132,6 +126,8 @@ impl LashRuntime {
                 crate::RuntimeEffectLocalExecutor::owned_runner(
                     Box::new(RootInputClaimRunner {
                         store: Arc::clone(&store),
+                        effect_host: Arc::clone(&self.host.core.control.effect_host),
+                        scope: root_controller.admitted_scope().clone(),
                         fence: fence.clone(),
                         owner: self.runtime_lease_owner.clone(),
                         session_id: self.state.session_id.clone(),
@@ -174,14 +170,69 @@ impl LashRuntime {
                 turn_index,
                 generation,
             }) => {
+                let head_moved = self.state.head_revision != base.revision
+                    || self.state.session_graph.leaf_node_id != base.leaf
+                    || self.state.checkpoint_ref != base.checkpoint;
+                let inspection = crate::RuntimeEffectInvocation::new(
+                    crate::EffectAddress::new(
+                        root_controller.execution_scope().clone(),
+                        format!("drive-head:{root}"),
+                    )
+                    .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+                    crate::RuntimeAttribution::for_turn_admission(
+                        self.state.session_id.clone(),
+                        root.clone(),
+                    ),
+                    format!("{root}.drive-head"),
+                );
+                let verdict = root_controller
+                    .execute_effect(
+                        crate::RuntimeEffectEnvelope::new(
+                            inspection,
+                            crate::RuntimeEffectCommand::InspectAdmittedHead {
+                                root: root.clone(),
+                                head: head.clone(),
+                            },
+                        ),
+                        crate::RuntimeEffectLocalExecutor::owned_runner(
+                            Box::new(InspectAdmittedHeadRunner {
+                                store: Arc::clone(&store),
+                                session_id: self.state.session_id.clone(),
+                                root: root.clone(),
+                                head: head.clone(),
+                                head_moved,
+                                live_revision: self.state.head_revision,
+                            }),
+                            None,
+                        ),
+                    )
+                    .await
+                    .and_then(|outcome| match outcome {
+                        crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict } => Ok(verdict),
+                        other => Err(crate::RuntimeEffectControllerError::wrong_outcome(
+                            crate::RuntimeEffectKind::InspectAdmittedHead,
+                            other.kind(),
+                        )),
+                    })
+                    .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
+                let verdict = match verdict {
+                    Ok(verdict) => verdict,
+                    Err(error) => {
+                        self.release_root_lease(lease.as_ref()).await;
+                        return Err(abort(error));
+                    }
+                };
                 if let Err(error) = self
                     .adopt_admitted_turn(
                         &store,
-                        &base,
-                        turn_index,
-                        generation.as_ref(),
-                        &root,
-                        head,
+                        AdmittedTurn {
+                            base: &base,
+                            turn_index,
+                            generation: generation.as_ref(),
+                            root: &root,
+                            head,
+                        },
+                        verdict,
                     )
                     .await
                 {
@@ -383,28 +434,25 @@ impl LashRuntime {
     /// Adopt the head a root's claim admitted it on and pin its recorded turn
     /// index for the prepare phase (FIG-3682).
     ///
-    /// The resident head is the live one, refreshed under the lease. When it
-    /// is still the admitted base, nothing is read. When it moved:
-    ///
-    /// * the root's own commit moved it (a redrive after the commit): the
-    ///   root is rebuilt from its base, so its replay issues the effects its
-    ///   journal holds and its commit replays the committed receipt;
-    /// * another driver answered the root's rows while it was down: the root
-    ///   cedes, exactly as its commit would;
-    /// * anything else moved it under the uncommitted root: the root parks as
-    ///   a replay divergence. It is never driven on a head it was not
-    ///   admitted on.
+    /// The recorded inspection decides whether the resident head may be
+    /// rebuilt from the claim's base. A live revalidation may only stop a
+    /// root whose claim lost its fence while its handler was down; it cannot
+    /// select new work or alter the claim's recorded base.
     ///
     /// A base the store no longer retains parks the root too.
-    pub(in crate::runtime) async fn adopt_admitted_turn(
+    async fn adopt_admitted_turn(
         &mut self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
-        base: &crate::store::SessionHeadRef,
-        turn_index: u64,
-        generation: Option<&crate::ExecutableGeneration>,
-        turn_id: &TurnId,
-        head: &crate::InputId,
+        admitted: AdmittedTurn<'_>,
+        verdict: AdmittedHeadVerdict,
     ) -> Result<(), RuntimeError> {
+        let AdmittedTurn {
+            base,
+            turn_index,
+            generation,
+            root: turn_id,
+            head,
+        } = admitted;
         // The root runs only under the executable generation its claim
         // recorded (FIG-3571), checked before anything else of it runs.
         crate::runtime::turn_loop::generation_fence::admit(self, generation)?;
@@ -417,7 +465,8 @@ impl LashRuntime {
         let head_moved = self.state.head_revision != base.revision
             || self.state.session_graph.leaf_node_id != base.leaf
             || self.state.checkpoint_ref != base.checkpoint;
-        if head_moved
+        let verdict = if matches!(verdict, AdmittedHeadVerdict::Ready)
+            && head_moved
             && !store
                 .committed_turn_exists(turn_id)
                 .await
@@ -427,7 +476,19 @@ impl LashRuntime {
                 .list_pending_turn_inputs(&self.state.session_id)
                 .await
                 .map_err(crate::runtime::runtime_error_from_store_commit)?;
-            if !open.iter().any(|read| read.input.input_id == *head) {
+            if open.iter().any(|read| read.input.input_id == *head) {
+                AdmittedHeadVerdict::Diverged {
+                    live_revision: self.state.head_revision,
+                }
+            } else {
+                AdmittedHeadVerdict::Ceded
+            }
+        } else {
+            verdict
+        };
+        match verdict {
+            AdmittedHeadVerdict::Ready => {}
+            AdmittedHeadVerdict::Ceded => {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::AcceptedTurnInputCeded,
                     format!(
@@ -436,14 +497,16 @@ impl LashRuntime {
                     ),
                 ));
             }
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::EffectReplayDivergence,
-                format!(
-                    "the session head moved from revision {} to {} under root `{turn_id}` before \
-                     it committed; the root is not driven on a head it was not admitted on",
-                    base.revision, self.state.head_revision
-                ),
-            ));
+            AdmittedHeadVerdict::Diverged { live_revision } => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::EffectReplayDivergence,
+                    format!(
+                        "the session head moved from revision {} to {} under root `{turn_id}` before \
+                         it committed; the root is not driven on a head it was not admitted on",
+                        base.revision, live_revision
+                    ),
+                ));
+            }
         }
         self.adopt_admission_base(base)
             .await
@@ -458,6 +521,74 @@ impl LashRuntime {
             })?;
         self.admitted_turn_index = Some(turn_index);
         Ok(())
+    }
+}
+
+struct AdmittedTurn<'a> {
+    base: &'a crate::store::SessionHeadRef,
+    turn_index: u64,
+    generation: Option<&'a crate::ExecutableGeneration>,
+    root: &'a TurnId,
+    head: &'a crate::InputId,
+}
+
+struct InspectAdmittedHeadRunner {
+    store: Arc<dyn crate::store::RuntimePersistence>,
+    session_id: crate::SessionId,
+    root: TurnId,
+    head: crate::InputId,
+    head_moved: bool,
+    live_revision: u64,
+}
+
+#[async_trait::async_trait]
+impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
+    async fn execute(
+        self: Box<Self>,
+        envelope: crate::RuntimeEffectEnvelope,
+    ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+        let crate::RuntimeEffectCommand::InspectAdmittedHead { root, head } = &envelope.command
+        else {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "admitted head inspector received another command",
+            ));
+        };
+        if *root != self.root || *head != self.head {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
+                "admitted head inspector was bound to another root or input",
+            ));
+        }
+        let store_fault = |error| {
+            crate::RuntimeEffectControllerError::from(
+                crate::runtime::runtime_error_from_store_commit(error),
+            )
+            .retryable_uncommitted_derivation()
+        };
+        let verdict = if !self.head_moved
+            || self
+                .store
+                .committed_turn_exists(&self.root)
+                .await
+                .map_err(store_fault)?
+        {
+            AdmittedHeadVerdict::Ready
+        } else {
+            let open = self
+                .store
+                .list_pending_turn_inputs(&self.session_id)
+                .await
+                .map_err(store_fault)?;
+            if open.iter().any(|read| read.input.input_id == self.head) {
+                AdmittedHeadVerdict::Diverged {
+                    live_revision: self.live_revision,
+                }
+            } else {
+                AdmittedHeadVerdict::Ceded
+            }
+        };
+        Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })
     }
 }
 
@@ -512,6 +643,8 @@ enum RootClaimProbe {
 /// every lease generation, and the envelope must not.
 struct RootInputClaimRunner {
     store: Arc<dyn crate::store::RuntimePersistence>,
+    effect_host: Arc<dyn crate::EffectHost>,
+    scope: crate::AdmittedScope,
     fence: crate::SessionExecutionLeaseAuthority,
     owner: crate::LeaseOwnerIdentity,
     session_id: crate::SessionId,
@@ -561,6 +694,24 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
         // on every later drive and wedge the session. Like admission and the
         // seal, the step runs again; only a claim or a refusal is recorded.
         let root = self.root.clone();
+        {
+            let scoped = self
+                .effect_host
+                .scoped(self.scope.clone())
+                .map_err(crate::RuntimeEffectControllerError::from)?;
+            crate::runtime::LashRuntime::defer_orphaned_turn_inputs_before_drain(
+                &self.store,
+                &self.fence,
+                &root,
+                &scoped,
+                &self.session_id,
+                self.effect_host.as_ref(),
+            )
+            .await
+            .map_err(|error| {
+                crate::RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
+            })?;
+        }
         let drive = match self.claim().await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(
                 crate::runtime::runtime_error_from_store_commit(err),

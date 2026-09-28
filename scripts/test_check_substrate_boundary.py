@@ -171,6 +171,20 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("rule 6 failed", result.stderr)
 
+    def test_unpinned_orphan_repair_seam_in_the_drive_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {}"], [])
+            hit = root / FIXTURE_STORE_FILE
+            hit.write_text(
+                "async fn drive() {\n"
+                "LashRuntime::defer_orphaned_turn_inputs_before_drain();\n"
+                "}\n"
+            )
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 6 failed", result.stderr)
+
     def test_pinned_store_call_in_the_drive_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

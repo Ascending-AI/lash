@@ -25,15 +25,13 @@
 //!   its journal is kept for a restored build.
 //!
 //! The kernel owns what a drive admits and how a root runs; these handlers
-//! only give each step its journal. They journal the kernel's recorded steps
-//! and nothing else, so what the kernel does between those steps is not
-//! journaled either: a root still reads live store state ahead of its
-//! claim and while adopting its admitted head (the orphaned-input repair,
-//! `committed_turn_exists`, the pending inputs), and a replay re-evaluates
-//! those reads under the session execution lease rather than reading them
-//! back (FIG-3824). Rule 6 of `scripts/check-substrate-boundary.sh` pins
-//! every direct store call in the session drive, tagged by whether a
-//! recorded step makes it. The core installs its
+//! only give each step its journal. The root's claim step repairs orphaned
+//! inputs and records its claim. Its `InspectAdmittedHead` step records the
+//! store-backed decision about the claimed head. On replay both steps return
+//! their recorded outcomes. Before a turn effect, a fenced live check may
+//! stop a root whose claim lost authority between attempts (FIG-3824,
+//! ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
+//! store calls and the repair helper in the session drive. The core installs its
 //! [`SessionDriver`] on the engine ([`SessionWorkEngine::install_session_driver`]),
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.

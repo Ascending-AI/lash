@@ -1068,6 +1068,116 @@ pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
     );
 }
 
+struct NoReplayRepairRead {
+    inner: Arc<dyn crate::RuntimePersistence>,
+    after_first: AtomicUsize,
+    replay_reads: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
+    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn pending_turn_cancel_closures(
+        &self,
+        session_id: &SessionId,
+        lease: &crate::SessionExecutionLeaseAuthority,
+        binding_id: &str,
+        scope: &crate::ExecutionScope,
+    ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
+        if self.after_first.load(Ordering::SeqCst) != 0 {
+            self.replay_reads.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner
+            .pending_turn_cancel_closures(session_id, lease, binding_id, scope)
+            .await
+    }
+}
+
+/// A committed root redriven on its journal replays the claim that included
+/// orphan repair. The repair's store read runs only on first execution;
+/// the current lease's stop-only head check may still read committed evidence.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_committed_root_replays_its_recorded_repair(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts =
+        DriveParts::new(prefix, "recorded-head-inspection", &effect_host, &stores, 1).await;
+    let read_guard = Arc::new(NoReplayRepairRead {
+        inner: Arc::clone(&parts.store),
+        after_first: AtomicUsize::new(0),
+        replay_reads: AtomicUsize::new(0),
+    });
+    parts.store = Arc::clone(&read_guard) as Arc<dyn crate::RuntimePersistence>;
+    parts
+        .enqueue("one answer", Some("recorded-head-root"))
+        .await;
+    let request = parts.request("recorded-head-drive");
+    let first: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        let request = request.clone();
+        let read_guard = Arc::clone(&read_guard);
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            let read_guard = Arc::clone(&read_guard);
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let admitted = admitted(
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                        .await
+                        .expect("admit the root"),
+                );
+                lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
+                    .await
+                    .expect("first root commits");
+                read_guard.after_first.store(1, Ordering::SeqCst);
+                panic!("worker died after committing the root");
+            })
+        })
+    };
+    let redrive: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let admitted = admitted(
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                        .await
+                        .expect("replay admission"),
+                );
+                lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
+                    .await
+                    .expect("redrive uses its recorded claim and repair");
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    runner
+        .run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(
+                &parts.session_id,
+                TurnId::from("recorded-head-driver"),
+            )),
+            first,
+            redrive,
+        )
+        .await;
+    assert_eq!(read_guard.after_first.load(Ordering::SeqCst), 1);
+    assert_eq!(read_guard.replay_reads.load(Ordering::SeqCst), 0);
+    assert_eq!(parts.calls(), 1, "the model call replays too");
+}
+
 impl ClaimFaultsOnce {
     fn fire(&self, at: ClaimFault) -> Result<(), crate::StoreError> {
         if std::mem::discriminant(&at) == std::mem::discriminant(&self.fault)

@@ -438,6 +438,12 @@ pub enum RuntimeEffectCommand {
     ClaimAcceptedTurnInput {
         input_id: crate::InputId,
     },
+    /// Inspect the claimed root's head before executing its turn. The body
+    /// reads live store state once; replay uses its recorded verdict.
+    InspectAdmittedHead {
+        root: crate::TurnId,
+        head: crate::InputId,
+    },
     /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
     /// replay decodes the recorded verdict instead of re-reading the store.
     AdmitDrive {
@@ -572,6 +578,7 @@ impl RuntimeEffectCommand {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
@@ -1110,6 +1117,15 @@ pub type RuntimeDirectLlmOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
+/// The first execution's decision about the head a root claimed.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AdmittedHeadVerdict {
+    Ready,
+    Ceded,
+    Diverged { live_revision: u64 },
+}
+
 /// Serializable result of a runtime effect command.
 ///
 /// Large payloads stay boxed so this boundary type remains cheap to retain in
@@ -1219,6 +1235,9 @@ pub enum RuntimeEffectOutcome {
     /// same rows under the same settlement authority (ADR 0069 §6).
     ClaimAcceptedTurnInput {
         drive: crate::AcceptedTurnInputDrive,
+    },
+    InspectAdmittedHead {
+        verdict: AdmittedHeadVerdict,
     },
     /// The drive admission's recorded verdict.
     AdmitDrive {
@@ -1687,6 +1706,7 @@ impl RuntimeEffectOutcome {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::InspectAdmittedHead { .. } => RuntimeEffectKind::InspectAdmittedHead,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,

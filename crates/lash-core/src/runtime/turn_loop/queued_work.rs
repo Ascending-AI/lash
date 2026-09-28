@@ -532,11 +532,13 @@ impl LashRuntime {
         }
         let preparation = async {
             let opts = queued_opts.bind(admission.scope.clone())?;
-            self.defer_orphaned_turn_inputs_before_drain(
+            Self::defer_orphaned_turn_inputs_before_drain(
                 &store,
                 &fence,
                 &TurnId::from(admission.scope.id()),
                 &opts.scoped_effect_controller(),
+                &self.state.session_id,
+                self.host.core.control.effect_host.as_ref(),
             )
             .await?;
             if admission.members.is_none() {

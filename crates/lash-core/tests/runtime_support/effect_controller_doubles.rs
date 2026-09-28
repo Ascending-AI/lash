@@ -647,6 +647,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             command @ (RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
+            | RuntimeEffectCommand::InspectAdmittedHead { .. }
             | RuntimeEffectCommand::AdmitDrive { .. }
             | RuntimeEffectCommand::DrawRootStart { .. }
             | RuntimeEffectCommand::SealDriveAdmission { .. }
