@@ -85,8 +85,46 @@ pub(super) async fn stage_scope_close(point: CrashPoint, seed: u64) -> Result<St
 }
 
 #[cfg(test)]
-pub(super) async fn stage_scope_close_claimed(seed: u64) -> Result<Staged, String> {
-    stage_scope_close_with_claim(CrashPoint::AfterStateCommit, seed, true).await
+pub(super) async fn stage_scope_close_claimed(
+    point: CrashPoint,
+    seed: u64,
+) -> Result<Staged, String> {
+    stage_scope_close_with_claim(point, seed, true).await
+}
+
+async fn claim_scope_close_before_restart(
+    world: &CrashWorld,
+    session: &SessionId,
+    root: &str,
+) -> Result<(), String> {
+    world.kill().await;
+    let id = scope_close_obligation_id(session, &TurnId::from(root));
+    let ledger = world
+        .backend()
+        .obligation_ledger(ObligationKind::ScopeClose);
+    match ledger
+        .state(&id)
+        .await
+        .map_err(|error| format!("read scope-close obligation `{id}`: {error}"))?
+    {
+        Some(ObligationState::Claimed) => {}
+        Some(ObligationState::Due) => {
+            if ledger
+                .claim(&id, world.now_ms(), 60_000)
+                .await
+                .map_err(|error| format!("claim scope-close obligation `{id}`: {error}"))?
+                .is_none()
+            {
+                return Err(format!("scope-close obligation `{id}` lost its due claim"));
+            }
+        }
+        other => {
+            return Err(format!(
+                "scope-close obligation `{id}` was {other:?} after the crash"
+            ));
+        }
+    }
+    world.restart().await
 }
 
 async fn stage_scope_close_with_claim(
@@ -135,34 +173,7 @@ async fn stage_scope_close_with_claim(
             if claim_before_restart {
                 let tripped = world.trip().wait(super::TRIP_WAIT).await;
                 if let Some(tripped) = tripped {
-                    world.kill().await;
-                    let id = scope_close_obligation_id(&session, &TurnId::from(root));
-                    let ledger = world
-                        .backend()
-                        .obligation_ledger(ObligationKind::ScopeClose);
-                    let state = ledger
-                        .state(&id)
-                        .await
-                        .map_err(|error| format!("read scope-close obligation `{id}`: {error}"))?;
-                    match state {
-                        Some(ObligationState::Claimed) => {}
-                        Some(ObligationState::Due) => {
-                            let claimed = ledger.claim(&id, world.now_ms(), 60_000).await.map_err(
-                                |error| format!("claim scope-close obligation `{id}`: {error}"),
-                            )?;
-                            if claimed.is_none() {
-                                return Err(format!(
-                                    "scope-close obligation `{id}` lost its due claim"
-                                ));
-                            }
-                        }
-                        other => {
-                            return Err(format!(
-                                "scope-close obligation `{id}` was {other:?} after the crash"
-                            ));
-                        }
-                    }
-                    world.restart().await?;
+                    claim_scope_close_before_restart(&world, &session, root).await?;
                     Some(tripped.at_ms)
                 } else {
                     None
@@ -205,7 +216,11 @@ async fn stage_scope_close_with_claim(
             match world.trip().wait(std::time::Duration::from_secs(20)).await {
                 Some(tripped) => {
                     lose_root_invocation(&world, root).await?;
-                    world.crash_and_restart().await?;
+                    if claim_before_restart {
+                        claim_scope_close_before_restart(&world, &session, root).await?;
+                    } else {
+                        world.crash_and_restart().await?;
+                    }
                     Some(tripped.at_ms)
                 }
                 None => None,
@@ -221,11 +236,11 @@ async fn stage_scope_close_with_claim(
     })
 }
 
-/// The row the after-commit crash left to recovery. On a live engine the
+/// The row a crash before the close step left to recovery. On a live engine the
 /// `BeforeRun` frame can race the SDK's local close attempt: it may claim the
 /// row before the deployment dies even though the frame never reached the
 /// journal. The cell must judge the actual row under the matching §1.8 bound.
-pub(super) async fn after_state_commit_obligation(
+pub(super) async fn obligation_at_restart(
     world: &CrashWorld,
     seed: u64,
 ) -> Result<ObligationState, String> {

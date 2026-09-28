@@ -263,28 +263,33 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
         world.finish().await;
         return;
     };
-    let detection_bound =
-        if spec.seam == Seam::ScopeClose && spec.point == super::CrashPoint::AfterStateCommit {
-            match scope::after_state_commit_obligation(&world, seed).await {
-                Ok(state) => {
-                    report
-                        .notes
-                        .push(format!("scope_close_at_restart={state:?}"));
-                    if state == lash_core::store::ObligationState::Claimed {
-                        super::DetectionBound::LapsedClaim
-                    } else {
-                        spec.bound
-                    }
-                }
-                Err(error) => {
-                    report.violations.push(error);
-                    world.finish().await;
-                    return;
+    // Both cuts stop before the close step records a result. Its immediate
+    // delivery may already have claimed the row, so use that row's bound.
+    let detection_bound = if spec.seam == Seam::ScopeClose
+        && matches!(
+            spec.point,
+            super::CrashPoint::AfterStateCommit | super::CrashPoint::InvocationLost
+        ) {
+        match scope::obligation_at_restart(&world, seed).await {
+            Ok(state) => {
+                report
+                    .notes
+                    .push(format!("scope_close_at_restart={state:?}"));
+                if state == lash_core::store::ObligationState::Claimed {
+                    super::DetectionBound::LapsedClaim
+                } else {
+                    spec.bound
                 }
             }
-        } else {
-            spec.bound
-        };
+            Err(error) => {
+                report.violations.push(error);
+                world.finish().await;
+                return;
+            }
+        }
+    } else {
+        spec.bound
+    };
     let bound = detection_bound.limit();
     if spec.bound == super::DetectionBound::AttemptCeiling {
         // Hundreds of ticks, each awaiting its own relay pass: the wait for
@@ -392,9 +397,51 @@ mod tests {
         let seed = 0x2d5f_311b_c328_b88c;
         let spec = super::super::case(Seam::ScopeClose, super::super::CrashPoint::AfterStateCommit)
             .expect("registered scope-close cell");
-        let staged = scope::stage_scope_close_claimed(seed)
+        let staged =
+            scope::stage_scope_close_claimed(super::super::CrashPoint::AfterStateCommit, seed)
+                .await
+                .expect("stage a claimed scope close");
+        let mut report = CaseReport {
+            seed,
+            test_name: spec.test_name(),
+            crashed: false,
+            detected_after: None,
+            violations: Vec::new(),
+            notes: Vec::new(),
+            ticks: 0,
+        };
+        Box::pin(tokio::time::timeout(
+            CASE_WALL_LIMIT,
+            recover_staged(spec, seed, &mut report, staged),
+        ))
+        .await
+        .expect("the claimed scope close finished within the wall limit");
+        assert!(report.crashed, "{report:#?}");
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note == "scope_close_at_restart=Claimed"),
+            "{report:#?}"
+        );
+        assert!(
+            report
+                .detected_after
+                .is_some_and(|after| after > spec.bound.limit()),
+            "the abandoned claim must outlive the due-row bound: {report:#?}"
+        );
+        assert!(report.passed(), "{report:#?}");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_claimed_invocation_lost_scope_close_uses_its_lapse_bound() {
+        let seed = 0xa1aa_32da_93f8_dc1b;
+        let point = super::super::CrashPoint::InvocationLost;
+        let spec =
+            super::super::case(Seam::ScopeClose, point).expect("registered scope-close cell");
+        let staged = scope::stage_scope_close_claimed(point, seed)
             .await
-            .expect("stage a claimed scope close");
+            .expect("stage a claimed scope close after invocation loss");
         let mut report = CaseReport {
             seed,
             test_name: spec.test_name(),

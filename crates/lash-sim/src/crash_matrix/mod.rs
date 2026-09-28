@@ -437,7 +437,8 @@ pub const MATRIX: &[CaseSpec] = &[
     // start the local close attempt while its BeforeRun frame is being cut.
     // If that attempt claims before the host dies, the cell reads its row and
     // uses §1.8's lapsed-claim bound; a due row keeps the shorter bound. The
-    // later cuts always leave a claimed root row.
+    // Invocation loss has the same race: the immediate attempt may claim
+    // before the invocation is killed. Both cells inspect the row at restart.
     today(
         Seam::ScopeClose,
         CrashPoint::AfterStateCommit,
