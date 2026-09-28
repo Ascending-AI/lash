@@ -51,7 +51,7 @@ timeout_seconds = 300
 panic_gate = true
 
 # The replay leg's held-back laws live in scripts/restate-divergences/
-# (FIG-3540, FIG-3753). The process drive's own divergence (3e, a
+# (FIG-3540). The process drive's own divergence (3e, a
 # LashProcessWorkflow journal mismatch) is fixed by FIG-3673 and is not held.
 
 [suites.agent-workbench.env]

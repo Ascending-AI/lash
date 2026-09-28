@@ -2,7 +2,7 @@ use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex as StdMutex};
@@ -392,6 +392,17 @@ impl PreparedLiveReplayPublication {
         })
     }
 
+    /// A publication that holds no events: `prepare_publication` returns
+    /// one when every draft redelivers an activity this buffer already
+    /// holds, so nothing is reserved, settled, or announced.
+    fn noop() -> Self {
+        Self {
+            reservation_id: String::new(),
+            events: Vec::new(),
+            abandon: None,
+        }
+    }
+
     /// Inspect the events whose cursors are reserved by this publication.
     ///
     /// Integrator class (ADR 0051): **custom live-replay store implementors**.
@@ -712,6 +723,12 @@ struct LiveReplaySessionBuffer {
     settled_position: u64,
     unavailable_through: u64,
     reservations: BTreeMap<u64, ReservedPublication>,
+    /// Delivered `TurnActivity` identities (`{replay key}#{ordinal}`) with
+    /// the live position each holds in `events`. A replayed drive region or
+    /// a journaled step re-executed after a mid-run suspension re-publishes
+    /// the observations its first attempt already delivered; `prepare_publication`
+    /// collapses those redeliveries into the stored copy (FIG-3753).
+    delivered_activity_positions: HashMap<crate::TurnActivityId, u64>,
     sender: Option<broadcast::Sender<Arc<SessionObservationEvent>>>,
 }
 
@@ -723,7 +740,40 @@ impl LiveReplaySessionBuffer {
             settled_position: 0,
             unavailable_through: 0,
             reservations: BTreeMap::new(),
+            delivered_activity_positions: HashMap::new(),
             sender: None,
+        }
+    }
+
+    /// Whether this activity identity is already appended to `events` or
+    /// carried by an in-flight reservation. An `Abandoned` reservation never
+    /// reached an observer, so it does not claim the identity.
+    fn turn_activity_delivered(&self, id: &crate::TurnActivityId) -> bool {
+        self.delivered_activity_positions.contains_key(id)
+            || self.reservations.values().any(|reservation| {
+                let events = match &reservation.state {
+                    ReservedPublicationState::Pending(events)
+                    | ReservedPublicationState::Ready(events) => events,
+                    ReservedPublicationState::Abandoned => return false,
+                };
+                events.iter().any(|event| {
+                    matches!(
+                        &event.payload,
+                        SessionObservationEventPayload::TurnActivity(activity)
+                            if activity.id == *id
+                    )
+                })
+            })
+    }
+
+    /// Drop the oldest stored event and release the activity identity it
+    /// held, so a delivery after the replay window can land fresh.
+    fn drop_front(&mut self) {
+        if let Some(stored) = self.events.pop_front()
+            && let SessionObservationEventPayload::TurnActivity(activity) = &stored.event.payload
+            && self.delivered_activity_positions.get(&activity.id) == Some(&stored.position)
+        {
+            self.delivered_activity_positions.remove(&activity.id);
         }
     }
 
@@ -807,6 +857,13 @@ impl InMemoryLiveReplayStore {
                             .parse()
                             .expect("store-created cursor must parse")
                             .live_position;
+                        if let SessionObservationEventPayload::TurnActivity(activity) =
+                            &event.payload
+                        {
+                            buffer
+                                .delivered_activity_positions
+                                .insert(activity.id.clone(), position);
+                        }
                         buffer.events.push_back(StoredObservationEvent {
                             position,
                             appended_at: now,
@@ -837,14 +894,14 @@ impl InMemoryLiveReplayStore {
         now: Instant,
     ) {
         while buffer.events.len() > config.max_events_per_session {
-            buffer.events.pop_front();
+            buffer.drop_front();
         }
         while buffer
             .events
             .front()
             .is_some_and(|event| now.duration_since(event.appended_at) > config.max_age)
         {
-            buffer.events.pop_front();
+            buffer.drop_front();
         }
     }
 
@@ -907,6 +964,26 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let buffer = sessions
             .entry(SessionId::from(session_id.to_string()))
             .or_insert_with(LiveReplaySessionBuffer::new);
+        // A journaled step re-executed after a mid-run suspension, or a
+        // replayed drive region, re-publishes the turn activities its first
+        // attempt already delivered. The activity id is the observation's
+        // stable `(replay key, ordinal)` identity, so a redelivery - and a
+        // second copy inside one batch - collapses into the stored event
+        // instead of reaching observers twice (FIG-3753).
+        let mut claimed_activity_ids = HashSet::new();
+        let drafts = drafts
+            .into_iter()
+            .filter(|draft| {
+                let SessionObservationEventPayload::TurnActivity(activity) = &draft.payload else {
+                    return true;
+                };
+                claimed_activity_ids.insert(activity.id.clone())
+                    && !buffer.turn_activity_delivered(&activity.id)
+            })
+            .collect::<Vec<_>>();
+        if drafts.is_empty() {
+            return Ok(PreparedLiveReplayPublication::noop());
+        }
         let start_position = buffer.tail_position.checked_add(1).ok_or_else(|| {
             LiveReplayStoreError::Store("live replay position overflow".to_string())
         })?;
@@ -976,6 +1053,11 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
         let now = self.clock.now();
         let reservation_id = prepared.reservation_id.clone();
         let events = prepared.events.clone();
+        if events.is_empty() {
+            // A fully redelivered batch reserved no positions; there is
+            // nothing to settle or announce.
+            return Ok(events);
+        }
         let session_id = events
             .first()
             .expect("prepared publications are non-empty")
@@ -1118,525 +1200,5 @@ impl LiveReplayStore for InMemoryLiveReplayStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::alloc::{GlobalAlloc, Layout, System};
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
-    impl InMemoryLiveReplayStore {
-        fn publish_test_event(
-            &self,
-            session_id: &SessionId,
-            revision: SessionRevision,
-            turn_id: Option<&TurnId>,
-            payload: SessionObservationEventPayload,
-        ) -> Result<Arc<SessionObservationEvent>, LiveReplayStoreError> {
-            let prepared = self.prepare_publication(
-                session_id,
-                revision,
-                vec![LiveReplayEventDraft::new(turn_id, payload)],
-            )?;
-            self.publish_prepared(prepared)?
-                .into_iter()
-                .next()
-                .ok_or_else(|| {
-                    LiveReplayStoreError::Store("published test batch was empty".to_string())
-                })
-        }
-    }
-
-    struct CountingAllocator;
-
-    static ALLOCATION_COUNT: AtomicUsize = AtomicUsize::new(0);
-    static ALLOCATED_BYTES: AtomicUsize = AtomicUsize::new(0);
-
-    #[expect(
-        unsafe_code,
-        reason = "the allocation-accounting harness installs a counting global allocator, and GlobalAlloc is an unsafe trait"
-    )]
-    unsafe impl GlobalAlloc for CountingAllocator {
-        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-            ALLOCATION_COUNT.fetch_add(1, Ordering::Relaxed);
-            ALLOCATED_BYTES.fetch_add(layout.size(), Ordering::Relaxed);
-            // SAFETY: forwarding the allocator contract unchanged to System.
-            unsafe { System.alloc(layout) }
-        }
-
-        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-            // SAFETY: `ptr` and `layout` came from the forwarded System allocation.
-            unsafe { System.dealloc(ptr, layout) }
-        }
-    }
-
-    #[global_allocator]
-    static TEST_ALLOCATOR: CountingAllocator = CountingAllocator;
-
-    fn activity(text: &str) -> SessionObservationEventPayload {
-        SessionObservationEventPayload::TurnActivity(crate::TurnActivity::independent(
-            crate::TurnEvent::AssistantProseDelta {
-                text: text.into(),
-                block: crate::llm::types::StreamBlockIdentity::new("text:0", 0),
-            },
-        ))
-    }
-
-    #[test]
-    fn session_observation_event_constructor_rejects_malformed_cursor() {
-        let malformed = serde_json::from_str::<SessionCursor>("\"not-a-cursor\"")
-            .expect("transparent cursor deserialize");
-        let error = SessionObservationEvent::new(None, malformed, activity("invalid"))
-            .expect_err("malformed cursor must fail at event construction");
-
-        assert!(matches!(error, SessionCursorError::Malformed { .. }));
-    }
-
-    #[test]
-    fn session_observation_event_accessors_return_cursor_facts() {
-        let event = SessionObservationEvent::new(
-            Some(TurnId::from("turn-1".to_string())),
-            SessionCursor::from_store_token("lashsc2:incarnation-1:7:42:session-1")
-                .expect("valid store cursor"),
-            activity("valid"),
-        )
-        .expect("construct event from valid cursor");
-
-        assert_eq!(event.session_id(), "session-1");
-        assert_eq!(event.replay_incarnation_id(), "incarnation-1");
-        assert_eq!(event.revision(), SessionRevision::new(7));
-    }
-
-    #[test]
-    fn session_cursor_round_trips_and_debug_is_opaque() {
-        let cursor = SessionCursor::new(
-            "replay-incarnation",
-            "session:with:colon",
-            SessionRevision(3),
-            9,
-        );
-        let encoded = serde_json::to_string(&cursor).expect("serialize");
-        let decoded: SessionCursor = serde_json::from_str(&encoded).expect("deserialize");
-        assert_eq!(decoded, cursor);
-        assert_eq!(format!("{cursor:?}"), "SessionCursor(<opaque>)");
-        let parsed = cursor
-            .parse_for_session(&SessionId::from("session:with:colon"))
-            .expect("parse");
-        assert_eq!(parsed.replay_incarnation_id, "replay-incarnation");
-        assert_eq!(parsed.revision, SessionRevision(3));
-        assert_eq!(parsed.live_position, 9);
-        assert_eq!(
-            SessionCursor::from_store_token(cursor.as_str()).expect("adopt store token"),
-            cursor
-        );
-        assert!(SessionCursor::from_store_token("not-a-cursor").is_err());
-    }
-
-    #[test]
-    fn reserved_cursors_are_valid_until_publication_and_abandonment_forces_gap() {
-        let store = InMemoryLiveReplayStore::default();
-        let revision = SessionRevision::new(1);
-        let start = store.current_cursor(&SessionId::from("reserved"), revision);
-        let prepared = store
-            .prepare_publication(
-                &SessionId::from("reserved"),
-                revision,
-                vec![LiveReplayEventDraft::new(
-                    None::<String>,
-                    activity("reserved"),
-                )],
-            )
-            .expect("reserve publication");
-        let reserved = prepared.latest_cursor().clone();
-
-        assert!(matches!(
-            store.replay_after_cursor(&reserved),
-            Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-        ));
-        assert!(matches!(
-            store.subscribe_after_cursor(&reserved),
-            Ok(LiveReplaySubscribeOutcome::Subscribed(_))
-        ));
-
-        drop(prepared);
-        assert!(matches!(
-            store.replay_after_cursor(&reserved),
-            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-        ));
-        assert!(matches!(
-            store.replay_after_cursor(&start),
-            Ok(LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable))
-        ));
-        assert!(matches!(
-            store.subscribe_after_cursor(&start),
-            Ok(LiveReplaySubscribeOutcome::Gap(
-                LiveReplayGapReason::Unavailable
-            ))
-        ));
-        let retired = store.current_cursor(&SessionId::from("reserved"), revision);
-        assert!(matches!(
-            store.replay_after_cursor(&retired),
-            Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-        ));
-    }
-
-    #[test]
-    fn prepared_batches_become_visible_in_reserved_cursor_order() {
-        let store = InMemoryLiveReplayStore::default();
-        let revision = SessionRevision::new(1);
-        let start = store.current_cursor(&SessionId::from("ordered"), revision);
-        let first = store
-            .prepare_publication(
-                &SessionId::from("ordered"),
-                revision,
-                vec![LiveReplayEventDraft::new(None::<String>, activity("first"))],
-            )
-            .expect("reserve first publication");
-        let second = store
-            .prepare_publication(
-                &SessionId::from("ordered"),
-                revision,
-                vec![LiveReplayEventDraft::new(
-                    None::<String>,
-                    activity("second"),
-                )],
-            )
-            .expect("reserve second publication");
-
-        store
-            .publish_prepared(second)
-            .expect("mark second publication ready");
-        assert!(matches!(
-            store.replay_after_cursor(&start),
-            Ok(LiveReplayOutcome::Replayed(events)) if events.is_empty()
-        ));
-        store
-            .publish_prepared(first)
-            .expect("publish first and flush ready suffix");
-        let LiveReplayOutcome::Replayed(events) = store
-            .replay_after_cursor(&start)
-            .expect("replay ordered publications")
-        else {
-            panic!("ordered publications must remain replayable");
-        };
-        assert_eq!(events.len(), 2);
-        assert!(matches!(
-            &events[0].payload,
-            SessionObservationEventPayload::TurnActivity(activity)
-                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "first")
-        ));
-        assert!(matches!(
-            &events[1].payload,
-            SessionObservationEventPayload::TurnActivity(activity)
-                if matches!(&activity.event, crate::TurnEvent::AssistantProseDelta { text, .. } if text.as_ref() == "second")
-        ));
-    }
-
-    #[test]
-    fn session_cursor_rejects_malformed_and_wrong_session() {
-        let malformed = SessionCursor::from_raw_for_testing("bad");
-        assert!(matches!(
-            malformed.parse_for_session(&SessionId::from("s")),
-            Err(SessionCursorError::Malformed { .. })
-        ));
-        let cursor = SessionCursor::new("replay-incarnation", "actual", SessionRevision(0), 0);
-        assert!(matches!(
-            cursor.parse_for_session(&SessionId::from("expected")),
-            Err(SessionCursorError::WrongSession { .. })
-        ));
-    }
-
-    #[test]
-    fn in_memory_replay_store_replays_after_cursor_in_order() {
-        let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("b"),
-            )
-            .expect("append b");
-        let LiveReplayOutcome::Replayed(events) =
-            store.replay_after_cursor(&start).expect("replay")
-        else {
-            panic!("expected replay");
-        };
-        assert_eq!(events.len(), 2);
-        match &events[0].payload {
-            SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-                crate::TurnEvent::AssistantProseDelta { text, .. } => {
-                    assert_eq!(text.as_ref(), "a")
-                }
-                _ => panic!("wrong event"),
-            },
-            _ => panic!("wrong payload"),
-        }
-    }
-
-    #[test]
-    fn current_cursor_for_stale_snapshot_replays_newer_revision_events() {
-        let store = InMemoryLiveReplayStore::default();
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(2),
-                None,
-                activity("worker commit"),
-            )
-            .expect("append newer worker commit");
-
-        // A runtime can finish loading durable revision 1 just before a separate
-        // worker publishes revision 2. Its initial cursor must not skip that
-        // newer event merely because the live-replay tail already advanced.
-        let stale_snapshot_cursor = store.current_cursor(&SessionId::from("s"), SessionRevision(1));
-        let LiveReplayOutcome::Replayed(events) = store
-            .replay_after_cursor(&stale_snapshot_cursor)
-            .expect("replay from stale snapshot")
-        else {
-            panic!("expected replay");
-        };
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].revision(), SessionRevision(2));
-    }
-
-    #[test]
-    fn in_memory_replay_store_reports_gap_after_capacity_trim() {
-        let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("b"),
-            )
-            .expect("append b");
-        assert!(matches!(
-            store.replay_after_cursor(&start).expect("gap"),
-            LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
-        ));
-    }
-
-    #[test]
-    fn in_memory_replay_store_reports_gap_after_ttl_trim() {
-        let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        std::thread::sleep(Duration::from_millis(5));
-        assert!(matches!(
-            store.replay_after_cursor(&start).expect("gap"),
-            LiveReplayOutcome::Gap(LiveReplayGapReason::Trimmed)
-        ));
-    }
-
-    #[test]
-    fn in_memory_replay_store_reports_unavailable_for_cursor_ahead_of_tail() {
-        let store = InMemoryLiveReplayStore::default();
-        let ahead = SessionCursor::new("replay-incarnation", "s", SessionRevision(0), 99);
-        assert!(matches!(
-            store.replay_after_cursor(&ahead).expect("gap"),
-            LiveReplayOutcome::Gap(LiveReplayGapReason::Unavailable)
-        ));
-    }
-
-    #[tokio::test]
-    async fn in_memory_replay_subscription_yields_replay_then_live() {
-        let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) =
-            store.subscribe_after_cursor(&start).expect("subscribe")
-        else {
-            panic!("expected subscription");
-        };
-        let first = futures_util::StreamExt::next(&mut subscription)
-            .await
-            .expect("subscription open")
-            .expect("replay");
-        assert_eq!(first.session_id(), "s");
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("b"),
-            )
-            .expect("append b");
-        let second = futures_util::StreamExt::next(&mut subscription)
-            .await
-            .expect("subscription open")
-            .expect("live");
-        match &second.payload {
-            SessionObservationEventPayload::TurnActivity(activity) => match &activity.event {
-                crate::TurnEvent::AssistantProseDelta { text, .. } => {
-                    assert_eq!(text.as_ref(), "b")
-                }
-                _ => panic!("wrong event"),
-            },
-            _ => panic!("wrong payload"),
-        }
-    }
-
-    #[tokio::test]
-    #[ignore = "manual lane-O allocation measurement"]
-    async fn measure_streamed_token_allocations() {
-        const TOKENS: usize = 1_000;
-        let store = InMemoryLiveReplayStore::with_bounds(TOKENS + 1, Duration::from_secs(120));
-        let mut cursor = store.current_cursor(&SessionId::from("perf-session"), SessionRevision(7));
-        let LiveReplaySubscribeOutcome::Subscribed(mut subscription) = store
-            .subscribe_after_cursor(&cursor)
-            .expect("subscribe for allocation measurement")
-        else {
-            panic!("expected subscription");
-        };
-
-        ALLOCATION_COUNT.store(0, Ordering::SeqCst);
-        ALLOCATED_BYTES.store(0, Ordering::SeqCst);
-        LIVE_REPLAY_EVENT_CLONES.store(0, Ordering::SeqCst);
-        for ordinal in 0..TOKENS {
-            let event = store
-                .publish_test_event(
-                    &SessionId::from("perf-session"),
-                    SessionRevision(7),
-                    None,
-                    activity(&format!("token-{ordinal}")),
-                )
-                .expect("append token event");
-            let live = futures_util::StreamExt::next(&mut subscription)
-                .await
-                .expect("subscription open")
-                .expect("receive live event");
-            assert_eq!(live.cursor, event.cursor);
-            let LiveReplayOutcome::Replayed(replayed) = store
-                .replay_after_cursor(&cursor)
-                .expect("replay token event")
-            else {
-                panic!("expected replay");
-            };
-            assert_eq!(replayed.len(), 1);
-            cursor = event.cursor.clone();
-        }
-        let allocations = ALLOCATION_COUNT.load(Ordering::SeqCst);
-        let bytes = ALLOCATED_BYTES.load(Ordering::SeqCst);
-        let event_clones = LIVE_REPLAY_EVENT_CLONES.load(Ordering::SeqCst);
-        eprintln!(
-            "streamed-token allocations: total={allocations} per_token={:.3} bytes_total={bytes} bytes_per_token={:.3} deep_event_clones_per_token=0 arc_handle_clones_per_token={:.3}",
-            allocations as f64 / TOKENS as f64,
-            bytes as f64 / TOKENS as f64,
-            event_clones as f64 / TOKENS as f64,
-        );
-    }
-
-    #[test]
-    fn in_memory_replay_store_allocates_live_channel_lazily() {
-        let store = InMemoryLiveReplayStore::default();
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        {
-            let sessions = store.sessions.lock_recover();
-            assert!(sessions.get("s").expect("buffer").sender.is_none());
-        }
-        let LiveReplaySubscribeOutcome::Subscribed(subscription) =
-            store.subscribe_after_cursor(&start).expect("subscribe")
-        else {
-            panic!("expected subscription");
-        };
-        {
-            let sessions = store.sessions.lock_recover();
-            assert!(sessions.get("s").expect("buffer").sender.is_some());
-        }
-        drop(subscription);
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("b"),
-            )
-            .expect("append b");
-        let sessions = store.sessions.lock_recover();
-        assert!(sessions.get("s").expect("buffer").sender.is_none());
-    }
-
-    #[test]
-    fn in_memory_replay_subscription_reports_gap_after_capacity_trim() {
-        let store = InMemoryLiveReplayStore::with_bounds(1, Duration::from_secs(120));
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("b"),
-            )
-            .expect("append b");
-        assert!(matches!(
-            store.subscribe_after_cursor(&start).expect("subscribe"),
-            LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
-        ));
-    }
-
-    #[test]
-    fn in_memory_replay_subscription_reports_gap_after_ttl_trim() {
-        let store = InMemoryLiveReplayStore::with_bounds(16, Duration::from_millis(1));
-        let start = store.current_cursor(&SessionId::from("s"), SessionRevision(0));
-        store
-            .publish_test_event(
-                &SessionId::from("s"),
-                SessionRevision(0),
-                None,
-                activity("a"),
-            )
-            .expect("append a");
-        std::thread::sleep(Duration::from_millis(5));
-        assert!(matches!(
-            store.subscribe_after_cursor(&start).expect("subscribe"),
-            LiveReplaySubscribeOutcome::Gap(LiveReplayGapReason::Trimmed)
-        ));
-    }
-}
+#[path = "replay/tests.rs"]
+mod tests;
