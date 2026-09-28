@@ -251,7 +251,7 @@ pub(super) struct StepObservation {
     /// Present only for the corrupt-input cases: the logical tables this step
     /// moved, read without decoding. Both SQL backends name the same logical
     /// tables, so this crosses the backend boundary where raw row text cannot.
-    pub(super) raw_changed_tables: Option<Vec<&'static str>>,
+    pub(super) raw_changed_tables: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

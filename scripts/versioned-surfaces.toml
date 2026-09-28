@@ -490,8 +490,8 @@ manifest = "SessionStateGeneration"
 constant = "DURABLE_READ_FIXTURE_SCHEMA_VERSION"
 constant_path = "crates/lash-core/tests/support/durable_read_fixture.rs"
 upgrade = "migrate"
-description = "checked-in durable-read fixture databases, dumps, and expectations"
-outside_manifest = "versions checked-in test fixtures, not bytes a lash build writes"
+description = "durable-read fixture databases, dumps, and expectations captured at the release cut"
+outside_manifest = "versions captured test fixtures, not bytes a lash build writes"
 
 [[surface]]
 constant = "HEAP_SIZE_SCHEDULE_VERSION"

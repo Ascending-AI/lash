@@ -200,10 +200,6 @@ lash_rust_integration_test(
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "durable_read_fixture", "//crates/lash-postgres-store:durable_read_fixture__test"),
     extra_compile_data = [
         "//crates/lash-core:durable_read_fixture_source",
-        "//:durable_fixtures",
-    ],
-    extra_data = [
-        "//crates/lash-core:durable_read_predecessor_fixtures",
     ],
     library = ":lash-postgres-store",
     library_crate_name = "lash_postgres_store",
@@ -437,10 +433,6 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-internal-postgres-store", "durable_read_fixture", "//crates/lash-postgres-store:durable_read_fixture__test__fv_e4daf51f"),
     extra_compile_data = [
         "//crates/lash-core:durable_read_fixture_source",
-        "//:durable_fixtures",
-    ],
-    extra_data = [
-        "//crates/lash-core:durable_read_predecessor_fixtures",
     ],
     library = "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
     library_crate_name = "lash_postgres_store",

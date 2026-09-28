@@ -1022,11 +1022,11 @@ run_scenario_harnesses() {
   local session_graph_cases="${LASH_SESSION_GRAPH_PROPTEST_CASES:-$default_session_graph_cases}"
 
   if area_selected store; then
-    step "Golden durable-store semantic read-back"
+    step "Durable-store seed round trip"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test durable_read_fixture \
-      sqlite_durable_fixture_reads_with_identical_semantics
+      sqlite_seed_round_trip
     run_cargo_tests -p lash-internal-postgres-store --locked --test durable_read_fixture \
-      postgres_durable_fixture_reads_with_identical_semantics_when_configured
+      postgres_seed_round_trips_through_a_fresh_store_when_configured
 
     step "Durable store-contract state-machine properties"
     LASH_STORE_CONTRACT_PROPTEST_CASES="$store_contract_cases" \

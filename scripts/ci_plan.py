@@ -954,9 +954,9 @@ def _is_schema_path(path: str) -> bool:
 # A package path selects it when the package is in those binaries'
 # first-party closure (`postgres_store_dependency_dirs`): FIG-3595 and
 # FIG-3550 were runtime changes outside every store crate, invisible to the
-# hand list of store crates this replaced. The root `fixtures/` tree is their
-# `//:durable_fixtures` input, and a SQL script or a SQLite database anywhere
-# is store input. Build tooling does not select it, except the files the job
+# hand list of store crates this replaced. The root `fixtures/` tree holds the
+# release fixtures their upgrade laws read, and a SQL script or a SQLite
+# database anywhere is store input. Build tooling does not select it, except the files the job
 # itself runs its tests through (`POSTGRES_STORE_TOOLING`): the Lint job's
 # workspace clippy compiles every one of these test targets, so a tooling diff
 # that breaks their build fails there, and the release dispatch runs them all.

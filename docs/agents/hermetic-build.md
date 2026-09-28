@@ -836,8 +836,6 @@ target of the package leaves them out of its inputs and runfiles. The facade's
 trybuild pins (`tests/ui/*`) belong to `ui`, so a pin edit re-runs only the UI
 harness and its fixtures. Test targets otherwise keep every package file as
 runfiles, because several tests read package sources at run time.
-The SQLite and PostgreSQL durable-read tests explicitly declare core's
-predecessor-fixture filegroup as runtime data, including their feature variants.
 
 All five relocated core runtime suites now declare their own Rust module trees
 and shared `runtime_support` helpers. The turns suite also owns its two

@@ -285,19 +285,12 @@ packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["durable_read_fixture"]
 compile_data = ["//crates/lash-core:durable_read_fixture_source"]
-data = ["//crates/lash-core:durable_read_predecessor_fixtures"]
 
 [[rule]]
 packages = ["lash-internal-postgres-store"]
 kinds = ["bin", "test", "example", "bench"]
 targets = ["preflight_durable_walk"]
 compile_data = ["//crates/lashlang:old_module_fixture"]
-
-[[rule]]
-packages = ["lash-internal-postgres-store", "lash-internal-sqlite-store"]
-kinds = ["bin", "test", "example", "bench"]
-targets = ["durable_read_fixture"]
-compile_data = ["//:durable_fixtures"]
 
 # Architecture lints that read sibling crates' sources at run time. A library's
 # runfiles carry only its declared non-Rust inputs, so a test that scans
@@ -424,7 +417,6 @@ provider-wire-fixtures = ["//crates/lash-sim:package_files"]
 [filegroups.lash-internal-core]
 cold_process_drivers = { srcs = ["tests/support/cold_process_effect_driver.rs"] }
 durable_read_fixture_source = { srcs = ["tests/support/durable_read_fixture.rs"] }
-durable_read_predecessor_fixtures = { glob = ["tests/fixtures/durable-read-predecessors/**"] }
 queued_claim_atomicity = { srcs = ["tests/support/queued_claim_atomicity.rs"] }
 
 [filegroups.lash-internal-lashlang]

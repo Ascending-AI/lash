@@ -1841,7 +1841,7 @@ impl BackendRunner {
         before: &ResidueDigest,
         comparison: ComparisonMode,
         result: Result<Option<ComparableRuntimeCommitResult>, StoreError>,
-    ) -> (StepObservation, Vec<&'static str>) {
+    ) -> (StepObservation, Vec<String>) {
         let (store_error, runtime_commit_result) = match result {
             Ok(result) => (None, result),
             Err(error) => (Some(normalized_store_error(self.name, &error)), None),

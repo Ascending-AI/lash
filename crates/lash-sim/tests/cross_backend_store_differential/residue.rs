@@ -17,9 +17,12 @@
 //! * what crosses the backend boundary is the mutated-or-not verdict and the
 //!   set of logical tables that moved, which are backend-neutral.
 //!
-//! The SQL effect-engine tables were deleted in FIG-3861. The registry's
-//! surviving scope-retirement table is outside the store operations driven
-//! here and remains in [`RESIDUE_TABLE_EXCLUSIONS`].
+//! The tables come from each backend's own catalog, never from a list here: a
+//! table with a `session_id` column is read for this session, every other
+//! table is read whole. Adding a table therefore needs no edit to this file.
+//! Whole-table reads are sound because every case runs sequentially under the
+//! shared database's advisory lock, so no other writer moves a store-wide row
+//! between a step's two digests.
 
 use super::*;
 
@@ -27,16 +30,16 @@ use super::*;
 /// decoding. Only ever compared with another digest from the same backend.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(super) struct ResidueDigest {
-    tables: BTreeMap<&'static str, Vec<String>>,
+    tables: BTreeMap<String, Vec<String>>,
 }
 
 impl ResidueDigest {
     /// Logical tables whose rows differ between `self` (pre-call) and `after`.
-    pub(super) fn changed_tables(&self, after: &Self) -> Vec<&'static str> {
+    pub(super) fn changed_tables(&self, after: &Self) -> Vec<String> {
         let mut changed = Vec::new();
         for table in self.tables.keys().chain(after.tables.keys()) {
             if self.tables.get(table) != after.tables.get(table) && !changed.contains(table) {
-                changed.push(*table);
+                changed.push(table.clone());
             }
         }
         changed.sort_unstable();
@@ -44,224 +47,54 @@ impl ResidueDigest {
     }
 }
 
-/// Session-scoped SQLite reads, by logical table name. `?1` is the session id.
-/// A store-wide singleton table carries no session id, so its query binds no
-/// parameter at all — the digest binds the session id only to a statement that
-/// declares a parameter.
-const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
-    (
-        "session_ingress_sequence",
-        "SELECT * FROM session_ingress_sequence WHERE session_id = ?1",
-    ),
-    (
-        "session_head",
-        "SELECT * FROM session_head WHERE session_id = ?1",
-    ),
-    (
-        "session_meta",
-        "SELECT * FROM session_meta WHERE session_id = ?1",
-    ),
-    (
-        "deleted_sessions",
-        "SELECT * FROM deleted_sessions WHERE session_id = ?1",
-    ),
-    (
-        "graph_nodes",
-        "SELECT * FROM graph_nodes WHERE session_id = ?1",
-    ),
-    (
-        "node_anchors",
-        "SELECT * FROM node_anchors WHERE source_session_id = ?1",
-    ),
-    (
-        "runtime_turn_commits",
-        "SELECT * FROM runtime_turn_commits WHERE session_id = ?1",
-    ),
-    (
-        "usage_deltas",
-        "SELECT * FROM usage_deltas WHERE session_id = ?1",
-    ),
-    (
-        "attachment_manifest",
-        "SELECT * FROM attachment_manifest WHERE session_id = ?1",
-    ),
-    (
-        "fork_lineage",
-        "SELECT * FROM fork_lineage WHERE session_id = ?1",
-    ),
-    (
-        "session_meta_pending_observer_intents",
-        "SELECT * FROM session_meta_pending_observer_intents WHERE session_id = ?1",
-    ),
-    (
-        "wake_redelivery_fences",
-        "SELECT * FROM wake_redelivery_fences WHERE session_id = ?1",
-    ),
+/// The reads a plain session filter cannot express, by the logical name they
+/// digest under: `(logical, SQLite table, SQLite read, Postgres read)`. The
+/// SQLite table name is what the read covers, so the catalog walk skips it.
+/// `?1`/`$1` is the session id.
+const SCOPED_READS: &[(&str, &str, &str, &str)] = &[
     // Condemnation rows are keyed by attachment, not by session, so they are
     // scoped through this session's manifest rows.
     (
         "attachment_condemnations",
+        "attachment_condemnations",
         "SELECT * FROM attachment_condemnations
          WHERE attachment_id IN
              (SELECT attachment_id FROM attachment_manifest WHERE session_id = ?1)",
-    ),
-    (
-        "turn_parks",
-        "SELECT * FROM turn_parks WHERE session_id = ?1",
-    ),
-    // The logical-root family (FIG-3600 S7): a root's record and terminal
-    // evidence, its input bindings, and the session's control intents.
-    (
-        "session_roots",
-        "SELECT * FROM session_roots WHERE session_id = ?1",
-    ),
-    (
-        "session_root_inputs",
-        "SELECT * FROM session_root_inputs WHERE session_id = ?1",
-    ),
-    (
-        "control_intents",
-        "SELECT * FROM control_intents WHERE session_id = ?1",
-    ),
-    (
-        "pending_turn_inputs",
-        "SELECT * FROM pending_turn_inputs WHERE session_id = ?1",
-    ),
-    (
-        "session_run_specs",
-        "SELECT * FROM session_run_specs WHERE session_id = ?1",
-    ),
-    (
-        "queued_work_batches",
-        "SELECT * FROM queued_work_batches WHERE session_id = ?1",
-    ),
-    (
-        "queued_work_items",
-        "SELECT item.* FROM queued_work_items AS item
-         JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
-         WHERE batch.session_id = ?1",
-    ),
-    (
-        "checkpoint_blob_refs",
-        "SELECT * FROM checkpoint_blob_refs
-         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)",
-    ),
-    // Checkpoint manifest and component bytes reachable from this session's
-    // head. Blobs are content-addressed, so a corrupted body is visible here
-    // and nowhere else.
-    (
-        "checkpoint_blobs",
-        "SELECT hash, hex(content) FROM blobs
-         WHERE hash IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)
-            OR hash IN (
-                SELECT blob_ref FROM checkpoint_blob_refs
-                WHERE checkpoint_ref IN
-                    (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1))",
-    ),
-    // `fleet_format` is a store-wide singleton (durable-format generation),
-    // not session state: it carries no session id, so this read binds none.
-    ("fleet_format", "SELECT * FROM fleet_format"),
-];
-
-/// The same reads on PostgreSQL. `to_jsonb(row)` renders every column without
-/// this harness naming them, so a new column is compared the day it lands.
-const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
-    (
-        "session_ingress_sequence",
-        "SELECT row_to_json(t)::text FROM lash_session_ingress_sequence t WHERE session_id = $1",
-    ),
-    (
-        "session_head",
-        "SELECT to_jsonb(t)::text FROM lash_sessions t WHERE session_id = $1",
-    ),
-    (
-        "session_meta",
-        "SELECT to_jsonb(t)::text FROM lash_session_meta t WHERE session_id = $1",
-    ),
-    (
-        "deleted_sessions",
-        "SELECT to_jsonb(t)::text FROM lash_deleted_sessions t WHERE session_id = $1",
-    ),
-    (
-        "graph_nodes",
-        "SELECT to_jsonb(t)::text FROM lash_graph_nodes t WHERE session_id = $1",
-    ),
-    (
-        "node_anchors",
-        "SELECT to_jsonb(t)::text FROM lash_node_anchors t WHERE source_session_id = $1",
-    ),
-    (
-        "runtime_turn_commits",
-        "SELECT to_jsonb(t)::text FROM lash_runtime_turn_commits t WHERE session_id = $1",
-    ),
-    (
-        "usage_deltas",
-        "SELECT to_jsonb(t)::text FROM lash_usage_deltas t WHERE session_id = $1",
-    ),
-    (
-        "attachment_manifest",
-        "SELECT to_jsonb(t)::text FROM lash_attachment_manifest t WHERE session_id = $1",
-    ),
-    (
-        "fork_lineage",
-        "SELECT to_jsonb(t)::text FROM lash_fork_lineage t WHERE session_id = $1",
-    ),
-    (
-        "session_meta_pending_observer_intents",
-        "SELECT to_jsonb(t)::text FROM lash_session_meta_pending_observer_intents t \
-         WHERE session_id = $1",
-    ),
-    (
-        "wake_redelivery_fences",
-        "SELECT to_jsonb(t)::text FROM lash_wake_redelivery_fences t WHERE session_id = $1",
-    ),
-    (
-        "attachment_condemnations",
         "SELECT to_jsonb(t)::text FROM lash_attachment_condemnations t
          WHERE attachment_id IN
              (SELECT attachment_id FROM lash_attachment_manifest WHERE session_id = $1)",
     ),
     (
-        "turn_parks",
-        "SELECT to_jsonb(t)::text FROM lash_turn_parks t WHERE session_id = $1",
-    ),
-    (
-        "session_roots",
-        "SELECT to_jsonb(t)::text FROM lash_session_roots t WHERE session_id = $1",
-    ),
-    (
-        "session_root_inputs",
-        "SELECT to_jsonb(t)::text FROM lash_session_root_inputs t WHERE session_id = $1",
-    ),
-    (
-        "control_intents",
-        "SELECT to_jsonb(t)::text FROM lash_control_intents t WHERE session_id = $1",
-    ),
-    (
-        "pending_turn_inputs",
-        "SELECT to_jsonb(t)::text FROM lash_pending_turn_inputs t WHERE session_id = $1",
-    ),
-    (
-        "session_run_specs",
-        "SELECT to_jsonb(t)::text FROM lash_session_run_specs t WHERE session_id = $1",
-    ),
-    (
-        "queued_work_batches",
-        "SELECT to_jsonb(t)::text FROM lash_queued_work_batches t WHERE session_id = $1",
-    ),
-    (
         "queued_work_items",
+        "queued_work_items",
+        "SELECT item.* FROM queued_work_items AS item
+         JOIN queued_work_batches AS batch ON batch.batch_id = item.batch_id
+         WHERE batch.session_id = ?1",
         "SELECT to_jsonb(item)::text FROM lash_queued_work_items AS item
          JOIN lash_queued_work_batches AS batch ON batch.batch_id = item.batch_id
          WHERE batch.session_id = $1",
     ),
     (
         "checkpoint_blob_refs",
+        "checkpoint_blob_refs",
+        "SELECT * FROM checkpoint_blob_refs
+         WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)",
         "SELECT to_jsonb(t)::text FROM lash_checkpoint_blob_refs t
          WHERE checkpoint_ref IN (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1)",
     ),
+    // Checkpoint manifest and component bytes reachable from this session's
+    // head. Blobs are content-addressed and shared by every session, so only
+    // the reachable rows are read; a corrupted body is visible here and
+    // nowhere else.
     (
         "checkpoint_blobs",
+        "blobs",
+        "SELECT hash, hex(content) FROM blobs
+         WHERE hash IN (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1)
+            OR hash IN (
+                SELECT blob_ref FROM checkpoint_blob_refs
+                WHERE checkpoint_ref IN
+                    (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1))",
         "SELECT hash || ':' || encode(content, 'hex') FROM lash_blobs
          WHERE hash IN (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1)
             OR hash IN (
@@ -269,13 +102,76 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
                 WHERE checkpoint_ref IN
                     (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1))",
     ),
-    // `lash_fleet_format` is the store-wide singleton SQLite carries as
-    // `fleet_format`: no session id, so this read binds none.
     (
-        "fleet_format",
-        "SELECT to_jsonb(t)::text FROM lash_fleet_format t",
+        "node_anchors",
+        "node_anchors",
+        "SELECT * FROM node_anchors WHERE source_session_id = ?1",
+        "SELECT to_jsonb(t)::text FROM lash_node_anchors t WHERE source_session_id = $1",
     ),
 ];
+
+/// The SQLite logical name of a Postgres table: the `lash_` prefix dropped,
+/// and the two tables Postgres names differently mapped back.
+fn postgres_logical_name(table: &str) -> Option<String> {
+    let name = table.strip_prefix("lash_")?;
+    Some(
+        match name {
+            "sessions" => "session_head",
+            "lashlang_artifacts" => "artifact_refs",
+            other => other,
+        }
+        .to_string(),
+    )
+}
+
+fn is_scoped(logical: &str) -> bool {
+    SCOPED_READS
+        .iter()
+        .any(|(_, sqlite_table, _, _)| *sqlite_table == logical)
+}
+
+/// The catalog read of one SQLite database: every user table, with the
+/// session read when it carries a `session_id` column and the whole table
+/// otherwise, plus the scoped reads.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+fn sqlite_residue_reads(connection: &rusqlite::Connection) -> Vec<(String, String)> {
+    let mut statement = connection
+        .prepare(
+            "SELECT m.name, EXISTS (
+                 SELECT 1 FROM pragma_table_info(m.name) WHERE name = 'session_id')
+             FROM sqlite_master AS m
+             WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite!_%' ESCAPE '!'
+             ORDER BY m.name",
+        )
+        .expect("prepare the SQLite catalog read");
+    let tables = statement
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?))
+        })
+        .expect("read the SQLite catalog")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("collect the SQLite catalog");
+    let mut reads: Vec<(String, String)> = SCOPED_READS
+        .iter()
+        .map(|(logical, _, sql, _)| ((*logical).to_string(), (*sql).to_string()))
+        .collect();
+    for (table, has_session) in tables {
+        if is_scoped(&table) {
+            continue;
+        }
+        let filter = if has_session {
+            " WHERE session_id = ?1"
+        } else {
+            ""
+        };
+        let sql = format!("SELECT * FROM \"{table}\"{filter}");
+        reads.push((table, sql));
+    }
+    reads
+}
 
 #[expect(
     clippy::expect_used,
@@ -286,10 +182,17 @@ pub(super) fn sqlite_residue_digest(path: &Path, session_id: &SessionId) -> Resi
     connection
         .busy_timeout(Duration::from_secs(15))
         .expect("configure SQLite residue reader busy timeout");
+    sqlite_connection_residue_digest(&connection, session_id)
+}
+
+fn sqlite_connection_residue_digest(
+    connection: &rusqlite::Connection,
+    session_id: &SessionId,
+) -> ResidueDigest {
     let mut tables = BTreeMap::new();
-    for (table, sql) in SQLITE_RESIDUE_QUERIES {
+    for (table, sql) in sqlite_residue_reads(connection) {
         let mut statement = connection
-            .prepare(sql)
+            .prepare(&sql)
             .unwrap_or_else(|error| panic!("prepare SQLite residue read for `{table}`: {error}"));
         let column_count = statement.column_count();
         let render = |row: &rusqlite::Row| -> rusqlite::Result<String> {
@@ -309,237 +212,214 @@ pub(super) fn sqlite_residue_digest(path: &Path, session_id: &SessionId) -> Resi
         .collect::<Result<Vec<_>, _>>()
         .unwrap_or_else(|error| panic!("collect SQLite residue rows for `{table}`: {error}"));
         rows.sort();
-        tables.insert(*table, rows);
+        tables.insert(table, rows);
     }
     ResidueDigest { tables }
 }
 
+/// The catalog read of the Postgres schema the installation is anchored in.
+/// `to_jsonb(row)` renders every column without this harness naming them.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
+async fn postgres_residue_reads(connection: &mut PgConnection) -> Vec<(String, String)> {
+    let tables: Vec<(String, String, bool)> = sqlx::query_as(
+        "SELECT c.table_schema::text, c.table_name::text, bool_or(c.column_name = 'session_id')
+         FROM information_schema.columns AS c
+         JOIN information_schema.tables AS t
+           ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+         WHERE t.table_type = 'BASE TABLE'
+           AND c.table_schema = (
+               SELECT n.nspname FROM pg_catalog.pg_class AS r
+               JOIN pg_catalog.pg_namespace AS n ON n.oid = r.relnamespace
+               WHERE r.oid = to_regclass('lash_schema_versions'))
+         GROUP BY c.table_schema, c.table_name
+         ORDER BY c.table_name",
+    )
+    .fetch_all(&mut *connection)
+    .await
+    .expect("read the Postgres catalog");
+    assert!(
+        !tables.is_empty(),
+        "no Postgres tables found in the schema that anchors `lash_schema_versions`"
+    );
+    let mut reads: Vec<(String, String)> = SCOPED_READS
+        .iter()
+        .map(|(logical, _, _, sql)| ((*logical).to_string(), (*sql).to_string()))
+        .collect();
+    for (schema, table, has_session) in tables {
+        let Some(logical) = postgres_logical_name(&table) else {
+            continue;
+        };
+        if is_scoped(&logical) {
+            continue;
+        }
+        let filter = if has_session {
+            " WHERE session_id = $1"
+        } else {
+            ""
+        };
+        let sql = format!("SELECT to_jsonb(t)::text FROM \"{schema}\".\"{table}\" t{filter}");
+        reads.push((logical, sql));
+    }
+    reads
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
+)]
 pub(super) async fn postgres_residue_digest(
     pool: &PgPool,
     session_id: &SessionId,
 ) -> ResidueDigest {
+    let mut connection = pool
+        .acquire()
+        .await
+        .expect("acquire a Postgres residue reader");
+    postgres_connection_residue_digest(&mut connection, session_id).await
+}
+
+async fn postgres_connection_residue_digest(
+    connection: &mut PgConnection,
+    session_id: &SessionId,
+) -> ResidueDigest {
     let mut tables = BTreeMap::new();
-    for (table, sql) in POSTGRES_RESIDUE_QUERIES {
-        // `$1` is the session id; a store-wide singleton query declares no
-        // parameter, and Postgres refuses a bind it does not declare.
-        let query = sqlx::query_scalar::<_, String>(sql);
+    for (table, sql) in postgres_residue_reads(connection).await {
+        // `$1` is the session id; a whole-table read declares no parameter,
+        // and Postgres refuses a bind it does not declare.
+        let query = sqlx::query_scalar::<_, String>(&sql);
         let query = if sql.contains("$1") {
             query.bind(session_id.as_str())
         } else {
             query
         };
         let mut rows: Vec<String> = query
-            .fetch_all(pool)
+            .fetch_all(&mut *connection)
             .await
             .unwrap_or_else(|error| panic!("read Postgres residue rows for `{table}`: {error}"));
         rows.sort();
-        tables.insert(*table, rows);
+        tables.insert(table, rows);
     }
     ResidueDigest { tables }
 }
 
-/// SQLite schema source, read back so the coverage gate below cannot drift.
-/// Fragment-carried tables live in schema_fragments.rs (FIG-3260).
-const SQLITE_SCHEMA_SOURCE: &str = concat!(
-    include_str!("../../../lash-sqlite-store/src/schema_fragments.rs"),
-    include_str!("../../../lash-sqlite-store/src/schema.rs"),
-);
-
-/// Reason strings shared by the tables one other suite owns.
-const TURN_CANCELLATION: &str = "turn-cancellation surface: this fixture wires no TurnCancellationAuthority, so no driven \
-     operation can write it; owned by the turn_control conformance suite";
-const PROCESS_LIFECYCLE: &str = "process-lifecycle surface: this fixture wires no process registry, so no driven operation \
-     can write it; owned by the process conformance suites";
-const TRIGGERS: &str = "trigger surface: no driven operation subscribes, delivers or occurs; owned by the trigger \
-     conformance suite";
-const REGISTRY: &str = "process-registry scope retirement and tool-intent submission are outside the store operations this differential drives";
-const ARTIFACTS: &str = "artifact/blob-byte store rather than a session row; the session-reachable blob bytes are \
-     already compared by the `checkpoint_blobs` entry, and the blob store itself by \
-     attachment_blob_store_differential_agrees";
-
-/// Durable tables this digest deliberately does not read, and who owns them.
-///
-/// A table in neither the digest nor this list fails
-/// [`residue_digest_covers_every_durable_table`]. That is the whole point: a
-/// table a driven operation can write but the digest cannot see makes the
-/// no-residue law vacuous exactly where a leak would land.
-const RESIDUE_TABLE_EXCLUSIONS: &[(&str, &str)] = &[
-    ("turn_cancel_closure_authorizations", TURN_CANCELLATION),
-    ("turn_cancel_closure_participants", TURN_CANCELLATION),
-    ("turn_cancellation_bindings", TURN_CANCELLATION),
-    ("turn_cancel_requests", TURN_CANCELLATION),
-    ("turn_cancel_retired_scopes", TURN_CANCELLATION),
-    ("processes", PROCESS_LIFECYCLE),
-    ("process_events", PROCESS_LIFECYCLE),
-    ("process_observers", PROCESS_LIFECYCLE),
-    ("process_segment_handovers", PROCESS_LIFECYCLE),
-    ("process_tombstones", PROCESS_LIFECYCLE),
-    ("process_wake_deliveries", PROCESS_LIFECYCLE),
-    ("process_artifact_cleanup", PROCESS_LIFECYCLE),
-    (
-        "parent_end_plans",
-        "process-lifecycle surface: every write goes through the process registry's parent-end \
-         path, which this fixture does not wire, and the row is keyed by the ended parent scope \
-         rather than by a session, so a session-scoped digest query could not read it either; \
-         owned by the process conformance suites",
-    ),
-    (
-        "wake_allocation_floors",
-        "process-wake surface, and on SQLite it lives in the factory-wide `durable-core.db` \
-         catalog rather than the per-session database this digest reads; owned by the process \
-         conformance suites",
-    ),
-    (
-        "process_change_clock",
-        "a store-wide singleton counter row, not session state; it carries no session id and is \
-         shared by every case in the one database this suite runs against",
-    ),
-    (
-        "turn_park_clock",
-        "the turn park feed's sequence row: a store-wide singleton counter, not session state; \
-         it carries no session id and is shared by every case in the one database this suite \
-         runs against; owned by the turn_park_feed laws L1-L6 in lash-conformance",
-    ),
-    (
-        "turn_park_events",
-        "the turn park feed's durable ledger: no driven operation records or clears a park, so \
-         none can write it, and every feed append rides inside the transaction that changes \
-         `turn_parks`, which the digest already reads; owned by the turn_park_feed laws L1-L6 \
-         in lash-conformance",
-    ),
-    (
-        "process_park_clock",
-        "the process park feed's sequence row: a store-wide singleton counter, not session \
-         state; it carries no session id and is shared by every case in the one database this \
-         suite runs against; owned by the process_park_feed laws in lash-conformance",
-    ),
-    (
-        "process_park_events",
-        "the process park feed's durable ledger: process-lifecycle surface this fixture does not \
-         drive, and every feed append rides inside the transaction that changes the park on \
-         `processes`; owned by the process_park_feed laws in lash-conformance",
-    ),
-    ("trigger_deliveries", TRIGGERS),
-    ("trigger_mutation_receipts", TRIGGERS),
-    ("trigger_occurrences", TRIGGERS),
-    ("trigger_subscriptions", TRIGGERS),
-    ("tool_intent_submissions", REGISTRY),
-    ("artifact_owners", ARTIFACTS),
-    ("artifact_owner_retirements", ARTIFACTS),
-    ("artifact_refs", ARTIFACTS),
-    (
-        "blobs",
-        "content-addressed byte store shared across every session in the one database this suite \
-         runs against; the rows this session can reach are compared by `checkpoint_blobs`",
-    ),
-    (
-        "attachment_blobs",
-        "SQLite-only attachment byte store (`SqliteAttachmentStore`): no store-trait operation \
-         this differential drives writes it, and a PostgreSQL deployment takes an external \
-         attachment backend instead, so there is no counterpart table to compare; owned by the \
-         SQLite attachment-store conformance registrations (FIG-3578)",
-    ),
-    (
-        "release_stamp",
-        "deployment metadata, not session state: the single row records which lash release wrote \
-         the store, it is written by the schema-open path rather than by any driven operation, \
-         and it carries no session id, so a session-scoped digest query could not read it \
-         either; owned by the release-stamp conformance law (FIG-3092)",
-    ),
-    (
-        "recovery_leader",
-        "deployment load control, not session state: one row per engine authority naming the \
-         recovery leader (ADR 0109 §1.6), written on the database clock by the recovery lease \
-         rather than by any session operation, and keyed by lease name, so a session-scoped \
-         digest query could not read it; its operations are compared by the obligation cases \
-         and owned by the recovery-leader conformance laws",
-    ),
-    (
-        "draining_generations",
-        "deployment drain control, not session state: one row per build generation an operator \
-         marked draining (FIG-3799), keyed by the generation rather than by a session, so a \
-         session-scoped digest query could not read it; its operations are compared by the \
-         generation drain cases",
-    ),
-    (
-        "process_definitions",
-        "definition-registry surface: this fixture wires no ProcessDefinitionRegistry, so no \
-         driven operation can write it, and the row is keyed by its owner scope rather than by a \
-         session, so a session-scoped digest query could not read it either; owned by the \
-         registry suites (FIG-2995)",
-    ),
-];
-
-/// Every `CREATE TABLE` name declared by the SQLite schema, deduplicated.
-fn declared_sqlite_tables() -> Vec<&'static str> {
-    let mut tables = Vec::new();
-    for line in SQLITE_SCHEMA_SOURCE.lines() {
-        let Some(rest) = line.trim().strip_prefix("CREATE TABLE IF NOT EXISTS ") else {
-            continue;
-        };
-        let name: &str = rest
-            .split(|character: char| !(character.is_alphanumeric() || character == '_'))
-            .next()
-            .unwrap_or_default();
-        if !name.is_empty() && !tables.contains(&name) {
-            tables.push(name);
-        }
-    }
-    assert!(
-        tables.len() > 40,
-        "the schema scan found only {} tables; its parser has drifted",
-        tables.len()
+/// A table the harness has never heard of is digested the moment the schema
+/// declares it: session-scoped when it carries `session_id`, whole otherwise.
+#[tokio::test]
+async fn residue_digest_covers_a_planted_sqlite_table() {
+    let root = tempfile::tempdir().expect("create the planted-table root");
+    lash_sqlite_store::SqliteStoreSet::open(root.path())
+        .await
+        .expect("open a fresh SQLite store set");
+    let connection = rusqlite::Connection::open(
+        root.path()
+            .join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+    )
+    .expect("open the durable core");
+    connection
+        .execute_batch(
+            "CREATE TABLE planted_session_rows (session_id TEXT NOT NULL, value TEXT NOT NULL);
+             CREATE TABLE planted_store_rows (value TEXT NOT NULL);",
+        )
+        .expect("plant two tables");
+    let session = SessionId::from("planted-session");
+    let before = sqlite_connection_residue_digest(&connection, &session);
+    connection
+        .execute_batch("INSERT INTO planted_session_rows VALUES ('other-session', 'unseen');")
+        .expect("write another session's row");
+    assert_eq!(
+        before.changed_tables(&sqlite_connection_residue_digest(&connection, &session)),
+        Vec::<String>::new(),
+        "a session-scoped planted table is read for this session only"
     );
-    tables
+    connection
+        .execute_batch(
+            "INSERT INTO planted_session_rows VALUES ('planted-session', 'leak');
+             INSERT INTO planted_store_rows VALUES ('leak');",
+        )
+        .expect("write the planted rows");
+    assert_eq!(
+        before.changed_tables(&sqlite_connection_residue_digest(&connection, &session)),
+        vec![
+            "planted_session_rows".to_string(),
+            "planted_store_rows".to_string()
+        ],
+    );
 }
 
-#[test]
-fn residue_digest_covers_every_durable_table() {
-    let sqlite_digest_tables: Vec<&str> = SQLITE_RESIDUE_QUERIES
-        .iter()
-        .map(|(table, _)| *table)
-        .collect();
-    let postgres_digest_tables: Vec<&str> = POSTGRES_RESIDUE_QUERIES
-        .iter()
-        .map(|(table, _)| *table)
-        .collect();
-    assert_eq!(
-        sqlite_digest_tables, postgres_digest_tables,
-        "the two SQL backends must render the same logical tables in the same order; the \
-         mutated-table set crosses the backend boundary and a table read on only one backend \
-         would read as a cross-backend divergence"
-    );
-
-    let mut missing = Vec::new();
-    let mut stale = Vec::new();
-    for table in declared_sqlite_tables() {
-        let excluded = RESIDUE_TABLE_EXCLUSIONS
-            .iter()
-            .find(|(name, _)| *name == table);
-        let read = sqlite_digest_tables.contains(&table)
-            || SQLITE_RESIDUE_QUERIES
-                .iter()
-                .any(|(_, sql)| sql.contains(&format!(" {table} ")));
-        match (read, excluded) {
-            (true, None) => {}
-            (false, Some((_, reason))) => assert!(
-                !reason.trim().is_empty(),
-                "the residue exclusion for `{table}` carries no reason"
-            ),
-            (true, Some(_)) => stale.push(table),
-            (false, None) => missing.push(table),
+/// The Postgres leg of [`residue_digest_covers_a_planted_sqlite_table`], planted
+/// inside a transaction that is rolled back so the shared schema is untouched.
+#[tokio::test]
+#[ignore = "requires Postgres (LASH_POSTGRES_DATABASE_URL with --include-ignored)"]
+async fn residue_digest_covers_a_planted_postgres_table() {
+    let database_url = match std::env::var("LASH_POSTGRES_DATABASE_URL") {
+        Ok(database_url) if !database_url.is_empty() => database_url,
+        _ => {
+            assert_ne!(
+                std::env::var("LASH_REQUIRE_POSTGRES").as_deref(),
+                Ok("1"),
+                "LASH_POSTGRES_DATABASE_URL must be set when LASH_REQUIRE_POSTGRES=1"
+            );
+            eprintln!(
+                "SKIPPED planted Postgres residue table; LASH_POSTGRES_DATABASE_URL is not set"
+            );
+            return;
         }
-    }
-    assert!(
-        missing.is_empty(),
-        "durable tables are neither read by the residue digest nor excluded with a reason: \
-         {missing:?}. A refused operation that wrote one of these would leave residue this law \
-         cannot see. Add a query to SQLITE_RESIDUE_QUERIES and POSTGRES_RESIDUE_QUERIES, or add \
-         the table to RESIDUE_TABLE_EXCLUSIONS with the suite that owns it."
+    };
+    let mut database_lock = PgConnection::connect(&database_url)
+        .await
+        .expect("connect the Postgres advisory lock");
+    sqlx::query("SELECT pg_advisory_lock($1)")
+        .bind(SHARED_DATABASE_LOCK_KEY)
+        .execute(&mut database_lock)
+        .await
+        .expect("acquire the Postgres advisory lock");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&mut database_lock)
+        .await
+        .expect("provision the shared Postgres database from schema.sql");
+    let mut connection = PgConnection::connect(&database_url)
+        .await
+        .expect("connect the planted-table reader");
+    sqlx::raw_sql(
+        "BEGIN;
+         CREATE TABLE lash_planted_session_rows (session_id TEXT NOT NULL, value TEXT NOT NULL);
+         CREATE TABLE lash_planted_store_rows (value TEXT NOT NULL);",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("plant two tables");
+    let session = SessionId::from("planted-session");
+    let before = postgres_connection_residue_digest(&mut connection, &session).await;
+    sqlx::raw_sql("INSERT INTO lash_planted_session_rows VALUES ('other-session', 'unseen');")
+        .execute(&mut connection)
+        .await
+        .expect("write another session's row");
+    assert_eq!(
+        before.changed_tables(&postgres_connection_residue_digest(&mut connection, &session).await),
+        Vec::<String>::new(),
+        "a session-scoped planted table is read for this session only"
     );
-    assert!(
-        stale.is_empty(),
-        "these tables are excluded but the digest now reads them; delete their exclusions: \
-         {stale:?}"
+    sqlx::raw_sql(
+        "INSERT INTO lash_planted_session_rows VALUES ('planted-session', 'leak');
+         INSERT INTO lash_planted_store_rows VALUES ('leak');",
+    )
+    .execute(&mut connection)
+    .await
+    .expect("write the planted rows");
+    let changed =
+        before.changed_tables(&postgres_connection_residue_digest(&mut connection, &session).await);
+    sqlx::raw_sql("ROLLBACK")
+        .execute(&mut connection)
+        .await
+        .expect("roll the planted tables back");
+    assert_eq!(
+        changed,
+        vec![
+            "planted_session_rows".to_string(),
+            "planted_store_rows".to_string()
+        ],
     );
 }

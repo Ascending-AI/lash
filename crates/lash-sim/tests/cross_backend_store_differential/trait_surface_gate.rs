@@ -34,37 +34,37 @@ const SESSION_DELETE_SOURCE: &str =
 const GENERATION_DRAIN_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/generation_drain.rs");
 
-/// Every source file that makes up this test binary. A method counts as
-/// covered when the harness calls it from one of these.
-const HARNESS_SOURCES: &[&str] = &[
-    include_str!("../cross_backend_store_differential.rs"),
-    include_str!("attachment_seeding.rs"),
-    include_str!("checkpoint_cases.rs"),
-    include_str!("claim_cases.rs"),
-    include_str!("coalesced_batch_oracles.rs"),
-    include_str!("corrupt_input_cases.rs"),
-    include_str!("fork_cases.rs"),
-    include_str!("generated_surface.rs"),
-    include_str!("generation_drain_cases.rs"),
-    include_str!("ingress_cases.rs"),
-    include_str!("obligation_cases.rs"),
-    include_str!("observations.rs"),
-    include_str!("plugin_state_case.rs"),
-    include_str!("process_event_pages.rs"),
-    include_str!("raw_durable_reader.rs"),
-    include_str!("residue.rs"),
-    include_str!("session_delete_cases.rs"),
-    include_str!("session_lifecycle_cases.rs"),
-    include_str!("session_meta_layout.rs"),
-    include_str!("surface_sweep.rs"),
-    include_str!("trait_surface_gate.rs"),
-];
-
-/// This file's own source, used to prove `HARNESS_SOURCES` lists every module
-/// the harness declares. A module missing from the list is invisible to
-/// `harness_drives`, so a method driven only from there reads as undriven --
-/// or, worse, a method dropped there reads as still covered.
-const GATE_SOURCE: &str = include_str!("trait_surface_gate.rs");
+/// Every source file that makes up this test binary: the root file and every
+/// `*.rs` under its module directory, read from the package at run time. A
+/// method counts as covered when the harness calls it from one of these.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: the harness sources ship with the test; an unreadable one panics the gate by design"
+)]
+fn harness_sources() -> Vec<String> {
+    let tests = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut paths = vec![tests.join("cross_backend_store_differential.rs")];
+    let mut pending = vec![tests.join("cross_backend_store_differential")];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).expect("read the harness module directory") {
+            let path = entry.expect("read a harness directory entry").path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "rs") {
+                paths.push(path);
+            }
+        }
+    }
+    assert!(
+        paths.len() > 2,
+        "found only {paths:?} under {}; the harness sources are not shipped with the test",
+        tests.display()
+    );
+    paths
+        .iter()
+        .map(|path| std::fs::read_to_string(path).expect("read a harness source"))
+        .collect()
+}
 
 /// The gated store traits. `RuntimePersistence` is the blanket alias over the
 /// first five, so covering them covers the whole runtime-store surface.
@@ -286,13 +286,14 @@ fn declared_method_name(line: &str) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-fn harness_drives(method: &str) -> bool {
+fn harness_drives(sources: &[String], method: &str) -> bool {
     let call = format!(".{method}(");
-    HARNESS_SOURCES.iter().any(|source| source.contains(&call))
+    sources.iter().any(|source| source.contains(&call))
 }
 
 #[test]
 fn store_trait_surface_is_fully_gated() {
+    let sources = harness_sources();
     let mut missing = Vec::new();
     let mut stale_exclusions = Vec::new();
     let mut covered = 0usize;
@@ -303,7 +304,7 @@ fn store_trait_surface_is_fully_gated() {
             let exclusion = SESSION_STORE_EXCLUSIONS
                 .iter()
                 .find(|(name, _)| *name == method);
-            let driven = harness_drives(&method);
+            let driven = harness_drives(&sources, &method);
             match (driven, exclusion) {
                 (true, None) => covered += 1,
                 (false, Some((_, reason))) => {
@@ -323,7 +324,7 @@ fn store_trait_surface_is_fully_gated() {
         let exclusion = ATTACHMENT_MANIFEST_EXCLUSIONS
             .iter()
             .find(|(name, _)| *name == method);
-        let driven = harness_drives(&method);
+        let driven = harness_drives(&sources, &method);
         match (driven, exclusion) {
             (true, None) => covered += 1,
             (false, Some((_, reason))) => {
@@ -339,7 +340,7 @@ fn store_trait_surface_is_fully_gated() {
     }
 
     for method in fallible_trait_methods(CONTROL_INTENT_SOURCE, "ControlIntentStore") {
-        if harness_drives(&method) {
+        if harness_drives(&sources, &method) {
             covered += 1;
         } else {
             missing.push(format!("ControlIntentStore::{method}"));
@@ -353,7 +354,7 @@ fn store_trait_surface_is_fully_gated() {
         (GENERATION_DRAIN_SOURCE, "GenerationDrainStore"),
     ] {
         for method in fallible_trait_methods(source, trait_name) {
-            if harness_drives(&method) {
+            if harness_drives(&sources, &method) {
                 covered += 1;
             } else {
                 missing.push(format!("{trait_name}::{method}"));
@@ -404,34 +405,5 @@ fn store_trait_surface_is_fully_gated() {
             + ATTACHMENT_STORE_EXCLUSIONS.len()
             + ATTACHMENT_MANIFEST_EXCLUSIONS.len(),
         "every exclusion must name a method the gated traits still declare"
-    );
-}
-
-/// Every module the harness declares must be listed in `HARNESS_SOURCES`.
-///
-/// `harness_drives` greps only the listed sources, so a module missing from
-/// the list makes the gate lie in both directions: a method driven only from
-/// the unlisted module reads as undriven, and a driver deleted there reads as
-/// still present.
-#[test]
-fn every_harness_module_is_listed_as_a_gate_source() {
-    let root = HARNESS_SOURCES[0];
-    let mut unlisted = Vec::new();
-    for line in root.lines() {
-        let trimmed = line.trim();
-        let Some(rest) = trimmed.strip_prefix("mod ") else {
-            continue;
-        };
-        let Some(module) = rest.strip_suffix(';') else {
-            continue;
-        };
-        if !GATE_SOURCE.contains(&format!("include_str!(\"{module}.rs\")")) {
-            unlisted.push(module.to_string());
-        }
-    }
-    assert!(
-        unlisted.is_empty(),
-        "these harness modules are not listed in HARNESS_SOURCES, so the completeness gate \
-         cannot see the methods they drive: {unlisted:?}"
     );
 }

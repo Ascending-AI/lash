@@ -3,12 +3,11 @@
 
 ADR 0106 section 4: at the clean-slate release, capture the durable fixtures
 every upgrade law reads and never regenerate them. This tool assembles that
-corpus out of the *existing* fixture trees -- the ones the committed
-regeneration utilities produce -- rather than serializing anything new:
+corpus out of the fixture trees the committed regeneration utilities produce
+rather than serializing anything new:
 
-- ``sqlite-stores``: the durable-read fixture's four SQLite catalogs
-  (``fixtures/durable-read/v1/sqlite/``), whose write-shape law keeps them
-  byte-identical to what the tagged build writes;
+- ``sqlite-stores``: the durable-read fixture's SQLite catalogs
+  (``fixtures/durable-read/v1/sqlite/``), as the tagged build writes them;
 - ``postgres-store``: the durable-read fixture's PostgreSQL dump, version
   manifest, and expectations;
 - ``session-at-rest``: the seeded ``durable-read-fixture`` session's own
@@ -20,8 +19,10 @@ regeneration utilities produce -- rather than serializing anything new:
 - ``replay-corpus``: the deterministic ``RecordedRuntimeEffect`` journals.
 
 ``--regenerate`` first re-runs the committed generators (the ignored Rust
-capture tests) so the sources are fresh; without it the tool snapshots the
-checked-in trees, which the write-shape laws already hold current. A real
+capture tests) so the sources are fresh. The durable-read trees are not checked
+in -- each backend's round-trip law proves the tagged build reads what it
+writes -- so a real capture needs ``--regenerate`` to produce them; without it
+the tool snapshots whatever trees are present and refuses a missing one. A real
 capture requires ``HEAD`` to be exactly ``--tag``; ``--dry-run`` writes the
 same layout into a temporary directory (or ``--dest``) with no tag check and
 no regeneration, to prove the plumbing before the tag exists.
@@ -101,8 +102,8 @@ LEGS = (
         source="fixtures/durable-read/v1/sqlite",
         regenerate=(SQLITE_REGENERATE,),
         note=(
-            "the four SQLite catalogs the write-shape law holds byte-identical to the "
-            "tagged build's output; expected.json and versions.json come along"
+            "the SQLite catalogs the tagged build's generator writes; "
+            "expected.json and versions.json come along"
         ),
     ),
     Leg(

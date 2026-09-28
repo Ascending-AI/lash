@@ -1,100 +1,21 @@
-//! The prose lives here, beside the constant it describes, rather than in a
-//! README under `fixtures/durable-read/`, so that tree holds only generated
-//! artifacts: the constant is asserted equal to the `fixture_schema_version`
-//! embedded in each `expected.json`, so moving it without regenerating fails
-//! read-back.
+//! Durable read fixture: seed, round trip and generators.
 //!
-//! Durable read fixture v1.
+//! [`seed`] writes one session's worth of durable state through every store
+//! surface the fixture covers, and returns the [`ExpectedFixture`] it wrote.
+//! [`assert_semantics`] reads that state back through the supported read and
+//! replay surfaces and requires the same public meaning.
 //!
-//! This fixture detects silent durable-format drift: current code must recover the
-//! same public meaning from rows written by the previous committed artifact. Lash
-//! does not migrate these stores across a declared store-schema change; a schema
-//! mismatch is a forward-only reject-and-recreate boundary and therefore fails this
-//! test instead of skipping it.
-//!
-//! The fixture format has its own declaration, `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, the
-//! constant below.
-//!
-//! ## Two laws: read-back and write shape
-//!
-//! It is blind by construction to a change in what this build *writes*: a payload field that
-//! is defaulted on read and skipped when absent lets the committed bytes decode, re-encode,
-//! and re-hash exactly as the previous writer wrote them, so the receipt still replays and
-//! every semantic assertion still holds.
-//!
-//! It re-seeds a throwaway store with the current code and requires the committed
-//! `expected.json` to equal what the seed produces, naming the drifted JSON paths on failure.
-//! Content-addressed identities — process-env refs, node ids, turn-commit hashes — move with
-//! the payload shape, so this law catches shape changes the read-back cannot see.
-//!
-//! Order of use: the write-shape law says drift happened, and the decision
-//! procedure below decides whether to revert the change or regenerate for it.
-//!
-//! ### What the write-shape law does not cover
-//!
-//! The law compares one artifact: the committed `expected.json`, whose shape is
-//! `ExpectedFixture`. It therefore covers exactly the payloads that struct carries —
-//! runtime commits (session config, graph node payloads, receipt identity), queue
-//! and pending-input identity, process-execution-env specs, and
-//! wake deliveries — plus everything their content-addressed hashes depend on.
-//!
-//! Trigger and process-registration payloads were that gap until FIG-1485. The
-//! read-back assertions for triggers are still deliberately shallow (subscription
-//! key, enabled flag, reservation status, occurrence payload), and a
-//! re-registration is answered by its start key without comparing content
-//! (ADR 0107) — so neither could see an additive payload field, which is FIG-1377's
-//! class of change in a different store. `ExpectedFixture` now carries the whole
-//! [`TriggerDeliveryReservation`] (which nests the occurrence and subscription
-//! records) and the whole waiting-process [`ProcessRecord`], so both payloads move
-//! the committed artifact when their shape moves.
-//!
-//! It still does not cover payloads absent from `ExpectedFixture`.
-//!
-//! It also does not cover a new field whose fixture value is skipped during
-//! serialization (e.g. a `None` that serde skips): such a field is invisible to the
-//! law unless a fixture scenario populates it. The `prompt` field was caught only
-//! because it serialized as `Some(empty)`.
-//!
-//! Closing a remaining gap means extending `ExpectedFixture`, which necessarily
-//! regenerates `expected.json` and moves the fixture declaration, so it is follow-up
-//! work on its own ticket rather than something to bundle into an unrelated change.
-//!
-//! ### Drift these laws missed before the write-shape law existed (FIG-1433)
-//!
-//! Both landed with the schema-declaration gate green because neither pull request
-//! touched a file under `fixtures/durable-read/`, and both survived read-back for
-//! the reason above. They surfaced only when FIG-1259 regenerated for an unrelated
-//! attachment-GC schema bump, which is why that regeneration moved the fixture
-//! declaration by two generations (16 to 18) instead of one.
-//!
-//! | Commit | Shape change | How it appeared later |
-//! | --- | --- | --- |
-//! | `122e7b348` — Reject drifted process wake delivery payloads (#399, FIG-1377) | `ProcessWakeDelivery` gained the stamped `version` field | `wake_delivery.version: 1` appeared in the SQLite expectations |
-//! | `771e875f2` — Persist session prompts and trace composition changes (#411, FIG-1376) | `PersistedSessionConfig` gained `prompt`, written as an explicit empty layer | `prompt: {}` appeared twice in both backends' expectations, and the `runtime_turn_commits` payload hashes were rewritten |
-//! | `8a23dca6a` — Guard the durable graph-node body with a versioned surface (#486) | `SessionNodeBody` gained a stamped `schema_version`, defaulted on read for unstamped rows | `"schema_version":1` appeared on every `graph_nodes` payload when FIG-1536's PostgreSQL generation bump forced a regeneration |
-//!
-//! ### A fixture cannot hold a legacy shape
-//!
-//! That last row also shows what this fixture is *not* for. Before the regeneration
-//! its `graph_nodes` rows happened to be unstamped, which incidentally exercised the
-//! defaulted-on-read path; regenerating re-stamped them and the exercise vanished.
-//! That was never coverage worth relying on: a fixture is written by the current
-//! writer, so every regeneration converts every row to the current shape, and any
-//! legacy shape sitting here is one bump away from disappearing without a failing
-//! test.
-//!
-//! A shape older than what this build writes therefore belongs in a frozen byte
-//! literal beside the decoder that must now refuse it —
-//! `session_graph_tests.rs::unstamped_conversation_bodies_are_refused` and
-//! `::unstamped_stored_bodies_are_refused` are that, for the node body — not in a
-//! generated artifact. Read this fixture as "the previous committed writer's
-//! output", which is the drift it exists to catch, and put "some writer, once, long
-//! ago" somewhere regeneration cannot reach.
+//! Each backend holds one round-trip law over these: seed a fresh store, reopen
+//! its handles at [`FIXTURE_READ_MS`], and assert the semantics of what was just
+//! written. Before 1.0 no durable data survives an upgrade, so there is no
+//! committed artifact to read back; the fixture proves that what this build
+//! writes, it can read.
 //!
 //! ## Coverage
 //!
-//! Every application-owned table in both artifacts has at least one row. Assertions
-//! use supported read/replay surfaces, not row counts, for semantic coverage.
+//! Every application-owned table has at least one row after [`seed`].
+//! Assertions use supported read/replay surfaces, not row counts, for semantic
+//! coverage.
 //!
 //! | Durable area | Populated tables | Supported read or refusal asserted |
 //! | --- | --- | --- |
@@ -104,109 +25,40 @@
 //! | Receiver queue | `queued_work_batches`, `queued_work_items`, `pending_turn_inputs`, `wake_redelivery_fences` | Queue/input payloads, deterministic ids, and typed wake-rewind refusal |
 //! | Processes | `processes`, `process_events`, `process_change_clock`, `process_observers`, `process_segment_handovers`, `process_tombstones`, `process_wake_deliveries`, `wake_allocation_floors` | Process state; every event payload; observers; continuation; wake delivery/floor; paginated change feed; typed `ProcessNoLongerRetained` tombstone |
 //! | Triggers | `trigger_subscriptions`, `trigger_occurrences`, `trigger_deliveries`, `trigger_mutation_receipts` | List/filter, delivery reservation, deterministic receipt replay, and `Unchanged` re-registration |
-//! | Backend metadata | PostgreSQL `lash_schema_versions`; SQLite `user_version` | Exact component/store schema-version comparison before read-back |
 //!
 //! The table names above omit PostgreSQL's `lash_` prefix where the logical name is
 //! otherwise identical. PostgreSQL's artifact table is named by role rather than
 //! spelled out: its literal name carries an integration-protocol infix that the
 //! `integration_boundary` lint forbids naming in this crate's `Cargo.toml`, `src/`,
-//! and `tests/`. Both backends' literal table names are in
-//! `fixtures/durable-read/v1/postgres/fixture.sql` and
-//! `fixtures/durable-read/v1/sqlite/durable-core.db`.
+//! and `tests/`.
 //!
 //! The intentionally expired session lease is a raw durable generation fact.
 //! Reading it proves decoding and identity continuity; it does not grant live
-//! execution authority. Transient WAL contents, PostgreSQL advisory locks,
-//! database indexes, and database-engine bookkeeping are outside this semantic-read
-//! contract. SQLite WAL files are checkpointed with `TRUNCATE`, required to report
-//! `busy = 0`, and required to be absent before artifact copying.
+//! execution authority.
 //!
-//! PostgreSQL generation uses only the dedicated `lash_durable_read_fixture` schema
-//! and never drops or mutates `public`. PostgreSQL owns lease time and effect-row
-//! audit time, so the generator normalizes those volatile timestamps to the fixed
-//! fixture epoch after populating them through supported APIs. Assertions still
-//! read the resulting records through supported surfaces.
+//! ## Generators
 //!
-//! ## Regeneration policy
-//!
-//! Regeneration is deterministic: the generator fixes its clock, signing secret,
-//! lease nonces, trigger incarnation, operation ids, and other identity inputs.
-//! Determinism is now verified cross-environment (Postgres 14/16/18 and across runner
-//! env/TZ/locale), not just two-consecutive-run on one machine: regenerations must
-//! produce byte-identical artifacts.
-//!
-//! An index-only catalog addition is not a reason to regenerate *when it moves no
-//! store schema version*. Indexes are outside the semantic-read contract above, and
-//! the SQLite catalog is created with `CREATE INDEX IF NOT EXISTS`, so on that tier
-//! such an addition leaves the declared version alone: the committed artifact keeps
-//! opening and adopts the new index in the copy under test, and regenerating would
-//! only replace working old-file evidence with a file the current binary just wrote.
-//!
-//! PostgreSQL is the exception, and FIG-1536 is the case that proved it. That tier
-//! has explicit migrations rather than a reject-and-recreate boundary, so an index
-//! addition is a new component generation with a creation-only migration into it —
-//! which moves `PostgresStorage::schema_version()`, which the read-back law compares
-//! against `postgres/version.json`. Once a store schema version moves, step 2 of the
-//! decision procedure below applies in full: bump `DURABLE_READ_FIXTURE_SCHEMA_VERSION`
-//! and regenerate *both* backends, because the declaration is embedded in each
-//! `expected.json` and asserted on read-back. A postgres-only bump cannot be
-//! regenerated alone.
-//!
-//! When a read-back test fails, use this decision procedure:
-//!
-//! 1. If no intentional durable-format change and store-schema bump exists, treat
-//!    the failure as silent drift. Repair decoding/identity compatibility; do not
-//!    regenerate the evidence away.
-//! 2. If the on-disk contract intentionally changed, bump every affected store
-//!    schema version and `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, state the
-//!    reject-and-recreate policy, regenerate both backends, and review the semantic
-//!    and artifact diffs.
-//!
-//! When a write-shape law fails, the failure is about the code in your diff, not
-//! about decoding the old artifact, so it gets its own branch:
-//!
-//! 1. Read the drifted paths the failure names and decide whether writing that shape
-//!    is intended. Most of the time it is not: an accidentally serialized field, a
-//!    flipped skip condition, or a default that stopped being the default. Revert the
-//!    shape change. Regenerating instead absorbs the drift into the committed
-//!    surface, which is exactly the failure mode this law exists to prevent.
-//! 2. Only for an intended write-shape change, continue with step 2 of the read-back
-//!    procedure above: bump the affected store schema versions and
-//!    `DURABLE_READ_FIXTURE_SCHEMA_VERSION`, regenerate both backends, and review the
-//!    semantic and artifact diffs — the shape change is now a reviewed surface.
-//! 3. Run the two destructive drift proofs, both normal read-back tests, both
-//!    write-shape laws, and the no-diff double-regeneration proof before
-//!    committing.
-//!
-//! Generate SQLite:
+//! The release fixtures are captured at the cut by
+//! `python3 scripts/capture_release_fixtures.py --regenerate`, which runs the two
+//! ignored generators below and freezes their output under `fixtures/release/`.
+//! Generation is deterministic: the generators fix the clock, signing secret,
+//! lease nonces, trigger incarnation, operation ids, and other identity inputs,
+//! and normalize the few values a store mints itself, so two runs produce
+//! byte-identical artifacts.
 //!
 //! ```text
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
 //!   kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
 //!   regenerate_sqlite_durable_fixture --ignored --exact
-//! ```
-//!
-//! Generate PostgreSQL against a caller-owned throwaway database (Docker is used
-//! only for the pinned `postgres:16-alpine` `pg_dump` client):
-//!
-//! ```text
 //! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
 //! LASH_REGENERATE_DURABLE_READ_FIXTURES=1 \
 //!   kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
 //!   regenerate_postgres_durable_fixture --ignored --exact
 //! ```
 //!
-//! ```text
-//! kiln test //crates/lash-sqlite-store:durable_read_fixture__test
-//! LASH_POSTGRES_DATABASE_URL=postgres://lash:lash@127.0.0.1:55487/lash \
-//! LASH_REQUIRE_POSTGRES=1 \
-//!   kiln run //crates/lash-postgres-store:durable_read_fixture__test
-//! ```
-//!
-//! For the no-diff proof, hash every file under `fixtures/durable-read/v1/`, run
-//! both generation commands twice, and require the hash set to remain unchanged
-//! after each pass. Released-pin reproducibility starts with the next published alpha;
-//! until then, the committed generators at HEAD are the source of truth.
+//! The PostgreSQL generator writes only the dedicated `lash_durable_read_fixture`
+//! schema of a caller-owned throwaway database, and uses Docker only for the
+//! pinned `postgres:16-alpine` `pg_dump` client.
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
@@ -214,7 +66,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use lash_sansio::{ProcessId, SessionId};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::runtime::{
@@ -243,6 +95,9 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
+/// The fixture format's declaration, carried in every [`ExpectedFixture`] and
+/// checked by [`assert_semantics`], so a captured release fixture names the
+/// format it was written in. Move it when [`ExpectedFixture`]'s shape changes.
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
@@ -402,355 +257,6 @@ fn assert_fixture_schema_version(found: u32) {
         found, DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         "durable fixture schema version changed without regeneration"
     );
-}
-
-#[test]
-fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
-    // Preserve every frozen integration parent while requiring the actual
-    // current predecessor to remain adjacent to this build's generation.
-    for (paths, predecessor_version, successor_version) in [
-        (
-            crate::EARLIEST_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            62,
-            63,
-        ),
-        (
-            crate::EARLIER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            63,
-            64,
-        ),
-        (
-            crate::ANCIENT_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            64,
-            65,
-        ),
-        (
-            crate::OLDER_HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            65,
-            66,
-        ),
-        (
-            crate::HISTORICAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            66,
-            67,
-        ),
-        (crate::PREVIOUS_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 67, 68),
-        (crate::PREDECESSOR_EXPECTED_RELATIVE_PATHS, 68, 69),
-        (crate::CURRENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 69, 70),
-        (crate::IMMEDIATE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 70, 71),
-        (crate::LATEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 71, 72),
-        (crate::NEWEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 72, 73),
-        (crate::FRESHEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 73, 74),
-        (
-            crate::CURRENT_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            74,
-            75,
-        ),
-        (
-            crate::LATEST_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            75,
-            76,
-        ),
-        (
-            crate::LATEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            76,
-            77,
-        ),
-        (
-            crate::NEWEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            77,
-            78,
-        ),
-        (
-            crate::FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            78,
-            79,
-        ),
-        (
-            crate::CURRENT_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            79,
-            80,
-        ),
-        (
-            crate::BOUNDARY_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            80,
-            81,
-        ),
-        (
-            crate::OUTGOING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            81,
-            82,
-        ),
-        (
-            crate::RETIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            82,
-            83,
-        ),
-        (
-            crate::DEPARTING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            83,
-            84,
-        ),
-        (
-            crate::PASSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            84,
-            85,
-        ),
-        (
-            crate::CLOSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            85,
-            86,
-        ),
-        (
-            crate::PARTING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            86,
-            87,
-        ),
-        (
-            crate::FADING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            87,
-            88,
-        ),
-        (
-            crate::WANING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            88,
-            89,
-        ),
-        (
-            crate::EBBING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            89,
-            90,
-        ),
-        (
-            crate::DWINDLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            90,
-            91,
-        ),
-        (
-            crate::SLIPPING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            91,
-            92,
-        ),
-        (
-            crate::RECEDING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            92,
-            93,
-        ),
-        (
-            crate::SUBSIDING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            93,
-            94,
-        ),
-        (
-            crate::LAPSING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            94,
-            95,
-        ),
-        (crate::ENVELOPE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 95, 96),
-        (
-            crate::DECLINING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            95,
-            96,
-        ),
-        (
-            crate::MESSAGE_BODY_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            96,
-            97,
-        ),
-        (
-            crate::SETTLEMENT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            96,
-            97,
-        ),
-        (crate::REBASED_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 97, 98),
-        (
-            crate::OBSERVER_SELECTION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            98,
-            99,
-        ),
-        (
-            crate::ABATING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            99,
-            100,
-        ),
-        (
-            crate::FLEETING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            100,
-            101,
-        ),
-        (
-            crate::EXPIRING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            101,
-            102,
-        ),
-        (
-            crate::CONSTRAINT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            102,
-            103,
-        ),
-        (
-            crate::SETTLING_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            103,
-            104,
-        ),
-        (crate::USAGE_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 104, 105),
-        (
-            crate::FIG_3484_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            105,
-            106,
-        ),
-        (
-            crate::EFFECT_OUTCOME_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            106,
-            107,
-        ),
-        (crate::RECEIPT_PREDECESSOR_EXPECTED_RELATIVE_PATHS, 107, 108),
-        (
-            crate::SUBMISSION_DIGEST_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            108,
-            109,
-        ),
-        (
-            crate::TOOL_RESULT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            109,
-            110,
-        ),
-        (
-            crate::ATTACHMENT_BLOB_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            110,
-            111,
-        ),
-        (
-            crate::DRIVE_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            111,
-            112,
-        ),
-        (
-            crate::TURN_BOUND_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            112,
-            113,
-        ),
-        (
-            crate::CARRIER_CUTOVER_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            113,
-            114,
-        ),
-        (
-            crate::REPLAY_ORDINAL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            114,
-            115,
-        ),
-        (
-            crate::GROUP_PROTOCOL_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            115,
-            116,
-        ),
-        (
-            crate::DRAIN_WAIT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            116,
-            117,
-        ),
-        (
-            crate::BINDING_SET_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            117,
-            118,
-        ),
-        (
-            crate::DIVERGENCE_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            118,
-            119,
-        ),
-        (
-            crate::SESSION_INGRESS_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            119,
-            120,
-        ),
-        (
-            crate::PARK_FEED_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            120,
-            121,
-        ),
-        (
-            crate::NATIVE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            121,
-            122,
-        ),
-        (
-            crate::ADMISSION_BASE_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            122,
-            123,
-        ),
-        (
-            crate::GENERATION_PARK_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            123,
-            124,
-        ),
-        (
-            crate::SEQUENCE_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            124,
-            125,
-        ),
-        (
-            crate::PG_ENGINE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            125,
-            126,
-        ),
-        (
-            crate::RETIRED_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            126,
-            127,
-        ),
-        (
-            crate::CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            127,
-            128,
-        ),
-        (
-            crate::FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            128,
-            129,
-        ),
-        (
-            crate::PROCESS_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            129,
-            130,
-        ),
-        (
-            crate::LOGICAL_ROOT_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
-            130,
-            DURABLE_READ_FIXTURE_SCHEMA_VERSION,
-        ),
-    ] {
-        for relative_path in paths {
-            let predecessor_path =
-                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(relative_path);
-            let predecessor: serde_json::Value =
-                serde_json::from_slice(&std::fs::read(&predecessor_path).unwrap_or_else(|error| {
-                    panic!(
-                        "read recorded durable-read predecessor {}: {error}",
-                        predecessor_path.display()
-                    )
-                }))
-                .expect("decode recorded durable-read predecessor");
-            let predecessor = predecessor["fixture_schema_version"]
-                .as_u64()
-                .and_then(|version| u32::try_from(version).ok())
-                .expect("recorded durable-read predecessor carries a u32 schema version");
-            assert_eq!(
-                predecessor, predecessor_version,
-                "each frozen parent artifact retains its recorded source generation"
-            );
-            assert_eq!(
-                predecessor + 1,
-                successor_version,
-                "durable-read fixture adjacency pin"
-            );
-            assert!(
-                std::panic::catch_unwind(|| assert_fixture_schema_version(predecessor)).is_err(),
-                "the immediate predecessor fixture schema must be refused"
-            );
-        }
-    }
 }
 
 pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
@@ -1693,124 +1199,6 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         TriggerMutationOutcome::Unchanged,
         "durable fixture identity drift: identical trigger re-registration changed meaning"
     );
-}
-
-/// Requires the committed expectations to equal what this build writes today.
-///
-/// [`assert_semantics`] is a read-back law: it decodes the previous artifact and
-/// asserts the meaning recovered from it. A write-path payload-shape change is
-/// invisible to it, because the committed bytes keep round-tripping through the
-/// new types — an added field that is defaulted on read and skipped when absent
-/// decodes, re-encodes, and re-hashes exactly as the old writer wrote it. The
-/// schema-declaration gate cannot see it either: that gate only fires once a
-/// fixture artifact is already in the diff.
-///
-/// This is the converse law (FIG-1433). The caller re-seeds a throwaway store
-/// with the current code and hands the serialized expectations here, so a shape
-/// change fails in the diff that introduces it instead of being absorbed by the
-/// next unrelated regeneration.
-///
-/// Its reach is exactly [`ExpectedFixture`]: a payload that struct does not carry
-/// can still gain a field unflagged. FIG-1485 brought the trigger
-/// subscription/occurrence/delivery rows and the projected process registration
-/// inside that reach; the module documentation records the remaining bound.
-pub fn assert_committed_expectations_match_current_writes(committed: &[u8], written_now: &[u8]) {
-    if committed == written_now {
-        return;
-    }
-    panic!(
-        "durable fixture write-shape drift: this build writes durable payloads the committed \
-         expectations do not carry.{}\nDecide first whether the new write shape is intended. If \
-         it is not, revert the shape change: regenerating here would absorb the drift into the \
-         committed surface, which is the failure FIG-1433 closed. Drift that appears or \
-         disappears between runs (without a code change) means nondeterminism in the fixture \
-         inputs — e.g. a non-empty HashMap reaching serialization, or a tie in the `ORDER BY \
-         generation` read — and must be fixed at the source, NOT by regenerating the fixture. \
-         Only once the change is intended, bump DURABLE_READ_FIXTURE_SCHEMA_VERSION and \
-         regenerate both backends:\n  {REGENERATION_COMMANDS}",
-        rendered_expectation_drift(committed, written_now)
-    );
-}
-
-const REGENERATION_COMMANDS: &str = "LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-sqlite-store:durable_read_fixture__test -- \
-     regenerate_sqlite_durable_fixture --ignored --exact\n  LASH_POSTGRES_DATABASE_URL=<throwaway> \
-     LASH_REGENERATE_DURABLE_READ_FIXTURES=1 kiln run //crates/lash-postgres-store:durable_read_fixture__test -- \
-     regenerate_postgres_durable_fixture --ignored --exact";
-
-fn rendered_expectation_drift(committed: &[u8], written_now: &[u8]) -> String {
-    let (Ok(committed), Ok(written_now)) = (
-        serde_json::from_slice::<serde_json::Value>(committed),
-        serde_json::from_slice::<serde_json::Value>(written_now),
-    ) else {
-        return String::new();
-    };
-    let mut drift = Vec::new();
-    collect_expectation_drift("", &committed, &written_now, &mut drift);
-    if drift.is_empty() {
-        return String::new();
-    }
-    drift.truncate(20);
-    format!("\n  - {}", drift.join("\n  - "))
-}
-
-fn collect_expectation_drift(
-    path: &str,
-    committed: &serde_json::Value,
-    written_now: &serde_json::Value,
-    drift: &mut Vec<String>,
-) {
-    match (committed, written_now) {
-        (serde_json::Value::Object(committed), serde_json::Value::Object(written_now)) => {
-            let keys = committed
-                .keys()
-                .chain(written_now.keys())
-                .collect::<BTreeSet<_>>();
-            for key in keys {
-                let child = format!("{path}/{key}");
-                match (committed.get(key), written_now.get(key)) {
-                    (Some(committed), Some(written_now)) => {
-                        collect_expectation_drift(&child, committed, written_now, drift)
-                    }
-                    (Some(committed), None) => drift.push(format!(
-                        "{child}: committed only ({})",
-                        rendered_drift_value(committed)
-                    )),
-                    (None, written_now) => drift.push(format!(
-                        "{child}: written by this build only ({})",
-                        written_now.map_or_else(String::new, rendered_drift_value)
-                    )),
-                }
-            }
-        }
-        (serde_json::Value::Array(committed), serde_json::Value::Array(written_now))
-            if committed.len() == written_now.len() =>
-        {
-            for (index, (committed, written_now)) in
-                committed.iter().zip(written_now.iter()).enumerate()
-            {
-                collect_expectation_drift(
-                    &format!("{path}/{index}"),
-                    committed,
-                    written_now,
-                    drift,
-                );
-            }
-        }
-        (committed, written_now) if committed != written_now => drift.push(format!(
-            "{path}: committed {} but this build writes {}",
-            rendered_drift_value(committed),
-            rendered_drift_value(written_now)
-        )),
-        _ => {}
-    }
-}
-
-fn rendered_drift_value(value: &serde_json::Value) -> String {
-    let mut rendered = value.to_string();
-    if rendered.chars().count() > 80 {
-        rendered = rendered.chars().take(77).collect::<String>() + "...";
-    }
-    rendered
 }
 
 fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>]) {

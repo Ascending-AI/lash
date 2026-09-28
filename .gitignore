@@ -75,3 +75,7 @@ autoresearch.html
 /.kiln.bazelrc
 /.agent-workbench-*/
 /.playwright-cli/
+
+# The durable-read generators write here; capture_release_fixtures.py --regenerate
+# freezes the output into fixtures/release/<tag>/ at the cut.
+/fixtures/durable-read/

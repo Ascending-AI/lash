@@ -202,10 +202,6 @@ lash_rust_integration_test(
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "durable_read_fixture", "//crates/lash-sqlite-store:durable_read_fixture__test"),
     extra_compile_data = [
         "//crates/lash-core:durable_read_fixture_source",
-        "//:durable_fixtures",
-    ],
-    extra_data = [
-        "//crates/lash-core:durable_read_predecessor_fixtures",
     ],
     library = ":lash-sqlite-store",
     library_crate_name = "lash_sqlite_store",
@@ -321,10 +317,6 @@ lash_rust_feature_test(
     exec_properties = sized_exec_properties("lash-internal-sqlite-store", "durable_read_fixture", "//crates/lash-sqlite-store:durable_read_fixture__test__fv_9621310a"),
     extra_compile_data = [
         "//crates/lash-core:durable_read_fixture_source",
-        "//:durable_fixtures",
-    ],
-    extra_data = [
-        "//crates/lash-core:durable_read_predecessor_fixtures",
     ],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
     library_crate_name = "lash_sqlite_store",
