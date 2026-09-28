@@ -93,39 +93,47 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   retry. `admit` does not read the marker yet: a fresh execution is refused
   at its seal, not at admission.
 
-- **Implemented (FIG-3682, FIG-3600 S5a): the root's claim records its base.**
-  `Admitted` records no head. The root's recorded claim step
-  (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`) takes
-  the rows and records, in its `AcceptedTurnInputDrive::Claimed` outcome, the
-  head the root runs on (`base: SessionHeadRef`: generation, revision, leaf
-  and checkpoint) and its `turn_index`. The claim is the one source of truth
-  for the base: a replay reads that outcome back, rebuilds the turn from
+- **Implemented (FIG-3682, FIG-3600 S5a): the root's admission records its
+  base.** `Admitted` records no head. The root's recorded admission step
+  (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`;
+  `AdmitRoot` at `drive-admit:{root}` under the FIG-3927 amendment, not yet
+  implemented) takes the rows and records, in its
+  `AcceptedTurnInputDrive::Claimed` outcome, the head the root runs on
+  (`base: SessionHeadRef`: generation, revision, leaf and checkpoint) and its
+  `turn_index`. The admission is the one source of truth for the base: a
+  replay reads that outcome back, rebuilds the turn from
   `SessionCommitStore::load_session_at(base)` and addresses it under the
   recorded index, never re-reading the live head, which the turn's own commit
   may have advanced. The store keeps the base checkpoint as a GC root until
   the session's next admission; a base it no longer holds refuses
-  `TurnBaseNotRetained`, which parks. The claim's identity is the root, not
-  the admission nonce: a later admission of the same root replays the same
-  claim step.
+  `TurnBaseNotRetained`, which parks. The admission's identity is the root,
+  not the admission nonce: a later admission of the same root replays the
+  same admission step, and the store records the admission on the root so a
+  re-execution reads it back rather than selecting again (FIG-3927).
 
-- **Implemented (FIG-3824): the claim and head inspection record drive
+- **Implemented (FIG-3824): the admission and head inspection record drive
   decisions.** The `ClaimAcceptedTurnInput` body repairs orphaned inputs
-  before claiming the root. It runs the store repair and any idempotent
-  await-event resolution inside that recorded body; a replay serves its claim
-  outcome and issues no second repair. After the claim, `InspectAdmittedHead`
-  records `Ready`, `Ceded`, or `Diverged` from the refreshed resident head,
-  committed-root evidence and pending input rows. Replay serves that verdict.
-  A `Ready` verdict is revalidated under the current session execution lease
-  before any turn effect: if another claimant advanced the head while this
-  handler was down, the root can only cede when its head input is gone or park
+  before admitting the root (the repair dies with the claims under FIG-3927:
+  a root's terminal write releases its rows, so there is nothing to repair).
+  It runs the store repair and any idempotent
+  await-event resolution inside that recorded body; a replay serves its
+  admission outcome and issues no second repair. After the admission,
+  `InspectAdmittedHead` records `Ready` or `Diverged` from the refreshed
+  resident head, committed-root evidence and pending input rows: `Ceded` is
+  no longer reachable after admission (FIG-3927, not yet implemented), because
+  an admitted head row is bound to the root and only the root's own commit or
+  terminal settles it. Replay serves that verdict.
+  A `Ready` verdict is revalidated under the current drive fence
+  before any turn effect: if another drive advanced the head while this
+  handler was down, the root stops when its head input is gone or parks
   as divergent when it remains. If this root's own commit advanced the head,
   its committed evidence lets replay continue. The fenced read never chooses
-  new work or changes the claim's recorded base; this stop-only re-evaluation
-  is safe across attempts. The resident-head refresh may run again on replay,
-  but its values only feed recorded steps and this fenced stop check. Loading
-  the retained base may be re-evaluated safely:
-  success reconstructs the same immutable head, while a missing base parks
-  before a turn effect. It never selects different work.
+  new work or changes the admission's recorded base; this stop-only
+  re-evaluation is safe across attempts. The resident-head refresh may run
+  again on replay, but its values only feed recorded steps and this fenced
+  stop check. Loading the retained base may be re-evaluated safely: success
+  reconstructs the same immutable head, while a missing base parks before a
+  turn effect. It never selects different work.
 
 A sealed verdict carries a `DriveFence` that the store checks on
 head-changing writes and ingress settlement. `DriveFence` and `AdmissionId`

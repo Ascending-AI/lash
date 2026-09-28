@@ -4,6 +4,14 @@
 
 Accepted.
 
+Superseded by [ADR
+0101](0101-one-session-ingress-carries-every-admitted-item.md)'s FIG-3927
+amendment (2026-09-28), **not yet implemented**: the session-execution lease's
+claim nonces and fencing generation go with the claims they fenced. The sealed
+drive fence is the one authority a fenced write checks, and a root's admission
+replaces claim identity. The nonce contract below records the regime the
+amendment replaces.
+
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
 makes Restate the only effect engine and the SQL stores storage only. This ADR

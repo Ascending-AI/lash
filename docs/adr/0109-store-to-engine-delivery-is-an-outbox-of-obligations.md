@@ -24,6 +24,13 @@ O2 and O3 (the mechanism behind "reconcile every unacknowledged intent" and
 (amendment text in §6 below). [ADR 0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md)
 stands: the leader lease is load control, never a fence.
 
+Amended 2026-09-28 (FIG-3927), **not yet implemented**: [ADR
+0101](0101-one-session-ingress-carries-every-admitted-item.md)'s claim-free
+amendment replaces the drive's claim of an ingress row with the root's
+admission write (§3). The obligation/relay claim machinery this ADR owns is
+unchanged: `obligation_claim_token` and the `claimed` state are relay claims,
+not turn-selection claims.
+
 ## 1. Interface (frozen; slices build against this)
 
 ### 1.1 Obligation columns
@@ -394,7 +401,7 @@ and is not a second ingress.
 
 | Kind | Table (both stores) | Armed by | Delivered when | Replaces |
 |---|---|---|---|---|
-| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the drive's claim of the row admitted it, in the claim's own transaction; the engine accepting drive request `{obligation_id}:{attempt}` only holds the relay's claim | the drives arm |
+| `Ingress` | `pending_turn_inputs`, `queued_work_batches` | the admission transaction | the root's admission write admitted the row, in the admission's own transaction; the engine accepting drive request `{obligation_id}:{attempt}` only holds the relay's claim | the drives arm |
 | `ControlIntent` | `control_intents` | the verb's transaction | the engine half is applied, the intent settled, and its follow-on drive `intent:{id}` accepted | the intents arm; the `attempts` column (use `obligation_attempts`) |
 | `ScopeClose` | `session_roots` | the root's terminal transaction | the close's own transaction | the scopes arm |
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
@@ -418,8 +425,9 @@ file: they are armed in that file's transaction, not the catalog's.
 due page being the oldest due rows of both. A row's obligation id is
 `ingress:{item_id}` (its `ti:` input id or `qwb:` batch id), derived rather
 than read back. The engine accepting the relay's ask does not deliver it:
-the drive's claim of the row — its admission — delivers it, in the claim's
-own write, whatever state the obligation was in. The relay's claim so covers
+the root's admission write — the row's selection — delivers it, in the
+admission's own transaction, whatever state the obligation was in
+(FIG-3927). The relay's claim so covers
 only the ask and the admission after it. Its ask is the drive request
 `{obligation_id}:{attempt}` (`ingress:{item_id}:{attempt}`), the attempt
 being the claim's: the engine dedupes a request id against an invocation it
@@ -434,14 +442,14 @@ for its batch's first attempt once and leaves the rest to the relay.
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive
 verb resumes it. A drive paused in its admission is parked on the root the
-session's next admission names (an unfinished queued run, an owed follow-on,
+session's next admission names (an unfinished root, an owed follow-on,
 else the head input unless a command precedes it); a session already parked
 keeps its park, and its verb resumes the drive with the root. A drive whose
 every attempt was refused only because the park named a redrive that had not
 settled (D15) waited on that redrive, not on an operator: once the redrive
 settles — its park still held, or already cleared by its root's commit — the
 pass resumes the drive rather than parking it again. A drive whose next work
-names no root (only queued commands, a closing session's in-flight claim, or
+names no root (only queued commands, a closing session's in-flight root, or
 nothing) has no park a verb could resume, so the pass kills it: what the
 session still holds keeps its own ingress obligation, whose relay asks for a
 fresh drive, and the command lane drives the session. One whose session is
@@ -500,14 +508,15 @@ live) are asked only before the close commits: a deletion retried after it
 replays the recorded close step, and a refusal there would answer the replay
 differently from the run that recorded it.
 
-An input claimed before the close does not finish. The close ends its root
-(`Cancelled`, cause `SessionDeleted`), and the delete retires the claim with
+An input admitted before the close does not finish. The close ends its root
+(`Cancelled`, cause `SessionDeleted`), and the delete retires the binding with
 the session's storage. A close whose obligation stalls arms no delete, so the
-claim stays until an operator re-arms the close: the store counts that turn as
-held by the stalled close (`UnsettledTurnCounts::held_by_stalled_close`), a
+unfinished root stays until an operator re-arms the close: the store counts
+that session as held by the stalled close
+(`UnsettledTurnCounts::held_by_stalled_close`), a
 typed stall like a park. The only close there is, is a delete. The crash
 matrix's control-intent cells therefore do not exclude a closing session's
-in-flight claim: the ingress invariant reads it until the session is deleted.
+in-flight root: the ingress invariant reads it until the session is deleted.
 
 ## 5. `available_at_ms` is deleted
 

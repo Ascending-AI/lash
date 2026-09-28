@@ -7,6 +7,17 @@ is authoritative.
 
 accepted
 
+Superseded by [ADR
+0101](0101-one-session-ingress-carries-every-admitted-item.md)'s FIG-3927
+amendment (2026-09-28), **not yet implemented**: no durable claim token takes
+part in selecting or settling a turn. A fenced write under the session's
+drive fence binds an ingress row to its root (`admitted_root`,
+`admitted_by`), and a fenced commit of that root — or the root's terminal
+write — settles or releases it. The generation-fencing and
+reclaim-mediated-supersession rules below record the claim regime the
+amendment replaces; its supersession law survives as "a stale drive fence
+refuses admission and settlement and writes nothing".
+
 Supersedes the claim-renewal language in
 [ADR 0014](0014-operational-policy-stays-with-the-host.md)'s *Lease Timings*
 bullet: queued-work and turn-input claims are no longer leases with a TTL and a

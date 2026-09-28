@@ -50,6 +50,13 @@ serialized execution becomes an engine obligation. Those passages stay as
 written until the PR that deletes the code (FIG-3667, FIG-3668, or FIG-3600 for
 the session lease) rewrites them.
 
+Amended 2026-09-28 (FIG-3927), **not yet implemented**: the FIG-3927
+amendment below removes the durable claim token and the `queued_runs` ledger
+from selection and settlement. A fenced write under the session's drive fence
+binds each admitted row to its root (`admitted_root`, `admitted_by`), the
+engine journal records the root's selection, and settlement is keyed by the
+root and the turn. It supersedes ADR 0029 and ADR 0053.
+
 ## Context
 
 Lash feeds turns from two durable queues. `pending_turn_inputs` holds host
@@ -120,7 +127,7 @@ composition unit, and it already spans several rows.
 | `authority`, `merge_key` | Per-item data, nullable where a kind has none. They feed the drain policy and traces. Nothing authorizes on them and nothing gates a claim on them (§5). |
 | `state` | `open \| accepted \| completed \| cancelled`. `held` stays a read projection, as ADR 0010 defined it. |
 | `terminal_cause` | Closed, non-null exactly on terminal rows (§8). |
-| claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. |
+| claim columns | One set: `claim_id`, owner id and incarnation, `claim_token`, `claim_fencing_token`, `claim_session_lease_generation`, and the predecessor claim identity. Null on every terminal row. *(FIG-3927, not yet implemented: the claim columns are replaced by `admitted_root` and `admitted_by`; see the FIG-3927 amendment.)* |
 | `enqueued_at_ms`, `terminal_at_ms` | Informational and for claim-size bounds. Never an order key. |
 
 `available_at_ms` is deleted: it has no non-test setter.
@@ -139,7 +146,10 @@ token and no `WorkClaim` lease fields.
 It replaces `TurnInputClaimMode` and `QueuedWorkClaimBoundary`.
 An ingress drive is always a claimed drive: FIG-3532 removed the runtime
 unclaimed drive, so there is no `Unclaimed` variant. `WithheldTerminalWork`
-becomes one list of claims.
+becomes one list of claims. *(FIG-3927, not yet implemented: the claim type
+itself dies; the root's recorded `AdmitRoot` step is the admission, and
+`WithheldTerminalWork` carries admitted row ids. See the FIG-3927
+amendment.)*
 
 **One settlement/disposition planner** with one settlement regime, the claimed
 one, and one disposition vocabulary `Complete | Drop | Defer`. Store-level
@@ -367,6 +377,10 @@ always matches. The immutable submission digest (§8) stays as defence in depth.
 
 #### 5.2 Composition
 
+*(FIG-3927, not yet implemented: the composition rule below is unchanged, but
+it runs over the open rows of both admission tables inside the root's
+recorded `AdmitRoot` step, not inside a claim. See the FIG-3927 amendment.)*
+
 **One composition rule for idle and checkpoint claims of the turn lane alike.**
 At idle it runs only after the command lane is drained (§4); at a checkpoint the
 command lane is never consulted.
@@ -420,6 +434,11 @@ trailing turn-events block. Today the idle path commits wakes first and the
 checkpoint path commits input first; both become input-then-wake.
 
 ### 7. Claims, deferral and redrive (D16, D17)
+
+*(Superseded by the FIG-3927 amendment below, not yet implemented: no durable
+claim token takes part in selecting or settling a turn. `Defer` releases an
+admitted row's binding at its own position, and an interrupted selection is
+the root's recorded admission.)*
 
 * Claims are fenced by the session-lease generation (ADR 0029) with per-row claim
   identity and no per-row expiry. Settlement checks claim identity, not only
@@ -562,7 +581,8 @@ and rides the §15 cutover.
 
 * One table, one row per item, payload inline; the side tables of §2 stay.
 * Claims are fenced by lease generation, with per-row claim identity and no
-  per-row expiry.
+  per-row expiry. *(FIG-3927: admission and settlement are fenced by the
+  drive fence instead; see the FIG-3927 amendment.)*
 * Enqueue order equals per-session commit order.
 * Order is by sequence only; the wall clock may bound claim size, never order.
 * Items addressed to a finished turn are `NextTurn` by rule, at their own
@@ -655,7 +675,8 @@ advisory lock on the merged table.
    turn-lane rows; no claim skips a row it could not take.
 3. **Stop points.** The prefix ends at the first delivery mismatch, kind cap,
    total bound or policy bound, and never continues past it, on either backend,
-   including with a locked head row.
+   including with a locked head row. *(FIG-3927: the locked head row is an
+   admitted head row; see the FIG-3927 amendment.)*
 4. **Command lane.** At every turn boundary (after a logical run's final commit,
    and at idle), every open command applies in `enqueue_seq` order before any
    turn-lane claim; an open command never delays a turn-lane claim at a
@@ -705,6 +726,8 @@ advisory lock on the merged table.
 19. **Recompose.** A deferred multi-row claim is recomposed row by row; a row
     ready before a deferred member is claimed first.
 20. **Fencing.** ADR 0029's supersession law holds for the one claim type.
+    *(FIG-3927: this law becomes "a stale drive fence refuses admission and
+    settlement and writes nothing"; see the FIG-3927 amendment.)*
 21. **Config compare-and-set.** A patch with a stale base settles as
     `StaleConfigRevision` and changes nothing; a patch replayed after `vacuum()`
     never applies twice; a coalesced group checks the running revision in seq
@@ -926,7 +949,9 @@ reason *Alternatives* rejects a `dedup_domain` column.
 §14's table and two-list deletions; §15's table cutover; §16's
 re-expression against `SessionIngressStore` (the laws hold per table).
 `WithheldTerminalWork` keeps one list per claim type: a turn-input claim and a
-queued-work claim remain different types.
+queued-work claim remain different types. *(FIG-3927, not yet implemented:
+the claims this amendment keeps die — each root's contiguous run is bound by
+its recorded admission, not by a claim. See the FIG-3927 amendment.)*
 
 **FIG-3589's surface is deleted with it** (A8): `claim_bound_*`, `TurnBound`,
 the bind and reclaim store methods, and `ClaimMode::Exact`. A redrive of an
@@ -950,6 +975,53 @@ work accepted after an unclaimed next-turn input. So one turn never takes an
 item past an earlier unconsumed item of the other kind. A session command stops
 nothing (§4); an addressed checkpoint input and the recomposition of an
 interrupted claim are exempt, as §5.2 and §7 already make them.
+
+## Amendment (FIG-3927, 2026-09-28): admission binds rows to a root; there are no claims
+
+**Status.** Decided in FIG-3927 under D19, D22 and D24; not yet implemented. The
+units in the FIG-3927 design land it, and the last one updates this line. It
+amends §1 (the claim columns and claim type), §5.2, §7, §13, §16 laws 3 and 20,
+the FIG-3540 close-out, and ADR 0029 and ADR 0053, which it supersedes. Each
+carries a note pointing here.
+
+**Decision.** No durable claim token takes part in selecting or settling a turn.
+A row of either admission table is *admitted* when a fenced write under the
+session's current drive fence (ADR 0105 §2) records the root that admitted it
+and the recorded step that did so (`admitted_root`, `admitted_by`). That write
+is the row's admission and delivers its ingress obligation (ADR 0109 §3). An
+admitted row is released or settled only by a fenced commit of that root, or by
+the root's terminal write, whatever ended it. No row stays admitted to a root
+that has terminal evidence. A session has at most one root that is admitted and
+unfinished, and the drive admits that root before anything else.
+
+**Selection** runs inside the drive, after the seal, as the root's recorded
+`AdmitRoot` step. It is keyed by the root, and its composition is the §5.2 rule
+over the open rows of both tables, contiguous per the close-out. The store
+records the result on the root (`session_roots`) in the same transaction, so a
+re-execution of the step reads it back rather than choosing again: a worker lost
+between the store's write and the journal's record never widens a turn. A
+checkpoint's selection is the same, keyed by its step. **Settlement** is keyed
+by the root and the turn: the commit names the rows it completes, releases or
+drops. The store checks each against the root and the commit against the drive
+fence. The commit identity (ADR 0105 §9) makes a replayed commit answer its
+receipt.
+
+**Commands** take no admission: the drive applies the leading command run at a
+boundary and settles those rows in the applying commit. A row withdrawn in
+between refuses the commit (§4, §12).
+
+**What this replaces.**
+
+* §7's generation-fenced claims, per-row claim identity, `Defer` of a claim and
+  redrive of an interrupted claim: `Defer` releases the binding at the row's
+  own position, and an interrupted selection is the root's recorded admission.
+* The queued-run ledger (D22).
+* The session-lease and drive-epoch claim authority (D24a/D24c).
+* Orphan repair: a root's terminal write releases its rows.
+* Host abandonment of a claim: cancel the root instead (A2).
+
+Law 20 becomes "a stale drive fence refuses admission and settlement and
+writes nothing". Law 3's "locked head row" becomes "an admitted head row".
 
 ## Alternatives considered
 
