@@ -158,8 +158,8 @@ pub use tool_output::{
     ModelToolReturnPart, ObservedProcessFailure, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
     ToolCallStatus, ToolCancellation, ToolControl, ToolFailure, ToolFailureClass,
     ToolFailureSource, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolRetryStatus, ToolValue, format_tool_output_content,
-    tool_result_text,
+    ToolIntentRefusalReason, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta,
+    format_tool_output_content, tool_result_text,
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{

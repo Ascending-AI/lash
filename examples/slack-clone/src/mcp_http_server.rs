@@ -10,10 +10,8 @@
 //!
 //! The five tools exist to make host-side MCP policy observable:
 //!
-//! * `workspace_badge` returns a binary blob resource. A host that opts into
-//!   [`with_binary_content_attachments`](lash_plugin_mcp::McpServerConfig::with_binary_content_attachments)
-//!   persists it as a model attachment; a host that does not receives the same
-//!   bytes inline. Same server, same call, two host policies.
+//! * `workspace_badge` returns a binary blob resource, which the host
+//!   persists as an attachment.
 //! * `roots_change_report` counts the `notifications/roots/list_changed`
 //!   notifications this server received and re-lists the host's roots on each
 //!   one, which is what makes

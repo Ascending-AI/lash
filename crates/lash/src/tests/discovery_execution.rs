@@ -117,6 +117,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                             discovery: Some(lash_core::ToolDiscovery {
                                 operation: "search".into(),
                             }),
+                            ..lash_protocol_standard::StandardProtocolConfig::default()
                         },
                     ),
                 ))

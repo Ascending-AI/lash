@@ -407,7 +407,9 @@ pub enum RuntimeEffectCommand {
     /// what replay serves.
     PresentToolResult {
         call_id: String,
+        tool_id: crate::ToolId,
         tool_name: String,
+        render: Option<crate::RecordedRender>,
         args: serde_json::Value,
         output: Box<crate::ToolCallOutput>,
     },

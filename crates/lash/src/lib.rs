@@ -57,6 +57,16 @@ mod process_lifecycle;
 mod process_observation;
 mod prompt_layer;
 pub mod recoverable_chat;
+pub mod render {
+    pub use lash_protocol_standard::StandardTurnOptions;
+    pub use lash_protocol_standard::render::{
+        AuthoredViewPolicy, BuiltinToolOutputRenderer, ResolvedStandardRenderConfig,
+        StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot, ToolRenderParams,
+        ToolRenderPatch, resolve,
+    };
+    #[cfg(feature = "rlm")]
+    pub use lash_render::*;
+}
 #[cfg(feature = "rlm")]
 /// RLM-specific turn-builder extensions.
 pub mod rlm;
@@ -273,10 +283,10 @@ pub mod tools {
         ToolIntentRefusalReason, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
         ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
         ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
-        derive_tool_intent_identity, facade_support::OrchestrationContext,
-        facade_support::ReconfigureError, facade_support::ToolSourceHandle,
-        facade_support::ToolStateFacadeOps, facade_support::ToolTriggerClient,
-        turn_outcome_from_tool_control,
+        ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
+        facade_support::OrchestrationContext, facade_support::ReconfigureError,
+        facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
+        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
     };
     pub use lash_core::{
         InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
@@ -499,8 +509,8 @@ pub mod plugins {
         BeforeToolCallHook, BeforeTurnHook, CheckpointHook, CheckpointHookContext,
         CompactionContext, ContextCompaction, ContextCompactor, ContextError,
         PluginExtensionContribution, PluginSessionMaterialization, PluginSpecBuilder,
-        StaticPluginFactory, ToolCallHookContext, ToolCatalogContext, ToolResultHookContext,
-        ToolResultProjectionContext, TurnHookReport,
+        StaticPluginFactory, ToolCallHookContext, ToolCatalogContext, ToolPresentationPresenter,
+        ToolResultHookContext, ToolResultProjectionContext, TurnHookReport,
     };
     /// Protocol and process-engine contracts, including their complete runtime-owned state closure.
     pub use lash_core::plugin::{
@@ -587,10 +597,6 @@ pub mod plugins {
     pub use lash_core::{
         facade_support::PreparedContext, facade_support::TurnContextTransform,
         facade_support::TurnTransformContext,
-    };
-    pub use lash_plugin_tool_output_budget::{
-        ToolOutputBudgetConfig, ToolOutputBudgetMode, ToolOutputBudgetPluginFactory,
-        tool_output_budget_stack as runtime_plugin_stack,
     };
     pub use lash_protocol_standard::{StandardProtocolConfig, StandardProtocolPluginFactory};
     /// Default chat projector installed by [`TurnDriverConfig::chat`].

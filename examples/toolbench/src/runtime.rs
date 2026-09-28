@@ -489,7 +489,7 @@ fn build_turn_core(
         .trace_sink(Arc::new(telemetry.capture.clone()))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
+        .configure_plugins(|stack| {
             stack.push(telemetry.plugin());
             if let Some(marker) = shutdown_marker {
                 stack.push(marker);
@@ -497,7 +497,7 @@ fn build_turn_core(
             if let Some(witness) = shutdown_witness {
                 stack.push(witness);
             }
-        }))
+        })
         .provider(provider)
         .model(model_spec(model, effort)?)
         .tools(if channel == crate::ChannelSelection::Standard {

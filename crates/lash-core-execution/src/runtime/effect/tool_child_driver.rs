@@ -1614,7 +1614,9 @@ async fn resolve_model_return(
                         ),
                         crate::RuntimeEffectCommand::PresentToolResult {
                             call_id: request.call.call_id.clone(),
+                            tool_id: request.call.tool_id.clone(),
                             tool_name: outcome.record.tool.clone(),
+                            render: dispatch.execution_env_spec.render.clone(),
                             args: outcome.record.args.clone(),
                             output: Box::new(outcome.record.output.clone()),
                         },

@@ -297,7 +297,7 @@ The five tools exist to make host-side policy observable rather than to be
 useful:
 
 - `mcp__workspace_http__workspace_badge_kczjjxpbmhykdl67ll7vfkvwre` returns a binary blob resource. This
-  server is attached `.with_binary_content_attachments(true)`, so the blob is
+  server stores binary content as an attachment, so the blob is
   persisted through the host's attachment store and reaches the model as an
   attachment reference; the same call against a server configured without that
   opt-in stays inline in the tool result.

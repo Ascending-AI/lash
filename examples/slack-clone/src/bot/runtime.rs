@@ -128,7 +128,6 @@ pub fn http_mcp_server_config(url: &str, token: &str) -> McpServerConfig {
         Duration::from_secs(2),
         Duration::from_secs(10),
     )
-    .with_binary_content_attachments(true)
 }
 
 /// Everything [`build_core`] hands back to the host.

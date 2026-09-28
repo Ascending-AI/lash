@@ -1325,6 +1325,8 @@ fn remote_process_dtos_json_round_trip() {
             output: RemoteProcessToolCallOutput {
                 outcome: RemoteProcessToolCallOutcome::Success(serde_json::json!({ "done": true })),
                 control: None,
+                view: None,
+                projection_value: None,
             },
         },
     };
@@ -2194,6 +2196,8 @@ fn cancelled_remote_process_record() -> RemoteProcessRecord {
                 raw: None,
             }),
             control: None,
+            view: None,
+            projection_value: None,
         },
     });
     record
@@ -2232,6 +2236,8 @@ fn remote_process_event() -> RemoteProcessEvent {
                     output: RemoteProcessToolCallOutput {
                         outcome: RemoteProcessToolCallOutcome::Success(serde_json::json!(true)),
                         control: None,
+                        view: None,
+                        projection_value: None,
                     },
                 },
             }),

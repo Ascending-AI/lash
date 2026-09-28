@@ -1,12 +1,12 @@
 {
   "scenario": "lashlang-effect-summary",
-  "recorded_at_git_sha": "7caa78958d6412ccefcf9b0ead106a5c8bf52c19",
+  "recorded_at_git_sha": "a62fa789369c3a3a411ea44c297935e6c3209da4",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
     "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
-        "hash": "dd27d2d70ca0216f3870e40947b3626f76d0f6d4342acb10401cfd011db8d91a"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"render\":{\"renderer_id\":\"lash.tool.v1\",\"params\":{\"defaults\":{\"authored_view\":\"prefer\",\"head_share_percent\":50,\"max_lines\":400,\"retain_full_output\":true,\"value\":{\"array_head\":3,\"array_tail\":2,\"array_threshold\":10,\"indent\":2,\"layout\":\"auto\",\"line_width\":80,\"max_chars\":16000,\"max_depth\":3,\"min_item_chars\":80,\"stack_head\":3,\"stack_tail\":1}},\"per_tool\":{\"tool:batch\":{\"authored_view\":\"prefer\",\"head_share_percent\":50,\"max_lines\":400,\"retain_full_output\":true,\"value\":{\"array_head\":3,\"array_tail\":2,\"array_threshold\":10,\"indent\":2,\"layout\":\"auto\",\"line_width\":80,\"max_chars\":16000,\"max_depth\":6,\"min_item_chars\":80,\"stack_head\":3,\"stack_tail\":1}}}}},\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
+        "hash": "58a96219aed124034378a23b211547932f3b34ce3e27ac62b84247e7a3b3f0c7"
       },
       "outcome": {
         "Ok": {
@@ -19,7 +19,7 @@
               "parts": [
                 {
                   "type": "text",
-                  "text": "{\"executed\":1,\"line\":\"summary\"}"
+                  "text": "{\"executed\": 1, \"line\": \"summary\"}"
                 }
               ]
             }
@@ -54,8 +54,7 @@
                     }
                   }
                 }
-              },
-              "duration_ms": 0
+              }
             },
             "intents": {
               "protocol_version": 3,

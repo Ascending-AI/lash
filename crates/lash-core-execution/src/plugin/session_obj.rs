@@ -634,7 +634,10 @@ impl PluginSession {
         ctx: ToolResultProjectionContext,
         settlement: Arc<crate::runtime::effect::ToolSettlement>,
         attachment_acceptance: &crate::provider::AttachmentCapabilitySnapshot,
-    ) -> crate::runtime::effect::ToolPresentation {
+    ) -> Result<
+        crate::runtime::effect::ToolPresentation,
+        crate::runtime::effect::RuntimeEffectControllerError,
+    > {
         use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 
         let mut model_return = crate::ModelToolReturn::from_output(
@@ -642,6 +645,19 @@ impl PluginSession {
             ctx.tool_name.clone(),
             &ctx.output,
         );
+        crate::session::tool_execution::surface_attachment_materialization_notices(
+            attachment_acceptance,
+            &ctx.output,
+            &mut model_return,
+        );
+        if let Some(presenter) = &self.contributions.presentation_presenter {
+            model_return = (presenter.hook)(ToolPresentationInput {
+                previous: model_return,
+                settlement: Arc::clone(&settlement),
+                context: ctx.clone(),
+            })
+            .await?;
+        }
         for registered in &self.contributions.presentation_steps {
             let input = ToolPresentationInput {
                 previous: model_return,
@@ -657,16 +673,11 @@ impl PluginSession {
                 ),
             };
         }
-        crate::session::tool_execution::surface_attachment_materialization_notices(
-            attachment_acceptance,
-            &ctx.output,
-            &mut model_return,
-        );
-        crate::runtime::effect::ToolPresentation {
+        Ok(crate::runtime::effect::ToolPresentation {
             version: crate::runtime::effect::TOOL_PRESENTATION_VERSION,
             model_return,
             artifacts: ctx.artifacts.retained(),
-        }
+        })
     }
 
     pub async fn emit_runtime_event(

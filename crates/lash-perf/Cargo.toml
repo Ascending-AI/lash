@@ -41,7 +41,6 @@ lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["perf-witness"] }
 lash-plugin-process-controls = { workspace = true }
 lash-plugin-standard-compaction = { workspace = true }
-lash-plugin-tool-output-budget = { workspace = true }
 lash-subagents = { workspace = true }
 anyhow = { workspace = true }
 async-trait = { workspace = true }

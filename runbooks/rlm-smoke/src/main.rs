@@ -496,7 +496,6 @@ async fn main() -> Result<()> {
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend, lash::TurnBudget::bounded(12), protocol)
         .no_progress_budget(lash::NoProgressBudget::bounded(4))
-        .plugins(lash::plugins::runtime_plugin_stack())
         .provider(provider)
         .model(
             lash::ModelSpec::builder(&args.model)

@@ -296,17 +296,13 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
         "the sampled result returns to the outer tool attempt: {}",
         requests[2]
     );
-    assert!(
-        requests[3].contains("\\\"action\\\":\\\"accept\\\"")
-            && requests[3].contains("\\\"answer\\\":\\\"yes\\\""),
-        "the host's structured elicitation answer returns to the server: {}",
-        requests[3]
+    assert_eq!(
+        model_structured_result(&requests[3], ELICIT_CONFIRMATION_TOOL.as_str()),
+        json!({"action": "accept", "answer": "yes"}),
     );
-    assert!(
-        requests[4].contains("slack-clone-demo-url-1")
-            && requests[4].contains("\\\"completion_notified\\\":true"),
-        "the URL request is accepted and its completion is notified: {}",
-        requests[4]
+    assert_eq!(
+        model_structured_result(&requests[4], URL_ELICITATION_TOOL.as_str())["completion_notified"],
+        true,
     );
     assert!(
         requests[5].contains("file://") && requests[5].contains("slack-clone"),
@@ -327,7 +323,6 @@ fn direct_server_config(api_base_url: &str) -> McpServerConfig {
             ..Default::default()
         },
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: env!("CARGO_BIN_EXE_slack-clone-mcp-server").to_string(),
             args: Vec::new(),
@@ -348,7 +343,6 @@ fn wrapped_server_config(api_base_url: &str, pid_file: &std::path::Path) -> McpS
             ..Default::default()
         },
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "sh".to_string(),
             args: vec![
@@ -479,6 +473,38 @@ fn transcript_text(session: &lash::LashSession) -> String {
         .join("\n")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "fixed model request fixture has this shape"
+)]
+fn model_structured_result(request: &str, tool: &str) -> Value {
+    let request: Value = serde_json::from_str(request).expect("recorded model request is JSON");
+    let mut found = None;
+    for message in request["messages"]
+        .as_array()
+        .expect("model request messages")
+    {
+        for block in message["blocks"].as_array().expect("model message blocks") {
+            let Some(result) = block.get("ToolResult") else {
+                continue;
+            };
+            if result["tool_name"] != tool {
+                continue;
+            }
+            for content in result["content"].as_array().expect("tool result content") {
+                if let Some(text) = content["text"].as_str()
+                    && let Ok(payload) = serde_json::from_str::<Value>(text)
+                    && payload.get("structuredContent").is_none()
+                    && payload.get("content").is_none()
+                {
+                    found = Some(payload);
+                }
+            }
+        }
+    }
+    found.unwrap_or_else(|| panic!("model request has no structured result for {tool}"))
+}
+
 #[tokio::test]
 async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
     let scratch = tempfile::tempdir().expect("tempdir");
@@ -534,6 +560,7 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
         "the live MCP result must reach the next model request: {}",
         requests[1]
     );
+    assert!(!requests[1].contains("[Object]"), "{}", requests[1]);
     let transcript = transcript_text(&session);
     assert!(
         transcript.contains("engineering") && transcript.contains("Build the product"),
@@ -645,11 +672,9 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
         .expect("next turn recovers");
     let requests = script.requests();
     assert_eq!(requests.len(), 4);
-    assert!(
-        requests[3].contains("\\\"active_members\\\":2")
-            && requests[3].contains("\\\"channels\\\":1"),
-        "the respawned server result reaches the next turn: {}",
-        requests[3]
+    assert_eq!(
+        model_structured_result(&requests[3], WORKSPACE_STATS_TOOL.as_str()),
+        json!({"active_members": 2, "channels": 1}),
     );
 }
 
@@ -941,7 +966,8 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
         .await
         .expect("run a turn against the attached server");
     assert_eq!(turn.result.tool_calls.len(), 1);
-    let output = turn.result.tool_calls[0].output.value_for_projection();
+    let value = turn.result.tool_calls[0].output.value_for_projection();
+    let output = &value;
     assert_eq!(
         output["notifications_seen"], 0,
         "no roots change has been published yet: {output}"
@@ -975,7 +1001,7 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
 
 /// Every file the host's attachment store holds, as raw bytes.
 #[tokio::test]
-async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in() {
+async fn binary_mcp_content_is_attached_for_each_server() {
     let scratch = tempfile::tempdir().expect("tempdir");
     let (api_base_url, _api) = fake_api(FakeApiState::normal()).await;
     let (url, _server) = http_mcp_server("integration-token").await;
@@ -987,7 +1013,7 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
     ]);
     let runtime = build_runtime(scratch.path(), &api_base_url, &script, None).await;
 
-    // Same server, same tool, two host policies.
+    // Both imported copies of the same tool retain media.
     runtime
         .mcp
         .attach_server(
@@ -1000,8 +1026,7 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         .mcp
         .attach_server(
             "workspace_inline".to_string(),
-            runtime::http_mcp_server_config(&url, "integration-token")
-                .with_binary_content_attachments(false),
+            runtime::http_mcp_server_config(&url, "integration-token"),
         )
         .await
         .expect("attach the inline server");
@@ -1028,13 +1053,11 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
     );
     let stored_output = stored.result.tool_calls[0].output.value_for_projection();
     let attachment = stored_output
-        .as_array()
-        .and_then(|items| {
-            items
-                .iter()
-                .find(|item| item["$lash_tool_value"] == "attachment")
-        })
-        .unwrap_or_else(|| panic!("no attachment in the opted-in result: {stored_output}"));
+        .get("content")
+        .and_then(Value::as_array)
+        .and_then(|items| items.iter().find(|block| block.get("attachment").is_some()))
+        .map(|block| &block["attachment"])
+        .unwrap_or_else(|| panic!("no attachment in the MCP result: {stored_output}"));
     assert_eq!(attachment["source"]["source"], "stored");
     assert_eq!(
         attachment["source"]["attachment_ref"]["media_type"],
@@ -1073,23 +1096,21 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         .await
         .expect("run the opted-out badge turn");
     let inline_output = inline.result.tool_calls[0].output.value_for_projection();
-    let encoded = inline_output.to_string();
-    assert!(
-        !encoded.contains("\"$lash_tool_value\":\"attachment\""),
-        "an opted-out server's binary content must stay inline: {inline_output}"
-    );
-    assert!(
-        encoded.contains(mcp_http_server::BADGE_URI),
-        "the inline result must carry the resource itself: {inline_output}"
-    );
+    let resource = inline_output["content"]
+        .as_array()
+        .and_then(|blocks| blocks.iter().find(|block| block["type"] == "resource"))
+        .expect("the MCP result keeps its resource block");
+    assert_eq!(resource["type"], "resource");
+    assert_eq!(resource["uri"], mcp_http_server::BADGE_URI);
+    assert_eq!(resource["attachment"]["$lash_tool_value"], "attachment");
     assert_eq!(
         attachment_store
             .list()
             .await
-            .expect("list the backend's attachments")
+            .expect("list attachments")
             .len(),
         stored_before,
-        "the opted-out call must not write to the attachment store"
+        "content-addressed media should reuse the stored bytes"
     );
 
     slack_clone::bot::shutdown_core(&runtime.core)
@@ -1244,7 +1265,8 @@ async fn a_form_the_answer_book_cannot_satisfy_is_declined_rather_than_answered(
         .output()
         .await
         .expect("run the elicitation turn");
-    let output = turn.result.tool_calls[0].output.value_for_projection();
+    let value = turn.result.tool_calls[0].output.value_for_projection();
+    let output = &value;
     assert_eq!(
         output["action"], "decline",
         "the host's textual answer fails the server's integer schema, so it must \
@@ -1287,7 +1309,8 @@ async fn a_question_the_host_has_not_read_is_declined_even_with_a_familiar_field
         .output()
         .await
         .expect("run the elicitation turn");
-    let output = turn.result.tool_calls[0].output.value_for_projection();
+    let value = turn.result.tool_calls[0].output.value_for_projection();
+    let output = &value;
     // The field is `answer`, which the host answers "yes" to for the prompt it
     // has read. A different question with the same field must still be
     // declined, or the host is granting consent it was never asked for.
@@ -1359,7 +1382,8 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
         .output()
         .await
         .expect("run the roots-report turn");
-    let output = turn.result.tool_calls[0].output.value_for_projection();
+    let value = turn.result.tool_calls[0].output.value_for_projection();
+    let output = &value;
     assert_eq!(
         output["notifications_seen"], 1,
         "the server must have received exactly one roots-changed notification: {output}"
@@ -1623,7 +1647,8 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
         .output()
         .await
         .expect("run the roots-report turn");
-    let output = turn.result.tool_calls[0].output.value_for_projection();
+    let value = turn.result.tool_calls[0].output.value_for_projection();
+    let output = &value;
     assert_eq!(output["notifications_seen"], 1);
     assert!(
         output["roots"]

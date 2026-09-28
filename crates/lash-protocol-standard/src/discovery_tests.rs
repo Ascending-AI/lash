@@ -40,7 +40,10 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
         validate_discovery(&manifests, discovery.as_ref()).unwrap();
         let expected = if discovery.is_some() { 1 } else { 2 };
         let driver = StandardProtocolDriver {
-            config: StandardProtocolConfig { discovery },
+            config: StandardProtocolConfig {
+                discovery,
+                ..StandardProtocolConfig::default()
+            },
         };
         let preamble = driver.build_preamble(ProtocolBuildInput {
             tool_catalog: Arc::new(catalog.clone()),
@@ -265,6 +268,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
                 discovery: Some(lash_core::ToolDiscovery {
                     operation: "tools.search".to_string(),
                 }),
+                ..StandardProtocolConfig::default()
             },
         )),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(

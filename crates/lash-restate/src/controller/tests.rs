@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn recorded_renderer_refusal_retries_the_uncommitted_presentation() {
+    let invocation = RuntimeEffectInvocation::new(
+        lash_core::EffectAddress::new(
+            ExecutionScope::turn("render-session", "render-turn"),
+            "present-result",
+        )
+        .expect("effect address"),
+        lash_core::RuntimeAttribution::for_turn("render-session", "render-turn", 0, 0),
+        "present-result",
+    );
+    let route = execution::restate_effect_execution(RuntimeEffectEnvelope {
+        invocation,
+        command: RuntimeEffectCommand::PresentToolResult {
+            call_id: "call".into(),
+            tool_id: lash_core::ToolId::new("tool:fixture"),
+            tool_name: "fixture".into(),
+            render: None,
+            args: serde_json::Value::Null,
+            output: Box::new(lash_core::ToolCallOutput::success("output")),
+        },
+        group: None,
+    })
+    .expect("presentation route");
+    assert!(matches!(
+        route,
+        execution::RestateEffectExecution::JournaledRun {
+            engine_faults: EngineFaults::Retried,
+            ..
+        }
+    ));
+    let refusal = RuntimeEffectControllerError::new(
+        RuntimeErrorCode::RecordedRendererUnavailable,
+        "renderer absent",
+    )
+    .retryable_uncommitted_derivation();
+    assert!(
+        refusal
+            .journal_disposition(lash_core::RuntimeEffectKind::PresentToolResult)
+            .is_retryable_derivation()
+    );
+}
+
+#[test]
 fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
     let parent_address = lash_core::EffectAddress::new(
         ExecutionScope::process(lash_core::ProcessId::fixture("restate-parent-process")),

@@ -1493,8 +1493,8 @@ fn turn_input_text(value: u8) -> String {
         &format!("runtime property input {value} "),
         u64::from(value),
         lash_core::testing::adversarial_text::TextBudget {
-            bytes: lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_LIMIT_BYTES,
-            lines: lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
+            bytes: 16_000,
+            lines: 400,
         },
     )
 }

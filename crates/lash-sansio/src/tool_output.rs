@@ -19,6 +19,56 @@ pub struct ToolCallOutput {
     pub outcome: ToolCallOutcome,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ToolControl>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<ToolView>,
+    /// Optional display projection for a successful result; `outcome` remains the code value.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub projection_value: Option<Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolView {
+    pub blocks: Vec<ToolViewBlock>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ToolViewMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+}
+
+impl ToolViewMeta {
+    pub fn is_empty(&self) -> bool {
+        self.priority.is_none() && self.last_modified.is_none()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ToolViewBlock {
+    Text {
+        text: String,
+        #[serde(default, skip_serializing_if = "ToolViewMeta::is_empty")]
+        meta: ToolViewMeta,
+    },
+    Attachment {
+        source: AttachmentSource,
+        #[serde(default, skip_serializing_if = "ToolViewMeta::is_empty")]
+        meta: ToolViewMeta,
+    },
+    ResourceLink {
+        uri: String,
+        name: String,
+        title: Option<String>,
+        description: Option<String>,
+        mime_type: Option<String>,
+        #[serde(default, skip_serializing_if = "ToolViewMeta::is_empty")]
+        meta: ToolViewMeta,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -193,6 +243,8 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Success(value),
             control: None,
+            view: None,
+            projection_value: None,
         }
     }
 
@@ -200,6 +252,8 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Failure(failure),
             control: None,
+            view: None,
+            projection_value: None,
         }
     }
 
@@ -207,11 +261,23 @@ impl ToolCallOutput {
         Self {
             outcome: ToolCallOutcome::Cancelled(cancellation),
             control: None,
+            view: None,
+            projection_value: None,
         }
     }
 
     pub fn with_control(mut self, control: ToolControl) -> Self {
         self.control = Some(control);
+        self
+    }
+
+    pub fn with_view(mut self, view: ToolView) -> Self {
+        self.view = Some(view);
+        self
+    }
+
+    pub fn with_projection_value(mut self, value: Value) -> Self {
+        self.projection_value = Some(value);
         self
     }
 
@@ -229,7 +295,10 @@ impl ToolCallOutput {
 
     pub fn value_for_projection(&self) -> Value {
         match &self.outcome {
-            ToolCallOutcome::Success(value) => value.projected_json_value(),
+            ToolCallOutcome::Success(value) => self
+                .projection_value
+                .clone()
+                .unwrap_or_else(|| value.projected_json_value()),
             ToolCallOutcome::Failure(failure) => failure.to_json_value(),
             ToolCallOutcome::Cancelled(cancellation) => cancellation.to_json_value(),
         }
@@ -237,7 +306,9 @@ impl ToolCallOutput {
 
     pub fn into_value_for_projection(self) -> Value {
         match self.outcome {
-            ToolCallOutcome::Success(value) => value.into_projected_json_value(),
+            ToolCallOutcome::Success(value) => self
+                .projection_value
+                .unwrap_or_else(|| value.into_projected_json_value()),
             ToolCallOutcome::Failure(failure) => failure.to_json_value(),
             ToolCallOutcome::Cancelled(cancellation) => cancellation.to_json_value(),
         }
@@ -284,8 +355,8 @@ impl ToolCallOutput {
 
 pub fn format_tool_output_content(output: &ToolCallOutput) -> String {
     match &output.outcome {
-        ToolCallOutcome::Success(value) => {
-            let value = value.projected_json_value();
+        ToolCallOutcome::Success(_) => {
+            let value = output.value_for_projection();
             match value {
                 Value::String(text) => text,
                 other => serde_json::to_string(&other).unwrap_or_else(|_| "null".to_string()),

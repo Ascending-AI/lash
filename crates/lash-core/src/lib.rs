@@ -250,6 +250,7 @@ pub mod facade_support {
     pub use crate::plugin::ToolCatalogContribution;
     pub use crate::plugin::ToolPresentationArtifacts;
     pub use crate::plugin::ToolPresentationInput;
+    pub use crate::plugin::ToolPresentationPresenter;
     pub use crate::plugin::ToolPresentationStep;
     pub use crate::plugin::ToolResultProjectionContext;
     pub use crate::plugin::TurnContextTransform;
@@ -575,7 +576,7 @@ pub use lash_sansio::{
     ToolDefinitionBindingExt, ToolDiscovery, ToolFailure, ToolFailureClass, ToolFailureSource,
     ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
     ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
-    ToolValue, TurnCause, TurnId, TurnOutputSource,
+    ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,

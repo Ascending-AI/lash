@@ -203,9 +203,10 @@ the batch interpreter. The same launch records are also present in their
 individual `ToolAttempt` entries. The intent portion has hard admission bounds:
 at most 32 declarations, at most 16 of one kind, and at most 64 KiB of canonical
 intent JSON per completed attempt. Tool output values have no core-wide byte
-cap: deployments may install the tool-output-budget plugin, and provider or
-tool contracts may impose tighter limits, but those are host policy rather than
-a durability invariant.
+cap: standard protocol limits its model-facing projection through the recorded
+tool renderer, and provider or tool contracts may impose tighter limits, but
+those are host policy rather than a durability invariant. The complete tool
+value remains in the journal.
 
 Accordingly the precise bound for a Restate `ToolBatch` is one journal entry per
 batch and a finite source batch, not a fixed byte count. Its payload is live

@@ -797,7 +797,11 @@ impl RuntimeExecutionContext<'_> {
                         ),
                         crate::RuntimeEffectCommand::PresentToolResult {
                             call_id: call_id.clone(),
+                            tool_id: self
+                                .callable_tool_id_by_name(&outcome.record.tool)
+                                .unwrap_or_else(|| crate::ToolId::new(outcome.record.tool.clone())),
                             tool_name: outcome.record.tool.clone(),
+                            render: self.dispatch.execution_env_spec.render.clone(),
                             args: outcome.record.args.clone(),
                             output: Box::new(outcome.record.output.clone()),
                         },

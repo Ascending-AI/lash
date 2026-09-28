@@ -307,13 +307,6 @@
     "peak_bytes": 744239104,
     "samples": 511
   },
-  "lash-internal-plugin-tool-output-budget/lash_plugin_tool_output_budget": {
-    "cpu_count": 2,
-    "memory_kb": 1572864,
-    "p95_cores": 1.41,
-    "peak_bytes": 547348480,
-    "samples": 362
-  },
   "lash-internal-postgres-store/conformance": {
     "cpu_count": 2,
     "memory_kb": 4718592,

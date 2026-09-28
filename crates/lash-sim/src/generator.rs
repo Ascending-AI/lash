@@ -1133,12 +1133,12 @@ const PROVIDER_MUTATIONS: &[&str] = &[
 /// rng, so widening the payload domain leaves every seed's workload shape
 /// unchanged.
 pub(crate) fn generated_text(seed: u64, tag: &str) -> String {
-    let budget = lash::plugins::ToolOutputBudgetConfig::default();
+    let budget = lash_protocol_standard::ToolRenderParams::default();
     adversarial_text(
         tag,
         content_draw(seed, tag, 0),
         TextBudget {
-            bytes: budget.limit,
+            bytes: budget.value.max_chars,
             lines: budget.max_lines,
         },
     )
@@ -1214,7 +1214,7 @@ mod tests {
     /// small seed batch, and the drawn usage keeps reasoning inside output.
     #[test]
     fn generated_payloads_reach_unicode_controls_budget_edges_and_large_usage() {
-        let budget = lash::plugins::ToolOutputBudgetConfig::default();
+        let budget = lash_protocol_standard::ToolRenderParams::default();
         let mut texts = Vec::new();
         let mut usages = Vec::new();
         for seed in 0..32 {
@@ -1246,7 +1246,8 @@ mod tests {
         );
         assert!(any(&|text| text.contains('\u{301}')), "combining mark");
         assert!(
-            any(&|text| text.len() > budget.limit && !text.is_char_boundary(budget.limit)),
+            any(&|text| text.len() > budget.value.max_chars
+                && !text.is_char_boundary(budget.value.max_chars)),
             "a scalar straddling the tool-output byte budget"
         );
         assert!(

@@ -22,8 +22,10 @@ workspace = true
 [dependencies]
 lash-sansio = { workspace = true }
 lash-core = { workspace = true }
+lash-render = { workspace = true }
 lash-tool-support = { workspace = true }
 async-trait = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [features]

@@ -258,13 +258,6 @@
     "peak_bytes": 17457152,
     "samples": 14
   },
-  "//crates/lash-plugin-tool-output-budget:lash-plugin-tool-output-budget__unit_test": {
-    "cpu_count": 1,
-    "memory_kb": 1048576,
-    "p95_cores": 0.0,
-    "peak_bytes": 18042880,
-    "samples": 14
-  },
   "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test": {
     "cpu_count": 2,
     "memory_kb": 1048576,

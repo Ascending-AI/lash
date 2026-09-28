@@ -168,17 +168,14 @@ impl LashCore {
     }
 
     /// Sugar entry point: a [`LashCoreBuilder`] over `backend` pre-seeded
-    /// with the standard protocol plugin and the default runtime plugin
-    /// stack.
+    /// with the standard protocol plugin.
     pub fn standard_builder(
         backend: Backend,
         turn_budget: lash_core::TurnBudget,
     ) -> LashCoreBuilder {
-        LashCore::builder(backend, turn_budget)
-            .protocol_plugin(Arc::new(
-                lash_protocol_standard::StandardProtocolPluginFactory::new(),
-            ))
-            .plugins(default_runtime_stack())
+        LashCore::builder(backend, turn_budget).protocol_plugin(Arc::new(
+            lash_protocol_standard::StandardProtocolPluginFactory::new(),
+        ))
     }
 
     /// The backend this core takes every port and its effect host from.
@@ -370,9 +367,7 @@ impl LashCore {
         turn_budget: lash_core::TurnBudget,
         factory: crate::rlm::RlmProtocolPluginFactory,
     ) -> LashCoreBuilder {
-        LashCore::builder(backend, turn_budget)
-            .protocol_plugin(Arc::new(factory))
-            .plugins(default_runtime_stack())
+        LashCore::builder(backend, turn_budget).protocol_plugin(Arc::new(factory))
     }
 
     pub fn session(&self, session_id: impl Into<SessionId>) -> SessionBuilder {
@@ -744,10 +739,6 @@ impl LashCore {
         )
         .with_session_policy(self.policy.clone()))
     }
-}
-
-fn default_runtime_stack() -> PluginStack {
-    lash_plugin_tool_output_budget::tool_output_budget_stack()
 }
 
 /// Builder for configuring lash core over one [`Backend`].

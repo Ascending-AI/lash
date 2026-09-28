@@ -33,7 +33,12 @@ use lash_core::session_model::{
 };
 
 mod batch;
+pub mod render;
 pub use batch::BatchResultRow;
+pub use render::{
+    BuiltinToolOutputRenderer, StandardRenderConfig, ToolOutputRenderer, ToolOutputRendererSlot,
+    ToolRenderParams,
+};
 pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
@@ -64,6 +69,14 @@ pub struct StandardProtocolPluginFactory {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct StandardProtocolConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
+    pub render: StandardRenderConfig,
+    pub renderer: ToolOutputRendererSlot,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct StandardTurnOptions {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render: Option<StandardRenderConfig>,
 }
 
 impl StandardProtocolPluginFactory {
@@ -98,6 +111,11 @@ impl SessionPlugin for StandardProtocolPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
+        let renderer = self.config.renderer.clone();
+        reg.tool_results().presenter(Arc::new(move |input| {
+            let renderer = renderer.clone();
+            Box::pin(async move { render::present(input, &renderer).await })
+        }))?;
         reg.protocol().session(Arc::new(StandardProtocolSession))?;
         reg.protocol()
             .protocol_driver(Arc::new(StandardProtocolDriver {
@@ -149,6 +167,24 @@ struct StandardProtocolDriver {
 }
 
 impl ProtocolDriverPlugin for StandardProtocolDriver {
+    fn resolve_render(
+        &self,
+        options: &lash_core::ProtocolTurnOptions,
+    ) -> Result<Option<lash_core::RecordedRender>, String> {
+        let payload: serde_json::Value = options.decode().map_err(|error| error.to_string())?;
+        let patch: StandardTurnOptions = serde_json::from_value(render::without_nulls(payload))
+            .map_err(|error| error.to_string())?;
+        let resolved = render::resolve(
+            &StandardRenderConfig::builtin(),
+            &self.config.render,
+            &patch.render.unwrap_or_default(),
+        )?;
+        Ok(Some(lash_core::RecordedRender {
+            renderer_id: self.config.renderer.0.id().to_string(),
+            params: serde_json::to_value(resolved).map_err(|error| error.to_string())?,
+        }))
+    }
+
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();

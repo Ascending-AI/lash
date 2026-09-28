@@ -445,7 +445,6 @@ mod tests {
                     ..Default::default()
                 },
                 shutdown_policy: Default::default(),
-                binary_content_attachments: false,
                 transport: McpTransport::Stdio(McpStdioTransport {
                     command: "sh".to_string(),
                     args: vec!["-c".to_string(), script],
@@ -498,7 +497,7 @@ mod tests {
             Some(json!("string"))
         );
         assert_eq!(
-            defs[0].contract.output_schema.canonical,
+            defs[0].contract.output_schema.canonical["properties"]["structuredContent"],
             json!({
                 "type": "object",
                 "properties": {
@@ -506,6 +505,10 @@ mod tests {
                 },
                 "required": ["matches"]
             })
+        );
+        assert_eq!(
+            defs[0].contract.output_schema.canonical["properties"]["content"]["type"],
+            json!("array")
         );
 
         let deferred = McpDeferredToolProvider::new(Arc::clone(factory.pool()));
@@ -543,7 +546,7 @@ mod tests {
         assert!(deferred_result.is_success(), "{deferred_result:?}");
         assert_eq!(
             deferred_result.value_for_projection(),
-            json!({ "matches": ["matched"] })
+            json!({ "structuredContent": { "matches": ["matched"] }, "content": [] })
         );
 
         // The resident provider makes no execution-binding demand: a resident
@@ -572,7 +575,7 @@ mod tests {
         assert!(resident_outcome.is_success(), "{resident_outcome:?}");
         assert_eq!(
             resident_outcome.value_for_projection(),
-            json!({ "matches": ["matched"] })
+            json!({ "structuredContent": { "matches": ["matched"] }, "content": [] })
         );
 
         factory.shutdown().await.expect("shut down MCP factory");
@@ -613,7 +616,6 @@ mod tests {
                     ..Default::default()
                 },
                 shutdown_policy: Default::default(),
-                binary_content_attachments: false,
                 transport: McpTransport::Stdio(McpStdioTransport {
                     command: "sh".to_string(),
                     args: vec!["-c".to_string(), script],

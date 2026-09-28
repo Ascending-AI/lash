@@ -1846,10 +1846,21 @@ impl ReplayableRecordingContext {
         *self.records.lock_recover() = records
             .into_iter()
             .map(|(effect_name, recorded)| {
-                // Installed as the journal holds it: stamped with this
-                // build's effect-journal generation.
-                let bytes = serde_json::to_vec(&JournaledEffectRecord::Recorded(recorded))
-                    .expect("encode installed recorded runtime effect");
+                let envelope: RuntimeEffectEnvelope =
+                    serde_json::from_str(recorded.envelope.json())
+                        .expect("decode recorded effect envelope");
+                let entry = JournaledEffectRecord::Recorded(recorded);
+                // Retried runs journal the closure's Result. Recorded runs
+                // journal the stamped entry directly.
+                let bytes = if matches!(
+                    envelope.command,
+                    RuntimeEffectCommand::PresentToolResult { .. }
+                ) {
+                    serde_json::to_vec(&Ok::<_, String>(entry))
+                } else {
+                    serde_json::to_vec(&entry)
+                }
+                .expect("encode installed recorded runtime effect");
                 (effect_name, bytes)
             })
             .collect();

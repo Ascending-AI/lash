@@ -103,6 +103,7 @@ pub(crate) struct PluginContributions {
     /// Presentation steps compose in registration order (FIG-3420); no
     /// exclusive `model_observation` ownership exists anymore.
     pub(crate) presentation_steps: Vec<RegisteredHook<ToolPresentationStep>>,
+    pub(crate) presentation_presenter: Option<RegisteredExclusiveHook<ToolPresentationPresenter>>,
     pub(crate) runtime_event_hooks: Vec<RegisteredHook<PluginLifecycleEventHook>>,
     pub(crate) session_config_mutators: Vec<SessionConfigMutator>,
     pub(crate) plugin_operations: BTreeMap<String, RegisteredPluginOperation>,
@@ -239,6 +240,10 @@ pub struct ToolResultRegistrations<'a> {
 }
 
 impl ToolResultRegistrations<'_> {
+    pub fn presenter(self, presenter: ToolPresentationPresenter) -> Result<(), PluginError> {
+        self.reg.add_presentation_presenter(presenter)
+    }
+
     /// Appends one composable presentation step; steps run in registration
     /// order inside the journaled `PresentToolResult` boundary (FIG-3420).
     pub fn presentation_step(self, step: ToolPresentationStep) {
@@ -721,6 +726,19 @@ impl PluginRegistrar {
             &self.registering_plugin_id,
             step,
         );
+    }
+
+    fn add_presentation_presenter(
+        &mut self,
+        presenter: ToolPresentationPresenter,
+    ) -> Result<(), PluginError> {
+        register_singleton_hook(
+            &mut self.contributions.presentation_presenter,
+            &self.registering_plugin_id,
+            "tool presentation presenter",
+            "presentation_presenter",
+            presenter,
+        )
     }
 
     fn operation_owner(&self) -> Result<String, PluginError> {

@@ -1304,7 +1304,9 @@ pub async fn coordinate_tool_provider_with_services(
             crate::plugin::ToolResultProjectionContext {
                 session_id: SessionId::from(session_id.to_string()),
                 call_id: call.call_id.clone(),
+                tool_id: call.tool_id.clone(),
                 tool_name: outcome.record.tool.clone(),
+                render: dispatch.execution_env_spec.render.clone(),
                 args: outcome.record.args.clone(),
                 output: outcome.record.output.clone(),
                 duration_ms: 0,
@@ -1323,6 +1325,7 @@ pub async fn coordinate_tool_provider_with_services(
                 .attachment_acceptance,
         )
         .await
+        .map_err(|error| error.to_string())?
         .model_return;
     model_return.parts.extend(
         outcome

@@ -11,8 +11,7 @@
 //! * a changed presentation environment on a successor host cannot change
 //!   what the child settled: the reopened group answers the recorded return,
 //!   and the successor's steps never run;
-//! * the real budget plugin composes with another step in one chain — the
-//!   return is both budget-truncated and marker-stamped;
+//! * a bounded presentation step composes with another step in one chain;
 //! * a retained full output is a durable session artifact, named by its
 //!   [`crate::AttachmentRef`] in the hint, readable through a second facade
 //!   over the same store, never a worker-local path — and replaying the
@@ -36,6 +35,50 @@ fn marker_step(
         next.parts
             .push(crate::ModelToolReturnPart::text(format!("[{marker}]")));
         Box::pin(async move { Ok::<_, crate::PluginError>(next) })
+    })
+}
+
+fn bounded_step() -> crate::plugin::ToolPresentationStep {
+    Arc::new(|input| {
+        let mut next = input.previous;
+        let text = input
+            .context
+            .output
+            .value_for_projection()
+            .as_str()
+            .unwrap_or("")
+            .to_owned();
+        next.parts = vec![crate::ModelToolReturnPart::text(format!(
+            "{}[cut]{}",
+            &text[..256.min(text.len())],
+            &text[text.len().saturating_sub(256)..]
+        ))];
+        Box::pin(async move { Ok(next) })
+    })
+}
+
+fn retaining_step() -> crate::plugin::ToolPresentationStep {
+    Arc::new(|input| {
+        Box::pin(async move {
+            let text = input
+                .context
+                .output
+                .value_for_projection()
+                .as_str()
+                .unwrap_or("")
+                .to_owned();
+            let reference = input
+                .context
+                .artifacts
+                .retain_text("tool-output:retained", &text)
+                .await?;
+            let mut next = input.previous;
+            next.parts = vec![crate::ModelToolReturnPart::text(format!(
+                "retained as attachment {}",
+                reference.id
+            ))];
+            Ok(next)
+        })
     })
 }
 
@@ -372,7 +415,7 @@ pub async fn a_changed_presentation_environment_on_replay_does_not_change_the_re
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixture, prefix: &str) {
+pub async fn the_oracle_and_a_bounded_step_coexist(fixture: &ToolChildLawFixture, prefix: &str) {
     let session_id = crate::SessionId::from(format!("{prefix}-coexist"));
     let turn_id = crate::TurnId::from(format!("{prefix}-coexist-turn"));
     let scope = crate::ExecutionScope::turn(session_id.clone(), turn_id.clone());
@@ -395,22 +438,10 @@ pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixt
         opener,
         tokio_util::sync::CancellationToken::new(),
         OpenerExtras {
-            plugin_factories: vec![
-                Arc::new(
-                    lash_plugin_tool_output_budget::ToolOutputBudgetPluginFactory::new(
-                        lash_plugin_tool_output_budget::ToolOutputBudgetConfig {
-                            mode: lash_plugin_tool_output_budget::ToolOutputBudgetMode::Bytes,
-                            limit: 512,
-                            max_lines:
-                                lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
-                            head_share_percent: 50,
-                            retain_full_output: false,
-                        },
-                    )
-                    .expect("valid tool output budget config"),
-                ),
-                steps_factory(vec![marker_step("oracle", Arc::clone(&oracle_runs))]),
-            ],
+            plugin_factories: vec![steps_factory(vec![
+                bounded_step(),
+                marker_step("oracle", Arc::clone(&oracle_runs)),
+            ])],
             attachment_store: None,
             clock: None,
         },
@@ -431,12 +462,12 @@ pub async fn the_oracle_and_the_budget_plugin_coexist(fixture: &ToolChildLawFixt
     .await;
     let presented = presented_text(invocation_settlement(&settlement));
     assert!(
-        presented.contains("bytes truncated"),
-        "the budget step truncated the oversized output: {presented:?}"
+        presented.contains("[cut]"),
+        "the bounded step cut the oversized output: {presented:?}"
     );
     assert!(
         presented.ends_with("[oracle]"),
-        "the second step ran after the budget step: {presented:?}"
+        "the second step ran after the bounded step: {presented:?}"
     );
     assert_eq!(oracle_runs.load(Ordering::SeqCst), 1);
     scoped
@@ -540,19 +571,7 @@ pub async fn a_retained_full_output_is_a_durable_artifact_not_a_path(
         opener,
         tokio_util::sync::CancellationToken::new(),
         OpenerExtras {
-            plugin_factories: vec![Arc::new(
-                lash_plugin_tool_output_budget::ToolOutputBudgetPluginFactory::new(
-                    lash_plugin_tool_output_budget::ToolOutputBudgetConfig {
-                        mode: lash_plugin_tool_output_budget::ToolOutputBudgetMode::Bytes,
-                        limit: 512,
-                        max_lines:
-                            lash_plugin_tool_output_budget::DEFAULT_TOOL_OUTPUT_BUDGET_MAX_LINES,
-                        head_share_percent: 50,
-                        retain_full_output: true,
-                    },
-                )
-                .expect("valid tool output budget config"),
-            )],
+            plugin_factories: vec![steps_factory(vec![retaining_step()])],
             attachment_store: Some(attachment_store),
             clock: None,
         },

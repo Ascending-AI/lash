@@ -32,6 +32,8 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
             control: None,
+            view: None,
+            projection_value: None,
         },
     });
     assert!(
@@ -53,6 +55,8 @@ fn remote_process_record_rejects_contradictory_status_and_outcome() {
                 raw: None,
             }),
             control: None,
+            view: None,
+            projection_value: None,
         },
     });
     assert!(
@@ -69,6 +73,8 @@ fn settled_success() -> RemoteProcessAwaitOutput {
         output: RemoteProcessToolCallOutput {
             outcome: RemoteProcessToolCallOutcome::Success(serde_json::Value::Null),
             control: None,
+            view: None,
+            projection_value: None,
         },
     }
 }
@@ -83,6 +89,8 @@ fn settled_cancelled() -> RemoteProcessAwaitOutput {
                 raw: None,
             }),
             control: None,
+            view: None,
+            projection_value: None,
         },
     }
 }
@@ -150,6 +158,8 @@ fn settled_failed() -> RemoteProcessAwaitOutput {
                 raw: None,
             }),
             control: None,
+            view: None,
+            projection_value: None,
         },
     }
 }

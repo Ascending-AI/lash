@@ -261,7 +261,7 @@ impl TryFrom<lash_core::ProcessAwaitOutput> for RemoteProcessAwaitOutput {
     fn try_from(value: lash_core::ProcessAwaitOutput) -> Result<Self, Self::Error> {
         match value {
             lash_core::ProcessAwaitOutput::Settled { output } => Ok(Self::Settled {
-                output: output.try_into()?,
+                output: (*output).try_into()?,
             }),
             lash_core::ProcessAwaitOutput::Abandoned { evidence, control } => Ok(Self::Abandoned {
                 evidence: (*evidence).try_into()?,
@@ -289,7 +289,7 @@ impl TryFrom<RemoteProcessAwaitOutput> for lash_core::ProcessAwaitOutput {
         value.validate("RemoteProcessAwaitOutput")?;
         match value {
             RemoteProcessAwaitOutput::Settled { output } => Ok(Self::Settled {
-                output: output.try_into()?,
+                output: Box::new(output.try_into()?),
             }),
             RemoteProcessAwaitOutput::Abandoned { evidence, control } => Ok(Self::Abandoned {
                 evidence: Box::new(evidence.try_into()?),
@@ -310,7 +310,12 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
     type Error = RemoteProtocolError;
 
     fn try_from(value: lash_core::ToolCallOutput) -> Result<Self, Self::Error> {
-        let lash_core::ToolCallOutput { outcome, control } = value;
+        let lash_core::ToolCallOutput {
+            outcome,
+            control,
+            view,
+            projection_value,
+        } = value;
         let outcome = match outcome {
             lash_core::ToolCallOutcome::Success(value) => RemoteProcessToolCallOutcome::Success(
                 encode_remote_json(value, "RemoteProcessAwaitOutput", "output.outcome.success")?,
@@ -371,6 +376,8 @@ impl TryFrom<lash_core::ToolCallOutput> for RemoteProcessToolCallOutput {
                     encode_remote_json(control, "RemoteProcessAwaitOutput", "output.control")
                 })
                 .transpose()?,
+            view,
+            projection_value,
         })
     }
 }
@@ -379,7 +386,12 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessToolCallOutput) -> Result<Self, Self::Error> {
-        let RemoteProcessToolCallOutput { outcome, control } = value;
+        let RemoteProcessToolCallOutput {
+            outcome,
+            control,
+            view,
+            projection_value,
+        } = value;
         let outcome = match outcome {
             RemoteProcessToolCallOutcome::Success(value) => lash_core::ToolCallOutcome::Success(
                 decode_remote_json(value, "RemoteProcessAwaitOutput", "output.outcome.success")?,
@@ -436,6 +448,8 @@ impl TryFrom<RemoteProcessToolCallOutput> for lash_core::ToolCallOutput {
         Ok(Self {
             outcome,
             control: decode_remote_tool_control(control, "RemoteProcessAwaitOutput")?,
+            view,
+            projection_value,
         })
     }
 }

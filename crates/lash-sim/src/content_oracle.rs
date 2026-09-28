@@ -24,14 +24,10 @@
 //!   (OpenAI chat `choices[0].delta.content`, OpenAI Responses
 //!   `response.output_text.delta`, Anthropic `text_delta`, Google candidate
 //!   part `text`), and its tool calls are the streamed native calls.
-//! * A tool result is the committed `ToolResult` part's `content`: the tool's
-//!   JSON value in `serde_json` compact form while it fits the tool-output
-//!   budget (bytes and lines). Past the budget the standard stack's
-//!   tool-output-budget step keeps a head window: the committed content is
-//!   a preview of at most the byte and line budget that the emitted text (its
-//!   lines rejoined with `\n`) starts with, followed by a
-//!   `\n\n...N <unit> truncated...\n\n` marker and a hint. The marker's
-//!   count is not part of the projection.
+//! * A tool result is the committed `ToolResult` part's `content`: the value
+//!   rendered with the standard renderer's default parameters. A cut includes
+//!   a head and tail within the shared character and line limits, plus a
+//!   notice naming the retained full output.
 //! * Usage is decoded per provider convention into the ledger buckets:
 //!   OpenAI reports prompt tokens inclusive of cached ones (input = prompt −
 //!   cached) and reasoning inside the completion count; Anthropic reports input
@@ -61,6 +57,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use lash_core::SessionStoreFactory;
+use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
 use lash_sansio::SessionId;
 use serde::Serialize;
 use serde_json::Value;
@@ -163,7 +160,16 @@ impl ToolResultContent {
         Self {
             call_id: call_id.to_string(),
             tool_name: tool_name.to_string(),
-            content: value.to_string(),
+            content: lash_core::facade_support::tool_result_text(
+                &BuiltinToolOutputRenderer
+                    .tool_output(
+                        &lash_core::ToolCallOutput::success(value.clone()),
+                        &lash_core::ToolId::new(tool_name),
+                        &ToolRenderParams::default(),
+                    )
+                    .body,
+            )
+            .into_owned(),
         }
     }
 }
@@ -817,12 +823,12 @@ fn tool_results_match(
             call_ids(committed)
         ));
     }
-    let budget = lash::plugins::ToolOutputBudgetConfig::default();
+    let budget = lash_protocol_standard::ToolRenderParams::default();
     for (emitted, committed) in emitted.iter().zip(committed) {
-        budget_projection_matches(
+        rendered_projection_matches(
             &emitted.content,
             &committed.content,
-            budget.limit,
+            budget.value.max_chars,
             budget.max_lines,
         )
         .map_err(|detail| format!("`{}` {detail}", emitted.call_id))?;
@@ -830,55 +836,38 @@ fn tool_results_match(
     Ok(())
 }
 
-/// The tool-output budget projection, as documented in the module docs.
-fn budget_projection_matches(
+/// Check the committed head and tail against the emitted rendering.
+fn rendered_projection_matches(
     emitted: &str,
     committed: &str,
-    max_bytes: usize,
+    max_chars: usize,
     max_lines: usize,
 ) -> Result<(), String> {
-    if emitted.len() <= max_bytes && emitted.lines().count() <= max_lines {
+    if emitted.chars().count() <= max_chars && emitted.lines().count() <= max_lines {
         return describe_divergence(emitted, committed).map_or(Ok(()), Err);
     }
-    let preview_end = committed
-        .match_indices("\n\n...")
-        .map(|(index, _)| index)
-        .find(|index| truncation_marker_at(&committed[index + 5..]))
-        .ok_or_else(|| {
-            format!(
-                "emitted {} bytes over the {max_bytes}-byte/{max_lines}-line budget but the committed {} bytes carry no truncation marker",
-                emitted.len(),
-                committed.len()
-            )
-        })?;
-    let preview = &committed[..preview_end];
-    let rejoined = emitted.lines().collect::<Vec<_>>().join("\n");
-    if preview.is_empty()
-        || preview.len() > max_bytes
-        || preview.lines().count() > max_lines
-        || !rejoined.starts_with(preview)
+    let notice_start = committed.find("[output cut:").ok_or_else(|| {
+        format!(
+            "rendered output exceeded {max_chars} chars/{max_lines} lines but has no cut notice"
+        )
+    })?;
+    let notice_end = committed[notice_start..]
+        .find(']')
+        .map(|index| notice_start + index + 1)
+        .ok_or_else(|| "cut notice has no closing bracket".to_string())?;
+    let head = &committed[..notice_start];
+    let tail = &committed[notice_end..];
+    if committed.chars().count() > max_chars
+        || committed.lines().count() > max_lines
+        || !emitted.starts_with(head)
+        || !emitted.ends_with(tail)
     {
         return Err(format!(
-            "truncated preview of {} bytes is not a head window within the budget: {}",
-            preview.len(),
-            describe_divergence(&rejoined[..rejoined.len().min(preview.len())], preview)
-                .unwrap_or_else(|| "preview exceeds the budget".to_string())
+            "committed head/tail is not within the cap or the emitted rendering: {}",
+            describe_divergence(emitted, committed).unwrap_or_default()
         ));
     }
     Ok(())
-}
-
-/// `N <unit> truncated...\n\n` right after the marker's leading dots.
-fn truncation_marker_at(rest: &str) -> bool {
-    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    digits > 0
-        && [
-            " bytes truncated...\n\n",
-            " lines truncated...\n\n",
-            " tokens truncated...\n\n",
-        ]
-        .iter()
-        .any(|unit| rest[digits..].starts_with(unit))
 }
 
 fn call_ids(results: &[ToolResultContent]) -> Vec<&str> {
@@ -1133,19 +1122,22 @@ mod tests {
     }
 
     #[test]
-    fn over_budget_tool_results_must_be_a_head_window_with_a_marker() {
-        let emitted = format!("{}\u{1f980}tail", "a".repeat(14));
-        // 22 emitted bytes over a 16-byte budget: the crab straddles byte 16.
-        let committed = format!("{}\n\n...5 bytes truncated...\n\nhint", "a".repeat(14));
+    fn over_budget_tool_results_keep_head_and_tail_with_a_notice() {
+        let emitted = format!("{}tail", "a".repeat(300));
+        let notice = "[output cut: showing head and tail; full output: attachment full]";
+        let committed = format!("{}{}{}", "a".repeat(40), notice, "tail");
         assert_eq!(
-            budget_projection_matches(&emitted, &committed, 16, 400),
+            rendered_projection_matches(&emitted, &committed, 180, 400),
             Ok(())
         );
-        let wrong_head = format!("{}\n\n...5 bytes truncated...\n\nhint", "b".repeat(14));
-        assert!(budget_projection_matches(&emitted, &wrong_head, 16, 400).is_err());
-        assert!(budget_projection_matches(&emitted, &emitted, 16, 400).is_err());
-        assert_eq!(budget_projection_matches("fits", "fits", 16, 400), Ok(()));
-        assert!(budget_projection_matches("fits", "fit", 16, 400).is_err());
+        let wrong_head = format!("{}{}{}", "b".repeat(40), notice, "tail");
+        assert!(rendered_projection_matches(&emitted, &wrong_head, 180, 400).is_err());
+        assert!(rendered_projection_matches(&emitted, &emitted, 180, 400).is_err());
+        assert_eq!(
+            rendered_projection_matches("fits", "fits", 180, 400),
+            Ok(())
+        );
+        assert!(rendered_projection_matches("fits", "fit", 180, 400).is_err());
     }
 
     #[test]

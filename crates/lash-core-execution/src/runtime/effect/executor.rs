@@ -353,7 +353,9 @@ impl PresentationLocalExecution {
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let RuntimeEffectCommand::PresentToolResult {
             call_id,
+            tool_id,
             tool_name,
+            render,
             args,
             output,
         } = envelope.command
@@ -372,7 +374,9 @@ impl PresentationLocalExecution {
         let context = crate::plugin::ToolResultProjectionContext {
             session_id: crate::SessionId::from(self.plugins.session_id().to_string()),
             call_id,
+            tool_id,
             tool_name,
+            render,
             args,
             output: *output,
             duration_ms: self.duration_ms,
@@ -381,7 +385,7 @@ impl PresentationLocalExecution {
         let presentation = self
             .plugins
             .present_tool_result(context, self.settlement, &self.attachment_acceptance)
-            .await;
+            .await?;
         Ok(RuntimeEffectOutcome::PresentToolResult {
             presentation: Box::new(presentation),
         })

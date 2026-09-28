@@ -3,6 +3,182 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
+    "AttachmentRef": {
+      "properties": {
+        "byte_len": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "media_type": {
+          "type": "string"
+        },
+        "type_metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AttachmentTypeMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "byte_len",
+        "id",
+        "media_type"
+      ],
+      "type": "object"
+    },
+    "AttachmentSource": {
+      "description": "The ownership-explicit attachment source at the LLM/content seam.\n\nInline bytes are transient and must be normalized to `Stored` before a durable effect is emitted. Borrowed sources are never fetched by Lash and never enter the attachment manifest.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "bytes": {
+              "items": {
+                "format": "uint8",
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "inline"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "bytes",
+            "media_type",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment_ref": {
+              "$ref": "#/definitions/AttachmentRef"
+            },
+            "source": {
+              "enum": [
+                "stored"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "attachment_ref",
+            "source"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "media_type": {
+              "type": "string"
+            },
+            "source": {
+              "enum": [
+                "external_url"
+              ],
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "media_type",
+            "source",
+            "url"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "media_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider_scope": {
+              "$ref": "#/definitions/ProviderFileScope"
+            },
+            "source": {
+              "enum": [
+                "provider_file"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "provider_scope",
+            "source"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "AttachmentTypeMetadata": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "height": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "image"
+              ],
+              "type": "string"
+            },
+            "width": {
+              "format": "uint32",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "CancelOrigin": {
       "description": "The runtime or actor decision that requested cancellation of a process.",
       "enum": [
@@ -338,6 +514,23 @@
           "type": "object"
         }
       ]
+    },
+    "ProviderFileScope": {
+      "additionalProperties": false,
+      "description": "Provider/account boundary for a provider-owned file id.",
+      "properties": {
+        "credential_scope": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "credential_scope",
+        "provider"
+      ],
+      "type": "object"
     },
     "RemoteAbandonEvidence": {
       "description": "Wire mirror of Abandoned-terminal evidence.",
@@ -850,6 +1043,17 @@
         "control": true,
         "outcome": {
           "$ref": "#/definitions/RemoteProcessToolCallOutcome"
+        },
+        "projection_value": true,
+        "view": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ToolView"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -1307,6 +1511,132 @@
         "session_id",
         "tool_call_id"
       ],
+      "type": "object"
+    },
+    "ToolView": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "items": {
+            "$ref": "#/definitions/ToolViewBlock"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "blocks"
+      ],
+      "type": "object"
+    },
+    "ToolViewBlock": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/definitions/ToolViewMeta"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "text"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "meta": {
+              "$ref": "#/definitions/ToolViewMeta"
+            },
+            "source": {
+              "$ref": "#/definitions/AttachmentSource"
+            },
+            "type": {
+              "enum": [
+                "attachment"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "$ref": "#/definitions/ToolViewMeta"
+            },
+            "mime_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "resource_link"
+              ],
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "uri"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ToolViewMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "last_modified": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "priority": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     }
   },

@@ -7,6 +7,146 @@ use super::*;
 use lash_core::ToolProvider;
 use lash_sansio::sync::{MutexExt, RwLockExt};
 
+#[tokio::test]
+async fn mcp_view_preserves_order_and_filters_nonassistant_blocks() {
+    let result = serde_json::from_value(json!({
+        "content": [
+            {"type":"text","text":"private","annotations":{"audience":["user"]}},
+            {"type":"text","text":"public"},
+            {"type":"resource_link","uri":"file:///report","name":"report","mimeType":"text/plain","annotations":{"priority":0.7,"lastModified":"2026-09-28T00:00:00Z"}},
+            {"type":"resource","resource":{"uri":"file:///source","text":"body"}}
+        ],
+        "structuredContent":{"answer":42}
+    })).expect("valid MCP result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert_eq!(
+        output.value_for_projection(),
+        json!({"structuredContent":{"answer":42},"content":[{"type":"text","text":"public"},{"type":"resource_link","uri":"file:///report","name":"report","mimeType":"text/plain"},{"type":"resource","uri":"file:///source","text":"body"}]})
+    );
+    let blocks = &output.view.expect("authored view").blocks;
+    assert_eq!(blocks.len(), 3);
+    assert!(matches!(&blocks[0], ToolViewBlock::Text { text, .. } if text == "public"));
+    assert!(
+        matches!(&blocks[1], ToolViewBlock::ResourceLink { uri, name, mime_type, meta, .. }
+        if uri == "file:///report" && name == "report" && mime_type.as_deref() == Some("text/plain")
+            && meta.priority.is_some_and(|priority| (priority - 0.7).abs() < 0.000001)
+            && meta.last_modified.as_deref() == Some("2026-09-28T00:00:00+00:00")),
+        "{:?}",
+        blocks[1]
+    );
+    assert!(
+        matches!(&blocks[2], ToolViewBlock::Text { text, .. } if text == "file:///source\nbody")
+    );
+}
+
+#[tokio::test]
+async fn mcp_json_copy_uses_the_structured_value_without_a_view() {
+    let result = serde_json::from_value(json!({
+        "content":[{"type":"text","text":"{\"answer\":42}"}],
+        "structuredContent":{"answer":42}
+    }))
+    .expect("valid MCP result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert_eq!(output.value_for_projection(), json!({"answer":42}));
+    assert!(
+        matches!(&output.outcome, lash_core::ToolCallOutcome::Success(value)
+        if value.to_json_value() == json!({"structuredContent":{"answer":42},"content":[]}))
+    );
+    assert!(output.view.is_none());
+}
+
+#[test]
+fn imported_mcp_tools_declare_the_fixed_result_envelope() {
+    let with_schema: rmcp::model::Tool = serde_json::from_value(json!({
+        "name":"lookup", "inputSchema":{"type":"object"},
+        "outputSchema":{"type":"object","properties":{"answer":{"type":"integer"}}}
+    }))
+    .expect("tool");
+    let without_schema = advertised_tool("plain");
+    let tools = import_tools("test", vec![with_schema, without_schema]).expect("imports");
+    for tool in tools.values() {
+        let schema = &tool.definition.contract.output_schema.canonical;
+        assert_eq!(schema["required"], json!(["content"]));
+        assert_eq!(schema["properties"]["content"]["type"], "array");
+        assert_eq!(
+            schema["properties"]["content"]["items"]["oneOf"]
+                .as_array()
+                .map(Vec::len),
+            Some(4)
+        );
+        if tool.original_name == "lookup" {
+            assert_eq!(
+                schema["properties"]["structuredContent"]["properties"]["answer"]["type"],
+                "integer"
+            );
+        } else {
+            assert_eq!(schema["properties"]["structuredContent"], json!({}));
+        }
+    }
+}
+
+#[tokio::test]
+async fn mcp_json_copy_is_deduplicated_among_other_blocks() {
+    let result = serde_json::from_value(json!({
+        "content":[
+            {"type":"text","text":"before"},
+            {"type":"text","text":"{\"answer\":42}"},
+            {"type":"text","text":"after"}
+        ],
+        "structuredContent":{"answer":42}
+    }))
+    .expect("valid result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert_eq!(
+        output.value_for_projection(),
+        json!({
+            "structuredContent":{"answer":42},
+            "content":[{"type":"text","text":"before"},{"type":"text","text":"after"}]
+        })
+    );
+    assert_eq!(output.view.expect("view").blocks.len(), 2);
+}
+
+#[tokio::test]
+async fn mcp_user_only_content_has_an_empty_assistant_view() {
+    let result = serde_json::from_value(json!({
+        "content":[{"type":"text","text":"private","annotations":{"audience":["user"]}}]
+    }))
+    .expect("valid result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert_eq!(output.value_for_projection(), json!({"content":[]}));
+    assert!(output.view.expect("empty assistant view").blocks.is_empty());
+}
+
+#[tokio::test]
+async fn mcp_error_keeps_its_classification_and_message() {
+    let result = serde_json::from_value(
+        json!({"content":[{"type":"text","text":"bad input"}],"isError":true}),
+    )
+    .expect("valid MCP result");
+    let output = tool_result_from_rmcp(result, &lash_core::testing::mock_attempt_context())
+        .await
+        .into_done_output()
+        .expect("settled");
+    assert!(
+        matches!(output.outcome, lash_core::ToolCallOutcome::Failure(ref failure)
+        if failure.class == ToolFailureClass::Execution && failure.code == "mcp_tool_error" && failure.message == "bad input")
+    );
+    assert!(output.view.is_none());
+}
+
 fn mcp_name(server: &str, native_tool: &str) -> String {
     naming::build_prefixed_name(server, native_tool).0
 }
@@ -385,7 +525,6 @@ async fn connect_tolerates_unreachable_server() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), "exit 1".to_string()],
@@ -542,7 +681,6 @@ async fn colliding_attach_cannot_kill_native_tools_during_catalog_rebuild() {
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "sh".to_string(),
             args: vec![
@@ -628,7 +766,6 @@ async fn eager_connects_start_in_parallel() {
         startup_timeout_ms: 1_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "sh".to_string(),
             args: vec![
@@ -695,7 +832,6 @@ async fn tools_list_changed_refreshes_the_live_catalog() {
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
@@ -777,7 +913,6 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
@@ -838,7 +973,10 @@ async fn collision_drop_preserves_the_survivor_grant_and_rejects_the_dropped_too
         survivor.is_success(),
         "survivor grant must remain valid: {survivor:?}"
     );
-    assert_eq!(survivor.value_for_projection(), json!("underscore"));
+    assert_eq!(
+        survivor.value_for_projection(),
+        json!({"content":[{"type":"text","text":"underscore"}]})
+    );
 
     let dropped_context = lash_core::testing::mock_attempt_context_with_execution_binding(json!({
         "kind": "mcp",
@@ -916,7 +1054,6 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
             startup_timeout_ms: 2_000,
             call_policy: McpCallPolicy::default(),
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
@@ -1003,7 +1140,7 @@ async fn exercise_deferred_call_across_catalog_refresh(retain_original: bool) {
     );
     assert_eq!(
         result.value_for_projection(),
-        json!("underscore"),
+        json!({"content":[{"type":"text","text":"underscore"}]}),
         "accepted call must dispatch the captured native tool after refresh"
     );
     pool.shutdown_all().await;
@@ -1064,7 +1201,6 @@ async fn attach_reaps_the_previous_child_before_starting_its_replacement() {
         startup_timeout_ms: 2_000,
         call_policy: McpCallPolicy::default(),
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "sh".to_string(),
             args: vec!["-c".to_string(), script],
@@ -1204,7 +1340,6 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script.to_string()],
@@ -1277,7 +1412,10 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
     let first = dispatch(&pool, &hyphen_operation)
         .await
         .expect("hyphenated Lashlang operation is available before respawn");
-    assert_eq!(first.value_for_projection(), json!("hyphen"));
+    assert_eq!(
+        first.value_for_projection(),
+        json!({"content":[{"type":"text","text":"hyphen"}]})
+    );
 
     replacement.await;
     assert_eq!(bound_operation(&pool, "get-user"), hyphen_operation);
@@ -1286,7 +1424,10 @@ async fn normalization_collisions_dispatch_stably_across_respawn() {
         .await
         .expect("underscore Lashlang operation is available after respawn");
     assert!(result.is_success(), "replacement call succeeds: {result:?}");
-    assert_eq!(result.value_for_projection(), json!("underscore"));
+    assert_eq!(
+        result.value_for_projection(),
+        json!({"content":[{"type":"text","text":"underscore"}]})
+    );
 
     pool.shutdown_all().await;
 }
@@ -1328,7 +1469,6 @@ async fn shutdown_all_reaps_child_from_in_progress_reconnect_before_return() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script],
@@ -1399,7 +1539,6 @@ async fn shutdown_all_wakes_actor_sleeping_until_keepalive() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "unused".to_string(),
                 args: Vec::new(),
@@ -1472,7 +1611,6 @@ async fn pool_reconnects_after_transport_death() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script],
@@ -1567,7 +1705,6 @@ async fn call_timeout_is_a_typed_retryable_failure() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script],
@@ -1638,7 +1775,6 @@ async fn discovery_hang_surfaces_startup_timeout() {
             ..Default::default()
         },
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "sh".to_string(),
             args: vec!["-c".to_string(), script],
@@ -1725,7 +1861,6 @@ async fn concurrent_calls_are_not_serialized_by_the_service_mutex() {
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "sh".to_string(),
                 args: vec!["-c".to_string(), script],

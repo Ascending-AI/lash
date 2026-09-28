@@ -359,7 +359,7 @@ async fn regenerate_postgres_durable_fixture() {
     install_fixed_catalog_identity(&storage).await;
     let handles = open_handles(&storage, fixture::FIXTURE_WRITE_MS);
     let expected = Box::pin(fixture::seed(&handles)).await;
-    normalize_server_authoritative_fixture_rows(&storage).await;
+    normalize_fixture_rows(&storage).await;
     drop(handles);
     storage.pool().close().await;
 
@@ -1371,7 +1371,33 @@ async fn install_fixed_catalog_identity(storage: &PostgresStorage) {
         .expect("install the fixed fixture catalog identity");
 }
 
-async fn normalize_server_authoritative_fixture_rows(storage: &PostgresStorage) {
+async fn normalize_fixture_rows(storage: &PostgresStorage) {
+    let pinned = sqlx::query(
+        "UPDATE lash_parent_end_plans SET obligation_id = $1 WHERE parent_kind = 'process'",
+    )
+    .bind(fixture::FIXTURE_PARENT_END_OBLIGATION_ID)
+    .execute(storage.pool())
+    .await
+    .expect("pin the fixture parent-end obligation id");
+    assert_eq!(
+        pinned.rows_affected(),
+        1,
+        "the fixture seeds one parent-end obligation"
+    );
+    let pinned = sqlx::query(
+        "UPDATE lash_process_events
+         SET event_json = jsonb_set(event_json::jsonb, '{occurred_at}', to_jsonb($1::bigint))::text
+         WHERE event_type = 'process.first_started'",
+    )
+    .bind(fixture::FIXTURE_WRITE_MS as i64)
+    .execute(storage.pool())
+    .await
+    .expect("pin the fixture first-started event time");
+    assert_eq!(
+        pinned.rows_affected(),
+        1,
+        "the fixture seeds one first-started event"
+    );
     sqlx::query(
         "UPDATE lash_session_execution_leases
          SET lease_claimed_at_ms = $2, lease_expires_at_ms = $3, lease_term_ms = $4

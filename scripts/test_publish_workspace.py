@@ -30,7 +30,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-llm-transport": "lash-internal-llm-transport",
     "lash-plugin-mcp": "lash-internal-plugin-mcp",
     "lash-plugin-process-controls": "lash-internal-plugin-process-controls",
-    "lash-plugin-tool-output-budget": "lash-internal-plugin-tool-output-budget",
     "lash-plugin-standard-compaction": "lash-internal-plugin-standard-compaction",
     "lash-postgres-store": "lash-internal-postgres-store",
     "lash-protocol-rlm": "lash-internal-protocol-rlm",

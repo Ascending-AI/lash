@@ -2080,7 +2080,6 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-lashlang",
- "lash-internal-plugin-tool-output-budget",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "pretty_assertions",
@@ -2406,18 +2405,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-internal-plugin-tool-output-budget"
-version = "0.0.0-dev"
-dependencies = [
- "lash-internal-core",
- "lash-internal-protocol-standard",
- "lash-internal-sansio",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "lash-internal-postgres-store"
 version = "0.0.0-dev"
 dependencies = [
@@ -2488,11 +2475,13 @@ dependencies = [
  "lash-internal-core",
  "lash-internal-core-worker",
  "lash-internal-plugin-process-controls",
+ "lash-internal-render",
  "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "mutants",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-util",
@@ -2832,7 +2821,6 @@ dependencies = [
  "lash-internal-llm-tools",
  "lash-internal-plugin-process-controls",
  "lash-internal-plugin-standard-compaction",
- "lash-internal-plugin-tool-output-budget",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-provider-openai",
@@ -2912,7 +2900,6 @@ dependencies = [
  "lash-internal-plugin-mcp",
  "lash-internal-plugin-process-controls",
  "lash-internal-plugin-standard-compaction",
- "lash-internal-plugin-tool-output-budget",
  "lash-internal-postgres-store",
  "lash-internal-protocol-rlm",
  "lash-internal-protocol-standard",

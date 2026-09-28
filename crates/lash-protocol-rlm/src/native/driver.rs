@@ -711,7 +711,12 @@ fn bounded_tool_call_output(output: &ToolCallOutput) -> ToolCallOutput {
             failure: bounded_tool_failure(failure),
         },
     });
-    ToolCallOutput { outcome, control }
+    ToolCallOutput {
+        outcome,
+        control,
+        view: None,
+        projection_value: None,
+    }
 }
 
 fn bounded_tool_failure(failure: &ToolFailure) -> ToolFailure {

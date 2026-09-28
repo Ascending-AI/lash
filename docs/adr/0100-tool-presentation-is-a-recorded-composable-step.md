@@ -61,6 +61,15 @@ Three properties of that boundary had drifted from the rest of the runtime:
   happens exactly once, and the recorded `artifacts` list names what was
   retained.
 
+Amended 2026-09-28 (FIG-3932): standard protocol now registers one required
+`ToolPresentationPresenter` before the ordered optional steps. Its
+`ToolOutputRenderer` reads the renderer id and resolved per-tool parameters
+recorded with the tool command, renders an authored view or the tool value,
+and applies a shared character and line limit. A cut keeps head and tail,
+records visible ranges, and retains the complete text through the artifact
+seam above. An unavailable recorded renderer refuses presentation. The
+superseded tool-output-budget plugin and its `SpillPolicy` are deleted.
+
 ## Consequences
 
 * Any number of plugins shape the model-facing result; ordering is the

@@ -1607,9 +1607,9 @@ impl RuntimeEffectControllerError {
 
     /// Marks this failure of an uncommitted host derivation — an
     /// execution-environment sync's rebuild, or a recorded execution-environment
-    /// load, that met a live fault — as safe to execute again: the claim is
-    /// released unsealed instead of journaling the failure as the effect's
-    /// outcome (FIG-3587, FIG-3683).
+    /// load, or a presentation whose recorded renderer is unavailable — as
+    /// safe to execute again. The claim is released unsealed instead of
+    /// journaling the failure as the effect's outcome (FIG-3587, FIG-3683).
     ///
     /// The one fault it never marks is the session's own retirement
     /// (FIG-3630): a deleted or closing session is a settled fact, not a
@@ -1634,8 +1634,9 @@ impl RuntimeEffectControllerError {
             .retryable_uncommitted_derivation()
     }
 
-    /// Only the host derivations — the before-LLM-call and assistant-response hooks, the
-    /// execution-environment sync and the execution-environment load — and a
+    /// Only the host derivations — the before-LLM-call and assistant-response hooks,
+    /// execution-environment sync, execution-environment load, and presentation
+    /// whose recorded renderer is unavailable — and a
     /// drive's admission and seal, a root's resolution (its spec read and its
     /// definition lookup, FIG-3838), a root's scope close and a session's close,
     /// whose store faults are the attempt's (FIG-3600), and a process command
@@ -1651,6 +1652,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::AssistantResponseHooks
                 | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::LoadExecutionEnv
+                | RuntimeEffectKind::PresentToolResult
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
                 | RuntimeEffectKind::ClaimAcceptedTurnInput

@@ -521,7 +521,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-presentation-recorded-env"
             ),
             (
-                the_oracle_and_the_budget_plugin_coexist,
+                the_oracle_and_a_bounded_step_coexist,
                 "tool-child-presentation-coexistence"
             ),
             (

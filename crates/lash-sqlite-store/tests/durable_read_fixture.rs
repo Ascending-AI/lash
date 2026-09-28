@@ -528,6 +528,7 @@ async fn regenerate_sqlite_durable_fixture() {
     let expected = Box::pin(fixture::seed(&handles)).await;
     drop(handles);
     pin_attachment_write_token(&temp.path().join("durable-core.db"));
+    pin_parent_end_obligation_id(&temp.path().join("processes.db"));
     checkpoint_files(temp.path());
 
     let destination = fixture_dir();
@@ -546,6 +547,21 @@ async fn regenerate_sqlite_durable_fixture() {
         json_with_newline(&versions_at(temp.path())),
     )
     .expect("write SQLite fixture versions");
+}
+
+fn pin_parent_end_obligation_id(processes_path: &Path) {
+    let connection = rusqlite::Connection::open(processes_path)
+        .expect("open SQLite process fixture to pin its obligation id");
+    let rewritten = connection
+        .execute(
+            "UPDATE parent_end_plans SET obligation_id = ?1 WHERE parent_kind = 'process'",
+            rusqlite::params![fixture::FIXTURE_PARENT_END_OBLIGATION_ID],
+        )
+        .expect("pin the fixture parent-end obligation id");
+    assert_eq!(rewritten, 1, "the fixture seeds one parent-end obligation");
+    connection
+        .execute_batch("VACUUM")
+        .expect("canonicalize SQLite pages after replacing the minted id");
 }
 
 /// Replace the random write token `begin_attachment_write` minted while seeding

@@ -17532,10 +17532,6 @@
               "standard_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -17845,10 +17841,6 @@
                 "values": {}
               },
               "rlm_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -18277,10 +18269,6 @@
               "rlm_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -18699,10 +18687,6 @@
               "rlm_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -19117,10 +19101,6 @@
               "subagents": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -19450,10 +19430,6 @@
                 "values": {}
               },
               "subagents": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -19870,10 +19846,6 @@
               "rlm_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -20286,10 +20258,6 @@
                 "values": {}
               },
               "rlm_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -20726,10 +20694,6 @@
               "subagents": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -21021,10 +20985,6 @@
                 "values": {}
               },
               "subagents": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -21431,10 +21391,6 @@
                 "values": {}
               },
               "rlm_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -21883,10 +21839,6 @@
                 "values": {}
               },
               "rlm_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -23529,10 +23481,6 @@
               "standard_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -24257,10 +24205,6 @@
                 "values": {}
               },
               "standard_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -25316,10 +25260,6 @@
                 "values": {}
               },
               "standard_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }
@@ -26860,10 +26800,6 @@
               "standard_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -27262,10 +27198,6 @@
               "standard_protocol": {
                 "generation": 0,
                 "values": {}
-              },
-              "tool_output_budget": {
-                "generation": 0,
-                "values": {}
               }
             }
           }
@@ -27662,10 +27594,6 @@
                 "values": {}
               },
               "standard_protocol": {
-                "generation": 0,
-                "values": {}
-              },
-              "tool_output_budget": {
                 "generation": 0,
                 "values": {}
               }

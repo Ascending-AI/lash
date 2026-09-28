@@ -30,7 +30,7 @@ use http::HeaderName;
 use rmcp::ServiceError;
 use rmcp::model::{
     CallToolRequestParams, ClientRequest, Content, PingRequest, ProtocolVersion, RawContent,
-    Request, ResourceContents, ServerResult,
+    Request, ResourceContents, Role, ServerResult,
 };
 use rmcp::service::{Peer, PeerRequestOptions, RoleClient};
 use serde_json::{Value, json};
@@ -38,7 +38,8 @@ use tokio::time::timeout;
 
 use lash_core::{
     AttachmentCreateMeta, AttemptContext, MediaType, ToolCallOutput, ToolDefinition, ToolFailure,
-    ToolFailureClass, ToolFailureSource, ToolId, ToolOutcome, ToolRetryStatus, ToolValue,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolOutcome, ToolRetryStatus, ToolValue, ToolView,
+    ToolViewBlock, ToolViewMeta,
 };
 use lash_tool_support::ToolDefinitionBindingExt;
 
@@ -739,8 +740,7 @@ impl McpConnectionPool {
         match response {
             Ok(ServerResult::CallToolResult(result)) => {
                 entry.record_call_success(service_generation);
-                tool_result_from_rmcp(result, context, entry.config.binary_content_attachments())
-                    .await
+                tool_result_from_rmcp(result, context).await
             }
             Ok(_) => ToolOutcome::err_fmt(McpError::Protocol(
                 ServiceError::UnexpectedResponse.to_string(),
@@ -1374,11 +1374,7 @@ fn import_tools_with_name_builder(
             .map(str::trim)
             .unwrap_or_default();
         let input_schema = Value::Object((*tool.input_schema).clone());
-        let output_schema = tool
-            .output_schema
-            .as_ref()
-            .map(|s| Value::Object((**s).clone()))
-            .unwrap_or_else(|| json!({}));
+        let output_schema = mcp_result_schema(tool.output_schema.as_deref());
         let (prefixed, lashlang_binding) = build_name(server_name, &original_name);
         let tool_id = naming::durable_tool_id(server_name, &original_name);
 
@@ -1415,22 +1411,70 @@ fn import_tools_with_name_builder(
     Ok(imported)
 }
 
+fn mcp_result_schema(structured_schema: Option<&serde_json::Map<String, Value>>) -> Value {
+    let block = json!({
+        "oneOf": [
+            {"type":"object","properties":{"type":{"const":"text"},"text":{"type":"string"}},"required":["type","text"]},
+            {"type":"object","properties":{"type":{"enum":["image","audio"]},"attachment":{},"mimeType":{"type":"string"}},"required":["type","attachment","mimeType"]},
+            {"type":"object","properties":{"type":{"const":"resource"},"uri":{"type":"string"},"mimeType":{"type":"string"},"text":{"type":"string"},"attachment":{}},"required":["type","uri"]},
+            {"type":"object","properties":{"type":{"const":"resource_link"},"uri":{"type":"string"},"name":{"type":"string"},"title":{"type":"string"},"description":{"type":"string"},"mimeType":{"type":"string"}},"required":["type","uri","name"]}
+        ]
+    });
+    let mut properties = serde_json::Map::new();
+    properties.insert("content".into(), json!({"type":"array","items":block}));
+    properties.insert(
+        "structuredContent".into(),
+        structured_schema
+            .map(|schema| Value::Object(schema.clone()))
+            .unwrap_or_else(|| json!({})),
+    );
+    json!({"type":"object","properties":properties,"required":["content"]})
+}
+
+fn mcp_block(kind: &str, fields: impl IntoIterator<Item = (&'static str, ToolValue)>) -> ToolValue {
+    let mut block = BTreeMap::from([("type".into(), ToolValue::String(kind.into()))]);
+    block.extend(fields.into_iter().map(|(key, value)| (key.into(), value)));
+    ToolValue::Object(block)
+}
+
 async fn tool_result_from_rmcp(
     result: rmcp::model::CallToolResult,
     context: &AttemptContext<'_>,
-    binary_content_attachments: bool,
 ) -> ToolOutcome {
     let is_error = result.is_error.unwrap_or(false);
-
+    let structured = result.structured_content;
+    let structured_projection = structured.clone();
     let mut text_parts = Vec::new();
-    let mut content_items: Vec<ToolValue> = Vec::new();
-    let mut has_attachments = false;
+    let mut content_items = Vec::new();
+    let mut view_blocks = Vec::new();
 
-    for Content { raw, .. } in result.content {
+    for content in result.content {
+        if content
+            .audience()
+            .is_some_and(|audience| !audience.contains(&Role::Assistant))
+        {
+            continue;
+        }
+        let meta = ToolViewMeta {
+            priority: content.priority().map(f64::from),
+            last_modified: content.timestamp().map(|timestamp| timestamp.to_rfc3339()),
+        };
+        let Content { raw, .. } = content;
+        if let RawContent::Text(text) = &raw
+            && structured.as_ref().is_some_and(|value| {
+                serde_json::from_str::<Value>(&text.text).ok().as_ref() == Some(value)
+            })
+        {
+            continue;
+        }
         match raw {
             RawContent::Text(text) => {
                 text_parts.push(text.text.clone());
-                content_items.push(ToolValue::String(text.text));
+                view_blocks.push(ToolViewBlock::Text {
+                    text: text.text.clone(),
+                    meta,
+                });
+                content_items.push(mcp_block("text", [("text", ToolValue::String(text.text))]));
             }
             RawContent::Image(image) => {
                 let reference =
@@ -1440,12 +1484,20 @@ async fn tool_result_from_rmcp(
                         Ok(reference) => reference,
                         Err(result) => return result,
                     };
-                has_attachments = true;
-                content_items.push(ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                    reference,
-                )));
+                let source = lash_core::AttachmentSource::stored(reference);
+                view_blocks.push(ToolViewBlock::Attachment {
+                    source: source.clone(),
+                    meta,
+                });
+                content_items.push(mcp_block(
+                    "image",
+                    [
+                        ("attachment", ToolValue::Attachment(source)),
+                        ("mimeType", ToolValue::String(image.mime_type)),
+                    ],
+                ));
             }
-            RawContent::Audio(audio) if binary_content_attachments => {
+            RawContent::Audio(audio) => {
                 let reference =
                     match store_mcp_attachment(context, &audio.data, &audio.mime_type, "MCP audio")
                         .await
@@ -1453,78 +1505,107 @@ async fn tool_result_from_rmcp(
                         Ok(reference) => reference,
                         Err(result) => return result,
                     };
-                has_attachments = true;
-                content_items.push(ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                    reference,
-                )));
+                let source = lash_core::AttachmentSource::stored(reference);
+                view_blocks.push(ToolViewBlock::Attachment {
+                    source: source.clone(),
+                    meta,
+                });
+                content_items.push(mcp_block(
+                    "audio",
+                    [
+                        ("attachment", ToolValue::Attachment(source)),
+                        ("mimeType", ToolValue::String(audio.mime_type)),
+                    ],
+                ));
             }
-            RawContent::Resource(resource) if binary_content_attachments => {
-                match resource.resource {
-                    ResourceContents::BlobResourceContents {
-                        uri,
-                        mime_type,
-                        blob,
-                        ..
-                    } => {
-                        let Some(mime_type) = mime_type else {
-                            return ToolOutcome::err_fmt(
-                                "MCP binary resource attachment is missing its MIME type",
-                            );
-                        };
-                        let reference = match store_mcp_attachment(
-                            context,
-                            &blob,
-                            &mime_type,
-                            &format!("MCP resource {uri}"),
-                        )
-                        .await
-                        {
-                            Ok(reference) => reference,
-                            Err(result) => return result,
-                        };
-                        has_attachments = true;
-                        content_items.push(ToolValue::Attachment(
-                            lash_core::AttachmentSource::stored(reference),
-                        ));
-                    }
-                    text_resource => {
-                        if let Ok(value) = serde_json::to_value(text_resource) {
-                            content_items.push(ToolValue::untrusted_json(value));
-                        }
-                    }
+            RawContent::Resource(resource) => match resource.resource {
+                ResourceContents::BlobResourceContents {
+                    uri,
+                    mime_type,
+                    blob,
+                    ..
+                } => {
+                    let mime_type = mime_type.unwrap_or_else(|| "application/octet-stream".into());
+                    let reference = match store_mcp_attachment(
+                        context,
+                        &blob,
+                        &mime_type,
+                        &format!("MCP resource {uri}"),
+                    )
+                    .await
+                    {
+                        Ok(reference) => reference,
+                        Err(result) => return result,
+                    };
+                    let source = lash_core::AttachmentSource::stored(reference);
+                    view_blocks.push(ToolViewBlock::Attachment {
+                        source: source.clone(),
+                        meta,
+                    });
+                    content_items.push(mcp_block(
+                        "resource",
+                        [
+                            ("uri", ToolValue::String(uri)),
+                            ("mimeType", ToolValue::String(mime_type)),
+                            ("attachment", ToolValue::Attachment(source)),
+                        ],
+                    ));
                 }
-            }
-            other => {
-                if let Ok(value) = serde_json::to_value(&other) {
-                    content_items.push(ToolValue::untrusted_json(value));
+                ResourceContents::TextResourceContents {
+                    uri,
+                    mime_type,
+                    text,
+                    ..
+                } => {
+                    view_blocks.push(ToolViewBlock::Text {
+                        text: format!("{uri}\n{text}"),
+                        meta,
+                    });
+                    let mut fields = vec![
+                        ("uri", ToolValue::String(uri)),
+                        ("text", ToolValue::String(text)),
+                    ];
+                    if let Some(mime_type) = mime_type {
+                        fields.push(("mimeType", ToolValue::String(mime_type)));
+                    }
+                    content_items.push(mcp_block("resource", fields));
                 }
+            },
+            RawContent::ResourceLink(link) => {
+                view_blocks.push(ToolViewBlock::ResourceLink {
+                    uri: link.uri.clone(),
+                    name: link.name.clone(),
+                    title: link.title.clone(),
+                    description: link.description.clone(),
+                    mime_type: link.mime_type.clone(),
+                    meta,
+                });
+                let mut fields = vec![
+                    ("uri", ToolValue::String(link.uri)),
+                    ("name", ToolValue::String(link.name)),
+                ];
+                if let Some(title) = link.title {
+                    fields.push(("title", ToolValue::String(title)));
+                }
+                if let Some(description) = link.description {
+                    fields.push(("description", ToolValue::String(description)));
+                }
+                if let Some(mime_type) = link.mime_type {
+                    fields.push(("mimeType", ToolValue::String(mime_type)));
+                }
+                content_items.push(mcp_block("resource_link", fields));
             }
         }
     }
 
-    let value = if let Some(structured) = result.structured_content {
-        if !has_attachments {
-            ToolValue::untrusted_json(structured)
-        } else {
-            ToolValue::Object(
-                [
-                    (
-                        "structured".to_string(),
-                        ToolValue::untrusted_json(structured),
-                    ),
-                    ("content".to_string(), ToolValue::Array(content_items)),
-                ]
-                .into_iter()
-                .collect(),
-            )
-        }
-    } else if content_items.is_empty() {
-        ToolValue::Null
-    } else if content_items.len() == 1 {
-        content_items.into_iter().next().unwrap_or(ToolValue::Null)
-    } else {
-        ToolValue::Array(content_items)
-    };
+    let mut fields = BTreeMap::from([("content".into(), ToolValue::Array(content_items))]);
+    if let Some(structured) = structured {
+        fields.insert(
+            "structuredContent".into(),
+            ToolValue::untrusted_json(structured),
+        );
+    }
+    let value = ToolValue::Object(fields);
     if is_error {
         ToolOutcome::from_output(ToolCallOutput::failure(ToolFailure {
             class: ToolFailureClass::Execution,
@@ -1539,7 +1620,16 @@ async fn tool_result_from_rmcp(
             raw: Some(value),
         }))
     } else {
-        ToolOutcome::from_output(ToolCallOutput::success_tool_value(value))
+        let output = ToolCallOutput::success_tool_value(value);
+        ToolOutcome::from_output(
+            if let Some(structured) = structured_projection.filter(|_| view_blocks.is_empty()) {
+                output.with_projection_value(structured)
+            } else {
+                output.with_view(ToolView {
+                    blocks: view_blocks,
+                })
+            },
+        )
     }
 }
 

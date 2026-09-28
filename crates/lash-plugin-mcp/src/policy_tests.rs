@@ -212,7 +212,6 @@ fn mock_config(root: &Path, options: MockOptions) -> McpServerConfig {
             reconnect_max_attempts: options.reconnect_max_attempts,
         },
         shutdown_policy: Default::default(),
-        binary_content_attachments: false,
         transport: McpTransport::Stdio(McpStdioTransport {
             command: "python3".to_string(),
             args: vec!["-u".to_string(), "-c".to_string(), MOCK_SERVER.to_string()],

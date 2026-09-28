@@ -55,6 +55,21 @@ pub struct ToolPresentationInput {
 /// journaled `PresentToolResult` boundary.
 pub type ToolPresentationStep =
     Arc<dyn Fn(ToolPresentationInput) -> PluginFuture<crate::ModelToolReturn> + Send + Sync>;
+pub type ToolPresentationPresenter = Arc<
+    dyn Fn(
+            ToolPresentationInput,
+        ) -> Pin<
+            Box<
+                dyn Future<
+                        Output = Result<
+                            crate::ModelToolReturn,
+                            crate::runtime::effect::RuntimeEffectControllerError,
+                        >,
+                    > + Send,
+            >,
+        > + Send
+        + Sync,
+>;
 
 /// The impure capability a presentation step may need, journaled by the
 /// `PresentToolResult` boundary that runs the chain: a blob retained here is
@@ -328,7 +343,9 @@ impl ToolResultHookContext {
 pub struct ToolResultProjectionContext {
     pub session_id: SessionId,
     pub call_id: String,
+    pub tool_id: crate::ToolId,
     pub tool_name: String,
+    pub render: Option<crate::RecordedRender>,
     pub args: serde_json::Value,
     pub output: crate::ToolCallOutput,
     pub duration_ms: u64,

@@ -1165,10 +1165,11 @@ pub(super) fn recovery_session_policy() -> lash_core::SessionPolicy {
 }
 
 pub(super) async fn persist_recovery_env_ref() -> lash_core::ProcessExecutionEnvRef {
-    let spec = lash_core::ProcessExecutionEnvSpec::new(
+    let mut spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
     );
+    spec.render = Some(recorded_standard_render());
     lash_core::runtime::publish_process_execution_env(
         RECOVERY_PROCESS_ENV_STORE.as_ref(),
         &lash_core::ArtifactOwner::host("restate-recovery-env"),
@@ -1181,10 +1182,11 @@ pub(super) async fn persist_recovery_env_ref() -> lash_core::ProcessExecutionEnv
 pub(super) async fn persist_snapshot_recovery_env_ref(
     snapshot_ref: &str,
 ) -> lash_core::ProcessExecutionEnvRef {
-    let spec = lash_core::ProcessExecutionEnvSpec::new(
+    let mut spec = lash_core::ProcessExecutionEnvSpec::new(
         snapshot_recovery_tool_options(snapshot_ref),
         recovery_session_policy(),
     );
+    spec.render = Some(recorded_standard_render());
     lash_core::runtime::publish_process_execution_env(
         RECOVERY_PROCESS_ENV_STORE.as_ref(),
         &lash_core::ArtifactOwner::host("restate-snapshot-recovery-env"),
@@ -1192,6 +1194,21 @@ pub(super) async fn persist_snapshot_recovery_env_ref(
     )
     .await
     .expect("persist snapshot recovery process execution env")
+}
+
+fn recorded_standard_render() -> lash_core::RecordedRender {
+    lash_core::RecordedRender {
+        renderer_id: "lash.tool.v1".to_string(),
+        params: serde_json::to_value(
+            lash_protocol_standard::render::resolve(
+                &lash_protocol_standard::StandardRenderConfig::builtin(),
+                &lash_protocol_standard::StandardRenderConfig::default(),
+                &lash_protocol_standard::StandardRenderConfig::default(),
+            )
+            .expect("the built-in Standard render config resolves"),
+        )
+        .expect("encode the recorded Standard render config"),
+    }
 }
 
 pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {

@@ -24,7 +24,12 @@ impl RemoteTurnActivity {
 fn encode_remote_tool_call_output(
     output: lash_core::ToolCallOutput,
 ) -> Result<serde_json::Value, RemoteProtocolError> {
-    let lash_core::ToolCallOutput { outcome, control } = output;
+    let lash_core::ToolCallOutput {
+        outcome,
+        control,
+        view,
+        projection_value,
+    } = output;
     let (status, payload) = match outcome {
         lash_core::ToolCallOutcome::Success(value) => ("success", value.to_json_value()),
         lash_core::ToolCallOutcome::Failure(failure) => ("failure", failure.to_json_value()),
@@ -42,6 +47,15 @@ fn encode_remote_tool_call_output(
             ("payload".to_string(), payload),
         ])),
     )]);
+    if let Some(view) = view {
+        encoded.insert(
+            "view".into(),
+            encode_remote_json(view, "RemoteTurnEvent", "output.view")?,
+        );
+    }
+    if let Some(projection_value) = projection_value {
+        encoded.insert("projection_value".into(), projection_value);
+    }
     // Observation and turn-result wire surfaces are intentionally lossy:
     // `RemoteTurnEvent::ToolCallCompleted.output.control` projects frame switches to kind,
     // frame_key, seed_count, and task; `RemoteTurnOutcome::AgentFrameSwitch` keeps frame_key and

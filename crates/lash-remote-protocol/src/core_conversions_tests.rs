@@ -891,6 +891,64 @@ fn process_await_wire_round_trip_preserves_failure_source_and_retry() {
 }
 
 #[test]
+fn process_await_output_round_trips_authored_view_blocks() {
+    let view = lash_core::ToolView {
+        blocks: vec![
+            lash_core::ToolViewBlock::Text {
+                text: "before".into(),
+                meta: lash_core::ToolViewMeta {
+                    priority: Some(0.7),
+                    last_modified: Some("2026-09-28T00:00:00Z".into()),
+                },
+            },
+            lash_core::ToolViewBlock::ResourceLink {
+                uri: "file:///report".into(),
+                name: "report".into(),
+                title: None,
+                description: None,
+                mime_type: Some("text/plain".into()),
+                meta: lash_core::ToolViewMeta::default(),
+            },
+        ],
+    };
+    let core = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(serde_json::json!({"answer":42})).with_view(view),
+    );
+    let remote = RemoteProcessAwaitOutput::try_from(core.clone()).expect("remote output");
+    let encoded = serde_json::to_vec(&remote).expect("encode remote");
+    let decoded =
+        serde_json::from_slice::<RemoteProcessAwaitOutput>(&encoded).expect("decode remote");
+    assert_eq!(
+        lash_core::ProcessAwaitOutput::try_from(decoded).expect("core output"),
+        core
+    );
+}
+
+#[test]
+fn process_await_output_keeps_code_value_and_display_projection_distinct() {
+    let structured = serde_json::json!({"channels":[{"name":"engineering"}]});
+    let envelope = serde_json::json!({"structuredContent":structured,"content":[]});
+    let core = lash_core::ProcessAwaitOutput::from_tool_output(
+        lash_core::ToolCallOutput::success(envelope.clone())
+            .with_projection_value(structured.clone()),
+    );
+    let remote = RemoteProcessAwaitOutput::try_from(core.clone()).expect("remote output");
+    let encoded = serde_json::to_vec(&remote).expect("encode remote");
+    let decoded =
+        serde_json::from_slice::<RemoteProcessAwaitOutput>(&encoded).expect("decode remote");
+    let restored = lash_core::ProcessAwaitOutput::try_from(decoded).expect("core output");
+    assert_eq!(restored, core);
+    let lash_core::ProcessAwaitOutput::Settled { output } = restored else {
+        panic!("settled output");
+    };
+    assert_eq!(output.value_for_projection(), structured);
+    assert!(
+        matches!(output.outcome, lash_core::ToolCallOutcome::Success(value)
+        if value.to_json_value() == envelope)
+    );
+}
+
+#[test]
 fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let filter = lash_core::ProcessListFilter {
         definition: Some(lash_core::ProcessDefinitionValue::new(

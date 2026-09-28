@@ -1334,6 +1334,27 @@ fn collect_printed_images_inner<'a>(
                 }
             }
             FlowValue::Record(record) => {
+                if matches!(record.get("$lash_tool_value"), Some(FlowValue::String(kind)) if kind.as_str() == "attachment")
+                    && let Some(source) = record.get("source")
+                    && let Ok(lash_core::AttachmentSource::Stored { attachment_ref }) =
+                        serde_json::from_value::<lash_core::AttachmentSource>(flow_to_json_value(
+                            source,
+                        ))
+                {
+                    if seen.insert(attachment_ref.id.to_string()) {
+                        attachment_store
+                            .get(&attachment_ref.id)
+                            .await
+                            .map_err(|_| {
+                                ExecutionHostError::new(format!(
+                                    "attachment bytes for `{}` are unavailable or were pruned",
+                                    attachment_ref.id
+                                ))
+                            })?;
+                        images.push(attachment_ref);
+                    }
+                    return Ok(());
+                }
                 for (_, value) in record.iter() {
                     collect_printed_images_inner(value, attachment_store, seen, images).await?;
                 }
@@ -1357,4 +1378,40 @@ fn collect_printed_images_inner<'a>(
         }
         Ok(())
     })
+}
+
+#[cfg(test)]
+mod mcp_media_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn printing_an_mcp_content_block_attaches_its_stored_media() {
+        let directory = tempfile::tempdir().expect("attachment directory");
+        let store = lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
+            lash_core::facade_support::FileAttachmentStore::new(directory.path()),
+        ));
+        let reference = store
+            .put(
+                b"audio bytes".to_vec(),
+                lash_core::AttachmentCreateMeta::new(
+                    lash_core::MediaType::parse("audio/wav").expect("media type"),
+                    None,
+                    Some("MCP audio".into()),
+                ),
+            )
+            .await
+            .expect("store media");
+        let media = lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
+            reference.clone(),
+        ));
+        let block = crate::projection::json_to_flow_value(serde_json::json!({
+            "type": "audio", "mimeType": "audio/wav", "attachment": media.to_json_value()
+        }));
+        assert_eq!(
+            collect_printed_images(&block, &store)
+                .await
+                .expect("print media"),
+            vec![reference]
+        );
+    }
 }

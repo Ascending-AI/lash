@@ -258,19 +258,15 @@ pub const SESSION_ID: &str = "durable-read-fixture";
 pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 131;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
+pub const FIXTURE_PARENT_END_OBLIGATION_ID: &str = "parent_end:00000000000040008000000000000887";
 
 /// Fixed stand-in for the await-event signing secret each store mints from
 /// system randomness when it first creates its schema.
 ///
-/// Two values in this fixture are minted from randomness rather than derived
-/// from the fixture's inputs: this secret and
-/// [`FIXTURE_ATTACHMENT_WRITE_ID`]. Left alone they make regeneration
-/// nondeterministic, which costs the no-diff double-regeneration proof — the
-/// only evidence that the committed bytes are a function of the code and not
-/// of the run. The generators therefore overwrite both rows with these seeds
-/// before the fixture is dumped. Production randomness is untouched: the store
-/// still mints a fresh secret and a fresh write token on every real open and
-/// every real attachment write; only the generator's copy is pinned.
+/// The fixture also pins a minted attachment write token and parent-end
+/// obligation id. Left alone, they make regeneration nondeterministic and
+/// defeat the no-diff double-regeneration proof. The generators replace only
+/// their fixture copies; production continues minting fresh values.
 #[allow(
     dead_code,
     reason = "only a store whose engine journals await-event promises pins their signing secret"
@@ -1921,7 +1917,7 @@ fn assert_graph_payloads(nodes: &[std::sync::Arc<lash_core::SessionNodeRecord>])
             assert_eq!(plugin_type, "durable-read-plugin");
             assert_eq!(
                 body.as_ref(),
-                &serde_json::json!({"fixture": true, "order": 2}),
+                &serde_json::json!({"fixture": true, "order": 2, "output": fixture_tool_output()}),
                 "durable fixture semantic drift: plugin node body changed"
             );
         }
@@ -2026,16 +2022,32 @@ fn fixture_append_nodes() -> Vec<SessionAppendNode> {
         )),
         SessionAppendNode::plugin(
             "durable-read-plugin",
-            serde_json::json!({"fixture": true, "order": 2}),
+            serde_json::json!({"fixture": true, "order": 2, "output": fixture_tool_output()}),
         ),
     ]
 }
 
+fn fixture_tool_output() -> lash_core::ToolCallOutput {
+    lash_core::ToolCallOutput::success(serde_json::json!({"fixture": "raw"})).with_view(
+        lash_core::ToolView {
+            blocks: vec![lash_core::ToolViewBlock::Text {
+                text: "durable read authored view".to_string(),
+                meta: lash_core::ToolViewMeta::default(),
+            }],
+        },
+    )
+}
+
 fn fixture_process_env() -> ProcessExecutionEnvSpec {
-    ProcessExecutionEnvSpec::new(
+    let mut env = ProcessExecutionEnvSpec::new(
         Default::default(),
         SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-    )
+    );
+    env.render = Some(lash_core::RecordedRender {
+        renderer_id: "standard".to_string(),
+        params: serde_json::json!({"max_chars": 120}),
+    });
+    env
 }
 
 fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegistration {

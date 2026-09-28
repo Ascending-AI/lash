@@ -291,18 +291,9 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
 #[test]
 fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -> Result<()> {
     run_async_test_on_stack_budget("tool-projection-stack-test", || async {
-        let projection = Arc::new(
-            crate::plugins::ToolOutputBudgetPluginFactory::new(
-                crate::plugins::ToolOutputBudgetConfig {
-                    mode: crate::plugins::ToolOutputBudgetMode::Bytes,
-                    limit: 12,
-                    max_lines: 4,
-                    head_share_percent: 50,
-                    retain_full_output: false,
-                },
-            )
-            .expect("valid tool output budget config"),
-        );
+        let mut standard_config = crate::plugins::StandardProtocolConfig::default();
+        standard_config.render.defaults.value.max_chars = Some(32);
+        standard_config.render.defaults.retain_full_output = Some(false);
         let observed_tool_results = Arc::new(TokioMutex::new(Vec::<String>::new()));
         let observed_tool_results_provider = Arc::clone(&observed_tool_results);
         let responses = Arc::new(TokioMutex::new(VecDeque::from([
@@ -347,16 +338,16 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .build()
             .into_handle();
         let double = restate_double(SEED).await;
-        let standard_core = explicit_ephemeral_facets(LashCore::standard_builder(
-            double.lash_backend(),
-            crate::TurnBudget::Unbounded,
-        ))
+        let standard_core = explicit_ephemeral_facets(
+            LashCore::builder(double.lash_backend(), crate::TurnBudget::Unbounded).protocol_plugin(
+                Arc::new(crate::plugins::StandardProtocolPluginFactory::with_config(
+                    standard_config,
+                )),
+            ),
+        )
         .provider(standard_provider)
         .model(mock_model_spec())
         .tools(Arc::new(LongTextTools))
-        .configure_plugins(|plugins| {
-            plugins.replace(projection.clone());
-        })
         .build(crate::testing::runtime_lease_owner())?;
         let standard_session = standard_core.session("standard-projection").open().await?;
         let standard_events = RecordingEvents::default();
@@ -380,10 +371,9 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         let observed = observed_tool_results.lock().await;
         let model_observation = observed
             .iter()
-            .find(|content| content.contains("bytes truncated"))
+            .find(|content| content.contains("[output cut:"))
             .expect("projected model observation");
-        assert!(model_observation.contains("Re-run the tool with narrower arguments"));
-        assert!(!model_observation.contains("Full output saved to:"));
+        assert!(model_observation.chars().count() <= 32);
 
         #[cfg(feature = "rlm")]
         {
@@ -394,9 +384,6 @@ finish("done");"#,
                 )]))
                 .model(mock_model_spec())
                 .tools(Arc::new(LongTextTools))
-                .configure_plugins(|plugins| {
-                    plugins.replace(projection);
-                })
                 .build(crate::testing::runtime_lease_owner())?;
             let rlm_session = rlm_core.session("rlm-projection").open().await?;
             let rlm_events = RecordingEvents::default();

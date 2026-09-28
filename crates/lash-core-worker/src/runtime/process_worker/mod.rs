@@ -477,6 +477,7 @@ impl DurableProcessWorker {
             crate::process_runtime_session_ids(process_id)[1].clone(),
             policy,
             create_request.plugin_options.clone(),
+            None,
             "session turn request",
         ))
         .await
@@ -506,6 +507,7 @@ impl DurableProcessWorker {
             crate::process_runtime_session_ids(process_id)[0].clone(),
             env.policy,
             env.plugin_options,
+            env.render,
             env_ref.as_str(),
         ))
         .await
@@ -516,6 +518,7 @@ impl DurableProcessWorker {
         session_id: SessionId,
         policy: crate::SessionPolicy,
         plugin_options: crate::PluginOptions,
+        render: Option<crate::RecordedRender>,
         source_label: &str,
     ) -> Result<LashRuntime, PluginError> {
         let attachment_manifest_store = self
@@ -540,11 +543,15 @@ impl DurableProcessWorker {
         // runtime state. Attachment intents still go to the catalog store so
         // the process owner of every blob stays durable.
         let process_work = self.process_wiring();
+        let mut state = crate::RuntimeSessionState::new(policy.clone());
+        state.session_id = session_id.clone();
+        state.authority.resolved_render = render;
         let builder = EmbeddedRuntimeBuilder::new(
             self.config.runtime_host.clone(),
             self.config.lease_owner.clone(),
         )
         .with_session_id(session_id.to_string())
+        .with_initial_state(state)
         .with_plugin_host(self.config.plugin_host.as_ref().clone())
         .with_policy(policy)
         .with_plugin_options(plugin_options)

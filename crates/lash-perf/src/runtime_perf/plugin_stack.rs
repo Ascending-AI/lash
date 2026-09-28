@@ -7,14 +7,12 @@ use std::sync::Arc;
 
 use lash_plugin_process_controls::SessionProcessAdminPluginFactory;
 use lash_plugin_standard_compaction::StandardCompactionPluginFactory;
-use lash_plugin_tool_output_budget::ToolOutputBudgetPluginFactory;
 
 pub(crate) fn runtime_perf_plugin_stack(
     uses_standard_compaction: bool,
     include_cancel_process: bool,
 ) -> lash::PluginStack {
     let mut stack = lash::PluginStack::new();
-    stack.push(Arc::new(ToolOutputBudgetPluginFactory::default()));
     if uses_standard_compaction {
         stack.push(Arc::new(StandardCompactionPluginFactory::default()));
     }

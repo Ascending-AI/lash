@@ -121,10 +121,6 @@ fn is_zero(value: &u64) -> bool {
     *value == 0
 }
 
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
 mod duration_millis_serde {
     use std::time::Duration;
 
@@ -316,9 +312,6 @@ pub struct McpServerConfig {
     /// Graceful-close and forced-reap timing for this server.
     #[serde(flatten)]
     pub shutdown_policy: McpShutdownPolicy,
-    /// Persist non-image MCP binary content as model attachments.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub binary_content_attachments: bool,
     #[serde(flatten)]
     pub transport: McpTransport,
 }
@@ -417,7 +410,6 @@ impl McpServerConfig {
             startup_timeout_ms: default_startup_timeout_ms(),
             call_policy: McpCallPolicy::default(),
             shutdown_policy: McpShutdownPolicy::default(),
-            binary_content_attachments: false,
             transport,
         }
     }
@@ -503,15 +495,6 @@ impl McpServerConfig {
         self
     }
 
-    pub fn with_binary_content_attachments(mut self, enabled: bool) -> Self {
-        self.binary_content_attachments = enabled;
-        self
-    }
-
-    pub(crate) fn binary_content_attachments(&self) -> bool {
-        self.binary_content_attachments
-    }
-
     pub(crate) fn validate(&self, server_name: &str) -> Result<(), McpError> {
         if server_name.trim().is_empty() {
             return Err(McpError::Config(
@@ -565,21 +548,6 @@ fn duration_millis(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn binary_attachment_opt_in_is_explicit_and_defaults_off() {
-        let default = McpServerConfig::stdio(McpStdioTransport::new("mcp-server", Vec::new()));
-        assert!(!default.binary_content_attachments());
-        let json = serde_json::to_value(&default).unwrap();
-        assert!(json.get("binary_content_attachments").is_none());
-
-        let enabled = default.with_binary_content_attachments(true);
-        assert!(enabled.binary_content_attachments());
-        assert_eq!(
-            serde_json::to_value(enabled).unwrap()["binary_content_attachments"],
-            true
-        );
-    }
 
     #[test]
     fn transport_builders_cover_headers_env_and_timeouts() {

@@ -276,7 +276,7 @@ pub fn terminal_append_request(
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProcessAwaitOutput {
     Settled {
-        output: crate::ToolCallOutput,
+        output: Box<crate::ToolCallOutput>,
     },
     /// The owner stopped executing without recording an outcome. Written only by
     /// the sweep or an owner's graceful drain, never round-tripped from a tool
@@ -338,14 +338,14 @@ impl<'de> Deserialize<'de> for ProcessAwaitOutput {
         D: serde::Deserializer<'de>,
     {
         Ok(match ProcessAwaitOutputDecode::deserialize(deserializer)? {
-            ProcessAwaitOutputDecode::Settled { output } => Self::Settled { output },
+            ProcessAwaitOutputDecode::Settled { output } => Self::from_tool_output(output),
             ProcessAwaitOutputDecode::Success { value, control } => {
                 let mut output = match decode_process_tool_value(value, "legacy success value") {
                     Ok(value) => crate::ToolCallOutput::success_tool_value(value),
                     Err(failure) => crate::ToolCallOutput::failure(*failure),
                 };
                 output.control = control;
-                Self::Settled { output }
+                Self::from_tool_output(output)
             }
             ProcessAwaitOutputDecode::Failure {
                 class,
@@ -369,7 +369,7 @@ impl<'de> Deserialize<'de> for ProcessAwaitOutput {
                     Err(failure) => crate::ToolCallOutput::failure(*failure),
                 };
                 output.control = control;
-                Self::Settled { output }
+                Self::from_tool_output(output)
             }
             ProcessAwaitOutputDecode::Cancelled {
                 message,
@@ -389,7 +389,7 @@ impl<'de> Deserialize<'de> for ProcessAwaitOutput {
                     Err(failure) => crate::ToolCallOutput::failure(*failure),
                 };
                 output.control = control;
-                Self::Settled { output }
+                Self::from_tool_output(output)
             }
             ProcessAwaitOutputDecode::Abandoned { evidence, control } => {
                 Self::Abandoned { evidence, control }
@@ -437,14 +437,16 @@ impl ProcessAwaitOutput {
     /// Builds a `ProcessAwaitOutput` from tool output data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_tool_output(output: crate::ToolCallOutput) -> Self {
-        Self::Settled { output }
+        Self::Settled {
+            output: Box::new(output),
+        }
     }
 
     /// Extracts the tool output outcome for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
     pub fn into_tool_output(self) -> crate::ToolCallOutput {
         match self {
-            Self::Settled { output } => output,
+            Self::Settled { output } => *output,
             // Abandonment has no `ToolCallOutcome` peer: a tool never self-reports
             // it. To a caller awaiting the result it surfaces one-directionally as
             // an external failure whose raw payload names it abandoned and carries

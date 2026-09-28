@@ -661,7 +661,6 @@ fn scripted_servers(trace: &std::path::Path, scenario: &str) -> BTreeMap<String,
                 ..Default::default()
             },
             shutdown_policy: Default::default(),
-            binary_content_attachments: false,
             transport: McpTransport::Stdio(McpStdioTransport {
                 command: "python3".to_string(),
                 args: vec![

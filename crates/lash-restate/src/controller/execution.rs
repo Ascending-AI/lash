@@ -167,15 +167,16 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AcceptTurnInput { .. }
         | RuntimeEffectCommand::DrawRootStart { .. }
         | RuntimeEffectCommand::Checkpoint { .. }
-        | RuntimeEffectCommand::IncorporateGroupSettlements { .. }
-        | RuntimeEffectCommand::PresentToolResult { .. }) => RestateEffectExecution::JournaledRun {
-            envelope: RuntimeEffectEnvelope {
-                invocation,
-                command,
-                group,
-            },
-            engine_faults: EngineFaults::Recorded,
-        },
+        | RuntimeEffectCommand::IncorporateGroupSettlements { .. }) => {
+            RestateEffectExecution::JournaledRun {
+                envelope: RuntimeEffectEnvelope {
+                    invocation,
+                    command,
+                    group,
+                },
+                engine_faults: EngineFaults::Recorded,
+            }
+        }
         // Store reads and store-backed derivations: a store or session that
         // did not answer is this attempt's fault, never the step's recorded
         // outcome (FIG-3683, FIG-3726). The executor marks only live faults
@@ -196,6 +197,8 @@ pub(crate) fn restate_effect_execution(
         // revision this worker does not register, is repaired by a retry or a
         // redeploy, and only a definition's refusal of its context is
         // recorded (FIG-3838).
+        // Presentation likewise retries when the recorded renderer is absent;
+        // an unavailable deployment must not turn that fault into history.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
@@ -207,6 +210,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::BeforeLlmCall { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
+        | RuntimeEffectCommand::PresentToolResult { .. }
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {
             envelope: RuntimeEffectEnvelope {
                 invocation,
