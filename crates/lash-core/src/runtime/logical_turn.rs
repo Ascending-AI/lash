@@ -287,9 +287,10 @@ impl LashRuntime {
 
     /// Whether the root this turn runs under is retried on `err`: a live
     /// fault aborts the attempt an engine runs the root in, and the engine
-    /// retries it under the same root (FIG-3897).
+    /// retries it under the same root (FIG-3897), except a superseded commit,
+    /// which ends the root (FIG-4010).
     fn drive_retries(&self, err: &RuntimeError) -> bool {
-        self.engine_retries_root && err.turn_failure_cause() == crate::TurnFailureCause::LiveFault
+        self.engine_retries_root && super::drive::engine_retries(err)
     }
 
     #[expect(

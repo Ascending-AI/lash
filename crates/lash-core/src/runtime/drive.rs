@@ -534,6 +534,19 @@ pub(crate) fn drive_abort(root: Option<&TurnId>, error: RuntimeError) -> DriveAb
     }
 }
 
+/// Whether an engine retries the root attempt that failed with `error`: a
+/// live fault, unless it is a superseded commit (FIG-4010). An engine's retry
+/// replays the admission base and the drive fence its journal recorded
+/// (FIG-3682), so a commit refused because the head moved under the root, or
+/// because its fence was superseded, meets the same refusal on every retry
+/// and can never commit. The root ends in the attempt that met it, with the
+/// superseded commit as its typed refusal; the redrive that reloads the head
+/// is a new root.
+pub(crate) fn engine_retries(error: &RuntimeError) -> bool {
+    error.turn_failure_cause() == crate::TurnFailureCause::LiveFault
+        && error.code != RuntimeErrorCode::StoreCommitSuperseded
+}
+
 /// A controller for one step of a drive under `admitted`: the drive's own
 /// controller when it already serves that scope, a rescope of it when it can
 /// build itself for another scope, and otherwise one the runtime's effect
@@ -704,7 +717,10 @@ impl LashRuntime {
         }
         let run = Box::pin(self.run_admitted_root_step(controller, admitted, sinks, None)).await;
         self.engine_retries_root = false;
-        run
+        run.map_err(|abort| match abort {
+            DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
+            abort => abort,
+        })
     }
 
     /// Seal `admitted`, then run its root.

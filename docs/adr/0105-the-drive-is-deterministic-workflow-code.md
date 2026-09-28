@@ -134,6 +134,16 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   stop check. Loading the retained base may be re-evaluated safely: success
   reconstructs the same immutable head, while a missing base parks before a
   turn effect. It never selects different work.
+- **Implemented (FIG-4010): a superseded commit ends its root.** A drive
+  fence does not stop a host service from moving the session head, so a
+  root's commit can be refused as `StoreCommitSuperseded`. The engine's retry
+  would replay the admission base and fence the journal recorded and meet
+  the same refusal on every attempt, and its replay meets the moved head in
+  the stop check above at a position where the refused attempt already
+  journaled the turn's commands (Restate `RT0016`, then a pause). The root
+  therefore ends in the attempt that met the refusal, with the superseded
+  commit as its typed refusal; the redrive that reloads the head is a new
+  root.
 
 A sealed verdict carries a `DriveFence` that the store checks on
 head-changing writes and ingress settlement. `DriveFence` and `AdmissionId`

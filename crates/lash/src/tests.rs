@@ -1971,6 +1971,7 @@ mod agent_scenarios;
 mod aggregate_await_comprehension;
 #[cfg(feature = "rlm")]
 mod aggregate_oracle;
+mod commit_superseded;
 #[cfg(feature = "rlm")]
 mod discovery_execution;
 mod failure_settlement;
