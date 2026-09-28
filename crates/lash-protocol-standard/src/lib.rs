@@ -22,8 +22,7 @@ use lash_core::plugin::{
     ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
 use lash_core::sansio::{
-    CheckpointResumeAction, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,
-    WaitingExecState, WaitingLlmState,
+    CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
 #[cfg(test)]
 use lash_core::session_model::PartKind;
@@ -388,7 +387,7 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
 
 /// Protocol driver for the Standard protocol. Consumes native
 /// tool-call envelopes from the LLM, dispatches them via
-/// `DriverAction::StartTools`, and splices reasoning parts into the
+/// `PendingWork::Tools`, and splices reasoning parts into the
 /// assistant message so provider replay metadata preserves
 /// chain-of-thought ordering.
 #[derive(Default)]
@@ -570,16 +569,17 @@ fn refused_tool_call_completion(
 
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(true),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
+        request: Arc<lash_core::LlmRequest>,
+        _driver_state: Option<lash_core::ProtocolDriverState>,
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -652,14 +652,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                     },
                 )]));
             }
-            actions.push(DriverAction::StartCheckpoint {
+            actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                     TurnFinish::AssistantMessage {
                         text: response.assistant_text,
                     },
                 )),
-            });
+            }));
             return actions;
         }
 
@@ -705,11 +705,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         replay: call.replay,
                     };
                     if self.discovery
-                        && !waiting
-                            .request
-                            .tools
-                            .iter()
-                            .any(|tool| tool.name == call.tool_name)
+                        && !request.tools.iter().any(|tool| tool.name == call.tool_name)
                     {
                         let output = lash_core::ToolCallOutput::failure(
                             lash_core::ToolFailure::runtime(
@@ -759,7 +755,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 },
             )]));
         }
-        actions.push(DriverAction::StartTools { calls });
+        actions.push(DriverAction::Start(PendingWork::Tools { calls }));
         actions
     }
 
@@ -812,10 +808,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
             return actions;
         }
 
-        actions.push(DriverAction::StartCheckpoint {
+        actions.push(DriverAction::Start(PendingWork::Checkpoint {
             checkpoint: CheckpointKind::AfterWork,
             on_empty: CheckpointResumeAction::PrepareIteration,
-        });
+        }));
         actions
     }
 
@@ -825,7 +821,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState<lash_core::HostTurnProtocol>,
+        _driver_state: lash_core::ProtocolDriverState,
         _result: Result<lash_core::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()

@@ -47,60 +47,18 @@ pub(super) enum EffectDeliveryStatus {
     Delivered,
 }
 
-/// The delivery bookkeeping of the effect a waiting variant is holding:
-/// the one spelling of the effect's id plus whether the machine has handed
-/// the effect to the host. Serialized transparently as the bare id, so the
-/// checkpoint spells it under the variant's `effect_id` key exactly as the
-/// id field it replaced; the flag is runtime-only and a restored
-/// checkpoint always re-delivers.
-#[derive(Clone, Copy, Debug, Serialize, serde::Deserialize)]
-#[serde(transparent)]
-pub(super) struct EffectDelivery {
-    pub(super) id: EffectId,
-    #[serde(skip)]
-    pub(super) status: EffectDeliveryStatus,
-}
-
-impl EffectDelivery {
-    pub(super) fn pending(id: EffectId) -> Self {
-        Self {
-            id,
-            status: EffectDeliveryStatus::Pending,
-        }
-    }
-}
-
 #[derive(Debug, Serialize, serde::Deserialize)]
 pub(super) enum MachineState<M: TurnProtocol = UnitTurnProtocol> {
     PreparingProtocol,
-    WaitingExecutionEnvironment {
-        #[serde(rename = "effect_id")]
-        delivery: EffectDelivery,
-    },
     PrepareIteration,
-    WaitingLlm {
-        #[serde(rename = "effect_id")]
-        delivery: EffectDelivery,
-        request: Arc<LlmRequest>,
-        driver_state: Option<M::DriverState>,
-    },
-    WaitingTools {
-        #[serde(rename = "effect_id")]
-        delivery: EffectDelivery,
-        calls: Vec<PendingToolCall>,
-    },
-    WaitingExec {
-        #[serde(rename = "effect_id")]
-        delivery: EffectDelivery,
-        language: String,
-        code: String,
-        driver_state: M::DriverState,
-    },
-    WaitingCheckpoint {
-        #[serde(rename = "effect_id")]
-        delivery: EffectDelivery,
-        checkpoint: CheckpointKind,
-        on_empty: CheckpointResumeAction,
+    /// Waiting on the host to fulfil `work`, answered under `effect_id`.
+    Waiting {
+        effect_id: EffectId,
+        work: PendingWork<M>,
+        /// Whether the machine has handed the effect to the host.
+        /// Runtime-only: a restored checkpoint always re-delivers.
+        #[serde(skip)]
+        delivery: EffectDeliveryStatus,
     },
     Finished,
 }
@@ -194,42 +152,15 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
     fn clone(&self) -> Self {
         match self {
             Self::PreparingProtocol => Self::PreparingProtocol,
-            Self::WaitingExecutionEnvironment { delivery } => Self::WaitingExecutionEnvironment {
-                delivery: *delivery,
-            },
             Self::PrepareIteration => Self::PrepareIteration,
-            Self::WaitingLlm {
+            Self::Waiting {
+                effect_id,
+                work,
                 delivery,
-                request,
-                driver_state,
-            } => Self::WaitingLlm {
+            } => Self::Waiting {
+                effect_id: *effect_id,
+                work: work.clone(),
                 delivery: *delivery,
-                request: Arc::clone(request),
-                driver_state: driver_state.clone(),
-            },
-            Self::WaitingTools { delivery, calls } => Self::WaitingTools {
-                delivery: *delivery,
-                calls: calls.clone(),
-            },
-            Self::WaitingExec {
-                delivery,
-                language,
-                code,
-                driver_state,
-            } => Self::WaitingExec {
-                delivery: *delivery,
-                language: language.clone(),
-                code: code.clone(),
-                driver_state: driver_state.clone(),
-            },
-            Self::WaitingCheckpoint {
-                delivery,
-                checkpoint,
-                on_empty,
-            } => Self::WaitingCheckpoint {
-                delivery: *delivery,
-                checkpoint: *checkpoint,
-                on_empty: on_empty.clone(),
             },
             Self::Finished => Self::Finished,
         }
@@ -238,70 +169,43 @@ impl<M: TurnProtocol> Clone for MachineState<M> {
 
 impl<M: TurnProtocol> MachineState<M> {
     pub(super) fn schedule_outstanding_effect(&mut self) {
-        match self {
-            Self::WaitingExecutionEnvironment { delivery, .. }
-            | Self::WaitingLlm { delivery, .. }
-            | Self::WaitingTools { delivery, .. }
-            | Self::WaitingExec { delivery, .. }
-            | Self::WaitingCheckpoint { delivery, .. } => {
-                delivery.status = EffectDeliveryStatus::Pending;
-            }
-            Self::PreparingProtocol | Self::PrepareIteration | Self::Finished => {}
+        if let Self::Waiting { delivery, .. } = self {
+            *delivery = EffectDeliveryStatus::Pending;
         }
     }
 
     pub(super) fn poll_outstanding_effect(&mut self) -> Option<Effect<M>> {
         match self {
-            Self::WaitingExecutionEnvironment { delivery }
-                if delivery.status == EffectDeliveryStatus::Pending =>
-            {
-                delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::SyncExecutionEnvironment { id: delivery.id })
-            }
-            Self::WaitingLlm {
-                delivery, request, ..
-            } if delivery.status == EffectDeliveryStatus::Pending => {
-                delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::LlmCall {
-                    id: delivery.id,
-                    request: Arc::clone(request),
-                })
-            }
-            Self::WaitingTools { delivery, calls }
-                if delivery.status == EffectDeliveryStatus::Pending =>
-            {
-                delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::ToolCalls {
-                    id: delivery.id,
-                    calls: calls.clone(),
-                })
-            }
-            Self::WaitingExec {
+            Self::Waiting {
+                effect_id,
+                work,
                 delivery,
-                language,
-                code,
-                ..
-            } if delivery.status == EffectDeliveryStatus::Pending => {
-                delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::ExecCode {
-                    id: delivery.id,
-                    language: language.clone(),
-                    code: code.clone(),
-                })
-            }
-            Self::WaitingCheckpoint {
-                delivery,
-                checkpoint,
-                ..
-            } if delivery.status == EffectDeliveryStatus::Pending => {
-                delivery.status = EffectDeliveryStatus::Delivered;
-                Some(Effect::Checkpoint {
-                    id: delivery.id,
-                    checkpoint: *checkpoint,
-                })
+            } if *delivery == EffectDeliveryStatus::Pending => {
+                *delivery = EffectDeliveryStatus::Delivered;
+                Some(work.to_effect(*effect_id))
             }
             _ => None,
         }
+    }
+
+    /// Take the work `response` answers, leaving the machine `Finished`
+    /// until the response's handler moves it on. A response whose id or kind
+    /// does not match the outstanding effect is stale: the machine keeps
+    /// waiting, its delivery bookkeeping untouched.
+    pub(super) fn take_waiting(&mut self, response: &Response) -> Option<PendingWork<M>> {
+        let Self::Waiting {
+            effect_id, work, ..
+        } = self
+        else {
+            return None;
+        };
+        if *effect_id != response.effect_id() || !work.answered_by(response) {
+            return None;
+        }
+        let Self::Waiting { work, .. } = std::mem::replace(self, Self::Finished) else {
+            return None;
+        };
+        Some(work)
     }
 }
 

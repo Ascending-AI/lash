@@ -9,7 +9,7 @@ use crate::plugin::{
     PluginFactory, PluginRegistrar, PluginSessionContext, ProtocolDriverPlugin,
     ProtocolRuntimeContext, ProtocolSessionContext, ProtocolSessionPlugin, SessionPlugin,
 };
-use crate::sansio::{CompletedToolCall, ProtocolDriverHandle, WaitingExecState, WaitingLlmState};
+use crate::sansio::{CompletedToolCall, PendingWork, ProtocolDriverHandle};
 use crate::{
     DriverAction, DriverContextView, ExecResponse, ProtocolBuildInput, TurnDriverConfig,
     TurnDriverPreamble,
@@ -378,16 +378,17 @@ struct TestDriver;
 
 impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(true),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState<crate::HostTurnProtocol>,
+        _request: Arc<lash_sansio::llm::types::LlmRequest>,
+        _driver_state: Option<crate::ProtocolDriverState>,
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -495,12 +496,12 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                     origin: None,
                 })),
             ]));
-            actions.push(DriverAction::StartCheckpoint {
+            actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                     TurnFinish::AssistantMessage { text: outcome_text },
                 )),
-            });
+            }));
             return actions;
         }
 
@@ -545,7 +546,7 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
                 })),
             ]));
         }
-        actions.push(DriverAction::StartTools { calls });
+        actions.push(DriverAction::Start(PendingWork::Tools { calls }));
         actions
     }
 
@@ -633,17 +634,17 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
             let _ = SessionStreamEvent::Done;
             return actions;
         }
-        actions.push(DriverAction::StartCheckpoint {
+        actions.push(DriverAction::Start(PendingWork::Checkpoint {
             checkpoint: CheckpointKind::AfterWork,
             on_empty: CheckpointResumeAction::PrepareIteration,
-        });
+        }));
         actions
     }
 
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState<crate::HostTurnProtocol>,
+        _driver_state: crate::ProtocolDriverState,
         _result: Result<ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()

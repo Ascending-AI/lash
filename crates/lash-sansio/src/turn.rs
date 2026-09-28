@@ -89,10 +89,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::sansio::{
-        CompletedToolCall, DriverAction, DriverContextView, ProtocolDriverHandle, WaitingExecState,
-        WaitingLlmState,
-    };
+    use crate::sansio::{CompletedToolCall, DriverAction, DriverContextView, ProtocolDriverHandle};
     use crate::turn_driver::{TurnDriverConfig, TurnDriverPreamble};
     use crate::{
         PromptBuildInput, PromptContribution, PromptContributionSet, ToolDefinition, build_prompt,
@@ -126,7 +123,8 @@ mod tests {
         fn handle_llm_success(
             &self,
             _ctx: DriverContextView<'_>,
-            _waiting: WaitingLlmState,
+            _request: Arc<crate::llm::types::LlmRequest>,
+            _driver_state: Option<serde_json::Value>,
             _llm_response: crate::llm::types::LlmResponse,
             _text_streamed: bool,
         ) -> Vec<DriverAction> {
@@ -144,7 +142,7 @@ mod tests {
         fn handle_exec_result(
             &self,
             _ctx: DriverContextView<'_>,
-            _waiting: WaitingExecState,
+            _driver_state: serde_json::Value,
             _result: Result<crate::ExecResponse, String>,
         ) -> Vec<DriverAction> {
             Vec::new()

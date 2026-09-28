@@ -4,8 +4,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use lash_core::sansio::{
-    CheckpointResumeAction, CompletedToolCall, ProtocolDriverHandle, WaitingExecState,
-    WaitingLlmState,
+    CheckpointResumeAction, CompletedToolCall, PendingWork, ProtocolDriverHandle,
 };
 use lash_core::session_model::{
     ConversationRecord, Message, SessionHistoryRecord, SessionStreamEvent, TurnFailureCode,
@@ -87,20 +86,21 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 serde_json::json!({"degraded_bindings": degraded_bindings}),
             )]));
         }
-        actions.push(DriverAction::StartLlm {
+        actions.push(DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(false),
             driver_state: Some(rlm_driver_state(
                 RlmDriverState::default(),
                 lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
             )),
-        });
+        }));
         actions
     }
 
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        mut waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
+        _request: Arc<lash_core::LlmRequest>,
+        driver_state: Option<lash_core::ProtocolDriverState>,
         llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -280,12 +280,12 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                             ),
                         )]));
                     }
-                    actions.push(DriverAction::StartCheckpoint {
+                    actions.push(DriverAction::Start(PendingWork::Checkpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
                         on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                             TurnFinish::AssistantMessage { text: prose },
                         )),
-                    });
+                    }));
                 } else {
                     let RlmTermination::FinishRequired { schema } = termination else {
                         unreachable!()
@@ -323,7 +323,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 }
             }
             super::tool::NativeAction::Execute { code } => {
-                let Some(raw_state) = waiting.take_driver_state() else {
+                let Some(raw_state) = driver_state else {
                     return invalid_driver_state_actions("missing native driver state".to_string());
                 };
                 let mut state = match decode_rlm_driver_state(
@@ -340,14 +340,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     text: code.clone(),
                     kind: self.dialect.code_stream_kind().to_string(),
                 }));
-                actions.push(DriverAction::StartExec {
+                actions.push(DriverAction::Start(PendingWork::Exec {
                     language: self.dialect.language_id().to_string(),
                     code,
                     driver_state: rlm_driver_state(
                         state,
                         lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
                     ),
-                });
+                }));
             }
         }
         actions
@@ -364,11 +364,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
     fn handle_exec_result(
         &self,
         ctx: DriverContextView<'_>,
-        waiting: WaitingExecState<lash_core::HostTurnProtocol>,
+        driver_state: lash_core::ProtocolDriverState,
         result: Result<ExecResponse, String>,
     ) -> Vec<DriverAction> {
         let mut state = match decode_rlm_driver_state(
-            waiting.into_driver_state(),
+            driver_state,
             lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
         ) {
             Ok(state) => state,
@@ -440,10 +440,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         None,
                         lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                     )));
-                    actions.push(DriverAction::StartCheckpoint {
+                    actions.push(DriverAction::Start(PendingWork::Checkpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
                         on_empty: CheckpointResumeAction::Finish(outcome),
-                    });
+                    }));
                     return actions;
                 }
             }
@@ -498,14 +498,14 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 Some(CellOutcome::Finished(finish_value.clone())),
                 lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
             )));
-            actions.push(DriverAction::StartCheckpoint {
+            actions.push(DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(TurnOutcome::Finished(
                     TurnFinish::FinalValue {
                         value: finish_value.clone(),
                     },
                 )),
-            });
+            }));
             return actions;
         }
 
@@ -597,10 +597,10 @@ fn continue_or_stop_after_nonterminal(
         actions.push(DriverAction::AppendEvents(retry_events));
     }
 
-    actions.push(DriverAction::StartCheckpoint {
+    actions.push(DriverAction::Start(PendingWork::Checkpoint {
         checkpoint: CheckpointKind::AfterWork,
         on_empty: CheckpointResumeAction::PrepareIteration,
-    });
+    }));
     Ok(())
 }
 

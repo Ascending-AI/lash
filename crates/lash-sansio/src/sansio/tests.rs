@@ -330,16 +330,17 @@ struct ProseDriver;
 
 impl ProtocolDriverHandle for ProseDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(false),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -348,10 +349,10 @@ impl ProtocolDriverHandle for ProseDriver {
                 MessageRole::Assistant,
                 "done",
             ))]),
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(assistant_done("done")),
-            },
+            }),
         ]
     }
 
@@ -366,7 +367,7 @@ impl ProtocolDriverHandle for ProseDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState,
+        _driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()
@@ -455,17 +456,18 @@ struct ExecDriver;
 
 impl ProtocolDriverHandle for ExecDriver {
     fn prepare_protocol_iteration(&self, _ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartExec {
+        vec![DriverAction::Start(PendingWork::Exec {
             language: "code".to_string(),
             code: "print 1".to_string(),
             driver_state: serde_json::json!("exec-state"),
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -483,11 +485,10 @@ impl ProtocolDriverHandle for ExecDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        waiting: WaitingExecState,
+        driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
-        let state = waiting
-            .into_driver_state()
+        let state = driver_state
             .as_str()
             .expect("exec driver state")
             .to_string();
@@ -496,10 +497,10 @@ impl ProtocolDriverHandle for ExecDriver {
                 MessageRole::User,
                 state,
             ))]),
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
                 on_empty: CheckpointResumeAction::Finish(assistant_done("done")),
-            },
+            }),
         ]
     }
 }
@@ -508,26 +509,27 @@ struct SyncThenAdvanceDriver;
 
 impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(true),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         if ctx.protocol_iteration() == ctx.protocol_run_offset() {
             vec![
                 DriverAction::AdvanceProtocolIteration,
-                DriverAction::StartCheckpoint {
+                DriverAction::Start(PendingWork::Checkpoint {
                     checkpoint: CheckpointKind::BeforeCompletion,
                     on_empty: CheckpointResumeAction::PrepareIteration,
-                },
+                }),
             ]
         } else {
             vec![DriverAction::Finish(assistant_done("done"))]
@@ -545,7 +547,7 @@ impl ProtocolDriverHandle for SyncThenAdvanceDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState,
+        _driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()
@@ -556,24 +558,25 @@ struct CellEveryIterationDriver;
 
 impl ProtocolDriverHandle for CellEveryIterationDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(false),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::StartExec {
+        vec![DriverAction::Start(PendingWork::Exec {
             language: "test".to_string(),
             code: format!("effect-at-iteration-{}", ctx.protocol_iteration()),
             driver_state: serde_json::Value::Null,
-        }]
+        })]
     }
 
     fn handle_tool_results(
@@ -587,15 +590,15 @@ impl ProtocolDriverHandle for CellEveryIterationDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState,
+        _driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         vec![
             DriverAction::AdvanceProtocolIteration,
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::AfterWork,
                 on_empty: CheckpointResumeAction::PrepareIteration,
-            },
+            }),
         ]
     }
 }
@@ -743,10 +746,10 @@ struct NoProgressFeedbackAtBudgetDriver;
 impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         if ctx.protocol_iteration() == 0 {
-            return vec![DriverAction::StartLlm {
+            return vec![DriverAction::Start(PendingWork::Llm {
                 request: ctx.project_llm_request(false),
                 driver_state: None,
-            }];
+            })];
         }
         vec![
             DriverAction::AppendEvents(vec![conversation_event(text_message(
@@ -760,16 +763,17 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
     fn handle_llm_success(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
         vec![
             DriverAction::AdvanceProtocolIteration,
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::AfterWork,
                 on_empty: CheckpointResumeAction::PrepareIteration,
-            },
+            }),
         ]
     }
 
@@ -784,7 +788,7 @@ impl ProtocolDriverHandle for NoProgressFeedbackAtBudgetDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState,
+        _driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()
@@ -854,20 +858,21 @@ struct ToolBatchDriver;
 
 impl ProtocolDriverHandle for ToolBatchDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: ctx.project_llm_request(true),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState,
+        _request: Arc<LlmRequest>,
+        _driver_state: Option<serde_json::Value>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
-        vec![DriverAction::StartTools {
+        vec![DriverAction::Start(PendingWork::Tools {
             calls: vec![
                 PendingToolCall {
                     call_id: "call-read".to_string(),
@@ -886,7 +891,7 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                     }),
                 },
             ],
-        }]
+        })]
     }
 
     fn handle_tool_results(
@@ -904,17 +909,17 @@ impl ProtocolDriverHandle for ToolBatchDriver {
                 MessageRole::User,
                 summary,
             ))]),
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::AfterWork,
                 on_empty: CheckpointResumeAction::PrepareIteration,
-            },
+            }),
         ]
     }
 
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState,
+        _driver_state: serde_json::Value,
         _result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()
@@ -1734,7 +1739,11 @@ fn checkpoint_redelivers_waiting_llm_from_state_only() {
             .len(),
         0
     );
-    assert!(encoded["state"]["WaitingLlm"].get("delivery").is_none());
+    let waiting = encoded["state"]["Waiting"]
+        .as_object()
+        .expect("waiting state");
+    assert!(waiting["work"].get("Llm").is_some());
+    assert!(waiting.get("delivery").is_none());
 
     let checkpoint: TurnCheckpoint = serde_json::from_value(encoded).expect("checkpoint");
     let mut restored =
@@ -1742,6 +1751,200 @@ fn checkpoint_redelivers_waiting_llm_from_state_only() {
             .expect("supported checkpoint");
     let effects = drain_effects(&mut restored);
     assert!(find_llm_call(&effects).is_some());
+}
+
+/// Pins the durable encoding of a waiting turn: one `Waiting` state carrying
+/// the effect id and the pending work, never the runtime delivery flag. The
+/// production decoder must read each shape back to the same bytes, and the
+/// restored machine must redeliver the effect the live machine delivered.
+#[test]
+fn turn_checkpoint_pins_the_waiting_state_encoding() {
+    fn assert_pinned(
+        machine: &mut TurnMachine,
+        driver: fn() -> Arc<dyn ProtocolDriverHandle>,
+        delivered: &Effect,
+        expected_state: serde_json::Value,
+    ) {
+        let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
+        assert_eq!(encoded["state"], expected_state);
+
+        let bytes = serde_json::to_vec(&encoded).expect("checkpoint bytes");
+        let decoded = TurnCheckpoint::<UnitTurnProtocol>::from_json_slice(&bytes)
+            .expect("current checkpoint decodes");
+        assert_eq!(
+            serde_json::to_value(&decoded).expect("re-encoded checkpoint"),
+            encoded
+        );
+
+        let mut config = test_config(driver());
+        config.sync_execution_environment = machine.config.sync_execution_environment;
+        let mut restored =
+            TurnMachine::restore_from_checkpoint(config, decoded).expect("supported checkpoint");
+        let redelivered = drain_effects(&mut restored);
+        assert_eq!(redelivered.len(), 1, "{redelivered:?}");
+        assert_eq!(
+            serde_json::to_value(&redelivered[0]).expect("redelivered effect"),
+            serde_json::to_value(delivered).expect("delivered effect"),
+        );
+    }
+
+    let mut config = test_config(Arc::new(ProseDriver));
+    config.sync_execution_environment = true;
+    let mut machine =
+        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let effects = drain_effects(&mut machine);
+    assert_pinned(
+        &mut machine,
+        || Arc::new(ProseDriver),
+        effects.last().expect("sync effect"),
+        serde_json::json!({"Waiting": {"effect_id": 1, "work": "SyncExecutionEnvironment"}}),
+    );
+
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(SyncThenAdvanceDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let (llm_id, request) = find_llm_call(&effects).expect("llm call");
+    assert_pinned(
+        &mut machine,
+        || Arc::new(SyncThenAdvanceDriver),
+        effects.last().expect("llm effect"),
+        serde_json::json!({"Waiting": {"effect_id": 1, "work": {"Llm": {
+            "request": serde_json::to_value(request).expect("request json"),
+            "driver_state": null,
+        }}}}),
+    );
+    machine.handle_response(Response::LlmComplete {
+        id: *llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    assert_pinned(
+        &mut machine,
+        || Arc::new(SyncThenAdvanceDriver),
+        effects.last().expect("checkpoint effect"),
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Checkpoint": {
+            "checkpoint": "before_completion",
+            "on_empty": "PrepareIteration",
+        }}}}),
+    );
+
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ToolBatchDriver)),
+        vec![user_message("use tools")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    let tool_calls = effects.last().expect("tool effect");
+    let Effect::ToolCalls { calls, .. } = tool_calls else {
+        panic!("tool batch must be the last effect: {effects:?}");
+    };
+    assert_pinned(
+        &mut machine,
+        || Arc::new(ToolBatchDriver),
+        tool_calls,
+        serde_json::json!({"Waiting": {"effect_id": 2, "work": {"Tools": {
+            "calls": serde_json::to_value(calls).expect("calls json"),
+        }}}}),
+    );
+
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ExecDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    assert_pinned(
+        &mut machine,
+        || Arc::new(ExecDriver),
+        effects.last().expect("exec effect"),
+        serde_json::json!({"Waiting": {"effect_id": 1, "work": {"Exec": {
+            "language": "code",
+            "code": "print 1",
+            "driver_state": "exec-state",
+        }}}}),
+    );
+}
+
+/// The outstanding effect is delivered after every side effect the same
+/// step queued: the model call's `LlmRequest` emit and the progress record
+/// reach the host before the effect that hands it the next work.
+#[test]
+fn outstanding_effect_follows_the_emits_and_progress_queued_before_it() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [
+                Effect::Emit(SessionStreamEvent::LlmRequest { .. }),
+                Effect::LlmCall { .. }
+            ]
+        ),
+        "{effects:?}"
+    );
+
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    let effects = drain_effects(&mut machine);
+    let progress = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::Progress { .. }))
+        .expect("progress");
+    let checkpoint = effects
+        .iter()
+        .position(|effect| matches!(effect, Effect::Checkpoint { .. }))
+        .expect("checkpoint");
+    assert_eq!(checkpoint, effects.len() - 1, "{effects:?}");
+    assert!(progress < checkpoint, "{effects:?}");
+}
+
+#[test]
+fn response_of_the_wrong_kind_leaves_the_waiting_work_in_place() {
+    let mut machine = TurnMachine::new(
+        test_config(Arc::new(ProseDriver)),
+        vec![user_message("hello")],
+        Arc::new(Vec::new()),
+        0,
+    );
+    let effects = drain_effects(&mut machine);
+    let llm_id = *find_llm_call(&effects).expect("llm call").0;
+
+    machine.handle_response(Response::ToolResults {
+        id: llm_id,
+        results: Vec::new(),
+    });
+    assert!(!machine.is_done());
+    assert!(drain_effects(&mut machine).is_empty());
+
+    machine.handle_response(Response::LlmComplete {
+        id: llm_id,
+        text_streamed: false,
+        result: Ok(LlmResponse::default()),
+    });
+    assert!(find_checkpoint(&drain_effects(&mut machine)).is_some());
 }
 
 #[test]

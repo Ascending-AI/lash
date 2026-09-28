@@ -101,20 +101,23 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
         &self,
         _ctx: lash_core::DriverContextView<'_>,
     ) -> Vec<lash_core::DriverAction> {
-        vec![lash_core::DriverAction::StartExec {
-            language: "code".to_string(),
-            code: "print('effect controller')".to_string(),
-            driver_state: lash_core::ProtocolDriverState::new(
-                "effect_controller_test_protocol",
-                serde_json::Value::Null,
-            ),
-        }]
+        vec![lash_core::DriverAction::Start(
+            lash_core::sansio::PendingWork::Exec {
+                language: "code".to_string(),
+                code: "print('effect controller')".to_string(),
+                driver_state: lash_core::ProtocolDriverState::new(
+                    "effect_controller_test_protocol",
+                    serde_json::Value::Null,
+                ),
+            },
+        )]
     }
 
     fn handle_llm_success(
         &self,
         _ctx: lash_core::DriverContextView<'_>,
-        _waiting: lash_sansio::WaitingLlmState<lash_core::HostTurnProtocol>,
+        _request: Arc<lash_core::LlmRequest>,
+        _driver_state: Option<lash_core::ProtocolDriverState>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<lash_core::DriverAction> {
@@ -132,7 +135,7 @@ impl lash_sansio::ProtocolDriverHandle<lash_core::HostTurnProtocol> for EffectCo
     fn handle_exec_result(
         &self,
         ctx: lash_core::DriverContextView<'_>,
-        _waiting: lash_sansio::WaitingExecState<lash_core::HostTurnProtocol>,
+        _driver_state: lash_core::ProtocolDriverState,
         result: Result<lash_core::ExecResponse, String>,
     ) -> Vec<lash_core::DriverAction> {
         if let Some(evidence) = ctx.observed_cancellation() {

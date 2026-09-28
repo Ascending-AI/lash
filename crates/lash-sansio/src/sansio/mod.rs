@@ -40,12 +40,11 @@ mod turn_protocol;
 pub use turn_protocol::{
     ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
     ContextProjector, DriverAction, DriverContextView, Effect, EffectId, ExecutionEnvironmentSync,
-    LlmCallError, LogEvent, PendingToolCall, ProjectorContext, ProjectorTurnInputs,
-    ProtocolDriverHandle, Response, TurnCause, TurnMachineConfig, WaitingExecState,
-    WaitingLlmState, render_turn_causes_prompt,
+    LlmCallError, LogEvent, PendingToolCall, PendingWork, ProjectorContext, ProjectorTurnInputs,
+    ProtocolDriverHandle, Response, TurnCause, TurnMachineConfig, render_turn_causes_prompt,
 };
 mod machine_state;
-use machine_state::{EffectDelivery, MachineState};
+use machine_state::{EffectDeliveryStatus, MachineState};
 pub use machine_state::{
     TURN_CHECKPOINT_SCHEMA_VERSION, TurnCheckpoint, TurnCheckpointRestoreError, TurnMachine,
 };

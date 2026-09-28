@@ -19,8 +19,7 @@ use lash_core::plugin::{
     ProtocolDriverPlugin, ProtocolSessionPlugin, SessionPlugin, StaticPluginFactory,
 };
 use lash_core::sansio::{
-    CheckpointResumeAction, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,
-    WaitingExecState, WaitingLlmState,
+    CheckpointResumeAction, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
 use lash_core::{
     AdmittedScope, AwaitEventResolver, CheckpointKind, DriverAction, DriverContextView,
@@ -534,16 +533,17 @@ impl ProtocolDriverPlugin for MinimalProtocolDriver {
 
 impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
     fn prepare_protocol_iteration(&self, context: DriverContextView<'_>) -> Vec<DriverAction> {
-        vec![DriverAction::StartLlm {
+        vec![DriverAction::Start(PendingWork::Llm {
             request: context.project_llm_request(true),
             driver_state: None,
-        }]
+        })]
     }
 
     fn handle_llm_success(
         &self,
         _context: DriverContextView<'_>,
-        _waiting: WaitingLlmState<HostTurnProtocol>,
+        _request: Arc<lash_core::LlmRequest>,
+        _driver_state: Option<lash_core::ProtocolDriverState>,
         response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -571,7 +571,7 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
                 TurnFinish::AssistantMessage { text },
             ))]
         } else {
-            vec![DriverAction::StartTools { calls }]
+            vec![DriverAction::Start(PendingWork::Tools { calls })]
         }
     }
 
@@ -582,17 +582,17 @@ impl ProtocolDriverHandle<HostTurnProtocol> for MinimalProtocolDriver {
     ) -> Vec<DriverAction> {
         vec![
             DriverAction::AdvanceProtocolIteration,
-            DriverAction::StartCheckpoint {
+            DriverAction::Start(PendingWork::Checkpoint {
                 checkpoint: CheckpointKind::AfterWork,
                 on_empty: CheckpointResumeAction::PrepareIteration,
-            },
+            }),
         ]
     }
 
     fn handle_exec_result(
         &self,
         _context: DriverContextView<'_>,
-        _waiting: WaitingExecState<HostTurnProtocol>,
+        _driver_state: lash_core::ProtocolDriverState,
         _result: Result<lash_core::ExecResponse, String>,
     ) -> Vec<DriverAction> {
         Vec::new()

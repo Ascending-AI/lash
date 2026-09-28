@@ -12,8 +12,7 @@ use lash_core::runtime::{
     RuntimeAttribution, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe, SessionCommand,
 };
 use lash_core::sansio::{
-    ChatContextProjector, CompletedToolCall, PendingToolCall, ProtocolDriverHandle,
-    WaitingExecState, WaitingLlmState,
+    ChatContextProjector, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
 use lash_core::store::GraphAppend;
 use lash_core::{

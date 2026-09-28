@@ -246,10 +246,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
 
     fn prepare_protocol(&mut self) {
         if self.config.sync_execution_environment {
-            let id = self.next_id();
-            self.state = MachineState::WaitingExecutionEnvironment {
-                delivery: EffectDelivery::pending(id),
-            };
+            self.start(PendingWork::SyncExecutionEnvironment);
             return;
         }
 
@@ -273,10 +270,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         if self.config.sync_execution_environment
             && self.synced_protocol_iteration != Some(self.protocol_iteration)
         {
-            let id = self.next_id();
-            self.state = MachineState::WaitingExecutionEnvironment {
-                delivery: EffectDelivery::pending(id),
-            };
+            self.start(PendingWork::SyncExecutionEnvironment);
             return;
         }
         let actions = {
@@ -287,47 +281,30 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.apply_actions(actions);
     }
 
-    fn start_llm_request(
-        &mut self,
-        request: Arc<LlmRequest>,
-        driver_state: Option<M::DriverState>,
-    ) {
-        let tool_list = self
-            .config
-            .tool_specs
-            .iter()
-            .map(|tool| tool.name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        self.emit(SessionStreamEvent::LlmRequest {
-            protocol_iteration: self.protocol_iteration,
-            message_count: self.messages.len(),
-            tool_list,
-        });
-
-        let id = self.next_id();
-        self.state = MachineState::WaitingLlm {
-            delivery: EffectDelivery::pending(id),
-            request,
-            driver_state,
-        };
-    }
-
-    fn start_tool_calls(&mut self, calls: Vec<PendingToolCall>) {
+    /// Wait on the host to fulfil `work`. Its effect is delivered by
+    /// [`MachineState::poll_outstanding_effect`] after every side effect
+    /// already queued, so the model call's `LlmRequest` emit and any pending
+    /// progress reach the host first.
+    fn start(&mut self, work: PendingWork<M>) {
+        if matches!(work, PendingWork::Llm { .. }) {
+            let tool_list = self
+                .config
+                .tool_specs
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            self.emit(SessionStreamEvent::LlmRequest {
+                protocol_iteration: self.protocol_iteration,
+                message_count: self.messages.len(),
+                tool_list,
+            });
+        }
         let effect_id = self.next_id();
-        self.state = MachineState::WaitingTools {
-            delivery: EffectDelivery::pending(effect_id),
-            calls,
-        };
-    }
-
-    fn start_exec(&mut self, language: String, code: String, driver_state: M::DriverState) {
-        let effect_id = self.next_id();
-        self.state = MachineState::WaitingExec {
-            delivery: EffectDelivery::pending(effect_id),
-            language,
-            code,
-            driver_state,
+        self.state = MachineState::Waiting {
+            effect_id,
+            work,
+            delivery: EffectDeliveryStatus::Pending,
         };
     }
 
@@ -358,11 +335,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         progress_dirty = true;
                     }
                 }
-                DriverAction::StartLlm {
-                    request,
-                    driver_state,
-                } => self.start_llm_request(request, driver_state),
-                DriverAction::StartTools { calls } => self.start_tool_calls(calls),
+                DriverAction::Start(work) => self.start(work),
                 DriverAction::ReportToolCalls { completed } => {
                     let accounting = completed
                         .iter()
@@ -379,15 +352,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                         self.emit(event);
                     }
                 }
-                DriverAction::StartExec {
-                    language,
-                    code,
-                    driver_state,
-                } => self.start_exec(language, code, driver_state),
-                DriverAction::StartCheckpoint {
-                    checkpoint,
-                    on_empty,
-                } => self.request_checkpoint(checkpoint, on_empty),
                 DriverAction::AdvanceProtocolIteration => {
                     self.protocol_iteration += 1;
                     self.synced_protocol_iteration = None;
@@ -434,48 +398,47 @@ impl<M: TurnProtocol> TurnMachine<M> {
     /// Fallible host seam for delivering a response whose usage must remain
     /// suitable for durable accumulation.
     pub fn try_handle_response(&mut self, response: Response) -> Result<(), TokenUsageOverflow> {
-        match response {
-            Response::ExecutionEnvironmentSynced { id, result } => {
-                self.handle_execution_environment_synced(id, result);
+        let Some(work) = self.state.take_waiting(&response) else {
+            return Ok(());
+        };
+        match (work, response) {
+            (
+                PendingWork::SyncExecutionEnvironment,
+                Response::ExecutionEnvironmentSynced { result, .. },
+            ) => self.handle_execution_environment_synced(result),
+            (
+                PendingWork::Llm {
+                    request,
+                    driver_state,
+                },
+                Response::LlmComplete {
+                    result,
+                    text_streamed,
+                    ..
+                },
+            ) => self.handle_llm_complete(request, driver_state, result, text_streamed)?,
+            (PendingWork::Tools { .. }, Response::ToolResults { results, .. }) => {
+                self.handle_tool_results(results);
             }
-            Response::LlmComplete {
-                id,
-                result,
-                text_streamed,
-            } => self.handle_llm_complete(id, result, text_streamed)?,
-            Response::ToolResults { id, results } => self.handle_tool_results(id, results),
-            Response::ExecResult { id, result } => self.handle_exec_result(id, result),
-            Response::Checkpoint { id, delivery } => self.handle_checkpoint(id, delivery),
+            (PendingWork::Exec { driver_state, .. }, Response::ExecResult { result, .. }) => {
+                self.handle_exec_result(driver_state, result);
+            }
+            (
+                PendingWork::Checkpoint {
+                    checkpoint,
+                    on_empty,
+                },
+                Response::Checkpoint { delivery, .. },
+            ) => self.handle_checkpoint(checkpoint, on_empty, delivery),
+            _ => unreachable!("take_waiting yields only the work the response answers"),
         }
         Ok(())
     }
 
-    fn request_checkpoint(&mut self, checkpoint: CheckpointKind, on_empty: CheckpointResumeAction) {
-        let id = self.next_id();
-        self.state = MachineState::WaitingCheckpoint {
-            delivery: EffectDelivery::pending(id),
-            checkpoint,
-            on_empty,
-        };
-    }
-
     fn handle_execution_environment_synced(
         &mut self,
-        id: EffectId,
         result: Result<Option<ExecutionEnvironmentSync>, String>,
     ) {
-        let delivery = match std::mem::replace(&mut self.state, MachineState::Finished) {
-            MachineState::WaitingExecutionEnvironment { delivery } => delivery,
-            other => {
-                self.state = other;
-                return;
-            }
-        };
-        if delivery.id != id {
-            self.state = MachineState::WaitingExecutionEnvironment { delivery };
-            return;
-        }
-
         match result {
             Ok(update) => {
                 if let Some(update) = update {
@@ -543,28 +506,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    fn handle_checkpoint(&mut self, id: EffectId, delivery: CheckpointDelivery) {
-        let (effect_delivery, checkpoint, on_empty) =
-            match std::mem::replace(&mut self.state, MachineState::Finished) {
-                MachineState::WaitingCheckpoint {
-                    delivery,
-                    checkpoint,
-                    on_empty,
-                } => (delivery, checkpoint, on_empty),
-                other => {
-                    self.state = other;
-                    return;
-                }
-            };
-        if effect_delivery.id != id {
-            self.state = MachineState::WaitingCheckpoint {
-                delivery: effect_delivery,
-                checkpoint,
-                on_empty,
-            };
-            return;
-        }
-
+    fn handle_checkpoint(
+        &mut self,
+        checkpoint: CheckpointKind,
+        on_empty: CheckpointResumeAction,
+        delivery: CheckpointDelivery,
+    ) {
         if !delivery.committed_user_messages.is_empty()
             || !delivery.messages.is_empty()
             || !delivery.transient_messages.is_empty()
@@ -604,32 +551,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }
     }
 
-    fn take_waiting_llm_state(&mut self, id: EffectId) -> Option<WaitingLlmState<M>> {
-        match std::mem::replace(&mut self.state, MachineState::Finished) {
-            MachineState::WaitingLlm {
-                delivery,
-                request,
-                driver_state,
-            } if delivery.id == id => Some(WaitingLlmState {
-                request,
-                driver_state,
-            }),
-            other => {
-                self.state = other;
-                None
-            }
-        }
-    }
-
     fn handle_llm_complete(
         &mut self,
-        id: EffectId,
+        request: Arc<LlmRequest>,
+        driver_state: Option<M::DriverState>,
         result: Result<LlmResponse, LlmCallError>,
         text_streamed: bool,
     ) -> Result<(), TokenUsageOverflow> {
-        let Some(waiting) = self.take_waiting_llm_state(id) else {
-            return Ok(());
-        };
         match result {
             Err(error) if error.terminal_reason == LlmTerminalReason::Cancelled => {
                 self.finish(TurnOutcome::Stopped(TurnStop::Cancelled {
@@ -660,7 +588,13 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 let actions = {
                     let driver = Arc::clone(&self.config.protocol_driver);
                     let ctx = self.driver_context();
-                    driver.handle_llm_success(ctx, waiting, llm_response, text_streamed)
+                    driver.handle_llm_success(
+                        ctx,
+                        request,
+                        driver_state,
+                        llm_response,
+                        text_streamed,
+                    )
                 };
                 self.apply_actions(actions);
             }
@@ -866,20 +800,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }));
     }
 
-    fn handle_tool_results(&mut self, id: EffectId, completed: Vec<CompletedToolCall>) {
-        let (delivery, calls) = match std::mem::replace(&mut self.state, MachineState::Finished) {
-            MachineState::WaitingTools { delivery, calls } => (delivery, calls),
-            other => {
-                self.state = other;
-                return;
-            }
-        };
-
-        if delivery.id != id {
-            self.state = MachineState::WaitingTools { delivery, calls };
-            return;
-        }
-
+    fn handle_tool_results(&mut self, completed: Vec<CompletedToolCall>) {
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
                 call_id: Some(outcome.call_id.clone()),
@@ -897,28 +818,15 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.apply_actions(actions);
     }
 
-    fn take_waiting_exec_state(&mut self, id: EffectId) -> Option<WaitingExecState<M>> {
-        match std::mem::replace(&mut self.state, MachineState::Finished) {
-            MachineState::WaitingExec {
-                delivery,
-                driver_state,
-                ..
-            } if delivery.id == id => Some(WaitingExecState { driver_state }),
-            other => {
-                self.state = other;
-                None
-            }
-        }
-    }
-
-    fn handle_exec_result(&mut self, id: EffectId, result: Result<crate::ExecResponse, String>) {
-        let Some(waiting) = self.take_waiting_exec_state(id) else {
-            return;
-        };
+    fn handle_exec_result(
+        &mut self,
+        driver_state: M::DriverState,
+        result: Result<crate::ExecResponse, String>,
+    ) {
         let actions = {
             let driver = Arc::clone(&self.config.protocol_driver);
             let ctx = self.driver_context();
-            driver.handle_exec_result(ctx, waiting, result)
+            driver.handle_exec_result(ctx, driver_state, result)
         };
         self.apply_actions(actions);
     }

@@ -361,24 +361,16 @@ pub struct ExecutionEnvironmentSync {
     pub projector_turn_inputs: Option<ProjectorTurnInputs>,
 }
 
-pub struct WaitingLlmState<M: TurnProtocol = UnitTurnProtocol> {
-    pub request: Arc<LlmRequest>,
-    pub(super) driver_state: Option<M::DriverState>,
-}
-
-impl<M: TurnProtocol> WaitingLlmState<M> {
-    pub fn take_driver_state(&mut self) -> Option<M::DriverState> {
-        self.driver_state.take()
-    }
-}
-
-pub struct WaitingExecState<M: TurnProtocol = UnitTurnProtocol> {
-    pub(super) driver_state: M::DriverState,
-}
-
-impl<M: TurnProtocol> WaitingExecState<M> {
-    pub fn into_driver_state(self) -> M::DriverState {
-        self.driver_state
+impl Response {
+    /// The id of the effect this response answers.
+    pub(super) fn effect_id(&self) -> EffectId {
+        match self {
+            Self::ExecutionEnvironmentSynced { id, .. }
+            | Self::LlmComplete { id, .. }
+            | Self::ToolResults { id, .. }
+            | Self::ExecResult { id, .. }
+            | Self::Checkpoint { id, .. } => *id,
+        }
     }
 }
 
@@ -388,27 +380,122 @@ pub enum CheckpointResumeAction {
     Finish(TurnOutcome),
 }
 
+/// Work a turn hands the host and waits on: the one definition of each
+/// waiting kind's payload.
+///
+/// The machine holds it, under its effect id, while the host fulfils it; the
+/// host-facing [`Effect`] is projected from it by [`PendingWork::to_effect`]
+/// on first delivery and again on every redelivery after a checkpoint
+/// restore, so the two cannot diverge. When the answer arrives the machine
+/// hands the driver-owned part (the request and driver state) back to the
+/// protocol driver.
+//
+// `Clone` is implemented by hand below for the same reason as on `Effect`:
+// the derive would demand `M: Clone`.
+#[derive(Debug, Serialize, serde::Deserialize)]
+pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
+    /// Sync the execution environment the next protocol iteration runs
+    /// under. The machine requests this itself at each iteration boundary.
+    SyncExecutionEnvironment,
+    Llm {
+        request: Arc<LlmRequest>,
+        driver_state: Option<M::DriverState>,
+    },
+    Tools {
+        calls: Vec<PendingToolCall>,
+    },
+    Exec {
+        language: String,
+        code: String,
+        driver_state: M::DriverState,
+    },
+    Checkpoint {
+        checkpoint: CheckpointKind,
+        on_empty: CheckpointResumeAction,
+    },
+}
+
+impl<M: TurnProtocol> Clone for PendingWork<M> {
+    fn clone(&self) -> Self {
+        match self {
+            Self::SyncExecutionEnvironment => Self::SyncExecutionEnvironment,
+            Self::Llm {
+                request,
+                driver_state,
+            } => Self::Llm {
+                request: Arc::clone(request),
+                driver_state: driver_state.clone(),
+            },
+            Self::Tools { calls } => Self::Tools {
+                calls: calls.clone(),
+            },
+            Self::Exec {
+                language,
+                code,
+                driver_state,
+            } => Self::Exec {
+                language: language.clone(),
+                code: code.clone(),
+                driver_state: driver_state.clone(),
+            },
+            Self::Checkpoint {
+                checkpoint,
+                on_empty,
+            } => Self::Checkpoint {
+                checkpoint: *checkpoint,
+                on_empty: on_empty.clone(),
+            },
+        }
+    }
+}
+
+impl<M: TurnProtocol> PendingWork<M> {
+    /// The effect that hands this work to the host under `id`. The only
+    /// constructor of a waiting effect.
+    pub(super) fn to_effect(&self, id: EffectId) -> Effect<M> {
+        match self {
+            Self::SyncExecutionEnvironment => Effect::SyncExecutionEnvironment { id },
+            Self::Llm { request, .. } => Effect::LlmCall {
+                id,
+                request: Arc::clone(request),
+            },
+            Self::Tools { calls } => Effect::ToolCalls {
+                id,
+                calls: calls.clone(),
+            },
+            Self::Exec { language, code, .. } => Effect::ExecCode {
+                id,
+                language: language.clone(),
+                code: code.clone(),
+            },
+            Self::Checkpoint { checkpoint, .. } => Effect::Checkpoint {
+                id,
+                checkpoint: *checkpoint,
+            },
+        }
+    }
+
+    /// Whether `response` is the kind of answer this work waits for.
+    pub(super) fn answered_by(&self, response: &Response) -> bool {
+        match self {
+            Self::SyncExecutionEnvironment => {
+                matches!(response, Response::ExecutionEnvironmentSynced { .. })
+            }
+            Self::Llm { .. } => matches!(response, Response::LlmComplete { .. }),
+            Self::Tools { .. } => matches!(response, Response::ToolResults { .. }),
+            Self::Exec { .. } => matches!(response, Response::ExecResult { .. }),
+            Self::Checkpoint { .. } => matches!(response, Response::Checkpoint { .. }),
+        }
+    }
+}
+
 // justification: driver actions are single-step machine values and boxing generic driver state would add allocation to every iteration.
 #[allow(clippy::large_enum_variant)]
 pub enum DriverAction<M: TurnProtocol = UnitTurnProtocol> {
     Emit(SessionStreamEvent),
     AppendEvents(Vec<SessionHistoryRecord<M::Event>>),
-    StartLlm {
-        request: Arc<LlmRequest>,
-        driver_state: Option<M::DriverState>,
-    },
-    StartTools {
-        calls: Vec<PendingToolCall>,
-    },
-    StartExec {
-        language: String,
-        code: String,
-        driver_state: M::DriverState,
-    },
-    StartCheckpoint {
-        checkpoint: CheckpointKind,
-        on_empty: CheckpointResumeAction,
-    },
+    /// Hand the host this work and wait for its answer.
+    Start(PendingWork<M>),
     AdvanceProtocolIteration,
     /// Finish for a cancellation whose host evidence was already observed.
     FinishCancelled {
@@ -619,10 +706,13 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
     }
 
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_, M>) -> Vec<DriverAction<M>>;
+    /// Answer the [`PendingWork::Llm`] the driver started, handing back its
+    /// `request` and `driver_state`.
     fn handle_llm_success(
         &self,
         ctx: DriverContextView<'_, M>,
-        waiting: WaitingLlmState<M>,
+        request: Arc<LlmRequest>,
+        driver_state: Option<M::DriverState>,
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction<M>>;
@@ -631,10 +721,12 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         ctx: DriverContextView<'_, M>,
         completed: Vec<CompletedToolCall>,
     ) -> Vec<DriverAction<M>>;
+    /// Answer the [`PendingWork::Exec`] the driver started, handing back its
+    /// `driver_state`.
     fn handle_exec_result(
         &self,
         ctx: DriverContextView<'_, M>,
-        waiting: WaitingExecState<M>,
+        driver_state: M::DriverState,
         result: Result<crate::ExecResponse, String>,
     ) -> Vec<DriverAction<M>>;
 }

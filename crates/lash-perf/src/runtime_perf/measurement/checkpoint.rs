@@ -389,14 +389,14 @@ enum CheckpointDriver {
 impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
     fn prepare_protocol_iteration(&self, ctx: DriverContextView<'_>) -> Vec<DriverAction> {
         match self {
-            Self::Llm => vec![DriverAction::StartLlm {
+            Self::Llm => vec![DriverAction::Start(PendingWork::Llm {
                 request: ctx.project_llm_request(false),
                 driver_state: None,
-            }],
-            Self::Tools => vec![DriverAction::StartTools {
+            })],
+            Self::Tools => vec![DriverAction::Start(PendingWork::Tools {
                 calls: checkpoint_tool_calls(ctx.protocol_iteration()),
-            }],
-            Self::Exec => vec![DriverAction::StartExec {
+            })],
+            Self::Exec => vec![DriverAction::Start(PendingWork::Exec {
                 language: "code".to_string(),
                 code: checkpoint_exec_code(ctx.protocol_iteration()),
                 driver_state: lash_core::ProtocolDriverState::new(
@@ -410,14 +410,15 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
                         })).collect::<Vec<_>>(),
                     }),
                 ),
-            }],
+            })],
         }
     }
 
     fn handle_llm_success(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingLlmState<lash_core::HostTurnProtocol>,
+        _request: Arc<lash_core::LlmRequest>,
+        _driver_state: Option<lash_core::ProtocolDriverState>,
         _llm_response: LlmResponse,
         _text_streamed: bool,
     ) -> Vec<DriverAction> {
@@ -443,7 +444,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
     fn handle_exec_result(
         &self,
         _ctx: DriverContextView<'_>,
-        _waiting: WaitingExecState<lash_core::HostTurnProtocol>,
+        _driver_state: lash_core::ProtocolDriverState,
         _result: Result<ExecResponse, String>,
     ) -> Vec<DriverAction> {
         vec![DriverAction::Finish(TurnOutcome::Finished(
