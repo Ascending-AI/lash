@@ -237,8 +237,7 @@ crate::statements! {
         /// digest and receipt until session deletion, alongside the terminal
         /// evidence of the root that took it, so a retry under its id is
         /// validated against its digest and answered from that root for the
-        /// root's whole retained life (FIG-3837). An applied input stays even
-        /// when no root binding names it (a checkpoint delivery).
+        /// root's whole retained life (FIG-3837).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
                AND NOT EXISTS (

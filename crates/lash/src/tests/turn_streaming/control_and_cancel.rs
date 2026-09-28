@@ -1152,6 +1152,115 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
     Ok(())
 }
 
+#[tokio::test]
+pub(super) async fn checkpoint_admitted_steer_cancel_reaches_its_root() -> Result<()> {
+    let (first_started_tx, first_started_rx) = oneshot::channel::<()>();
+    let (release_first_tx, release_first_rx) = oneshot::channel::<()>();
+    let (second_started_tx, second_started_rx) = oneshot::channel::<()>();
+    let first_started_tx = Arc::new(StdMutex::new(Some(first_started_tx)));
+    let release_first_rx = Arc::new(TokioMutex::new(Some(release_first_rx)));
+    let second_started_tx = Arc::new(StdMutex::new(Some(second_started_tx)));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |request| {
+            let first_started_tx = Arc::clone(&first_started_tx);
+            let release_first_rx = Arc::clone(&release_first_rx);
+            let second_started_tx = Arc::clone(&second_started_tx);
+            async move {
+                let user_text = last_user_text(&request);
+                if user_text == "primary waits for active steer" {
+                    if let Some(tx) = first_started_tx.lock_recover().take() {
+                        let _ = tx.send(());
+                    }
+                    if let Some(rx) = release_first_rx.lock().await.take() {
+                        let _ = rx.await;
+                    }
+                    // A tool call keeps the turn working, so its
+                    // after-work checkpoint applies the accepted steer
+                    // instead of finishing on a plain answer first.
+                    return Ok(LlmResponse {
+                        parts: vec![LlmOutputPart::ToolCall {
+                            call_id: "primary-lookup".to_string(),
+                            tool_name: "app_lookup".to_string(),
+                            input_json: "{}".to_string(),
+                            replay: None,
+                        }],
+                        response_metadata: Default::default(),
+                        ..LlmResponse::default()
+                    });
+                }
+                let steer_started = second_started_tx.lock_recover().take();
+                if user_text == "cancelled active steer"
+                    && let Some(tx) = steer_started
+                {
+                    let _ = tx.send(());
+                    std::future::pending::<()>().await;
+                    unreachable!("cancelled steer provider call should be dropped by cancellation");
+                }
+                Ok(text_response(&format!("echo: {user_text}")))
+            }
+        })
+        .build()
+        .into_handle();
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        double.lash_backend(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(mock_model_spec())
+    .tools(Arc::new(AppTools))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core
+        .session("checkpoint-admitted-steer-cancel")
+        .open()
+        .await?;
+    let active_turn_id = "checkpoint-admitted-steer-turn";
+    let primary = session
+        .send(TurnInput::text("primary waits for active steer"))
+        .id(active_turn_id)
+        .await?;
+    let turn = tokio::spawn(async move { primary.outcome().await });
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), first_started_rx)
+        .await
+        .expect("first provider call should start")
+        .expect("first provider signal");
+    let active = session
+        .send(TurnInput::text("cancelled active steer"))
+        .id("checkpoint-admitted-steer")
+        .ingress(lash_core::TurnInputIngress::active_turn(
+            active_turn_id,
+            lash_core::TurnInputCheckpointBoundary::AfterWork,
+        ))
+        .await?;
+    let active_id = active.input_id().clone();
+    release_first_tx
+        .send(())
+        .expect("release first provider response");
+    tokio::time::timeout(std::time::Duration::from_secs(2), second_started_rx)
+        .await
+        .expect("admitted active steer should start the follow-up provider call")
+        .expect("second provider signal");
+
+    // The steer is checkpoint-admitted and its turn is in flight: the input's
+    // cancel resolves the consuming root from the admission's record.
+    let stopped = session
+        .cancel(crate::CancelTarget::Input(active_id.clone()))
+        .await?;
+    let crate::CancelReceipt::Requested { root, .. } = &stopped else {
+        panic!("a checkpoint-admitted input's cancel reaches its root: {stopped:?}");
+    };
+    assert_eq!(root.as_str(), active_turn_id);
+    let interrupted = tokio::time::timeout(std::time::Duration::from_secs(10), turn)
+        .await
+        .expect("the cancelled root settles")
+        .expect("turn task")?;
+    assert_eq!(interrupted.status, crate::TurnStatus::Cancelled);
+    assert_eq!(active.outcome().await?.status, crate::TurnStatus::Cancelled);
+    Ok(())
+}
+
 #[cfg(feature = "rlm")]
 #[test]
 pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<()> {

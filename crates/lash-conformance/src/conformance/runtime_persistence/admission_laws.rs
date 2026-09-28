@@ -60,7 +60,8 @@ async fn durable_ingress(
 
 /// The inputs a read reports admitted to `root`, and the batches a root
 /// holds: listed but not open. Each law's session has one root at a time,
-/// so a held batch is that root's.
+/// so a held batch is that root's. Every listed input's point read
+/// (`pending_turn_input`) must answer the status the list answers.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own reads"
@@ -70,10 +71,23 @@ async fn rows_bound_to(
     session: &SessionId,
     root: &str,
 ) -> (Vec<crate::InputId>, Vec<crate::BatchId>) {
-    let inputs = store
+    let listed = store
         .list_pending_turn_inputs(session)
         .await
-        .expect("list inputs")
+        .expect("list inputs");
+    for read in &listed {
+        assert_eq!(
+            store
+                .pending_turn_input(session, &read.input.input_id)
+                .await
+                .expect("read the input by id")
+                .map(|by_id| by_id.status),
+            Some(read.status.clone()),
+            "input `{}` reads by id as the list reads it",
+            read.input.input_id
+        );
+    }
+    let inputs = listed
         .into_iter()
         .filter(|read| {
             matches!(

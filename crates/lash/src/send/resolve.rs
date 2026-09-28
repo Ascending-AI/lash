@@ -43,26 +43,6 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
     crate::EmbedError::Store(error)
 }
 
-/// Committed input applications, in commit order.
-///
-/// Only an input no claim bound needs them: a checkpoint delivery acquires
-/// application evidence at its turn's commit. A store that keeps no
-/// application records (a test double) has none to show; every durable
-/// backend keeps them.
-pub(super) async fn applications(
-    parts: &SendParts,
-) -> Result<Vec<lash_core::TurnInputApplication>> {
-    match parts
-        .store
-        .list_turn_input_applications(&parts.session_id)
-        .await
-    {
-        Ok(applications) => Ok(applications),
-        Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => Ok(Vec::new()),
-        Err(error) => Err(store_error(error)),
-    }
-}
-
 /// Resolve an accepted input through the durable binding made by its claim.
 pub(super) async fn resolve_input(
     parts: &SendParts,
@@ -78,11 +58,10 @@ pub(super) async fn resolve_input(
     }
     let open = parts
         .store
-        .list_pending_turn_inputs(&parts.session_id)
+        .pending_turn_input(&parts.session_id, &receipt.input_id)
         .await
         .map_err(store_error)?
-        .iter()
-        .any(|read| read.input.input_id == receipt.input_id);
+        .is_some();
     // Claim and settlement can race the pending read. Re-read the binding
     // before interpreting a missing row as a withdrawal.
     if let Some(root) = parts
@@ -92,15 +71,6 @@ pub(super) async fn resolve_input(
         .map_err(store_error)?
     {
         return resolve_root(parts, &root).await;
-    }
-    // Checkpoint inputs in the interim ingress acquire application evidence
-    // at commit. Never infer their root from their host id.
-    if let Some(application) = applications(parts)
-        .await?
-        .into_iter()
-        .find(|application| application.input_id == receipt.input_id)
-    {
-        return resolve_from_turn(parts, &application.turn_id).await;
     }
     if !open {
         return Ok(Resolution::Withdrawn);
@@ -228,14 +198,4 @@ async fn park_of(parts: &SendParts, root: &TurnId) -> Result<Option<ParkedTurn>>
             since_ms: park.since_ms,
             attempts: park.attempts,
         }))
-}
-
-/// The inputs a root's physical turns applied, in commit order.
-pub(super) async fn inputs_of_root(parts: &SendParts, root: &TurnId) -> Result<Vec<InputId>> {
-    Ok(applications(parts)
-        .await?
-        .into_iter()
-        .filter(|application| root_of_physical_turn(&application.turn_id).0 == *root)
-        .map(|application| application.input_id)
-        .collect())
 }

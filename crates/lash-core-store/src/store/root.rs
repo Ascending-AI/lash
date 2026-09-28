@@ -436,7 +436,8 @@ pub trait RootStore: Send + Sync {
     }
 
     /// The root that took accepted input `input`: the root its admission bound
-    /// it to. `None` while it is pending.
+    /// it to, or for a checkpoint delivery the root whose commit applied it.
+    /// `None` while it is pending or while a checkpoint delivery is in flight.
     async fn root_of_input(
         &self,
         session_id: &SessionId,

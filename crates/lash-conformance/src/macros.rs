@@ -160,6 +160,7 @@ macro_rules! runtime_persistence_tests {
             (pending_session_work_ordering_agrees_across_ingress_families, "pending-work-ordering"),
             (concurrent_admissions_bind_every_row_to_at_most_one_root, "concurrent-queue-input"),
             (checkpoint_admission_takes_both_families_once, "checkpoint-work"),
+            (a_checkpoint_applied_input_resolves_to_its_root_by_point_read, "checkpoint-applied-binding"),
             (checkpoint_admission_is_idempotent_by_root_and_step, "checkpoint-step-idempotence"),
             (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
             (checkpoint_claims_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),

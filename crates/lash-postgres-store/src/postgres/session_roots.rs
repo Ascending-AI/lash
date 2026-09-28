@@ -500,6 +500,26 @@ pub(crate) async fn root_binding_conn(
         .map(|root| root.map(TurnId::from))
 }
 
+/// Bind `input` to `root` in the caller's transaction, set-if-absent: the
+/// commit that applies a checkpoint-admitted input records the root that
+/// applied it. A root admission already wrote the same binding for its own
+/// inputs, so the insert is a no-op for them.
+pub(crate) async fn bind_applied_input_tx(
+    conn: &mut PgConnection,
+    session_id: &SessionId,
+    input: &InputId,
+    root: &TurnId,
+) -> Result<(), StoreError> {
+    sqlx::query(session_roots_sql().inputs.insert.sql())
+        .bind(session_id.as_str())
+        .bind(input.as_str())
+        .bind(root.as_str())
+        .execute(&mut *conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(())
+}
+
 /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s row, in
 /// the caller's transaction. A binding to another root refuses the whole
 /// write.
@@ -949,8 +969,9 @@ impl RootStore for PostgresSessionStore {
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        // An input's root is its binding: the admission that took it, or
-        // the fork that rebound it.
+        // An input's root is its binding: the admission that took it, the
+        // commit whose checkpoint delivery applied it, or the fork that
+        // rebound it.
         self.root_binding(session_id, input).await
     }
 

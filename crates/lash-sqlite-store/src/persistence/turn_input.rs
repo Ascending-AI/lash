@@ -615,6 +615,44 @@ impl IngressStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &lash_core_execution::InputId,
+    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        let session_id = session_id.clone();
+        let input_id = input_id.clone();
+        self.conn
+            .call(move |conn| {
+                // One point read by primary key; the lifecycle filter the
+                // list applies in SQL is applied to the one row here.
+                let outcome = (|| {
+                    let row = conn
+                        .prepare_cached(
+                            crate::turn_ingress::turn_ingress_sql()
+                                .pending_inputs
+                                .select_by_id
+                                .sql(),
+                        )
+                        .and_then(|mut stmt| {
+                            stmt.query_row(
+                                params![session_id.as_str(), input_id.as_str()],
+                                pending_turn_input_row_from_sql,
+                            )
+                            .optional()
+                        })
+                        .map_err(sqlite_error)?;
+                    Ok(row
+                        .map(pending_turn_input_read_from_row)
+                        .transpose()?
+                        .filter(|read| read.input.state.is_open()))
+                })();
+                Ok(outcome)
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn list_turn_input_applications(
         &self,
         session_id: &SessionId,

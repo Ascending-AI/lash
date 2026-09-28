@@ -549,6 +549,127 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
     );
 }
 
+/// FIG-3976: a checkpoint-admitted input has no root binding while its
+/// delivery is in flight; the commit that completes it binds it to the root
+/// that applied it, so `root_of_input` resolves it by one point read. The
+/// row's own point read, `pending_turn_input`, answers what the undelivered
+/// list answers for it at each stage.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("checkpoint-applied-binding");
+    let turn = crate::TurnId::from("checkpoint-applied-binding:turn");
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "checkpoint applied input",
+        ))
+        .await
+        .expect("enqueue active input");
+    assert_eq!(
+        undelivered_status(&store, &session_id, &input.input_id).await,
+        (
+            Some(crate::PendingTurnInputReadStatus::Open),
+            Some(crate::PendingTurnInputReadStatus::Open)
+        ),
+        "an enqueued input reads open by id and in the list"
+    );
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-applied-owner").await;
+    let admission = admit_at_checkpoint_for_test(
+        &store,
+        &fence,
+        &turn,
+        &turn,
+        crate::CheckpointKind::AfterWork,
+        "checkpoint-applied-binding:step",
+        10,
+        crate::testing::queued_work_admission_policy(10),
+    )
+    .await
+    .expect("admit at the checkpoint");
+    assert!(
+        admission
+            .inputs
+            .as_ref()
+            .is_some_and(|inputs| inputs.input_ids() == vec![input.input_id.clone()]),
+        "the checkpoint admits the input"
+    );
+    assert_eq!(
+        store
+            .root_of_input(&session_id, &input.input_id)
+            .await
+            .expect("read the in-flight binding"),
+        None,
+        "a checkpoint delivery in flight binds no root yet"
+    );
+    assert_eq!(
+        undelivered_status(&store, &session_id, &input.input_id).await,
+        (None, None),
+        "an accepted checkpoint delivery is no longer undelivered, by id or in the list"
+    );
+
+    end_root(
+        &store,
+        &fence,
+        completing_checkpoint(IngressSettlement::new(turn.clone()), &admission),
+    )
+    .await;
+    assert_eq!(
+        store
+            .root_of_input(&session_id, &input.input_id)
+            .await
+            .expect("read the applied binding"),
+        Some(turn.clone()),
+        "the completing commit binds the input to the root that applied it"
+    );
+    assert_eq!(
+        undelivered_status(&store, &session_id, &input.input_id).await,
+        (None, None),
+        "a completed input is no longer undelivered, by id or in the list"
+    );
+    assert_eq!(
+        store
+            .root_binding(&session_id, &input.input_id)
+            .await
+            .expect("read the applied binding"),
+        Some(turn),
+    );
+}
+
+/// `input`'s undelivered status by its point read and by the session's list.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the reads are established by the caller's setup"
+)]
+async fn undelivered_status(
+    store: &Arc<dyn RuntimePersistence>,
+    session_id: &SessionId,
+    input: &crate::InputId,
+) -> (
+    Option<crate::PendingTurnInputReadStatus>,
+    Option<crate::PendingTurnInputReadStatus>,
+) {
+    let by_id = store
+        .pending_turn_input(session_id, input)
+        .await
+        .expect("read the row by id")
+        .map(|read| read.status);
+    let listed = store
+        .list_pending_turn_inputs(session_id)
+        .await
+        .expect("list the undelivered rows")
+        .into_iter()
+        .find(|read| read.input.input_id == *input)
+        .map(|read| read.status);
+    (by_id, listed)
+}
+
 /// FIG-3927 N3, checkpoint half: `admit_at_checkpoint` is idempotent by
 /// `(root, step)`. Run again under the same fence, under a later fence, or
 /// with rows enqueued in between, the step reads back exactly the rows it

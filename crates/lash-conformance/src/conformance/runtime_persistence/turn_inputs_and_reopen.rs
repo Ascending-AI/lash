@@ -620,6 +620,14 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
 
     // The root ends without settling the input: its terminal releases it.
     end_root(&store, &successor, IngressSettlement::new(turn.clone())).await;
+    assert_eq!(
+        store
+            .root_of_input(&session_id, &input.input_id)
+            .await
+            .expect("read the released input's root"),
+        None,
+        "a released checkpoint input stays unbound"
+    );
     let released = store
         .list_pending_turn_inputs(&session_id)
         .await

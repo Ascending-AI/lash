@@ -511,6 +511,25 @@ pub(crate) fn root_binding_conn(
     .map(|root| root.map(TurnId::from))
 }
 
+/// Bind `input` to `root` in the caller's transaction, set-if-absent: the
+/// commit that applies a checkpoint-admitted input records the root that
+/// applied it. A root admission already wrote the same binding for its own
+/// inputs, so the insert is a no-op for them.
+pub(crate) fn bind_applied_input_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    input: &InputId,
+    root: &TurnId,
+) -> Result<(), StoreError> {
+    crate::conn::cached_execute(
+        tx,
+        session_roots_sql().inputs.insert.sql(),
+        params![session_id.as_str(), input.as_str(), root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
 /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s row, in
 /// the caller's transaction. A binding to another root refuses the whole
 /// write.
@@ -999,8 +1018,9 @@ impl RootStore for crate::Store {
         session_id: &SessionId,
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError> {
-        // An input's root is its binding: the admission that took it, or
-        // the fork that rebound it.
+        // An input's root is its binding: the admission that took it, the
+        // commit whose checkpoint delivery applied it, or the fork that
+        // rebound it.
         self.root_binding(session_id, input).await
     }
 

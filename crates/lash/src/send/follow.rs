@@ -707,17 +707,18 @@ async fn live_report(
     subject: &Subject,
     root: &TurnId,
 ) -> Result<Option<mailbox::SettledRoot>> {
-    let inputs = match subject {
-        Subject::Input(receipt) => vec![receipt.input_id.clone()],
-        Subject::Root(_) => resolve::inputs_of_root(&ctx.parts, root).await?,
-    };
-    Ok(inputs.into_iter().find_map(|input| {
-        mailbox::take_settled_root(
+    Ok(match subject {
+        Subject::Input(receipt) => mailbox::take_settled_root(
             ctx.parts.work.store_binding(),
             &ctx.parts.session_id,
-            &input,
-        )
-    }))
+            &receipt.input_id,
+        ),
+        Subject::Root(_) => mailbox::take_settled_root_of(
+            ctx.parts.work.store_binding(),
+            &ctx.parts.session_id,
+            root,
+        ),
+    })
 }
 
 #[allow(

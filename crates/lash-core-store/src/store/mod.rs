@@ -1556,6 +1556,25 @@ pub trait IngressStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
 
+    /// Read one undelivered user input by id: the row
+    /// [`list_pending_turn_inputs`](Self::list_pending_turn_inputs) lists for
+    /// `input_id`, or `None` once it is completed, cancelled or unknown.
+    ///
+    /// The default filters that list. Durable backends override it with one
+    /// point read by `(session_id, input_id)`, so a follower asking whether
+    /// its own input is still open pays no scan of the session's queue.
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &crate::InputId,
+    ) -> Result<Option<crate::PendingTurnInputRead>, StoreError> {
+        Ok(self
+            .list_pending_turn_inputs(session_id)
+            .await?
+            .into_iter()
+            .find(|read| read.input.input_id == *input_id))
+    }
+
     /// Read canonical input applications from durable turn-commit records.
     ///
     /// Unlike live observation replay, this surface is not retention-window
