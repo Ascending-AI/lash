@@ -33,6 +33,8 @@
 //! [`drive_root_scope`]: crate::engine::drive_root_scope
 
 mod admission;
+#[cfg(test)]
+mod attempt_drop_tests;
 mod close;
 mod control;
 pub mod ingress;
@@ -570,6 +572,51 @@ fn controller_abort(root: Option<&TurnId>, error: RuntimeEffectControllerError) 
     drive_abort(root, error.into_runtime_error())
 }
 
+/// One engine attempt of a root on the resident runtime, from its entry
+/// until it returns or the engine drops it (FIG-3984).
+///
+/// Restate stops polling a handler that suspends at an await, so an attempt
+/// can end where it awaited and nothing after that await runs. The resident
+/// runtime then still holds what the attempt did to it: its sealed root,
+/// its journaled claims, the turn index its admission recorded, and a
+/// resident session holding a code cell that returned but was never
+/// settled. A guard dropped before its attempt returned discards all of it,
+/// and invalidates the resident session so the next use reloads the durable
+/// session: the engine's next attempt replays the journal from its start
+/// and must start from that session (FIG-3982), and a host's read of the
+/// runtime in between must not see the dropped attempt's state.
+struct EngineAttempt<'r> {
+    runtime: &'r mut LashRuntime,
+    returned: bool,
+}
+
+impl<'r> EngineAttempt<'r> {
+    fn enter(runtime: &'r mut LashRuntime) -> Self {
+        debug_assert!(
+            !runtime.engine_retries_root,
+            "an engine attempt entered inside another one"
+        );
+        runtime.engine_retries_root = true;
+        Self {
+            runtime,
+            returned: false,
+        }
+    }
+}
+
+impl Drop for EngineAttempt<'_> {
+    fn drop(&mut self) {
+        let runtime = &mut *self.runtime;
+        runtime.engine_retries_root = false;
+        if !self.returned {
+            runtime.drive_root = None;
+            runtime.journaled_drive_claims.clear();
+            runtime.admitted_turn_index = None;
+            runtime.invalidate_resident_session_state();
+        }
+    }
+}
+
 impl LashRuntime {
     /// The drive loop: admit, seal and run roots until admission stops, or
     /// until `done` says the root just run is the one the caller waited for.
@@ -694,29 +741,26 @@ impl LashRuntime {
     ///
     /// An engine also ends an attempt by dropping it where it stands:
     /// Restate stops polling a handler that suspends at an await, or whose
-    /// attempt failed. Nothing after that await runs, so the attempt's flag
-    /// is still up when the engine's next attempt enters, and the resident
-    /// session still holds what the dropped attempt did to it: a code cell
-    /// that returned but was never settled, the root's claims, its sealed
-    /// run. The next attempt replays the journal from its start, so it must
-    /// start from the durable session exactly as a redrive in a fresh
-    /// process does, never from that residue: a cell that refuses to start
-    /// over an unsettled one skips the effects its first execution journaled
-    /// (FIG-3982).
+    /// attempt failed. The attempt's [`EngineAttempt`] guard discards what
+    /// the dropped attempt left on the resident runtime as it is dropped
+    /// (FIG-3984), so whoever locks the runtime next, the engine's next
+    /// attempt or a host's read, finds it as a redrive in a fresh process
+    /// would (FIG-3982).
     async fn run_engine_root(
         &mut self,
         controller: &ScopedEffectController<'_>,
         admitted: Admitted,
         sinks: &DriveSinks<'_>,
     ) -> Result<RootRun, DriveAbort> {
-        if std::mem::replace(&mut self.engine_retries_root, true) {
-            self.drive_root = None;
-            self.journaled_drive_claims.clear();
-            self.admitted_turn_index = None;
-            self.invalidate_resident_session_state();
-        }
-        let run = Box::pin(self.run_admitted_root_step(controller, admitted, sinks, None)).await;
-        self.engine_retries_root = false;
+        let mut attempt = EngineAttempt::enter(self);
+        let run = Box::pin(
+            attempt
+                .runtime
+                .run_admitted_root_step(controller, admitted, sinks, None),
+        )
+        .await;
+        attempt.returned = true;
+        drop(attempt);
         run.map_err(|abort| match abort {
             DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
             abort => abort,

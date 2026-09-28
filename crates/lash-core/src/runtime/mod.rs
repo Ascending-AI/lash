@@ -522,9 +522,9 @@ pub struct LashRuntime {
     pub(crate) journaled_drive_claims: std::collections::BTreeSet<String>,
     /// Set while an engine runs one admitted root as an attempt of its own
     /// ([`run_admitted_root`](crate::drive::run_admitted_root)): the engine retries
-    /// that attempt on a live fault, under the same root (FIG-3897). Still
-    /// set when the next attempt enters, it names an attempt the engine
-    /// dropped mid-flight, whose residue that attempt discards (FIG-3982).
+    /// that attempt on a live fault, under the same root (FIG-3897). The
+    /// attempt's guard lowers it when the attempt returns or the engine
+    /// drops it, discarding a dropped attempt's residue (FIG-3984).
     pub(crate) engine_retries_root: bool,
     /// The turn index the running direct turn's admission recorded
     /// (FIG-3682). The accept phase sets it after it adopted the head the
