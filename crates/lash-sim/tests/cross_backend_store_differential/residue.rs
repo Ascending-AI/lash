@@ -423,3 +423,84 @@ async fn residue_digest_covers_a_planted_postgres_table() {
         ],
     );
 }
+
+/// The logical name `changed_tables` reports for the `processes` rows the
+/// ProcessStart leg digests (FIG-3964).
+pub(super) const PROCESS_OBLIGATION_TABLE: &str = "processes";
+
+/// The `start_obligation_*` family of one registered `processes` row (ADR
+/// 0109 §3). `processes` is keyed by process id rather than session id and,
+/// on SQLite, lives in the process-registry file beside the durable core the
+/// session digest reads — the catalog walk above never sees it there. The
+/// ProcessStart leg digests the rows it registered directly, rendered
+/// without decoding and compared only against another digest of the same
+/// backend, so a ledger answer that lied about not writing — or a write that
+/// leaked into the family — moves the table.
+const SQLITE_PROCESS_OBLIGATION_QUERY: &str = "SELECT * FROM processes WHERE process_id = ?1";
+
+const POSTGRES_PROCESS_OBLIGATION_QUERY: &str =
+    "SELECT to_jsonb(t)::text FROM lash_processes t WHERE process_id = $1";
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a backend that cannot open or answer panics the harness with its name by design"
+)]
+pub(super) fn sqlite_process_obligation_digest(
+    registry: &Path,
+    process_ids: &[String],
+) -> ResidueDigest {
+    let connection =
+        rusqlite::Connection::open(registry).expect("open SQLite process residue reader");
+    connection
+        .busy_timeout(Duration::from_secs(15))
+        .expect("configure SQLite process residue reader busy timeout");
+    let mut statement = connection
+        .prepare(SQLITE_PROCESS_OBLIGATION_QUERY)
+        .expect("prepare SQLite process residue read");
+    let column_count = statement.column_count();
+    let mut rows = Vec::new();
+    for process_id in process_ids {
+        let mut found = statement
+            .query_map([process_id], |row| {
+                let mut rendered = String::new();
+                for column in 0..column_count {
+                    let value: rusqlite::types::Value = row.get(column)?;
+                    let _ = write!(rendered, "{value:?}|");
+                }
+                Ok(rendered)
+            })
+            .expect("read SQLite process residue rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("collect SQLite process residue rows");
+        rows.append(&mut found);
+    }
+    rows.sort();
+    ResidueDigest {
+        tables: BTreeMap::from([(PROCESS_OBLIGATION_TABLE.to_string(), rows)]),
+    }
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a backend that cannot answer panics the harness with its name by design"
+)]
+pub(super) async fn postgres_process_obligation_digest(
+    pool: &PgPool,
+    process_ids: &[String],
+) -> ResidueDigest {
+    let mut rows = Vec::new();
+    for process_id in process_ids {
+        if let Some(row) = sqlx::query_scalar::<_, String>(POSTGRES_PROCESS_OBLIGATION_QUERY)
+            .bind(process_id)
+            .fetch_optional(pool)
+            .await
+            .expect("read Postgres process residue rows")
+        {
+            rows.push(row);
+        }
+    }
+    rows.sort();
+    ResidueDigest {
+        tables: BTreeMap::from([(PROCESS_OBLIGATION_TABLE.to_string(), rows)]),
+    }
+}
