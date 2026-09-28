@@ -327,9 +327,6 @@ where
             TraceEvent::CompactionNeeded { .. } => {
                 self.emit_instant(record, "lash.compaction.needed", None)
             }
-            TraceEvent::PromptViewPruned { .. } => {
-                self.emit_instant(record, "lash.prompt_view.pruned", None)
-            }
             TraceEvent::PromptViewAttachmentsPruned { .. } => {
                 self.emit_instant(record, "lash.prompt_view.attachments_pruned", None)
             }
@@ -568,29 +565,6 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             attrs.push(KeyValue::new(
                 attr::LASH_COMPACTION_THRESHOLD_TOKENS,
                 *threshold_tokens as i64,
-            ));
-        }
-        TraceEvent::PromptViewPruned {
-            used_tokens,
-            max_context_tokens,
-            dropped_prefix_messages,
-            retained_messages,
-        } => {
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_USED_TOKENS,
-                *used_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_MAX_CONTEXT_TOKENS,
-                *max_context_tokens as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_DROPPED_PREFIX_MESSAGES,
-                *dropped_prefix_messages as i64,
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_COMPACTION_RETAINED_MESSAGES,
-                *retained_messages as i64,
             ));
         }
         TraceEvent::PromptViewAttachmentsPruned {

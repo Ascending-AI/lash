@@ -206,6 +206,30 @@ fn build_turn_ctx_with_graph(
     manager: Arc<MockSessionManager>,
     session_graph: Arc<dyn SessionGraphService>,
 ) -> TurnTransformContext<'static> {
+    build_turn_ctx_with_direct(
+        session_id,
+        state,
+        prompt_usage,
+        max_context_tokens,
+        manager,
+        session_graph,
+        lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
+            Err(lash_core::PluginError::Session(
+                "direct completions are unavailable in standard compaction tests".to_string(),
+            ))
+        }),
+    )
+}
+
+fn build_turn_ctx_with_direct(
+    session_id: &SessionId,
+    state: SessionSnapshot,
+    prompt_usage: Option<TokenUsage>,
+    max_context_tokens: Option<usize>,
+    manager: Arc<MockSessionManager>,
+    session_graph: Arc<dyn SessionGraphService>,
+    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
+) -> TurnTransformContext<'static> {
     TurnTransformContext {
         session_id: SessionId::from(session_id.to_string()),
         state: state.read_view().expect("runtime frame scope resolves"),
@@ -219,11 +243,7 @@ fn build_turn_ctx_with_graph(
             lash_core::AdmittedScope::turn(session_id, "standard-compaction-test-turn"),
         )
         .expect("test scoped effect controller"),
-        direct_completions: lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
-            Err(lash_core::PluginError::Session(
-                "direct completions are unavailable in standard compaction tests".to_string(),
-            ))
-        }),
+        direct_completions,
         system_prompt: None,
     }
 }
@@ -380,156 +400,161 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
     assert_eq!(image_part.content(), PRUNED_ATTACHMENT_PLACEHOLDER);
 }
 
+/// FIG-4029: at the compaction threshold the transform summarizes the
+/// committed frame, switches to a fresh compaction frame seeded with the
+/// summary, and hands the turn that frame's window: the seed, then the turn's
+/// own request.
 #[tokio::test]
-async fn standard_compaction_turn_transform_projects_tail_without_summary() {
+async fn pressure_compaction_switches_to_a_summary_frame_and_projects_its_window() {
     let manager = Arc::new(mock_manager());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
-    };
-    let ctx = build_turn_ctx(
-        &SessionId::from("root"),
-        state,
-        Some(prompt_usage(90_000)),
-        Some(100_000),
-        manager.clone(),
-    );
-    let prepared = PreparedContext {
-        messages: vec![
-            text_message("u1", MessageRole::User, "old work"),
-            text_message("a1", MessageRole::Assistant, "assistant old"),
-            text_message("u2", MessageRole::User, "latest request"),
-        ]
-        .into(),
+    let graph = Arc::new(RecordingSessionGraph::default());
+    let direct = Arc::new(RecordingLlmCompletions {
+        summary: "Compacted work summary".to_string(),
         ..Default::default()
-    };
+    });
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
+    let history = vec![
+        text_message("u1", MessageRole::User, "old work"),
+        text_message("a1", MessageRole::Assistant, "assistant old"),
+    ];
+    let ctx = build_turn_ctx_with_direct(
+        &SessionId::from("root"),
+        compactable_state(history.clone()),
+        Some(prompt_usage(30_000)),
+        Some(40_000),
+        manager.clone(),
+        graph.clone(),
+        RecordingLlmCompletions::client(&direct),
+    );
+    let mut messages = history;
+    messages.push(text_message("u2", MessageRole::User, "latest request"));
     let built = transform
-        .transform(&ctx, prepared)
+        .transform(
+            &ctx,
+            PreparedContext {
+                messages: messages.into(),
+                ..Default::default()
+            },
+        )
         .await
         .expect("transform")
         .messages;
 
-    assert!(built.iter().any(|message| {
-        message
-            .parts
-            .iter()
-            .any(|part| part.content().contains("latest request"))
-    }));
-    assert!(!built.iter().any(|message| {
-        message
-            .parts
-            .iter()
-            .any(|part| part.content().contains("old work"))
-    }));
-
-    let created = manager.created_snapshot();
-    assert!(created.is_empty());
-}
-
-#[tokio::test]
-async fn standard_compaction_turn_transform_traces_threshold_and_prompt_pruning() {
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
-    };
-    let ctx = build_turn_ctx_with_graph(
-        &SessionId::from("root"),
-        state,
-        Some(prompt_usage(30_000)),
-        Some(40_000),
-        manager,
-        trace.clone(),
+    // One summarizer call over the committed frame.
+    let requests = direct.requests();
+    assert_eq!(requests.len(), 1, "exactly one direct summarizer call");
+    let request_text = RecordingLlmCompletions::request_text(&requests[0]);
+    assert!(request_text.contains("old work") && request_text.contains("assistant old"));
+    assert!(!request_text.contains("latest request"));
+    assert!(
+        manager.created_snapshot().is_empty(),
+        "compaction must not create a child session"
     );
-    let prepared = PreparedContext {
-        messages: vec![
-            text_message("u1", MessageRole::User, "old work"),
-            text_message("a1", MessageRole::Assistant, "assistant old"),
-            text_message("u2", MessageRole::User, "latest request"),
-        ]
-        .into(),
-        ..Default::default()
-    };
 
-    transform
-        .transform(&ctx, prepared)
-        .await
-        .expect("transform should emit its decisions");
-
-    let events = trace.events();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
-    assert_eq!(
-        events[0].0.turn_id.as_deref(),
-        Some("standard-compaction-test-turn")
+    // One compaction frame switch, seeded with the summary.
+    let switches = graph.switches();
+    assert_eq!(switches.len(), 1);
+    let switch = &switches[0].1;
+    assert_eq!(switch.reason.as_str(), "compaction");
+    assert_eq!(switch.task.as_deref(), Some("context-pressure compaction"));
+    assert!(
+        switch
+            .operation_id
+            .starts_with("standard-compaction-pressure/switch/")
     );
+    let [lash_core::SessionAppendNode::Message { message: seed }] = switch.initial_nodes.as_slice()
+    else {
+        panic!("the switch is seeded with one summary message: {switch:?}");
+    };
     assert_eq!(
-        events[0].1,
-        lash_core::TraceEvent::CompactionNeeded {
+        seed.parts.first().map(Part::content).as_deref(),
+        Some("Compaction summary:\nCompacted work summary")
+    );
+    assert!(
+        graph.appends().is_empty(),
+        "pressure appends nothing to the old frame"
+    );
+
+    // The turn's window is the new frame's: the seed under the id the frame
+    // mints for it, then the current request, and nothing the summary covers.
+    assert_eq!(built.len(), 2, "{built:?}");
+    assert_eq!(Some(&built[0].id), seed.id.as_ref());
+    assert!(is_compaction_summary_message(&built[0]));
+    assert_eq!(
+        built[0].parts[0].content(),
+        "Compaction summary:\nCompacted work summary"
+    );
+    assert_eq!(built[1].id, "u2");
+
+    assert_eq!(
+        graph
+            .events()
+            .into_iter()
+            .map(|(context, event)| {
+                assert_eq!(context.session_id.as_deref(), Some("root"));
+                assert_eq!(
+                    context.turn_id.as_deref(),
+                    Some("standard-compaction-test-turn")
+                );
+                event
+            })
+            .collect::<Vec<_>>(),
+        [lash_core::TraceEvent::CompactionNeeded {
             used_tokens: 30_000,
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
-        }
-    );
-    assert_eq!(
-        events[1].1,
-        lash_core::TraceEvent::PromptViewPruned {
-            used_tokens: 30_000,
-            max_context_tokens: 40_000,
-            dropped_prefix_messages: 2,
-            retained_messages: 1,
-        }
+        }]
     );
 }
 
+/// Pressure over a frame with no committed conversation records the need and
+/// has nothing to summarize: no summarizer call and no frame switch.
 #[tokio::test]
-async fn standard_compaction_turn_transform_records_needed_when_no_cut_point_exists() {
+async fn pressure_without_committed_history_records_the_need_and_switches_nothing() {
     let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let graph = Arc::new(RecordingSessionGraph::default());
+    let direct = Arc::new(RecordingLlmCompletions::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let state = SessionSnapshot {
-        session_id: SessionId::from("root"),
-        policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
-    };
-    let ctx = build_turn_ctx_with_graph(
+    let ctx = build_turn_ctx_with_direct(
         &SessionId::from("root"),
-        state,
+        compactable_state(vec![text_message("s1", MessageRole::System, "policy")]),
         Some(prompt_usage(30_000)),
         Some(40_000),
         manager,
-        trace.clone(),
+        graph.clone(),
+        RecordingLlmCompletions::client(&direct),
     );
-    let prepared = PreparedContext {
-        messages: vec![
-            text_message("s1", MessageRole::System, "policy"),
-            text_message("s2", MessageRole::System, "more policy"),
-        ]
-        .into(),
-        ..Default::default()
-    };
-
-    transform
-        .transform(&ctx, prepared)
+    let messages = vec![
+        text_message("s1", MessageRole::System, "policy"),
+        text_message("u1", MessageRole::User, "first request"),
+    ];
+    let built = transform
+        .transform(
+            &ctx,
+            PreparedContext {
+                messages: messages.into(),
+                ..Default::default()
+            },
+        )
         .await
-        .expect("no-cut-point decision should be traced");
+        .expect("a frame with nothing to summarize still runs its turn")
+        .messages;
 
-    let events = trace.events();
-    assert_eq!(events.len(), 2);
     assert_eq!(
-        events[1].1,
-        lash_core::TraceEvent::PromptViewPruned {
-            used_tokens: 30_000,
-            max_context_tokens: 40_000,
-            dropped_prefix_messages: 0,
-            retained_messages: 2,
-        }
+        built
+            .iter()
+            .map(|message| message.id.as_str())
+            .collect::<Vec<_>>(),
+        ["s1", "u1"]
     );
+    assert!(direct.requests().is_empty());
+    assert!(graph.switches().is_empty());
+    let events = graph.events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0].1,
+        lash_core::TraceEvent::CompactionNeeded { .. }
+    ));
 }
 
 #[tokio::test]
@@ -596,11 +621,9 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
         Some("standard-compaction-test-turn")
     );
     assert!(
-        !events.iter().any(|(_, event)| matches!(
-            event,
-            lash_core::TraceEvent::CompactionNeeded { .. }
-                | lash_core::TraceEvent::PromptViewPruned { .. }
-        )),
+        !events
+            .iter()
+            .any(|(_, event)| matches!(event, lash_core::TraceEvent::CompactionNeeded { .. })),
         "no compaction decision runs on a prune-only turn: {events:?}"
     );
 }

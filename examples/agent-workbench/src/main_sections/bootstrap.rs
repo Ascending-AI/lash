@@ -24,7 +24,6 @@ pub(crate) fn configure_workbench_plugins(
     approvals: approvals::WorkbenchApprovals,
     mcp: Arc<dyn PluginFactory>,
 ) {
-    plugins.push(Arc::new(StandardCompactionPluginFactory::default()));
     plugins.push(Arc::new(
         WorkbenchPluginFactory::new()
             .with_mail_world(mail_world)
@@ -727,7 +726,7 @@ pub(crate) fn context_window_tokens_from(
 
 pub(crate) fn invalid_context_window_error(problem: std::fmt::Arguments<'_>) -> anyhow::Error {
     anyhow!(
-        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: standard-compaction compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}, so the workbench requires a context window at least twice the plugin's compaction buffer"
+        "agent-workbench: {AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV} {problem}: the workbench requires a context window of at least {MIN_CONTEXT_WINDOW_TOKENS} tokens"
     )
 }
 
@@ -758,21 +757,15 @@ mod startup_tests {
     }
 
     #[test]
-    fn startup_refuses_context_window_below_twice_the_compaction_buffer() {
+    fn startup_refuses_context_window_below_the_minimum() {
         let below_floor = (MIN_CONTEXT_WINDOW_TOKENS - 1).to_string();
         let error = context_window_tokens_from(|_| Ok(below_floor))
-            .expect_err("a window below twice the compaction buffer must refuse startup");
+            .expect_err("a window below the minimum must refuse startup");
 
         let message = error.to_string();
         assert!(
             message.contains("AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS"),
             "unexpected startup refusal: {error:#}"
-        );
-        assert!(
-            message.contains(&format!(
-                "compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}"
-            )),
-            "startup refusal must explain the buffer predicate: {error:#}"
         );
         assert!(
             message.contains(&format!("must be at least {MIN_CONTEXT_WINDOW_TOKENS}")),
@@ -781,7 +774,7 @@ mod startup_tests {
     }
 
     #[test]
-    fn startup_refuses_unparseable_context_window_with_buffer_explanation() {
+    fn startup_refuses_unparseable_context_window_with_the_minimum() {
         let error = context_window_tokens_from(|_| Ok("tight".to_string()))
             .expect_err("an unparseable context-window override must refuse startup");
 
@@ -792,16 +785,10 @@ mod startup_tests {
             )),
             "unexpected parse refusal: {error:#}"
         );
-        assert!(
-            message.contains(&format!(
-                "compaction_needed fires at max_context - {STANDARD_COMPACTION_BUFFER_TOKENS}"
-            )),
-            "parse refusal must explain the buffer predicate: {error:#}"
-        );
     }
 
     #[test]
-    fn startup_non_unicode_error_does_not_claim_a_buffer_violation() {
+    fn startup_non_unicode_error_does_not_claim_a_minimum_violation() {
         let error = context_window_tokens_from(|_| {
             Err(std::env::VarError::NotUnicode(std::ffi::OsString::from(
                 "not-unicode",
@@ -811,13 +798,13 @@ mod startup_tests {
 
         let message = error.to_string();
         assert!(message.contains("is not valid Unicode"));
-        assert!(!message.contains("compaction_needed"));
+        assert!(!message.contains("at least"));
     }
 
     #[test]
-    fn startup_accepts_context_window_at_twice_the_compaction_buffer() {
+    fn startup_accepts_context_window_at_the_minimum() {
         let value = context_window_tokens_from(|_| Ok(MIN_CONTEXT_WINDOW_TOKENS.to_string()))
-            .expect("twice the compaction buffer is a useful minimum");
+            .expect("the minimum is accepted");
         assert_eq!(value, MIN_CONTEXT_WINDOW_TOKENS);
     }
 

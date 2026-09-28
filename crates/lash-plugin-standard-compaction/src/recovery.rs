@@ -1,9 +1,9 @@
-//! Plugin-owned recovery of an exhausted RLM context (FIG-2950): the third
-//! context policy of `lash-plugin-standard-compaction`.
+//! Plugin-owned recovery of an exhausted standard-protocol context (FIG-2950):
+//! the third context policy of `lash-plugin-standard-compaction`.
 
 use super::*;
 
-// ---- FIG-2950: plugin-owned recovery of an exhausted RLM context ----
+// ---- FIG-2950: plugin-owned recovery of an exhausted context ----
 // A persisted turn that stops with the FIG-1272 `context_overflow` outcome
 // leaves the task unfinished and unactionable by any instruction inside that
 // same exhausted context. This third policy recovers it out of band:
@@ -16,9 +16,9 @@ use super::*;
 // 3. Recovery summarizes the whole committed history through one direct LLM
 //    completion on the session's own journal lane, with the oversized parts
 //    elided first so the summarizer request itself fits the window.
-// 4. The summary and one terminal record are appended through the pinning
-//    graph seam under a stable operation id, and the continuing turn runs in
-//    a fresh recovered window (system prefix + summary + current request).
+// 4. One terminal record is appended through the pinning graph seam under a
+//    stable operation id, and the summary seeds a fresh compaction frame the
+//    continuing turn runs in (FIG-4029).
 //
 // Attempt count, the cap, and the recoverable-failure record are all
 // plugin-owned durable facts; the terminal exhausted record is what keeps a
@@ -242,20 +242,13 @@ pub(crate) async fn append_recovery_record(
     suffix: String,
     nodes: Vec<lash_core::SessionAppendNode>,
 ) -> Result<(), ContextError> {
-    let (compaction_frame_id, _) = compaction_request_ids(
+    let discriminator = compaction_discriminator(
         session_id,
         history_snapshot,
         request_snapshot,
         prompt_text,
         execution_scope,
     )?;
-    let discriminator = compaction_frame_id
-        .as_str()
-        .split_once("-compaction:")
-        .map_or_else(
-            || compaction_frame_id.to_string(),
-            |(_, tail)| tail.to_string(),
-        );
     let request = lash_core::AppendSessionNodesRequest {
         operation_id: format!("standard-compaction-overflow-recovery/{suffix}/{discriminator}"),
         nodes,
@@ -266,37 +259,6 @@ pub(crate) async fn append_recovery_record(
         .await
         .map_err(ContextError::from)?;
     Ok(())
-}
-
-/// The recovered prompt window: system prefix, the recovered summary, and the
-/// current turn's own request. Everything summarized is gone from the window
-/// without being rewritten; the session keeps its full history durable and
-/// inspectable.
-pub(crate) fn recovered_prompt_window(
-    summary: &str,
-    history_messages: &[Message],
-    current_request: &[Message],
-) -> Vec<Message> {
-    let prefix_len = leading_system_prefix_len(history_messages);
-    let message_id = "m_standard_compaction_overflow_recovery_summary";
-    let summary_message = Message {
-        id: message_id.to_string(),
-        role: MessageRole::Assistant,
-        parts: vec![Part::text(
-            format!("{message_id}.p0"),
-            format!("{COMPACTION_SUMMARY_TITLE}\n{summary}"),
-            None,
-        )]
-        .into(),
-        origin: Some(MessageOrigin::Plugin {
-            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-    };
-    let mut projected: Vec<Message> = history_messages[..prefix_len].to_vec();
-    projected.push(summary_message);
-    projected.extend_from_slice(current_request);
-    projected
 }
 
 pub(crate) fn recovery_pending_marker() -> lash_core::PluginMessage {
@@ -357,13 +319,12 @@ pub(crate) async fn record_and_project_failure(
 /// the turn on the ordinary rolling projection.
 ///
 /// FIG-3374: the summarizer is one direct LLM completion over the committed
-/// history on the session's own journal lane, and the summary lands in a
+/// history on the session's own journal lane, and the summary seeds a
 /// durable recovery frame through
 /// [`SessionGraphService::switch_agent_frame`], the same durable semantics as
-/// the in-turn frame-switch control. Recovery no longer projects a window
-/// into the exhausted frame: the residual window projection below covers only
-/// this running turn's prompt view, while the durable session continues in
-/// the switched frame.
+/// the in-turn frame-switch control. The frame opens before the recovering
+/// turn runs (FIG-4029), so the returned window is the recovery frame's own:
+/// the turn continues inside it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn run_overflow_recovery(
     session_id: &SessionId,
@@ -533,71 +494,27 @@ pub(crate) async fn run_overflow_recovery(
     .await?;
 
     // Switch to the recovery frame: a compaction-derived durable frame whose
-    // seed is the recovered summary, materialized by this turn's own commit.
-    switch_recovery_frame(
+    // seed is the recovered summary, opened before this turn runs and
+    // committed with it. The terminal record above folds into the frame the
+    // recovery leaves.
+    let seed = switch_to_summary_frame(
+        SummaryFrame::OverflowRecovery,
         session_id,
         history_snapshot,
         &request_snapshot,
         &prompt_text,
         session_graph,
-        scoped_effect_controller,
+        scoped_effect_controller.execution_scope(),
         current_frame_node_id,
         &summary,
     )
     .await?;
 
-    let window = recovered_prompt_window(&summary, history_messages, current_request);
-    Ok(Some(window))
-}
-
-/// Opens the recovery frame through the plugin-visible frame-switch seam
-/// (FIG-3107). The operation id materializes from the same compaction request
-/// identity as the append above, so re-deriving the recovery answers the same
-/// switch commit idempotently.
-#[allow(clippy::too_many_arguments)]
-async fn switch_recovery_frame(
-    session_id: &SessionId,
-    history_snapshot: &SessionSnapshot,
-    request_snapshot: &SessionSnapshot,
-    prompt_text: &str,
-    session_graph: &dyn lash_core::plugin::SessionGraphService,
-    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
-    current_frame_node_id: Option<&str>,
-    summary: &str,
-) -> Result<(), ContextError> {
-    let (compaction_frame_id, _) = compaction_request_ids(
-        session_id,
-        history_snapshot,
-        request_snapshot,
-        prompt_text,
-        scoped_effect_controller.execution_scope(),
-    )?;
-    let discriminator = compaction_frame_id
-        .as_str()
-        .split_once("-compaction:")
-        .map_or_else(
-            || compaction_frame_id.to_string(),
-            |(_, tail)| tail.to_string(),
-        );
-    let frame_key = lash_core::FrameKey::from_compaction_material(
-        session_id,
-        &format!("standard-compaction-overflow-recovery:{discriminator}"),
-        current_frame_node_id.unwrap_or_default(),
-    );
-    session_graph
-        .switch_agent_frame(
-            session_id,
-            lash_core::SwitchAgentFrameRequest::new(
-                format!("standard-compaction-overflow-recovery/switch/{discriminator}"),
-                frame_key,
-                lash_core::AgentFrameReason::compaction(),
-            )
-            .with_task("context-overflow recovery")
-            .with_initial_nodes(vec![compaction_summary_seed(summary)]),
-        )
-        .await
-        .map_err(ContextError::from)?;
-    Ok(())
+    Ok(Some(summary_frame_window(
+        seed,
+        history_messages,
+        current_request,
+    )))
 }
 
 /// Marker directive the `after_turn` hook queues for a persisted overflow.

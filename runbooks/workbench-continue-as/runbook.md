@@ -12,6 +12,15 @@
 > [central lifecycle constraint](../RULES.md#agent-workbench-lifecycle-constraint-fig-1164);
 > never substitute the destructive reset.
 
+> **Standard-compaction gates retired (FIG-4029).** The standard-compaction plugin serves
+> standard-protocol sessions only, and the workbench — an RLM host — no longer registers it,
+> so it emits no `compaction_needed` or other standard-compaction trace event. Every gate
+> below that waits on or scores those events (golden rules 5–6, the Phase 0 context-window
+> proof, Phase 1's stop condition, `01-standard-compaction.json`, and the two scorecard
+> rows marked retired) is out of force until this runbook re-bases pressure on the RLM
+> context-budget warning. Until then, bound pressure by marker-turn count alone: 2–6 turns,
+> never filling the window until provider rejection.
+
 **Purpose.** Referee an RLM agent-initiated `control.continue_as({ task, seed })` tail-call
 through the workbench browser surface. The scenario proves that one logical composer turn
 can open a fresh `AgentFrame`, carry only its explicit seed into that frame, conclude coherently,
@@ -90,8 +99,7 @@ or reinterpret persistence of old nodes as permission to render old assistant ro
 6. **Record both standard-compaction decision events by scope.** The first
    `compaction_needed` must report `max_context_tokens == 41000`,
    `threshold_tokens == 21000`, and `used_tokens >= threshold_tokens`.
-   `prompt_view_pruned` must carry non-negative dropped/retained counts and be
-   turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
+   The event must be turn-scoped. Missing or incorrectly parented decision evidence is a FAIL.
    The decision consumes the prior completed prompt's usage: if the sixth bounded prompt is
    the first to cross 21,000 tokens, submit one short marker-only probe (no more filler) and
    require the events on that probe.
@@ -296,8 +304,8 @@ extracts first, then remove `/workspace/tmp/fig992a-run/data` and confirm it is 
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Boot/scope | `/healthz` 200; exact 41,000-token launch; rendered/API session `<S>`; DOM/API/graph and runtime-activity trace empty (passive empty work-poll records allowed and retained) | | `00-scoped-empty.png`, `00-identities.json`, `00-state.json`, `00-trace.json` |
-| Bounded pressure | 2–6 marker turns; `compaction_needed` has 41000/21000 budget fields | | `01-pressure-ready.png`, `01-standard-compaction.json` |
-| Standard-compaction scope | needed/pruned are turn-scoped with typed payloads retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-standard-compaction.json` |
+| Bounded pressure | 2–6 marker turns; `compaction_needed` has 41000/21000 budget fields (retired, FIG-4029: marker-turn count only) | | `01-pressure-ready.png`, `01-standard-compaction.json` |
+| Standard-compaction scope (retired, FIG-4029) | `compaction_needed` is turn-scoped with its typed payload retained; host-invoked standard-mode started/completed lifecycle is out of scope | | `01-standard-compaction.json` |
 | Real tool turn | paired successful tool start/completion with one call id | | `01-tool-call.json` |
 | Switch lever | organic pressure tried once; actual lever recorded honestly | | `02-lever.json` |
 | Frame switch | matching trace switch + `frame_open{reason:"continue_as"}`; follow frame completed coherently | | `02-frame-graph.json`, `02-switch-trace.json` |

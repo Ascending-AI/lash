@@ -3618,44 +3618,6 @@
         },
         {
           "properties": {
-            "dropped_prefix_messages": {
-              "format": "uint",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "max_context_tokens": {
-              "format": "uint",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "retained_messages": {
-              "format": "uint",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "type": {
-              "enum": [
-                "prompt_view_pruned"
-              ],
-              "type": "string"
-            },
-            "used_tokens": {
-              "format": "uint",
-              "minimum": 0.0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "dropped_prefix_messages",
-            "max_context_tokens",
-            "retained_messages",
-            "type",
-            "used_tokens"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
             "max_context_tokens": {
               "format": "uint",
               "minimum": 0.0,

@@ -16,9 +16,14 @@
 //!    `TurnStop::ContextOverflow` — its own outcome, not the undifferentiated
 //!    `ProviderError` an auth failure or a 500 produces.
 //! 3. The host reads that outcome off the public turn report
-//!    (`TurnReport::is_context_overflow`), decides its own policy, and acts on
-//!    the existing seam: `compact_context` on the session admin surface.
+//!    (`TurnReport::is_context_overflow`).
 //! 4. The same session runs another turn and finishes. Nothing was restarted.
+//!
+//! Plugin-owned overflow recovery is not exercised here: the
+//! standard-compaction plugin serves standard-protocol sessions only
+//! (FIG-4029), and an RLM session switches frames through the model-driven
+//! `continue_as`. Standard sessions own plugin recovery, covered by the
+//! `standard_compaction_persistence` tests in `crates/lash`.
 //!
 //! A control phase drives the same harness into a plain provider error and
 //! requires a *different* stop, because "distinguishable from a provider
@@ -48,12 +53,6 @@ const OVERSIZED_BYTES: usize = 512 * 1024;
 /// The tool the scripted cell calls to pull the oversized result into the
 /// turn's context.
 const OVERSIZED_TOOL: &str = "oversized_report";
-
-const STANDARD_COMPACTION_PLUGIN_ID: &str = "standard_compaction";
-const OVERFLOW_RECOVERY_MARKER_TITLE: &str =
-    "Standard-compaction context-overflow recovery marker (pending):";
-const OVERFLOW_RECOVERY_COMPLETED_TITLE: &str =
-    "Standard-compaction context-overflow recovery completed:";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -90,25 +89,11 @@ fn emit(checkpoint: &Value) {
     println!("{checkpoint}");
 }
 
-/// Every durable message node the session holds, across frames and branches.
-fn durable_messages(view: &lash_core::SessionReadView) -> Vec<lash_core::Message> {
-    fn walk(nodes: &[lash::messages::SessionMessageTreeNode], out: &mut Vec<lash_core::Message>) {
-        for node in nodes {
-            out.push(node.message.clone());
-            walk(&node.children, out);
-        }
-    }
-    let mut out = Vec::new();
-    walk(&view.message_tree(), &mut out);
-    out
-}
-
-/// Phases 1-3: overflow, host recovery, continued session.
+/// Phases 1-4: overflow, its own outcome, continued session.
 ///
 /// The two differ only in how the provider states the overflow -- a terminal reason on an
 /// accepted response, or a failure whose text lash classifies itself -- and the point of
-/// running both is that the outcome, the recovery and the continued session must be identical
-/// either way.
+/// running both is that the outcome and the continued session must be identical either way.
 async fn overflow_and_recovery(
     run_id: &str,
     script: Script,
@@ -130,57 +115,14 @@ async fn overflow_and_recovery(
     let overflow_stop = stop_tag(&overflow.result.outcome)?;
     let tool_bytes = harness.served_tool_bytes();
 
-    // No host compaction call: the plugin owns the recovery now. The host
-    // only observes the durable recovery state the plugin appended, and the
-    // next turn below re-derives and executes it.
-    let overflow_history = session.read_view().messages().to_vec();
-    let plugin_recovery_pending = overflow_history.iter().any(|message| {
-        let origin = message.origin.as_ref().map(|origin| match origin {
-            lash_core::MessageOrigin::Plugin { plugin_id, .. } => plugin_id.clone(),
-            _ => String::new(),
-        });
-        origin.as_deref() == Some(STANDARD_COMPACTION_PLUGIN_ID)
-            && message
-                .parts
-                .iter()
-                .any(|part| part.content().starts_with(OVERFLOW_RECOVERY_MARKER_TITLE))
-    });
-    if overflow.result.is_context_overflow() && !plugin_recovery_pending {
-        bail!("the plugin silently swallowed the overflow trigger");
-    }
-
-    // FIG-3107: recovery completes through a durable agent-frame switch. The
-    // frame the overflow turn ran in is the baseline the recovery frame
-    // leaves behind.
-    let pre_recovery = session.read_view().to_snapshot();
-    let recovery_frame_before_id = pre_recovery.current_frame_node_id.clone();
-
     // The same session, not a new one: the claim is that the session continues.
     let continued = session
         .send(lash::TurnInput::text("now give me the verdict"))
         .output()
         .await
         .map_err(|err| anyhow!("{err}"))
-        .context("the post-recovery turn")?;
-    let continued_history = session.read_view().messages().to_vec();
-    let continued_history_len = continued_history.len();
-    // The recovery's terminal record is durable in the frame the recovery left
-    // behind, so the durable read is the whole message tree, not the active
-    // frame's projection: after the switch the session is resident in the
-    // recovery frame and reads only that frame's messages.
-    let overflow_history_after_turn = durable_messages(&session.read_view());
-
-    // The recovery frame exists and the session is resident in it after
-    // recovery: the latest frame record carries the compaction reason and the
-    // session's current frame moved off the overflow turn's frame.
-    let post_recovery = session.read_view().to_snapshot();
-    let recovery_frame = post_recovery.agent_frames.last().map(|frame| {
-        (
-            frame.reason.as_str().to_string(),
-            frame.frame_node_id.clone(),
-        )
-    });
-    let recovery_frame_id = post_recovery.current_frame_node_id.clone();
+        .context("the continued turn")?;
+    let continued_history_len = session.read_view().messages().len();
 
     Ok(json!({
         "checkpoint": checkpoint,
@@ -193,42 +135,12 @@ async fn overflow_and_recovery(
         "overflow_stop": overflow_stop,
         "overflow_is_context_overflow": overflow.result.is_context_overflow(),
         "overflow_is_success": overflow.result.is_success(),
-        "plugin_recovery_pending": plugin_recovery_pending,
         "continued_stop": stop_tag(&continued.result.outcome)?,
-        // Plugin-owned recovery evidence, re-derived from the durable history
-        // after the continued turn: the plugin appended its summary and the
-        // completed record, and the original history stays inspectable.
-        "plugin_recovery_completed": overflow_history_after_turn.iter().any(|message| {
-            message.parts.iter().any(|part| {
-                part.content()
-                    .starts_with(OVERFLOW_RECOVERY_COMPLETED_TITLE)
-            })
-        }),
-        "plugin_recovery_summary_chars": overflow_history_after_turn
-            .iter()
-            .filter_map(|message| {
-                message.parts.iter().find_map(|part| {
-                    part.content()
-                        .strip_prefix("Compaction summary:")
-                        .map(|rest| rest.trim().len())
-                })
-            })
-            .next()
-            .unwrap_or(0),
-        "history_messages_after_recovery": continued_history_len,
+        "history_messages_after_continued_turn": continued_history_len,
         "continued_is_success": continued.result.is_success(),
         "continued_is_context_overflow": continued.result.is_context_overflow(),
         "continued_assistant_message": continued.result.assistant_message(),
         "continued_final_value": continued.result.final_value(),
-        // FIG-3107 frame evidence: the recovery frame exists (latest frame
-        // record with the compaction reason) and the continued session is
-        // resident in it — the current frame moved off the overflow turn's
-        // frame.
-        "recovery_frame_reason": recovery_frame
-            .as_ref()
-            .map(|(reason, _)| reason.clone()),
-        "recovery_frame_id": recovery_frame_id,
-        "recovery_frame_moved": recovery_frame_before_id != recovery_frame_id,
     }))
 }
 
@@ -337,9 +249,6 @@ impl Harness {
                     .map(std::path::PathBuf::from)
                     .unwrap_or_else(|| std::path::PathBuf::from("/dev/null")),
             )
-            .plugin(Arc::new(
-                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-            ))
             .plugin(Arc::new(OverflowPluginFactory {
                 tool_bytes: Arc::clone(&tool_bytes),
             }))
@@ -409,34 +318,9 @@ fn oversized_call_cell() -> String {
 fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider::ProviderHandle {
     lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
         .kind("context-overflow-recovery")
-        .complete(move |request| {
+        .complete(move |_request| {
             let call = calls.fetch_add(1, Ordering::SeqCst);
-            // The plugin-owned recovery branch: the out-of-band summarizer
-            // carries the standard compaction prompt. It is not a cell, so it
-            // must be answered with plain assistant text.
-            // The compaction prompt can sit behind the protocol's own trailing
-            // messages, so the whole request is scanned for it rather than its
-            // last message alone.
-            let is_recovery_summarizer = request.messages.iter().any(|message| {
-                message.blocks.iter().any(|block| match block {
-                    lash::provider::LlmContentBlock::Text { text, .. } => {
-                        text.contains("Provide a detailed summary of the conversation above")
-                    }
-                    _ => false,
-                })
-            });
             async move {
-                if is_recovery_summarizer {
-                    // The out-of-band summarizer runs in the plugin's compaction
-                    // child session; the scripted answer is a terminal finish
-                    // cell whose value becomes the recovered summary.
-                    return Ok(text_response(
-                        lash_restate_postgres_workers_e2e::scripted_finish_cell(
-                            "\"Recovery summary: the user asked for the oversized report's \
-                             verdict; the report body was elided and still needs stating.\"",
-                        ),
-                    ));
-                }
                 Ok(match (script, call) {
                     // Turn 1, call 1: reach for the oversized report.
                     (_, 0) => text_response(oversized_call_cell()),
@@ -461,7 +345,7 @@ fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider:
                         lash_core::LlmTerminalReason::ProviderError,
                         "upstream returned 500",
                     ),
-                    // Turn 2, after the host compacted: the session continues.
+                    // Turn 2: the session continues.
                     (_, _) => {
                         text_response(lash_restate_postgres_workers_e2e::scripted_finish_cell(
                             "\"the report checks out\"",

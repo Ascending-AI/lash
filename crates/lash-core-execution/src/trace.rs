@@ -248,7 +248,6 @@ fn assign_span_identity(context: &mut TraceContext, event: &TraceEvent) {
         | TraceEvent::AttachmentDegraded { .. }
         | TraceEvent::CompositionChanged { .. }
         | TraceEvent::CompactionNeeded { .. }
-        | TraceEvent::PromptViewPruned { .. }
         | TraceEvent::PromptViewAttachmentsPruned { .. }
         | TraceEvent::EffectEnvelopeDiff { .. }
         | TraceEvent::ProtocolStep { .. }

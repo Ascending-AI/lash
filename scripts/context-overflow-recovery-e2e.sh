@@ -165,26 +165,12 @@ if control["control_stop"] != "provider_error":
 if control["control_stop"] == observed["overflow_stop"]:
     fail(f"overflow and provider error collapsed into one outcome: {control}")
 
-# Plugin-owned recovery (FIG-2950): the registered standard-compaction policy
-# derives the pending trigger from the durable marker, spends one bounded
-# out-of-band summarizer, and appends its summary plus a terminal record. The
-# host only observes the durable state and the same session continues.
+# The same session continues after the overflow. Plugin-owned recovery is not
+# a gate here: the standard-compaction plugin serves standard-protocol
+# sessions only (FIG-4029), and standard sessions own plugin recovery.
 for name, value in (("injected", observed), ("classified", classified)):
-    if value["plugin_recovery_pending"] is not True:
-        fail(f"[{name}] the plugin never recorded the overflow trigger: {value}")
-    if value["plugin_recovery_completed"] is not True:
-        fail(f"[{name}] plugin-owned recovery did not complete: {value}")
-    if value["plugin_recovery_summary_chars"] <= 0:
-        fail(f"[{name}] plugin recovery produced no summary: {value}")
-    # FIG-3107: the recovery is a plugin-visible durable agent-frame switch.
-    # The recovery frame exists (an ordinary compaction frame) and the
-    # continued session is resident in it after recovery.
-    if value.get("recovery_frame_reason") != "compaction":
-        fail(f"[{name}] the recovery frame is not a compaction frame: {value}")
-    if value.get("recovery_frame_moved") is not True:
-        fail(f"[{name}] the session is not resident in the recovery frame: {value}")
     if value["continued_is_success"] is not True:
-        fail(f"[{name}] the session did not continue after recovery: {value}")
+        fail(f"[{name}] the session did not continue after the overflow: {value}")
     if value["continued_is_context_overflow"] is not False:
         fail(f"[{name}] the continued turn overflowed again: {value}")
     if value.get("continued_final_value") is None:
@@ -196,8 +182,7 @@ if classified["overflow_stop"] != observed["overflow_stop"]:
 
 print(
     f"context-overflow-recovery [{dialect}] gates: mid-turn overflow (injected + "
-    "classified), own outcome, distinct from provider_error, plugin-owned recovery, "
-    "session continued"
+    "classified), own outcome, distinct from provider_error, session continued"
 )
 PY
 

@@ -421,6 +421,11 @@ impl LashRuntime {
         // post-turn `append_active_read_delta` to deep-clone the session
         // graph (Arc::make_mut with refcount > 1).
         drop(turn_ctx);
+        // A frame a context transform switched to is the frame this turn
+        // runs in (FIG-4029): it opens now, on the resident state, and rides
+        // the turn's commit.
+        let opened_frame_before_turn =
+            turn_graph_appends.open_recorded_frame_switch_before_turn(&mut self.state)?;
         let messages = prepared_context.messages;
         if let Some(session) = self.session.as_mut() {
             session
@@ -434,7 +439,7 @@ impl LashRuntime {
         }
 
         self.state.last_prompt_usage = None;
-        Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
+        let execution = Box::pin(self.stream_prepared_turn_inner_with_graph_appends(
             PreparedTurnExecuteContext {
                 turn: PreparedLogicalTurn {
                     messages,
@@ -457,7 +462,13 @@ impl LashRuntime {
             },
             turn_graph_appends,
         ))
-        .await
+        .await;
+        // The opened frame lives only in resident state until the turn's
+        // commit lands; a turn that fails before it must not leave it there.
+        if opened_frame_before_turn && execution.is_err() {
+            self.invalidate_resident_session_state();
+        }
+        execution
     }
 
     pub async fn normalize_input_items(

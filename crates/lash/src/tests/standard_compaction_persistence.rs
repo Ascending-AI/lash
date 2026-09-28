@@ -54,6 +54,326 @@ fn standard_compaction_provider_counted(
     (provider, calls)
 }
 
+/// A scripted provider that also records the messages of every request it
+/// answers, serialized, so a test can read what the model was shown.
+fn standard_compaction_provider_recorded(
+    responses: Vec<LlmResponse>,
+) -> (ProviderHandle, Arc<StdMutex<Vec<String>>>) {
+    let requests = Arc::new(StdMutex::new(Vec::new()));
+    let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("standard-compaction-frame-test")
+        .complete({
+            let responses = Arc::clone(&responses);
+            let requests = Arc::clone(&requests);
+            move |request: LlmRequest| {
+                let responses = Arc::clone(&responses);
+                requests.lock_recover().push(
+                    serde_json::to_string(&request.messages).expect("serialize request messages"),
+                );
+                async move {
+                    Ok(responses
+                        .lock()
+                        .await
+                        .pop_front()
+                        .expect("queued standard-compaction response"))
+                }
+            }
+        })
+        .build()
+        .into_handle();
+    (provider, requests)
+}
+
+/// FIG-4029: a frame is the context window. Every standard compaction —
+/// context pressure, an explicit `compact_context`, overflow recovery —
+/// leaves the session resident in a fresh compaction frame seeded with the
+/// summary, with none of the prior frame's nodes in it. Returns the new
+/// frame's node id.
+fn assert_resident_in_fresh_compaction_frame(
+    before: &lash_core::SessionReadView,
+    after: &lash_core::SessionReadView,
+    summary: &str,
+) -> lash_core::FrameNodeId {
+    let before_frame = before.to_snapshot().current_frame_node_id;
+    let after_snapshot = after.to_snapshot();
+    let frame = after_snapshot
+        .current_frame_node_id
+        .clone()
+        .expect("the session is resident in a frame");
+    assert_ne!(Some(&frame), before_frame.as_ref(), "a new frame opened");
+    let record = after_snapshot
+        .agent_frames
+        .iter()
+        .find(|record| record.frame_node_id == frame)
+        .expect("the resident frame has a frame record");
+    assert_eq!(
+        record.reason.as_str(),
+        lash_core::AgentFrameReason::COMPACTION
+    );
+    assert_eq!(record.previous_frame_node_id, before_frame);
+
+    let prior_ids = before
+        .messages()
+        .iter()
+        .map(|message| message.id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let resident = after.messages();
+    let carried = resident
+        .iter()
+        .filter(|message| prior_ids.contains(&message.id))
+        .map(|message| message.id.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        carried.is_empty(),
+        "the prior frame's nodes must not be in the resident frame: {carried:?}"
+    );
+    let seed = resident.first().expect("the fresh frame has its seed");
+    assert!(
+        message_text(seed).starts_with("Compaction summary:")
+            && message_text(seed).contains(summary),
+        "the fresh frame is seeded with the summary: {:?}",
+        resident.iter().map(message_text).collect::<Vec<_>>()
+    );
+    frame
+}
+
+/// The frame the durable head's leaf belongs to.
+fn sqlite_leaf_frame(
+    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    session_id: &str,
+) -> String {
+    rusqlite::Connection::open(store_factory.catalog_uri())
+        .expect("open SQLite session catalog")
+        .query_row(
+            "SELECT g.frame_node_id FROM session_head h
+             JOIN graph_nodes g ON g.node_id = h.leaf_node_id
+             WHERE h.session_id = ?1",
+            [session_id],
+            |row| row.get::<_, String>(0),
+        )
+        .expect("read the durable leaf's frame")
+}
+
+/// FIG-4029: crossing the pressure threshold starts a frame the way an
+/// explicit compaction does — the summary seeds it — and the turn that
+/// crossed the threshold continues inside it, on the same resident session.
+#[tokio::test]
+async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Result<()> {
+    let session_id = "standard-compaction-pressure-frame";
+    let backend = double_backend().await;
+    let store_factory = latest_double()
+        .expect("the backend runs on its held double")
+        .stores()
+        .session_store_factory();
+    let (provider, requests) = standard_compaction_provider_recorded(vec![
+        // 20,000 prompt tokens reach the 20,000-token threshold of a 40,000-token window.
+        response_with_usage("first response", 20_000),
+        response_with_usage("pressure summary", 1),
+        response_with_usage("threshold response", 1),
+        response_with_usage("after response", 1),
+    ]);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(model_spec("standard-compaction-model", None, 40_000))
+    .plugin(Arc::new(
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    session
+        .send(TurnInput::text("first request"))
+        .id("standard-compaction-pressure-first")
+        .output()
+        .await?;
+    let before = session.read_view();
+
+    let threshold = session
+        .send(TurnInput::text("threshold request"))
+        .id("standard-compaction-pressure-threshold")
+        .output()
+        .await?;
+    assert!(threshold.result.is_success(), "{:?}", threshold.result);
+    let after = session.read_view();
+    let frame = assert_resident_in_fresh_compaction_frame(&before, &after, "pressure summary");
+    // The turn continued in the new frame: its own request and reply follow
+    // the seed there, and the model answered it from the summary window.
+    assert_eq!(
+        after
+            .messages()
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>()[1..],
+        ["threshold request", "threshold response"]
+    );
+    let requests = requests.lock_recover().clone();
+    assert_eq!(requests.len(), 3, "turn one, the summarizer, turn two");
+    let turn_prompt = &requests[2];
+    assert!(
+        turn_prompt.contains("pressure summary") && turn_prompt.contains("threshold request"),
+        "{turn_prompt}"
+    );
+    assert!(
+        !turn_prompt.contains("first request") && !turn_prompt.contains("first response"),
+        "the turn's prompt is the new frame, not the prior one: {turn_prompt}"
+    );
+    // No reload: the durable head the turn committed is the frame the
+    // resident session already stands in.
+    assert_eq!(
+        sqlite_leaf_frame(store_factory.as_ref(), session_id),
+        frame.as_str()
+    );
+
+    // The next turn stays in that frame.
+    session
+        .send(TurnInput::text("after request"))
+        .id("standard-compaction-pressure-after")
+        .output()
+        .await?;
+    let next = session.read_view();
+    assert_eq!(next.to_snapshot().current_frame_node_id, Some(frame));
+    assert_eq!(
+        next.messages().iter().map(message_text).collect::<Vec<_>>()[1..],
+        [
+            "threshold request",
+            "threshold response",
+            "after request",
+            "after response"
+        ]
+    );
+    Ok(())
+}
+
+/// FIG-4029: the explicit `compact_context` path meets the same frame
+/// assertion, and the next turn continues in the frame it opened.
+#[tokio::test]
+async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() -> Result<()> {
+    let session_id = "standard-compaction-explicit-frame";
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(standard_compaction_provider(vec![
+        response_with_usage("first response", 1),
+        response_with_usage("second response", 1),
+        response_with_usage("explicit summary", 1),
+        response_with_usage("after response", 1),
+    ]))
+    .model(model_spec("standard-compaction-model", None, 40_000))
+    .plugin(Arc::new(
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    for (turn_id, text) in [
+        ("standard-compaction-explicit-one", "first request"),
+        ("standard-compaction-explicit-two", "second request"),
+    ] {
+        session
+            .send(TurnInput::text(text))
+            .id(turn_id)
+            .output()
+            .await?;
+    }
+    let before = session.read_view();
+    assert!(
+        Box::pin(session.admin().state().compact_context(
+            None,
+            runtime_operation_scope(&core, "standard-compaction-explicit-frame").await,
+        ))
+        .await?
+    );
+    let after = session.read_view();
+    let frame = assert_resident_in_fresh_compaction_frame(&before, &after, "explicit summary");
+    assert_eq!(after.messages().len(), 1);
+
+    session
+        .send(TurnInput::text("after request"))
+        .id("standard-compaction-explicit-after")
+        .output()
+        .await?;
+    let next = session.read_view();
+    assert_eq!(next.to_snapshot().current_frame_node_id, Some(frame));
+    assert_eq!(
+        next.messages().iter().map(message_text).collect::<Vec<_>>()[1..],
+        ["after request", "after response"]
+    );
+    Ok(())
+}
+
+/// FIG-4029: overflow recovery meets the same frame assertion, and the turn
+/// that recovered continues inside the recovery frame.
+#[tokio::test]
+async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in() -> Result<()> {
+    let session_id = "standard-compaction-recovery-frame";
+    let backend = double_backend().await;
+    let (provider, requests) = standard_compaction_provider_recorded(vec![
+        LlmResponse {
+            terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
+            terminal_diagnostic: Some("prompt is too long".to_string()),
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        },
+        response_with_usage("recovery summary", 1),
+        response_with_usage("verdict response", 1),
+    ]);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(model_spec("standard-compaction-model", None, 200_000))
+    .plugin(Arc::new(
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    let overflow = session
+        .send(TurnInput::text("summarize the report"))
+        .id("standard-compaction-recovery-overflow")
+        .output()
+        .await?;
+    assert!(
+        overflow.result.is_context_overflow(),
+        "{:?}",
+        overflow.result
+    );
+    let before = session.read_view();
+
+    let recovered = session
+        .send(TurnInput::text("now give me the verdict"))
+        .id("standard-compaction-recovery-verdict")
+        .output()
+        .await?;
+    assert!(recovered.result.is_success(), "{:?}", recovered.result);
+    let after = session.read_view();
+    assert_resident_in_fresh_compaction_frame(&before, &after, "recovery summary");
+    assert_eq!(
+        after
+            .messages()
+            .iter()
+            .map(message_text)
+            .collect::<Vec<_>>()[1..],
+        ["now give me the verdict", "verdict response"]
+    );
+    let requests = requests.lock_recover().clone();
+    assert_eq!(
+        requests.len(),
+        3,
+        "the overflow, the summarizer, the verdict"
+    );
+    assert!(
+        !requests[2].contains("summarize the report"),
+        "{}",
+        requests[2]
+    );
+    Ok(())
+}
+
 fn sqlite_head_and_max_generation(
     store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     session_id: &SessionId,
@@ -241,6 +561,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .session_store_factory();
     let provider = standard_compaction_provider(vec![
         response_with_usage("first response", 20_000),
+        response_with_usage("threshold summary", 1),
         response_with_usage("threshold response", 1),
         response_with_usage("durable summary", 1),
     ]);
@@ -289,8 +610,8 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         )
         .expect("count threshold commit nodes");
     assert_eq!(
-        threshold_node_count, 2,
-        "the threshold turn must append exactly its new user message and assistant outcome"
+        threshold_node_count, 4,
+        "the threshold turn must append exactly its compaction frame, the summary seed, its new user message and its assistant outcome"
     );
     assert_eq!(
         first_threshold_parent, durable_leaf_before_threshold,
@@ -335,25 +656,14 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         );
     }
 
-    let projection_record = records
-        .iter()
-        .find(|record| {
-            record.get("type").and_then(serde_json::Value::as_str) == Some("custom")
-                && record.get("name").and_then(serde_json::Value::as_str)
-                    == Some("session_graph.read_projection")
-        })
-        .expect("projection partition trace record");
-    assert_eq!(
-        projection_record["payload"]["durably_appended_messages"],
-        serde_json::json!(1)
-    );
-    assert_eq!(
-        projection_record["payload"]["observation_only_messages"],
-        serde_json::json!(0)
-    );
-    assert_eq!(
-        projection_record["payload"]["id_mismatch_message_ids"],
-        serde_json::json!([])
+    // FIG-4029: the threshold turn's prompt is the frame it switched to, not
+    // a pruned view over the frame it left, so no turn projected its prompt.
+    assert!(
+        !records.iter().any(|record| {
+            record.get("name").and_then(serde_json::Value::as_str)
+                == Some("session_graph.read_projection")
+        }),
+        "no prompt projection over durable history"
     );
 
     drop(session);
@@ -656,8 +966,16 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         "standard-compaction-injection-test",
         lash_core::facade_support::PluginSpec::new().with_before_turn(injection_hook),
     );
+    // Every turn after the first crosses the threshold, so its pressure
+    // compaction's summary is answered before the turn's own response.
     let responses = (0..=THRESHOLD_TURNS)
-        .map(|ordinal| response_with_usage(&format!("response {ordinal}"), 20_000))
+        .flat_map(|ordinal| {
+            let summary =
+                (ordinal > 0).then(|| response_with_usage(&format!("summary {ordinal}"), 1));
+            summary
+                .into_iter()
+                .chain([response_with_usage(&format!("response {ordinal}"), 20_000)])
+        })
         .collect();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
@@ -706,8 +1024,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
 
 #[cfg(feature = "rlm")]
 #[tokio::test]
-async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durable_leaf()
--> Result<()> {
+async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<()> {
     let session_id = "standard-compaction-continue-as-parent";
     let backend = double_backend().await;
     let store_factory = latest_double()
@@ -727,9 +1044,6 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(model_spec("standard-compaction-rlm-model", None, 40_000))
-        .plugin(Arc::new(
-            lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
-        ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
 

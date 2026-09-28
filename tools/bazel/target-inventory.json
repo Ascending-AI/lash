@@ -7855,18 +7855,6 @@
       "package": "lash-internal-plugin-standard-compaction"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
-      "package": "lash-internal-plugin-standard-compaction"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-plugin-standard-compaction:lash-plugin-standard-compaction__fv_f5ac86c7",
-      "package": "lash-internal-plugin-standard-compaction"
-    },
-    {
       "features": [
         "testing"
       ],
@@ -16068,13 +16056,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_299df723",
+      "label": "//examples/agent-workbench:agent-workbench__fv_1d85fff7",
       "package": "agent-workbench"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_d96a7d1e",
+      "label": "//examples/agent-workbench:agent-workbench__fv_ae410342",
       "package": "agent-workbench"
     },
     {
@@ -16082,13 +16070,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_299df723",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_1d85fff7",
       "package": "agent-workbench"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_d96a7d1e",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_ae410342",
       "package": "agent-workbench"
     },
     {
@@ -19131,7 +19119,6 @@
         "lash-internal-llm-tools",
         "lash-internal-plugin-mcp",
         "lash-internal-plugin-process-controls",
-        "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
         "lash-internal-protocol-rlm",
         "lash-internal-provider-openai",
@@ -19437,7 +19424,6 @@
         "lash-internal-core",
         "lash-internal-llm-tools",
         "lash-internal-plugin-process-controls",
-        "lash-internal-plugin-standard-compaction",
         "lash-internal-postgres-store",
         "lash-internal-protocol-rlm",
         "lash-internal-provider-openai",

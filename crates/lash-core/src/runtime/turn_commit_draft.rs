@@ -38,6 +38,10 @@ pub(in crate::runtime) struct RecordedFrameSwitch {
     pub(in crate::runtime) frame_key: crate::FrameKey,
     request: crate::SwitchAgentFrameRequest,
     outcome: crate::OpenAgentFrameResult,
+    /// Opened on the resident state before the turn ran (a context
+    /// transform's switch), so the final commit carries it without opening it
+    /// again.
+    opened_before_turn: bool,
 }
 
 #[derive(Debug)]
@@ -53,6 +57,10 @@ struct TurnGraphAppendDraftInner {
     frame_switch: Option<RecordedFrameSwitch>,
     /// Prefix of `recorded` already folded into the turn's final state.
     applied: usize,
+    /// Prefix of `recorded` folded into the resident state itself when a
+    /// context transform's switch opened before the turn ran; read overlays
+    /// built from that state must not apply it twice.
+    resident: usize,
 }
 
 /// In-turn `SessionGraphService::append_session_nodes` requests on the current
@@ -93,6 +101,7 @@ impl TurnGraphAppendDraft {
                 recorded: Vec::new(),
                 frame_switch: None,
                 applied: 0,
+                resident: 0,
             })),
             clock,
         }
@@ -165,8 +174,70 @@ impl TurnGraphAppendDraft {
 
     /// Overlays every recorded append on a turn-scoped read snapshot.
     pub(in crate::runtime) fn overlay_on_read_state(&self, state: &mut RuntimeSessionState) {
-        let recorded = self.inner.lock_recover().recorded.clone();
+        let recorded = {
+            let inner = self.inner.lock_recover();
+            inner.recorded[inner.resident..].to_vec()
+        };
         apply_recorded_appends(state, &recorded, self.clock.as_ref());
+    }
+
+    /// Opens the switch a context transform recorded, on the resident state,
+    /// before the turn runs (FIG-4029).
+    ///
+    /// A frame is the context window. A switch recorded while the turn's
+    /// context was prepared (context-pressure compaction, overflow recovery)
+    /// starts the frame the turn then runs in, exactly as an explicit
+    /// `open_agent_frame` does between turns: the appends recorded before the
+    /// switch fold into the frame it leaves, the frame opens with its seed
+    /// nodes, and the turn's own messages follow them. Nothing commits here
+    /// and nothing reloads: the turn's commit carries the frame. The slot
+    /// keeps the switch, so a second author is still refused and a replay is
+    /// still answered, and the final commit does not open it again.
+    ///
+    /// Answers whether a frame opened.
+    pub(in crate::runtime) fn open_recorded_frame_switch_before_turn(
+        &self,
+        state: &mut RuntimeSessionState,
+    ) -> Result<bool, crate::RuntimeError> {
+        let mut inner = self.inner.lock_recover();
+        let Some(recorded) = inner.frame_switch.as_ref() else {
+            return Ok(false);
+        };
+        if recorded.opened_before_turn || !recorded.outcome.opened {
+            return Ok(false);
+        }
+        let request = crate::OpenAgentFrameRequest::new(
+            recorded.request.frame_key.clone(),
+            recorded.request.reason.clone(),
+        )
+        .with_initial_nodes(recorded.request.initial_nodes.clone());
+        let expected = recorded.outcome.clone();
+        debug_assert_eq!(
+            inner.applied, 0,
+            "a context transform's switch opens before the turn's first boundary"
+        );
+        let pending = inner.recorded.clone();
+        apply_recorded_appends(state, &pending, self.clock.as_ref());
+        inner.applied = pending.len();
+        inner.resident = pending.len();
+        let result = crate::runtime::state::open_agent_frame_in_state_with_clock(
+            state,
+            request,
+            self.clock.as_ref(),
+        )?;
+        debug_assert_eq!(result.frame_node_id, expected.frame_node_id);
+        debug_assert_eq!(result.initial_node_ids, expected.initial_node_ids);
+        inner
+            .active_node_ids
+            .insert(crate::NodeId::from(result.frame_node_id.as_str()));
+        inner
+            .active_node_ids
+            .extend(result.initial_node_ids.iter().cloned());
+        inner.leaf_node_id = state.session_graph.leaf_node_id.clone();
+        if let Some(recorded) = inner.frame_switch.as_mut() {
+            recorded.opened_before_turn = true;
+        }
+        Ok(result.opened)
     }
 
     /// Records a FIG-3107 frame switch under the running turn's scope and
@@ -250,6 +321,7 @@ impl TurnGraphAppendDraft {
             frame_key: request.frame_key.clone(),
             request: request.clone(),
             outcome: outcome.clone(),
+            opened_before_turn: false,
         });
         Ok(outcome)
     }
@@ -275,7 +347,7 @@ impl TurnGraphAppendDraft {
             (pending, frame_switch)
         };
         apply_recorded_appends(state, &pending, self.clock.as_ref());
-        let Some(recorded) = frame_switch else {
+        let Some(recorded) = frame_switch.filter(|recorded| !recorded.opened_before_turn) else {
             return Ok(());
         };
         let request = crate::OpenAgentFrameRequest::new(
@@ -723,6 +795,118 @@ mod tests {
                 .count(),
             3,
             "every queued append is committed exactly once"
+        );
+    }
+
+    /// FIG-4029: a switch recorded while the turn's context is prepared
+    /// opens before the turn runs. The append recorded ahead of it stays in
+    /// the frame it leaves, the turn's messages follow the seed in the new
+    /// frame, read overlays do not apply the folded append twice, and the
+    /// final commit neither reopens the frame nor accepts another one.
+    #[test]
+    fn a_prepare_phase_switch_opens_before_the_turn_and_is_carried_once() {
+        let session_id = SessionId::from("draft-early-switch");
+        let mut state = seeded_state(&session_id);
+        let old_frame = state.current_frame_node_id.clone();
+        let clock: Arc<dyn crate::Clock> = Arc::new(crate::SystemClock);
+        let appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
+        let record = appended_ids(
+            &appends
+                .record(&session_id, &plugin_append("before-switch", &["record"]))
+                .expect("append before the switch"),
+        );
+        let switch = crate::SwitchAgentFrameRequest::new(
+            "early-switch",
+            crate::FrameKey::from_caller_material("early").expect("non-empty frame material"),
+            AgentFrameReason::compaction(),
+        )
+        .with_initial_nodes(vec![SessionAppendNode::message(
+            crate::PluginMessage::text(MessageRole::Assistant, "summary").with_id("seed"),
+        )]);
+        let answered = appends
+            .record_frame_switch(
+                &session_id,
+                old_frame.as_ref().map(|frame| frame.as_str()),
+                &switch,
+            )
+            .expect("record the switch");
+
+        assert!(
+            appends
+                .open_recorded_frame_switch_before_turn(&mut state)
+                .expect("open the switch before the turn")
+        );
+        assert_eq!(
+            state
+                .current_frame_node_id
+                .as_ref()
+                .map(|frame| frame.as_str()),
+            Some(answered.frame_node_id.as_str())
+        );
+        assert_eq!(
+            state
+                .session_graph
+                .nearest_frame_node_id(Some(record[0].as_str()))
+                .map(crate::NodeId::as_str),
+            old_frame.as_ref().map(|frame| frame.as_str()),
+            "the append recorded before the switch stays in the frame it leaves"
+        );
+        assert!(
+            !appends
+                .open_recorded_frame_switch_before_turn(&mut state)
+                .expect("a second open is a no-op"),
+        );
+        let mut read_state = state.clone();
+        appends.overlay_on_read_state(&mut read_state);
+        assert_eq!(
+            read_state.session_graph.nodes.len(),
+            state.session_graph.nodes.len(),
+            "a read overlay does not apply the folded append again"
+        );
+        assert!(
+            appends
+                .record_frame_switch(
+                    &session_id,
+                    old_frame.as_ref().map(|frame| frame.as_str()),
+                    &crate::SwitchAgentFrameRequest::new(
+                        "other-switch",
+                        crate::FrameKey::from_caller_material("other")
+                            .expect("non-empty frame material"),
+                        AgentFrameReason::compaction(),
+                    ),
+                )
+                .is_err(),
+            "the turn still carries one switch"
+        );
+
+        let mut draft = TurnCommitDraft::from_state_with_graph_appends(
+            state,
+            clock,
+            "turn-early",
+            appends.clone(),
+        );
+        let request = text_message("request", "turn request");
+        draft.apply_prepared_messages(&MessageSequence::from_owned(vec![request.clone()]));
+        draft.finalize_turn_read_state(MessageSequence::from_owned(vec![request]), false);
+        let mut state = draft.into_final_state();
+        appends
+            .fold_into_final_state(&mut state)
+            .expect("the final fold carries the opened switch");
+        let frames = state
+            .session_graph
+            .nodes
+            .iter()
+            .filter(|node| matches!(node.payload, SessionNodePayload::FrameOpen { .. }))
+            .count();
+        assert_eq!(frames, 2, "the frame opened exactly once");
+        let read = state.read_model().expect("the new frame resolves");
+        assert_eq!(
+            read.messages
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            ["seed", "request"],
+            "the turn's messages follow the seed in the new frame"
         );
     }
 

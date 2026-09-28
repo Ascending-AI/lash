@@ -59,9 +59,6 @@ fn test_core_owner() -> lash::persistence::LeaseOwnerIdentity {
         "agent-workbench-test-boot",
     )
 }
-use lash_plugin_standard_compaction::{
-    STANDARD_COMPACTION_BUFFER_TOKENS, StandardCompactionPluginFactory,
-};
 use lash_provider_openai::{OPENROUTER_BASE_URL, OpenAiCompat, OpenAiCompatibleProvider};
 use lash_remote_protocol::{
     Envelope, RemoteLiveReplayGap, RemoteSessionObservation, RemoteSessionObservationEvent,
@@ -78,7 +75,10 @@ const SESSION_ROSTER_FILE_NAME: &str = "sessions.json";
 const MAX_SESSION_NAME_CHARS: usize = 80;
 const DEFAULT_CONTEXT_WINDOW_TOKENS: usize = 200_000;
 const AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS_ENV: &str = "AGENT_WORKBENCH_CONTEXT_WINDOW_TOKENS";
-const MIN_CONTEXT_WINDOW_TOKENS: usize = STANDARD_COMPACTION_BUFFER_TOKENS * 2;
+/// The smallest context window the workbench accepts. The workbench is an
+/// RLM host: its sessions switch frames through the model-driven
+/// `continue_as` below this window, never through standard compaction.
+const MIN_CONTEXT_WINDOW_TOKENS: usize = 40_000;
 static WORKBENCH_CONTEXT_WINDOW_TOKENS: OnceLock<usize> = OnceLock::new();
 const OPENROUTER_API_KEY_ENV: &str = "OPENROUTER_API_KEY";
 pub(crate) const BUTTON_TRIGGER_RESOURCE: &str = "Button";

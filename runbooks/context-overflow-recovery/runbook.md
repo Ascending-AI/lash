@@ -6,9 +6,8 @@
 > judgment itself.
 
 **Purpose.** Prove FIG-1272 end to end: a context-window overflow that lands *mid-turn* is
-its own turn outcome, a host can read it off the public turn report, act on the compaction
-seam lash already ships, and continue the same session — instead of being told only that
-"the turn failed" and restarting.
+its own turn outcome, a host can read it off the public turn report, and the same session
+continues — instead of being told only that "the turn failed" and restarting.
 
 The gap this closes is narrow and worth stating precisely. Lash already classifies an
 overflow correctly, and its classifier is stricter than the implementations we compared
@@ -19,9 +18,13 @@ The proactive compaction check cannot cover the case either, because it reads th
 turn is invisible to it.
 
 **Lash chooses no recovery policy.** Whether and when to compact, summarize, or restart
-stays host policy. The kernel's whole obligation is to stop hiding the reason. This
-fixture's policy — compact once, keep a one-line summary, run the next turn — belongs to
-the fixture.
+stays host policy. The kernel's whole obligation is to stop hiding the reason.
+
+**No plugin recovery in this row (FIG-4029).** The row is an RLM session, and the
+standard-compaction plugin serves standard-protocol sessions only: an RLM session switches
+frames through the model-driven `continue_as`. Standard sessions own plugin recovery; it is
+covered by the `standard_compaction_persistence` tests in `crates/lash` until a
+standard-protocol row joins this runbook.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -52,8 +55,8 @@ provider: a live model cannot be made to overflow on demand.
 **Two layers.** The scripted layer is the cell that calls the oversized tool and the cell
 that finishes: both must be cells the row's session can *execute*, because a foreign cell
 never commits and the turn then never reaches a terminal state — the row hangs rather than
-failing. The judged layer is everything above it: the outcome's identity, the host's
-recovery, and the continued session, none of which are about the dialect at all.
+failing. The judged layer is everything above it: the outcome's identity and the continued
+session, neither of which is about the dialect at all.
 
 The dialect is fixed: TypeScript is the sole RLM dialect (ADR 0096) and the cells here are
 TypeScript. **Do not try to confirm a served dialect from this bundle.** The checkpoint's
@@ -93,18 +96,9 @@ turn outcome is.
 3. **Distinction needs two observations.** The control turn must stop as `provider_error`
    on the same harness. One outcome observed alone proves nothing about distinguishability;
    if both arms report the same stop, that is a real-defect stop.
-4. **Recovery is plugin-owned (FIG-2950).** The registered standard-compaction
-   plugin owns the recovery policy: its `after_turn` trigger records the
-   durable marker for a persisted `context_overflow` outcome, and the next
-   turn re-derives the pending recovery from that durable state — one bounded
-   out-of-band summarizer (the standard compaction prompt with the oversized
-   body elided), then the summary and one terminal record appended through
-   the plugin's graph seam. The fixture writes no host-side compaction call;
-   a host-side `compact_context` in the fixture is the pre-FIG-2950 policy
-   and its absence is what this scenario now proves.
-5. **The session continues; it is not restarted.** The post-recovery turn runs on the same
-   session id and finishes successfully.
-6. **Every claim needs observed evidence.** A required outcome with no companion evidence is
+4. **The session continues; it is not restarted.** The turn after the overflow runs on the
+   same session id and finishes successfully.
+5. **Every claim needs observed evidence.** A required outcome with no companion evidence is
    a finding. Any observed contradiction is a real-defect stop; never loosen a gate to make
    a run pass.
 
@@ -149,37 +143,7 @@ arms to agree, because the path the reason took must not change the outcome. The
 arms disagree, the public accessor disagrees with the serialized outcome, an overflow turn
 reports success, or the control turn produces the same stop as an overflow turn.
 
-## Phase 3 — Plugin-owned recovery, both arms
-
-Require, of each overflow arm, `plugin_recovery_pending == true` (the durable
-marker the `after_turn` trigger appended rides the overflow turn's own
-commit), `plugin_recovery_completed == true` (the plugin's terminal record is
-in the committed history), and `plugin_recovery_summary_chars > 0`: the
-out-of-band summarizer ran once and its summary is durable, so the recovered
-window no longer contains the oversized body.
-
-Two different reads are in play here and the runbook means both, separately:
-
-- `history_messages_after_recovery` is a **read-view** count. After the FIG-3107 frame
-  switch the session is resident in the recovery frame and the read view projects only that
-  frame, so `1` is the correct, expected value — not evidence that history was lost. Require
-  `> 0` and read it as "the recovered window is populated", nothing more.
-- The original history, including the oversized body, stays inspectable in the **durable**
-  tree, which the emitter reads through a different call (`durable_messages`). That is the
-  whole point of the durable record order; recovery never rewrites it. Do not expect the
-  read-view count to reflect it.
-
-Also require the recovery frame's own witness, which this bundle carries and the older text
-left unscored: `recovery_frame_moved` with `recovery_frame_reason: "compaction"`.
-
-**Fail if:** the plugin never derecorded the marker or terminal record, no summary was
-produced, or `recovery_frame_moved` / `recovery_frame_reason: "compaction"` is absent. (The
-older clause "the recovery required the fixture's host hand-rolled compaction" is deleted:
-there is no host compaction path left in the fixture for a recovery to require, so the clause
-could never fire — it described the pre-FIG-2950 world. The frame witness above is its live
-successor.)
-
-## Phase 4 — The session continues
+## Phase 3 — The session continues
 
 Require, of each overflow arm, `continued_is_success == true`,
 `continued_is_context_overflow == false`, and a non-null `continued_final_value`, all on the
@@ -204,11 +168,8 @@ requirements cannot record which of them was observed if it is collapsed to one 
 | 2 | Both arms report the same outcome | | `03-observed.jsonl` |
 | 2 | The control turn's stop differs from an overflow turn's | | `03-observed.jsonl` |
 | 2 | The public accessor agrees with the serialized outcome | | `03-observed.jsonl` |
-| 3 | Recovery marker and terminal record are both durable, both arms | | `03-observed.jsonl` |
-| 3 | A summary was produced (`plugin_recovery_summary_chars > 0`), both arms | | `03-observed.jsonl` |
-| 3 | `recovery_frame_moved` with `recovery_frame_reason: "compaction"`, both arms | | `03-observed.jsonl` |
-| 4 | The continued turn succeeds and does not overflow again, both arms | | `03-observed.jsonl` |
-| 4 | It runs on the same `session_id` as its overflow turn, both arms | | `03-observed.jsonl` |
+| 3 | The continued turn succeeds and does not overflow again, both arms | | `03-observed.jsonl` |
+| 3 | It runs on the same `session_id` as its overflow turn, both arms | | `03-observed.jsonl` |
 
 Record the artifact directory and the companion's final line with the scorecard. There is
 no dialect to record: it is a compile-time constant, not an observation.

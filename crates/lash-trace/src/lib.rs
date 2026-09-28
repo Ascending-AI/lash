@@ -156,7 +156,9 @@ pub use lashlang_graph::{
 /// Version 36 (FIG-3607) names a process by its minted, never-reused id: a
 /// language execution's generation is its attempt alone, graph keys drop the
 /// `:incarnation:` segment, and child links drop `incarnation` and
-/// `child_incarnation`.
+/// `child_incarnation`. It changes in place under the pre-1.0 version freeze
+/// (FIG-3846): FIG-4029 drops `prompt_view_pruned`, because context-pressure
+/// compaction starts a frame instead of pruning the prompt view.
 pub const TRACE_SCHEMA_VERSION: u32 = 36;
 
 /// A durable trace record was written under a schema this reader does not support.
@@ -494,12 +496,6 @@ pub enum TraceEvent {
     },
     CompactionCompleted {
         summary_nodes: usize,
-    },
-    PromptViewPruned {
-        used_tokens: usize,
-        max_context_tokens: usize,
-        dropped_prefix_messages: usize,
-        retained_messages: usize,
     },
     PromptViewAttachmentsPruned {
         used_tokens: usize,
@@ -860,7 +856,6 @@ impl TraceEvent {
             | Self::CompactionNeeded { .. }
             | Self::CompactionStarted { .. }
             | Self::CompactionCompleted { .. }
-            | Self::PromptViewPruned { .. }
             | Self::PromptViewAttachmentsPruned { .. }
             | Self::LlmCallStarted { .. }
             | Self::LlmCallCompleted { .. }
@@ -896,7 +891,6 @@ impl TraceEvent {
             Self::CompactionNeeded { .. } => "compaction_needed",
             Self::CompactionStarted { .. } => "compaction_started",
             Self::CompactionCompleted { .. } => "compaction_completed",
-            Self::PromptViewPruned { .. } => "prompt_view_pruned",
             Self::PromptViewAttachmentsPruned { .. } => "prompt_view_attachments_pruned",
             Self::LlmCallStarted { .. } => "llm_call_started",
             Self::LlmCallCompleted { .. } => "llm_call_completed",

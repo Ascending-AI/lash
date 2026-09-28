@@ -1,10 +1,12 @@
 //! Default standard-compaction plugin.
 //!
-//! Owns rolling prompt-view shaping and the explicit `/compact`
-//! summarization strategy.
+//! Owns the standard protocol's context policies: old-attachment pruning in
+//! the prompt view, compaction — explicit `/compact` or at the context-pressure
+//! threshold — and context-overflow recovery. Every compaction starts a fresh
+//! frame seeded with its summary (FIG-4029): a frame is the context window.
 //!
-//! Registered as a default plugin by the first-party default tool bundles,
-//! so standard lash sessions pick it up automatically.
+//! The standard protocol's plugin only: RLM switches frames through the
+//! model-driven `continue_as`.
 
 use lash_sansio::{SessionId, TurnId};
 
@@ -483,21 +485,137 @@ pub(crate) fn prepare_compaction_request(
     ))
 }
 
-fn prompt_tail_window(messages: &[Message], cut_point: usize) -> Vec<Message> {
-    let prefix_len = leading_system_prefix_len(messages);
-    let latest_summary_index = messages[prefix_len..]
-        .iter()
-        .rposition(is_compaction_summary_message)
-        .map(|index| prefix_len + index);
-    let mut out = Vec::new();
-    out.extend_from_slice(&messages[..prefix_len]);
-    if let Some(summary_index) = latest_summary_index
-        && summary_index < cut_point
-    {
-        out.push(messages[summary_index].clone());
+/// The compaction discriminator: the tail of the compaction request identity,
+/// shared by the summarizer's replay key, the frame switch it seeds and the
+/// records it appends, so one request names all of them.
+pub(crate) fn compaction_discriminator(
+    session_id: &SessionId,
+    history_snapshot: &SessionSnapshot,
+    request_snapshot: &SessionSnapshot,
+    prompt_text: &str,
+    execution_scope: &lash_core::ExecutionScope,
+) -> Result<String, ContextError> {
+    let (compaction_frame_id, _) = compaction_request_ids(
+        session_id,
+        history_snapshot,
+        request_snapshot,
+        prompt_text,
+        execution_scope,
+    )?;
+    Ok(compaction_frame_id
+        .as_str()
+        .split_once("-compaction:")
+        .map_or_else(
+            || compaction_frame_id.to_string(),
+            |(_, tail)| tail.to_string(),
+        ))
+}
+
+/// The in-turn compaction that starts a frame: which policy asked for it, as
+/// it names the frame key, the switch operation and the switch's task.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum SummaryFrame {
+    /// The context-pressure threshold was reached.
+    Pressure,
+    /// A persisted context overflow is being recovered.
+    OverflowRecovery,
+}
+
+impl SummaryFrame {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Pressure => "standard-compaction-pressure",
+            Self::OverflowRecovery => "standard-compaction-overflow-recovery",
+        }
     }
-    out.extend_from_slice(&messages[cut_point..]);
-    out
+
+    fn task(self) -> &'static str {
+        match self {
+            Self::Pressure => "context-pressure compaction",
+            Self::OverflowRecovery => "context-overflow recovery",
+        }
+    }
+}
+
+/// Starts the frame the running turn continues in, seeded with `summary`,
+/// through the plugin-visible frame-switch seam (FIG-3107, FIG-4029): the
+/// switch a context transform records opens before the turn runs, so the
+/// turn's own messages follow the seed. Returns the seed as the message the
+/// resident frame will hold, for the turn's prompt window.
+///
+/// Every identity derives from the compaction request, so re-deriving the
+/// same compaction answers the same switch idempotently.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn switch_to_summary_frame(
+    frame: SummaryFrame,
+    session_id: &SessionId,
+    history_snapshot: &SessionSnapshot,
+    request_snapshot: &SessionSnapshot,
+    prompt_text: &str,
+    session_graph: &dyn lash_core::plugin::SessionGraphService,
+    execution_scope: &lash_core::ExecutionScope,
+    current_frame_node_id: Option<&str>,
+    summary: &str,
+) -> Result<Message, ContextError> {
+    let discriminator = compaction_discriminator(
+        session_id,
+        history_snapshot,
+        request_snapshot,
+        prompt_text,
+        execution_scope,
+    )?;
+    let label = frame.label();
+    let frame_key = lash_core::FrameKey::from_compaction_material(
+        session_id,
+        &format!("{label}:{discriminator}"),
+        current_frame_node_id.unwrap_or_default(),
+    );
+    let seed_id = format!("m_{}_summary_{discriminator}", label.replace('-', "_"));
+    session_graph
+        .switch_agent_frame(
+            session_id,
+            lash_core::SwitchAgentFrameRequest::new(
+                format!("{label}/switch/{discriminator}"),
+                frame_key,
+                lash_core::AgentFrameReason::compaction(),
+            )
+            .with_task(frame.task())
+            .with_initial_nodes(vec![lash_core::SessionAppendNode::message(
+                compaction_summary_message(summary).with_id(&seed_id),
+            )]),
+        )
+        .await
+        .map_err(ContextError::from)?;
+    Ok(Message {
+        parts: vec![Part::text(
+            format!("{seed_id}.p0"),
+            compaction_summary_text(summary),
+            None,
+        )]
+        .into(),
+        id: seed_id,
+        role: MessageRole::Assistant,
+        origin: Some(compaction_summary_origin()),
+    })
+}
+
+/// The prompt window a turn runs in once it switched to a summary frame:
+/// the system prefix, the summary seed, and the turn's own request. Durable
+/// history keeps everything the summary covers, in the frame it left.
+pub(crate) fn summary_frame_window(
+    seed: Message,
+    history_messages: &[Message],
+    current_request: &[Message],
+) -> Vec<Message> {
+    let prefix_len = leading_system_prefix_len(history_messages);
+    let mut window: Vec<Message> = history_messages[..prefix_len].to_vec();
+    window.push(seed);
+    window.extend_from_slice(current_request);
+    window
+}
+
+fn current_request(messages: &[Message]) -> Vec<Message> {
+    latest_user_index(messages).map_or(Vec::new(), |index| messages[index..].to_vec())
 }
 
 /// One direct LLM completion on the parent's own session (FIG-3374).
@@ -594,17 +712,24 @@ async fn summarize_compaction_prefix(
     Ok(Some(summary))
 }
 
+fn compaction_summary_text(summary: &str) -> String {
+    format!("{COMPACTION_SUMMARY_TITLE}\n{summary}")
+}
+
+fn compaction_summary_origin() -> MessageOrigin {
+    MessageOrigin::Plugin {
+        plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
+        transient: false,
+    }
+}
+
+fn compaction_summary_message(summary: &str) -> lash_core::PluginMessage {
+    lash_core::PluginMessage::text(MessageRole::Assistant, compaction_summary_text(summary))
+        .with_origin(compaction_summary_origin())
+}
+
 fn compaction_summary_seed(summary: &str) -> lash_core::SessionAppendNode {
-    lash_core::SessionAppendNode::message(
-        lash_core::PluginMessage::text(
-            MessageRole::Assistant,
-            format!("{COMPACTION_SUMMARY_TITLE}\n{summary}"),
-        )
-        .with_origin(MessageOrigin::Plugin {
-            plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
-            transient: false,
-        }),
-    )
+    lash_core::SessionAppendNode::message(compaction_summary_message(summary))
 }
 
 async fn compact_messages_core(
@@ -731,11 +856,7 @@ impl TurnContextTransform for StandardCompactionTurnTransform {
                 .map_err(|error| ContextError::Session(error.to_string()))?,
         );
         if recovery_state.pending() {
-            let current_request = {
-                let messages_now = input.messages.make_mut();
-                latest_user_index(messages_now)
-                    .map_or(Vec::new(), |index| messages_now[index..].to_vec())
-            };
+            let request = current_request(input.messages.make_mut());
             let trace_context =
                 lash_core::TraceContext::default().for_session(ctx.session_id.clone());
             if recovery_state.exhausted() {
@@ -760,7 +881,7 @@ impl TurnContextTransform for StandardCompactionTurnTransform {
                 trace_context,
                 recovery_state,
                 ctx.max_context_tokens.unwrap_or(0),
-                &current_request,
+                &request,
                 ctx.system_prompt.clone(),
             )
             .await?
@@ -822,40 +943,51 @@ impl TurnContextTransform for StandardCompactionTurnTransform {
             return Ok(input);
         }
 
-        let messages = input.messages.make_mut();
-        let prefix_len = leading_system_prefix_len(messages);
-        let cut_point = find_compaction_cut_point(messages, prefix_len);
-        if cut_point <= prefix_len {
-            ctx.session_graph
-                .emit_trace_event(
-                    trace_context,
-                    lash_core::TraceEvent::PromptViewPruned {
-                        used_tokens: pressure.used_tokens,
-                        max_context_tokens: pressure.max_context_tokens,
-                        dropped_prefix_messages: 0,
-                        retained_messages: messages.len(),
-                    },
-                )
-                .await?;
+        // FIG-4029: a frame is the context window, so pressure compaction
+        // starts one the way an explicit compaction does. The committed frame
+        // is summarized, the summary seeds a fresh compaction frame, and this
+        // turn runs inside it on the same resident session.
+        let history = ctx.state.messages();
+        let summarized = history[leading_system_prefix_len(history)..].to_vec();
+        if summarized.is_empty() {
             return Ok(input);
         }
-
-        let message_count = messages.len();
-        let projected = prompt_tail_window(messages, cut_point);
-        let dropped_prefix_messages = message_count.saturating_sub(projected.len());
-        let retained_messages = projected.len();
-        input.messages.replace(projected);
-        ctx.session_graph
-            .emit_trace_event(
-                trace_context,
-                lash_core::TraceEvent::PromptViewPruned {
-                    used_tokens: pressure.used_tokens,
-                    max_context_tokens: pressure.max_context_tokens,
-                    dropped_prefix_messages,
-                    retained_messages,
-                },
-            )
-            .await?;
+        let history_snapshot = ctx.state.to_snapshot();
+        let (request_snapshot, prompt_text) =
+            prepare_compaction_request(&history_snapshot, summarized.clone(), None)?;
+        let system_prompt = match &ctx.system_prompt {
+            Some(provider) => provider().await.map_err(ContextError::from)?,
+            None => None,
+        };
+        let Some(summary) = summarize_compaction_prefix(
+            &ctx.session_id,
+            &history_snapshot,
+            summarized,
+            None,
+            &ctx.direct_completions,
+            &ctx.scoped_effect_controller,
+            system_prompt,
+        )
+        .await?
+        else {
+            return Ok(input);
+        };
+        let seed = switch_to_summary_frame(
+            SummaryFrame::Pressure,
+            &ctx.session_id,
+            &history_snapshot,
+            &request_snapshot,
+            &prompt_text,
+            &*ctx.session_graph,
+            ctx.scoped_effect_controller.execution_scope(),
+            history_snapshot.current_frame_node_id.as_deref(),
+            &summary,
+        )
+        .await?;
+        let request = current_request(input.messages.make_mut());
+        input
+            .messages
+            .replace(summary_frame_window(seed, history, &request));
         Ok(input)
     }
 }

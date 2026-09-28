@@ -137,13 +137,10 @@ pub(super) const LASH_REQUEST_BODY_LEN: &str = "lash.request.body_len";
 pub(super) const LASH_REQUEST_BODY_SHA256: &str = "lash.request.body_sha256";
 pub(super) const LASH_RETRY_ATTEMPTS_JSON: &str = "lash.retry.attempts_json";
 pub(super) const LASH_COMPACTION_USED_TOKENS: &str = "lash.compaction.used_tokens";
-pub(super) const LASH_COMPACTION_DROPPED_PREFIX_MESSAGES: &str =
-    "lash.compaction.dropped_prefix_messages";
 pub(super) const LASH_COMPACTION_INSTRUCTIONS_PRESENT: &str =
     "lash.compaction.instructions_present";
 pub(super) const LASH_COMPACTION_MAX_CONTEXT_TOKENS: &str = "lash.compaction.max_context_tokens";
 pub(super) const LASH_COMPACTION_PRUNED_ATTACHMENTS: &str = "lash.compaction.pruned_attachments";
-pub(super) const LASH_COMPACTION_RETAINED_MESSAGES: &str = "lash.compaction.retained_messages";
 pub(super) const LASH_COMPACTION_SOURCE_MESSAGES: &str = "lash.compaction.source_messages";
 pub(super) const LASH_COMPACTION_SUMMARY_NODES: &str = "lash.compaction.summary_nodes";
 pub(super) const LASH_COMPACTION_THRESHOLD_TOKENS: &str = "lash.compaction.threshold_tokens";

@@ -389,12 +389,6 @@ fn event_samples() -> Vec<TraceEvent> {
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
         },
-        TraceEvent::PromptViewPruned {
-            used_tokens: 30_000,
-            max_context_tokens: 40_000,
-            dropped_prefix_messages: 2,
-            retained_messages: 1,
-        },
         TraceEvent::PromptViewAttachmentsPruned {
             used_tokens: 30_000,
             max_context_tokens: 40_000,
@@ -635,7 +629,6 @@ trace_event_kinds! {
     CompactionNeeded => "compaction_needed",
     CompactionStarted => "compaction_started",
     CompactionCompleted => "compaction_completed",
-    PromptViewPruned => "prompt_view_pruned",
     PromptViewAttachmentsPruned => "prompt_view_attachments_pruned",
     LlmCallStarted => "llm_call_started",
     LlmCallCompleted => "llm_call_completed",
@@ -1422,12 +1415,6 @@ fn standard_compaction_events_pin_decision_payloads() {
             max_context_tokens: 40_000,
             threshold_tokens: 20_000,
         },
-        TraceEvent::PromptViewPruned {
-            used_tokens: 30_000,
-            max_context_tokens: 40_000,
-            dropped_prefix_messages: 2,
-            retained_messages: 1,
-        },
         TraceEvent::PromptViewAttachmentsPruned {
             used_tokens: 30_000,
             max_context_tokens: 40_000,
@@ -1448,13 +1435,6 @@ fn standard_compaction_events_pin_decision_payloads() {
                 "used_tokens": 30_000,
                 "max_context_tokens": 40_000,
                 "threshold_tokens": 20_000,
-            }),
-            json!({
-                "type": "prompt_view_pruned",
-                "used_tokens": 30_000,
-                "max_context_tokens": 40_000,
-                "dropped_prefix_messages": 2,
-                "retained_messages": 1,
             }),
             json!({
                 "type": "prompt_view_attachments_pruned",
