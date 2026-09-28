@@ -1163,11 +1163,11 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
     ] {
         // A process the turn is the durable parent of — the shape a
         // `processes.start` followed by `await handle` leaves behind, down to
-        // the `Abandon` parent-end policy that keeps the parent-end sweep from
+        // the `Abandon` parent-end policy that keeps the parent-end pass from
         // touching it.
         let process_id = register_turn_child(&registry, &session_id, turn_id).await;
         // A second process parented by a different turn proves the cancel is
-        // addressed, not a session-wide sweep.
+        // addressed, not a session-wide pass.
         register_turn_child(&registry, &session_id, "other-turn").await;
         state.track_turn(&session_id, &TurnId::from(turn_id));
 

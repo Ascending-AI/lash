@@ -2277,7 +2277,7 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
 /// send.
 ///
 /// That suspension is the state a host crash between the handover and the
-/// successor send leaves behind, and it is the state the recovery sweep meets
+/// successor send leaves behind, and it is the state the lost-run pass meets
 /// in production. The reference is written before the handover (FIG-3588), so
 /// no live boundary leaves a handover visible without its successor's
 /// reference.
@@ -2389,7 +2389,7 @@ impl LiveSegmentBoundary {
 /// recorded reference names an ordinal above zero.
 ///
 /// Without this write the row keeps the segment-0 reference its start wrote for
-/// the whole chain, and the recovery sweep has nothing to compare a segment
+/// the whole chain, and the lost-run pass has nothing to compare a segment
 /// against: every handed-over row would read as "already submitted" forever.
 #[tokio::test]
 pub(super) async fn segment_handover_records_the_successor_external_reference() {

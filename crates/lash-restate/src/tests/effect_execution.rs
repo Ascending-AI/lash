@@ -181,7 +181,7 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
             .expect("get externally-owned row");
         assert!(
             !row.is_terminal(),
-            "the sweep never closes an externally-owned row"
+            "the start path never closes an externally-owned row"
         );
     }
 }

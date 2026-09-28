@@ -49,19 +49,20 @@ pub(crate) async fn double_backend() -> lash_core::Backend {
 }
 
 /// The backend over `double` whose installed driver starts no wall-clock
-/// reconcile sweep: every obligation delivery is one the test made — a
-/// verb's immediate attempt or a pass it drives — so a sweep can never
+/// reconcile tick: every obligation delivery is one the test made — a
+/// verb's immediate attempt or a pass it drives — so no scheduled pass can
 /// claim an obligation out from under the assertion being made (FIG-3926).
-fn sweep_less(double: &lash_restate_test::RestateTestBackend) -> lash_core::Backend {
+fn explicit_reconcile(double: &lash_restate_test::RestateTestBackend) -> lash_core::Backend {
     lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
         .with_session_work(double.explicit_reconcile_session_work())
         .into_backend()
 }
 
-/// [`double_backend`] over the sweep-less session work [`sweep_less`] gives.
+/// [`double_backend`] over the explicit-reconcile session work
+/// [`explicit_reconcile`] gives.
 pub(crate) async fn double_backend_explicit_reconcile() -> lash_core::Backend {
     let double = restate_double(DOUBLE_SEED).await;
-    let backend = sweep_less(&double);
+    let backend = explicit_reconcile(&double);
     TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
     backend
 }
@@ -82,8 +83,8 @@ pub(crate) async fn double_backend_over(
     backend
 }
 
-/// [`double_backend_over`] over the sweep-less session work
-/// [`sweep_less`] gives.
+/// [`double_backend_over`] over the explicit-reconcile session work
+/// [`explicit_reconcile`] gives.
 pub(crate) async fn double_backend_over_explicit_reconcile(
     config: lash_restate_test::ServerConfig,
     decorate: impl FnOnce(Arc<dyn lash_core::StoreSet>) -> Arc<dyn lash_core::StoreSet>,
@@ -91,7 +92,7 @@ pub(crate) async fn double_backend_over_explicit_reconcile(
     let double = lash_restate_test::backend_with(DOUBLE_SEED, config, decorate)
         .await
         .expect("build the Restate double over decorated stores");
-    let backend = sweep_less(&double);
+    let backend = explicit_reconcile(&double);
     TEST_DOUBLES.with(|held| held.borrow_mut().push(double));
     backend
 }

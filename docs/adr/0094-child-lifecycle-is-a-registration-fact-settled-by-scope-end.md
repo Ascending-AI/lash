@@ -50,7 +50,7 @@ provenance relations remain cleanup-free.
 
 A child process's Lifecycle Policy and Parent Scope are required facts on its
 durable process record. They are written at registration and are never optional.
-The parent's end is a durable registry fact. One registry sweep settles every
+The parent's end is a durable registry fact. One parent-end plan settles every
 child whose policy says Cancel, for every parent kind. A child whose policy says
 Abandon belongs to the host from registration onward.
 
@@ -142,14 +142,15 @@ than reinterpreted.
 
 On SQL tiers, writing the ledger row and selecting its children occur in one
 registry transaction. Registration reads the ledger in its own transaction, so
-a child commits before the end fact and is swept, or sees the fact afterward
+a child commits before the end fact and is cancelled, or sees the fact afterward
 and is refused. Historical rows with pending old plans become Process + Cancel;
 all others become Host + Abandon, and `record_json` is rewritten to agree.
 Stored registration fingerprints are not recomputed. Because the ledger is
 keyed by parent scope rather than by process id, a ledger row no longer depends
 on the process row it was written for: retention prunes a terminal parent on
 the ordinary horizon whether or not its row is settled, the row outlives it,
-and the sweep still finds the children through their own Parent Scope column. Restate
+and applying the plan still finds the children through their own Parent Scope
+column. Restate
 retains the Lifecycle Policy on the process record and journals the discriminated plan. `wake_session_id` deliberately remains
 column-only.
 
@@ -180,9 +181,9 @@ answer this question; the receipt can, without persisting anything new.
 
 Only a committed candidate gets a row. A turn that crashed before its commit is
 interrupted, not ended: the stop-backtracks-to-checkpoint rule drops its
-uncommitted tail so the turn replays and re-registers exactly the children a
-sweep would have cancelled. Uncommitted candidates are therefore left alone and
-reconsidered on the next pass.
+uncommitted tail so the turn replays and re-registers exactly the children its
+parent-end plan would have cancelled. Uncommitted candidates are therefore left
+alone and reconsidered on the next pass.
 
 A tier whose turn commit and ledger row are steps of one durable execution —
 Restate, whose row is a journaled step right after the commit step — has no
@@ -191,9 +192,9 @@ candidates and is never asked the committed-turn question.
 
 The window can only delay settlement, never defeat it:
 
-- a child that registered *before* the row exists is swept when the row
-  arrives, because the sweep selects children by Parent Scope and Cancel
-  policy, not by anything the turn recorded at exit;
+- a child that registered *before* the row exists is cancelled when the row
+  arrives, because applying the plan selects children by Parent Scope and
+  Cancel policy, not by anything the turn recorded at exit;
 - a child that registers *after* the row exists is refused `ParentEnded` by
   the registration-time read of the ledger;
 - a child that registers *during* the write commits either before or after the
@@ -231,12 +232,13 @@ parent-end ledger row. SQL tiers write it in the turn-commit or process-complete
 transaction; Restate journals it immediately after commit. Host never ends, so
 host shutdown uses Operator Requested cancellation over rows the host selects.
 
-The process worker pages pending ledger rows, selects matching Cancel children,
-requests cancellation with origin Parent Ended and the rendered Parent Scope as
-requester, then marks the plan settled. Terminal children and children already
-carrying a cancellation request count as settled. Concurrent sweeps converge;
-one failed row retries on the next pass without aborting the page. Settlement
-does not await child termination.
+A `ParentEnd` obligation's delivery applies the plan's row (ADR 0109 §3): it
+pages the plan's Cancel children, requests cancellation with origin Parent
+Ended and the rendered Parent Scope as requester, then marks the plan settled.
+Terminal children and children already carrying a cancellation request count as
+settled. Concurrent applications converge; one failed row retries on the next
+relay pass without aborting the page. Settlement does not await child
+termination.
 
 #### Stop and Cancel Origin
 
@@ -245,14 +247,14 @@ process, with origin Turn Stopped. After-step stop finishes the current step as
 defined by
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md).
 Other children continue unless their Lifecycle Policy says Cancel, in which
-case the parent-end sweep handles them.
+case the parent-end plan handles them.
 
 The first Cancel Origin and requester win. The writer map is:
 
 | Writer | Cancel Origin |
 | --- | --- |
 | Immediate await branch | Turn Stopped |
-| Parent-end sweep | Parent Ended |
+| Parent-end plan | Parent Ended |
 | Model `processes.cancel` | Model Requested |
 | Process administration, session-runner control, and `cancel_all_visible` | Operator Requested |
 | Start compensation | Start Failed |
@@ -271,11 +273,13 @@ On Restate, submission is keyed by segment: `process_id` for segment zero and
 `process_id#ordinal` after handover. Submission coalesces. A submission error
 requests cancellation with Start Failed inside the scheduling boundary before
 returning the error; if that request also fails, start returns the record. A
-recovery sweep re-reads and resubmits a nonterminal row only when it has neither
-external reference nor cancel request. External references are compare-and-set,
-including later segment ordinals, and terminal writes are journaled. The sweep
-never terminalizes a row, and registration conflicts never cancel an existing
-row.
+registered row's first submission is its armed `ProcessStart` obligation
+(ADR 0109); what resubmits a started row is the recovery pass's lost-run
+scan, which sends a live row's latest segment under its recorded key when
+Restate holds no run for it and ends the process `SubstrateLost` when that
+run finished failed (ADR 0110 §2). External references are compare-and-set,
+including later segment ordinals, and terminal writes are journaled.
+Registration conflicts never cancel an existing row.
 
 #### Retry bound
 
@@ -364,8 +368,8 @@ different effects.
 
 **A parent end is a durable registry fact about a process's children.** It is
 written by the three turn exits and by each terminal process completion, it is
-keyed by `(parent_kind, parent_id)`, and one registry sweep settles every child
-whose policy says Cancel. Nothing about that changes.
+keyed by `(parent_kind, parent_id)`, and one parent-end plan settles every
+child whose policy says Cancel. Nothing about that changes.
 
 **An opener close is a phase of a group's tool children.** It is entered by a
 **durable live→closing transition recorded before admission stops or any
@@ -384,7 +388,7 @@ Three consequences, each of which an implementation can get wrong quietly:
 1. **A process really started by a tool child belongs to ADR 0094, not to the
    group.** Closing a group never cancels it. If the start was realized, the
    process exists with its required Lifecycle Policy and Parent Scope, and the
-   parent-end sweep settles it when its *parent* ends. Refusing a late
+   parent-end plan settles it when its *parent* ends. Refusing a late
    completion suppresses delivery of a result; it does not unmake a registered
    process.
 2. **A dead worker is not a parent end and not an opener close.** This ADR
@@ -398,11 +402,12 @@ Three consequences, each of which an implementation can get wrong quietly:
    retirement. A crash between steps resumes the first incomplete one. A start
    realized during closing therefore registers before the parent-end row exists,
    which is the "registered before the row" case this ADR already covers: the
-   sweep selects children by Parent Scope and Cancel policy, so it finds them when
-   the row arrives. The window can delay settlement and cannot defeat it — the
-   same shape as this ADR's own turn-commit-before-ledger-row window.
+   plan's application selects children by Parent Scope and Cancel policy, so it
+   finds them when the row arrives. The window can delay settlement and cannot
+   defeat it — the same shape as this ADR's own turn-commit-before-ledger-row
+   window.
 
-Cancellation vocabulary is unchanged: a child cancelled by the parent-end sweep
+Cancellation vocabulary is unchanged: a child cancelled by the parent-end plan
 carries origin `ParentEnded`, and closing a group is not a new `CancelOrigin`
 because it cancels *tool attempts*, which are not processes and carry no
 `CancelRequest`.
@@ -449,9 +454,9 @@ epilogue first resumes every `closing` group under the drain scope
 (`resume_closing_groups`, ADR 0099 §7) and refuses to end while any report is
 `Pending` or the scope is not quiescent, then commits the receipt, then writes
 the `ParentScope::queue_drain` row via `record_parent_end`. The ledger row is
-the separate-store second write; a crash in the gap is closed by
-`redrive_missing_opener_parent_end_rows`, which confirms
-`drain_end_exists(drain_id)` before re-deriving the row — and a drain whose
+the separate-store second write; a crash in the gap leaves the scope's
+`ScopeClose` obligation undelivered (ADR 0109 §3), and the due relay's
+re-delivery runs the idempotent close until the row lands. A drain whose
 receipt is absent and whose run is still pending is interrupted, not ended, so
 its retry under the same `drain_id` ends it.
 
@@ -470,32 +475,23 @@ operation that claims the lane and settles through the one method every
 groups settle first, then the receipt and the row land. The store-only Durable
 Session cannot abandon: the end needs the effect host's closing-group resume,
 the resident state the receipt checkpoints, and the registry, and a settlement
-without its end is the ownerless drain this rule exists to prevent. The sweep
-then settles `OnParentEnd::Cancel` children with `ParentEnded`; `Abandon`
-children stay host-managed.
+without its end is the ownerless drain this rule exists to prevent. The plan's
+application then settles `OnParentEnd::Cancel` children with `ParentEnded`;
+`Abandon` children stay host-managed.
 
 **An owed end is written when the owed work settles (FIG-3563).** The
 epilogue after a settlement withholds the receipt while a closing group under
 the drain scope owes work leased to another host. A settled run is never asked
 again by its own drain — a `Failed` one is never retried, and a completed one's
 caller has its answer — so a withheld end would stay unwritten. The end is owed,
-and the recovery sweep writes it: `redrive_missing_opener_parent_end_rows`
-already lists the drain as a candidate (its children have no ledger row), and
-for a candidate with no receipt it reads the drain's run through
-`QueuedWorkStore::queued_run(scope)`. A terminally settled run means the end is
-owed; the worker opens the session and calls
-`LashRuntime::end_settled_queue_drain`, which claims the lane and runs the same
-epilogue, with the same ordering and the same ownership test. The closing groups
-resume — finishing any obligation whose foreign lease has settled or expired —
-and the receipt and row land once nothing is owed; until then the epilogue
-withholds again and a later pass retries. No input is consumed and the drain id
-is not replayed through admission. The rule is one for every settlement:
-`Failed`, `Empty` or completed. The write runs on a detached task, one per drain
-at a time, because the epilogue waits out an obligation the worker's own
-process is running and the pass must not stall intake behind it. Discovery is
-the registry's candidate list, so a drain that owns no children is never
-visited; the owed-end epilogue runs as one that ran nothing here, which writes
-no end for a childless drain in any case.
+and its `ScopeClose` obligation is what re-asks it: armed by the drain's
+terminal transaction (ADR 0109 §3), it stays due until its delivery — the same
+epilogue, with the same ordering and the same ownership test — completes; the
+closing groups resume, finishing any obligation whose foreign lease has settled
+or expired, and the receipt and row land once nothing is owed, while every
+miss leaves the row due for the relay's next pass. No input is consumed and the
+drain id is not replayed through admission. The rule is one for every
+settlement: `Failed`, `Empty` or completed.
 
 The incarnation stays *beside* `ExecutionScope`, not inside it: the scope
 remains the claim address, the pin is the admission-time fact, and

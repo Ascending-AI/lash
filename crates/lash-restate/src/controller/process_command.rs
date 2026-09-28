@@ -490,8 +490,8 @@ where
                     // The awaiting process was cancelled while it waited: its
                     // await ends cancelled, which the drive records as its
                     // own cancellation. The awaited process is left to its
-                    // own lifecycle; the ended parent scope's sweep, not this
-                    // wait, owns its children.
+                    // own lifecycle; the ended parent scope's parent-end
+                    // plan, not this wait, owns its children.
                     trace_resolve("process", lash_trace::TraceDurableWaitResolution::Cancelled);
                     lash_core::ProcessAwaitOutput::from_tool_output(
                         lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(

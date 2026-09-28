@@ -194,7 +194,7 @@ pub fn prepare_process_transition(
         ProcessTransition::SetExternalRef(external_ref) => {
             // Mirrors the fold's compare-and-set: a write that cannot displace
             // the recorded owner is an idempotent no-op, not an append, so a resubmitting
-            // sweep never rewrites a row it coalesced onto.
+            // pass never rewrites a row it coalesced onto.
             // a competing backend still reaches the fold's refusal.
             match record.external_ref.as_ref() {
                 // An ended process names no successor segment: its stored
@@ -228,7 +228,7 @@ pub fn prepare_process_transition(
                     ProcessEventAppendRequest::external_ref_set(&record.id, &external_ref)
                 }
                 // Same or earlier segment on the same backend: an idempotent
-                // no-op, so a resubmitting sweep never rewrites a row it
+                // no-op, so a resubmitting pass never rewrites a row it
                 // coalesced onto.
                 Some(_) => return Ok(ProcessTransitionPlan::Unchanged),
             }
@@ -422,7 +422,7 @@ pub fn apply_process_event_projection(
         ProcessEventKind::ExternalRefSet => {
             let external_ref = lifecycle_payload(event, "external_ref")?;
             // Compare-and-set on the segment ordinal, never last-write-wins.
-            // A live host and the recovery sweep may both submit the same
+            // A live host and the recovery pass may both submit the same
             // segment and mint different backend identities for it; the first
             // recorded one stays, because both run the same coalesced work.
             // Only a strictly later segment names a new owner, and a reference

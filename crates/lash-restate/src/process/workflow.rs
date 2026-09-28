@@ -836,8 +836,8 @@ where
         match outcome {
             Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude }) => {
                 // The terminal append writes the ended parent scope's ledger
-                // row in the same store transaction; the sweep, not this
-                // handler, cancels the children.
+                // row in the same store transaction; the parent-end plan,
+                // not this handler, cancels the children.
                 Ok(SegmentRunEnd::Terminal(TerminalProposal::Output {
                     output,
                     prelude,
@@ -1339,7 +1339,7 @@ where
         let next_segment_ordinal = input.segment_ordinal.saturating_add(1);
         let successor_key = process_segment_workflow_key(&process_id, next_segment_ordinal);
         // The successor's reference names who owns the process now.
-        // It is observational: the recovery sweep keys on the latest
+        // It is observational: the lost-run pass keys on the latest
         // handover, and admission, not the reference, decides whether
         // a segment runs. It is still written before the handover and
         // the send, so a visible handover always has its reference.

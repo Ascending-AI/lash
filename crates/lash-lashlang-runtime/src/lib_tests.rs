@@ -188,13 +188,13 @@ impl DoubleProcessHarness {
             .await
             .expect("register the harness process")
             .id;
-        self.drive_pending(&process_id).await;
+        self.deliver_start(&process_id).await;
         process_id
     }
 
     /// Deliver one registered process to the installed worker through the
     /// `ProcessStart` obligation's relay — the one production delivery path.
-    pub(crate) async fn drive_pending(&self, process_id: &lash_core::ProcessId) {
+    pub(crate) async fn deliver_start(&self, process_id: &lash_core::ProcessId) {
         let relay = lash_core::runtime::process_start::ProcessStartRelay::new(
             self.backend
                 .obligation_ledger(lash_core::store::ObligationKind::ProcessStart),
@@ -528,7 +528,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         harness.env_ref(),
     )
     .await;
-    harness.drive_pending(&process_id).await;
+    harness.deliver_start(&process_id).await;
     let result = harness.await_terminal(&process_id).await;
     assert!(
         matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),

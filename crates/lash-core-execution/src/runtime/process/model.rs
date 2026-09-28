@@ -1237,7 +1237,7 @@ pub struct ProcessExternalRef {
     /// Execution segment this reference was minted for.
     ///
     /// A run that hands over to a successor is a new segment with its own
-    /// backend identity, and the live host and the recovery sweep can both
+    /// backend identity, and the live host and the recovery pass can both
     /// submit one. The reference is therefore written compare-and-set on this
     /// ordinal: an absent or lower ordinal never displaces a higher one, so a
     /// slow writer for an earlier segment cannot overwrite the owner a later
@@ -1669,7 +1669,7 @@ impl ProcessRecord {
     }
 
     /// Whether the process is parked and its latest run refused: the only
-    /// state in which a sweep's rerun is exempt from the attempt budget.
+    /// state in which a recovery rerun is exempt from the attempt budget.
     pub fn is_refusing_park(&self) -> bool {
         self.park.as_deref().is_some_and(|park| park.refusing)
     }

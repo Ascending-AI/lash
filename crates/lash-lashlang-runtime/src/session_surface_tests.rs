@@ -550,7 +550,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         process_ids.insert(name, process_id);
     }
     for process_id in process_ids.values() {
-        harness.drive_pending(process_id).await;
+        harness.deliver_start(process_id).await;
     }
     for name in ["scalar", "batch"] {
         let process_id = &process_ids[name];

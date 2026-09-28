@@ -825,8 +825,9 @@ pub(super) fn assert_lashlang_engine_record(
 
 /// Phase-B recovery: a TRIGGER-started process whose worker died mid-flight is
 /// left non-terminal in the durable registry; a subsequent worker reopening
-/// that registry must drive it to completion via the recovery sweep — the same
-/// durable re-execution guarantee a turn-started process has (invariant 3).
+/// that registry must drive it to completion through its armed `ProcessStart`
+/// obligation — the same durable re-execution guarantee a turn-started
+/// process has (invariant 3).
 ///
 /// Mirrors `sqlite_process_recovery_reopens_registry_worker_observers_wakes_and_cancel`
 /// but the process is started by a trigger occurrence (a `lashlang` engine row
@@ -868,9 +869,9 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     drop(registry_a);
 
     // Reopen the registry and stand up a fresh worker over it: the crash
-    // recovery counterpart. The recovery sweep submits the non-terminal process
-    // by workflow key; Restate coalesces duplicates and the workflow, run here
-    // on the fresh worker, writes the terminal outcome.
+    // recovery counterpart. The armed start obligation's relay submits the
+    // non-terminal process by workflow key; Restate coalesces duplicates and
+    // the workflow, run here on the fresh worker, writes the terminal outcome.
     let registry_b = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -936,7 +937,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         lash_core::NoProcessWork::for_registry(Arc::clone(&registry_b))
             .await_terminal(&trigger_notify)
             .await
-            .expect("await after idempotent re-sweep"),
+            .expect("await after the recovered segment"),
         process_success(serde_json::json!({ "triggered": "issue-42" }))
     );
 }
@@ -1555,7 +1556,7 @@ pub(super) async fn run_registration_runs_a_fresh_process() {
 /// reaches the same workflow key — the lost-run scan's recovery resubmit —
 /// coalesces onto the run already in flight (`PreviouslyAccepted`); a key
 /// Restate no longer holds runs the segment's admission instead, which is how
-/// the sweep reaches a lost workflow whose reference still names it.
+/// the lost-run scan reaches a lost workflow whose reference still names it.
 #[tokio::test]
 pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_the_repeat_scan() {
     // A non-terminal, Lash-executed process is the durable registry row the
@@ -1785,7 +1786,7 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
         "both rows reach the ingress, keyed by their own segment: {requests:?}"
     );
     // The cancel-requested row is now owned by Restate and still non-terminal:
-    // the sweep submitted it and wrote no terminal of its own. Its run honours
+    // the relay submitted it and wrote no terminal of its own. Its run honours
     // the standing request.
     let cancelling = registry
         .get_process(&cancelling.id)
@@ -1794,7 +1795,7 @@ pub(super) async fn start_relay_starts_the_crashed_row_once_and_submits_the_canc
         .expect("the cancelling row stands");
     assert!(
         !cancelling.is_terminal(),
-        "the sweep must never terminalise a row it did not run, got {:?}",
+        "the relay must never terminalise a row it did not run, got {:?}",
         cancelling.status
     );
     assert_eq!(

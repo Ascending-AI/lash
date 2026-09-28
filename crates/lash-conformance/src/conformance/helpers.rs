@@ -210,10 +210,10 @@ pub(crate) fn started_detached(
 /// process port — the same `deliver_cancel` the law's native executions read
 /// their cancel request from.
 ///
-/// This is the sweep's delivery half: the worker pass records the missing
-/// ledger rows (`redrive_missing_opener_parent_end_rows`), and this claims
-/// each armed row, applies its plan and settles it — or retries it under its
-/// backoff when the delivery cannot run.
+/// This is the obligation's delivery half: the `ScopeClose` delivery records
+/// the missing ledger rows (ADR 0094), and this claims each armed `ParentEnd`
+/// row, applies its plan and settles it — or retries it under its backoff when
+/// the delivery cannot run.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the store set's ports and the pass bound are established"

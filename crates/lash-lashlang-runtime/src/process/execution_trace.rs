@@ -90,7 +90,7 @@ impl LashlangProcessExecutionTrace {
                 ),
             },
             // `emit_finished` fires after an actual execution, whose outcome is
-            // Success/Failure/Cancelled — abandonment is written out-of-band by the sweep,
+            // Success/Failure/Cancelled — abandonment is written out-of-band by recovery,
             // never returned by a run.
             lash_core::ProcessAwaitOutput::Abandoned { .. } => (
                 TraceLanguageExecutionStatus::Failed,

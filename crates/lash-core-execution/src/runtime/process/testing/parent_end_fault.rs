@@ -3,12 +3,12 @@
 //!
 //! The drain-end epilogue writes its end receipt and its parent-end ledger
 //! row as two separate stores' writes; the crash window between them is what
-//! `redrive_missing_opener_parent_end_rows` closes (ADR 0094, FIG-3419). A
-//! law cannot pause the epilogue between the two writes, so it injects the
-//! equivalent failure here: the first `record_parent_end` for the target
-//! scope answers `Err`, the epilogue traces and returns without the row —
-//! the same durable shape a crash after the receipt leaves — and the sweep
-//! re-derives it on the next pass.
+//! the owed `ScopeClose` obligation's re-delivery closes (ADR 0094, FIG-3419;
+//! ADR 0109 §3). A law cannot pause the epilogue between the two writes, so it
+//! injects the equivalent failure here: the first `record_parent_end` for the
+//! target scope answers `Err`, the epilogue traces and returns without the row
+//! — the same durable shape a crash after the receipt leaves — and the next
+//! delivery re-derives it.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

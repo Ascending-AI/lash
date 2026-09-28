@@ -70,12 +70,12 @@ not observe is a FAIL of that gate, never a skip. Do not credit the companion's 
    journal-capable `ToolContext` routes remain fenced until their aggregate removal.
 7. **Parent teardown is a registry ledger row, not terminal-state cleanup.** An ended parent
    scope leaves exactly one unsettled `parent_end_plans` row keyed by `(parent_kind, parent_id)`.
-   The row carries no action list: the process worker's sweep derives the work by querying the
-   children that name that Parent Scope with a `Cancel` policy, requests `ParentEnded` cancel on
-   each, and only then stamps the row settled. A crash anywhere in that sweep redrives without
-   duplicating a child event, because a child already carrying a cancel request is no longer
-   returned by the children query. Concurrent sweeps may race, but only one durable
-   cancellation may remain for each child.
+   The row carries no action list: the process worker's reconcile pass derives the work by
+   querying the children that name that Parent Scope with a `Cancel` policy, requests
+   `ParentEnded` cancel on each, and only then stamps the row settled. A crash anywhere in that
+   pass redrives without duplicating a child event, because a child already carrying a cancel
+   request is no longer returned by the children query. Concurrent passes may race, but only
+   one durable cancellation may remain for each child.
 
 ## Parent-end ledger preflight
 

@@ -276,7 +276,7 @@ impl RecordingContext {
             }
         })
         .await
-        .expect("the Restate durable waiter is registered before the sweep");
+        .expect("the Restate durable waiter is registered before the reconcile");
     }
 
     pub(super) fn with_endpoint(endpoint: Endpoint) -> Self {

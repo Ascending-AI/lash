@@ -589,7 +589,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("wake single-reply delivery");
 
         // Delivering the wake asks the engine to drive it; the engine's own
-        // sweep may already have.
+        // reconcile tick may already have.
         state
             .core
             .processes()

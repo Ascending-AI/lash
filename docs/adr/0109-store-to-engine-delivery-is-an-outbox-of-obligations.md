@@ -54,6 +54,11 @@ not turn-selection claims.
 
 A ledger row that owes the engine an effect carries these columns. The row
 is the obligation: no side table. The same names are used on every ledger.
+A ledger that owes two kinds carries a second, prefixed family of the same
+columns: `processes` owes `ProcessStart` on `start_obligation_*` beside
+`ProcessTerminal` on `obligation_*`, and the two families are independent —
+a row's start settles while its terminal obligation is still unarmed, and
+arming or settling either never touches the other.
 
 | Column | SQLite | PostgreSQL | Meaning |
 |---|---|---|---|
@@ -70,7 +75,8 @@ The decisions' `next_attempt_at_ms` and `claimed_until_ms` are one column,
 `obligation_due_at_ms`: a row is never both waiting and claimed, so two
 columns would be two sources of truth for "when may a relay take this row".
 
-One CHECK, `ck_<table>_obligation`, pins the combinations:
+One CHECK per family, `ck_<table>_obligation` (`ck_processes_start_obligation`
+for the `processes` start family), pins the combinations:
 
 ```sql
 (obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL
@@ -86,7 +92,8 @@ OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_du
    AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable'))
 ```
 
-Three indexes per ledger (`lash_` prefix on PostgreSQL):
+Three indexes per family (`lash_` prefix on PostgreSQL;
+`idx_processes_start_obligation_*` for the `processes` start family):
 
 ```sql
 CREATE UNIQUE INDEX idx_<table>_obligation_id ON <table>(obligation_id);
@@ -105,14 +112,16 @@ LOCKED`. Claiming sets `claimed`, a fresh token, `attempts + 1` and
 ### 1.2 Kinds
 
 `ObligationKind` (lash-core-store): `Ingress`, `ControlIntent`, `ScopeClose`,
-`ParentEnd`, `SessionDelete`, `ProcessTerminal`. Its label (`ingress`,
-`control_intent`, `scope_close`, `parent_end`, `session_delete`,
-`process_terminal`) is the metric label and the drain-status key.
+`ParentEnd`, `SessionDelete`, `ProcessStart`, `ProcessTerminal`. Its label
+(`ingress`, `control_intent`, `scope_close`, `parent_end`, `session_delete`,
+`process_start`, `process_terminal`) is the metric label and the
+drain-status key.
 
 `ObligationKey` names the row an obligation lives on, one variant per kind:
 `Ingress { session_id, item_id }`, `ControlIntent { intent_id }`,
 `ScopeClose { session_id, root }`, `ParentEnd { parent_kind, parent_id }`,
-`SessionDelete { session_id }`, `ProcessTerminal { process_id }`.
+`SessionDelete { session_id }`, `ProcessStart { process_id }`,
+`ProcessTerminal { process_id }`.
 
 `process_wake_deliveries` is the template and already has this shape under
 its own names (`pending`/`enqueuing`/`enqueued`/`discarded`, `attempts`,
@@ -423,6 +432,7 @@ and is not a second ingress.
 | `ScopeClose` | `session_roots` | the root's terminal transaction | the close's own transaction | the scopes arm |
 | `ParentEnd` | `parent_end_plans` | the plan's record | every child's cancel delivered or refused | the parent-end slot and the native worker sweep |
 | `SessionDelete` | `session_meta` | the close intent's delivered settle | physical delete ran | caller-retried deletion |
+| `ProcessStart` | `processes` (`start_obligation_*`) | the registration transaction | the engine accepted the process's current-segment `run` submission | the hosts' pending-process admission pass (`admit_pending_processes`) |
 | `ProcessTerminal` | `processes` | the terminal transaction | the engine's terminal promise resolved | nothing (S-14 had no owner) |
 
 At the ceiling an intent stalls and is written `Failed{retryable: false}`,
@@ -455,6 +465,14 @@ attempt's drive and follows the ask: when the drive it waits on ends with the
 input unadmitted and the row claimed under a later attempt, it attaches to
 that attempt's drive. There is no repair scan for ingress. A native wake asks
 for its batch's first attempt once and leaves the rest to the relay.
+
+**ProcessStart.** The obligation id is `process_start:{process_id}`, derived
+from the key the way the ingress ids are. The registering transaction's
+own-commit attempt delivers through `deliver_now`; a journaled engine that
+must carry its own submission context (Restate's start `send`, with its
+execution context and causal invocation) claims the row itself, sends, and
+settles through the same ledger. The relay's due pass is the fallback for a
+lost immediate attempt; the row is delivered once and nothing re-arms it.
 
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive

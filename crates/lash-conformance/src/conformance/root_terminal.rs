@@ -518,7 +518,7 @@ fn scope_close_pass(report: &lash_core::engine::ReconcileTick) -> lash_core::eng
 /// pass delivers the cancel each close row owes the processes living `Until`
 /// the closed scope (ADR 0108 §5) — the same `relay_due` the deployment's
 /// reconcile tick runs (ADR 0109).
-async fn recovery_sweep(stores: &Arc<dyn crate::StoreSet>) {
+async fn recovery_pass(stores: &Arc<dyn crate::StoreSet>) {
     let pass = crate::deliver_due_parent_end_obligations(stores).await;
     assert_eq!(
         pass.stalled, 0,
@@ -709,7 +709,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         closes.closes()
     );
 
-    recovery_sweep(&stores).await;
+    recovery_pass(&stores).await;
     assert!(
         root_close_row(&registry, &parts.session_id, &root)
             .await
@@ -766,7 +766,7 @@ pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_f
         0,
         "the due pass found no close to deliver"
     );
-    recovery_sweep(&stores).await;
+    recovery_pass(&stores).await;
     assert_eq!(
         terminal(&parts, &parked).await,
         None,

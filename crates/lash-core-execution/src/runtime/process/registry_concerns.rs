@@ -590,12 +590,12 @@ pub trait ProcessLifecycle: Send + Sync {
         parent_id: &str,
     ) -> Result<Option<ParentEndPlan>, PluginError>;
 
-    /// Page the children this parent-end sweep still has to cancel.
+    /// Page the children this parent-end plan still has to cancel.
     ///
     /// Returns nonterminal rows whose recorded lifetime is `Until(parent)`
     /// and that do not already carry a cancel request, ordered by process id and resumed after `after`. A terminal
     /// child and a child already carrying a request are settled by definition,
-    /// so two concurrent sweeps converge instead of conflicting.
+    /// so two concurrent passes converge instead of conflicting.
     async fn list_parent_end_children(
         &self,
         parent: &crate::ScopeId,
@@ -620,7 +620,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// nonterminal child row and carrying no ledger row, ordered by scope id,
     /// resumed strictly after `after` and bounded by `limit`.
     ///
-    /// The cursor is what keeps the sweep from head-of-line blocking: a
+    /// The cursor is what keeps the pass from head-of-line blocking: a
     /// candidate can be unresolvable for a long time — an uncommitted turn
     /// that is never redriven, a session whose store this worker cannot open —
     /// and without a cursor a full page of such scopes would occupy every pass

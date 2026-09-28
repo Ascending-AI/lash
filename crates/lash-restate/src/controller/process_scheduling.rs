@@ -159,10 +159,11 @@ where
                     process_command_journal_name(invocation, "process-start-compensate"),
                     async move {
                         // The compensation write failing leaves the row
-                        // exactly the shape the recovery sweep resubmits --
+                        // exactly the shape the `ProcessStart` obligation's
+                        // relay retries --
                         // nonterminal, no external reference, no cancel
                         // request -- so that answer is recorded, not retried:
-                        // the start stands and recovery owns the run.
+                        // the start stands and the obligation owns it.
                         Ok::<_, String>(
                             match compensate_failed_process_submission(
                                 compensation_registry.as_ref(),
@@ -241,7 +242,7 @@ where
                             metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
                             // A live start always schedules the first segment;
                             // a later segment's reference is written by the
-                            // handover path or the recovery sweep and
+                            // handover path or the lost-run pass and
                             // supersedes this one.
                             segment_ordinal: Some(0),
                         },

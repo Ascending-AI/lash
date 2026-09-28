@@ -108,7 +108,7 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
     // The waiter observes the roots of every leg in its own chain; a
     // reconcile tick's sibling chain legitimately owns the roots it
     // claimed first. Which siblings exist is not settled by the direct
-    // chain's end — the sweep's ask can still be in flight while the
+    // chain's end — the reconcile tick's ask can still be in flight while the
     // last roots run — so the law settles on the state its assertions
     // read: every drive ask it ever observes awaited once, the session's
     // ingress drained, and every input's turn counted. The timeout
@@ -157,7 +157,7 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
 
 /// The request ids of `session`'s drive invocations that are not legs of
 /// `request`'s chain: each is the root of a sibling chain (the reconcile
-/// sweep asks for `reconcile:` requests). `drive-next:` invocations are
+/// tick asks for `reconcile:` requests). `drive-next:` invocations are
 /// continuation legs and count through their chain's root, so they are
 /// skipped here.
 async fn sibling_drive_roots(

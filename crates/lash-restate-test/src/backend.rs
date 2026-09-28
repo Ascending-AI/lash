@@ -392,14 +392,14 @@ impl RestateTestBackend {
         lash_core::Backend::new(self.restate.clone())
     }
 
-    /// The engine's session work with its own sweep schedule off: every
+    /// The engine's session work with its own reconcile schedule off: every
     /// answer is `RestateSessionWork`'s, but installing a driver fills the
     /// slot without starting the wall-clock reconcile interval. A
     /// scenario that pins one interleaving per seed reconciles explicitly
     /// through [`SessionDriver::reconcile`] (or
     /// [`lash_core::drive::reconcile_once`]) when it wants a pass, so a
     /// seed's grant order never turns on when wall time happens to run
-    /// the sweep's store reads.
+    /// the interval's store reads.
     pub fn explicit_reconcile_session_work(&self) -> Arc<dyn SessionWorkEngine> {
         Arc::new(ExplicitlyReconciledSessionWork {
             inner: Arc::clone(self.restate.session_work_engine()),
@@ -646,7 +646,7 @@ impl RestateTestBackend {
 }
 
 // ---------------------------------------------------------------------------
-// Session work without the deployment's sweep schedule
+// Session work without the deployment's reconcile schedule
 // ---------------------------------------------------------------------------
 
 /// [`RestateSessionWork`] minus the wall-clock reconcile interval a real
@@ -694,7 +694,7 @@ impl SessionWorkEngine for ExplicitlyReconciledSessionWork {
     /// The same get-or-init [`RestateSessionWork::install_session_driver`]
     /// answers, without its spawned interval: the driver a core installs
     /// serves every drive and answers [`SessionDriver::reconcile`] when a
-    /// scenario calls it, but no sweep runs on wall time.
+    /// scenario calls it, but no pass runs on wall time.
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         self.inner.driver_slot().install(driver)
     }

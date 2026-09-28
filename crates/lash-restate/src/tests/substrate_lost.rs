@@ -670,8 +670,8 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
 /// Segment 0's marker is the process's `first_started`. Under Restate's
 /// identity rule a retry and a fresh invocation of the root key share an id,
 /// so the fence reads the marker, not the id: a started row is refused before
-/// the runner is asked for anything, and a row that never started runs — the
-/// sweep may still start rows that never started.
+/// the runner is asked for anything, and a row that never started runs — a
+/// resubmission may still start rows that never started.
 #[tokio::test]
 pub(super) async fn root_segment_admits_only_rows_that_never_started() {
     let registry = process_registry();
@@ -1034,7 +1034,8 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
 /// whatever the external reference says: a reference that already names the
 /// segment no longer hides a segment whose workflow Restate lost.
 #[tokio::test]
-pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_current() {
+pub(super) async fn lost_run_pass_resubmits_the_latest_segment_even_when_its_reference_is_current()
+{
     let segment = HandedOverSegment::new().await;
     segment
         .registry
@@ -1089,10 +1090,10 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
             "POST /LashProcessWorkflow/{}%231/run/send ",
             segment.process_id
         )),
-        "the sweep addresses the latest segment's key: {}",
+        "the pass addresses the latest segment's key: {}",
         requests[1]
     );
-    // The sweep repeats the handover's send: it carries the generation of
+    // The pass repeats the handover's send: it carries the generation of
     // the build that wrote the handover as its sender (FIG-3795 S6).
     let written = segment
         .continuations
@@ -1104,7 +1105,7 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
         .expect("the handover records its writer's generation");
     assert!(
         requests[1].contains(&format!("\"sender_generation\":\"{written}\"")),
-        "the sweep stamps the handover writer's generation: {}",
+        "the pass stamps the handover writer's generation: {}",
         requests[1]
     );
 }

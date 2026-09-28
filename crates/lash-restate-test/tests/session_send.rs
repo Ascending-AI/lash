@@ -544,7 +544,7 @@ async fn dropped_schedule_is_reconciled() {
 }
 
 /// A row that lands while an engine-side invocation owns its session is
-/// asked for once, through its own ingress obligation, and never by a sweep:
+/// asked for once, through its own ingress obligation, and never by a second ask:
 /// its drive queues behind the live one on the session's object, so no
 /// sibling ever fences the live turn (S5a review, ADR 0109 §3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -582,7 +582,7 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
         .input_id;
 
     // The engine driver's own reconcile tick (ADR 0104 O2) relays the row's
-    // obligation. A full tick after the row lands finds no sweep ask and
+    // obligation. A full tick after the row lands finds no ask but
     // exactly the row's own.
     tokio::time::sleep(Duration::from_secs(11)).await;
     #[derive(Debug, serde::Deserialize)]

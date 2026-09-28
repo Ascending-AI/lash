@@ -581,7 +581,7 @@ impl Roll {
     /// One lost-run pass of the deployment's recovery tick over the shared
     /// stores: it resubmits only a live process whose current segment the
     /// server no longer holds.
-    async fn sweep(&self) -> crate::process::park_reconcile::LostRunPass {
+    async fn lost_run_pass(&self) -> crate::process::park_reconcile::LostRunPass {
         crate::process::park_reconcile::end_lost_process_runs(
             &crate::RestateAdminClient::new(self.connection.clone()),
             &self.ingress,
@@ -1037,7 +1037,7 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
     );
 
     for _ in 0..2 {
-        let pass = roll.sweep().await;
+        let pass = roll.lost_run_pass().await;
         assert!(
             pass.resubmitted.is_empty() && pass.ended.is_empty(),
             "{case}: the pass leaves the live segment alone: {pass:?}"
@@ -1060,7 +1060,7 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         "{case}: the redrive addressed no generation lane"
     );
 
-    // End the process; a later sweep submits nothing.
+    // End the process; a later lost-run pass submits nothing.
     roll.ingress
         .call_workflow_json::<_, ()>(
             PROCESS_WORKFLOW,
@@ -1084,12 +1084,12 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
         .unwrap_or_else(|error| panic!("{case}: the awaiter failed: {error}"));
     roll.settle().await;
     let invocations = roll.server.invocations().len();
-    roll.sweep().await;
+    roll.lost_run_pass().await;
     roll.settle().await;
     assert_eq!(
         roll.server.invocations().len(),
         invocations,
-        "{case}: a sweep after the terminal submits nothing"
+        "{case}: a lost-run pass after the terminal submits nothing"
     );
     assert_eq!(roll.runs_of(SUCCESSOR).len(), 1, "{case}: still one start");
 }
@@ -1117,7 +1117,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     .await;
     roll.settle().await;
 
-    let pass = roll.sweep().await;
+    let pass = roll.lost_run_pass().await;
     roll.settle().await;
     assert!(
         pass.resubmitted.is_empty() && pass.ended.is_empty(),

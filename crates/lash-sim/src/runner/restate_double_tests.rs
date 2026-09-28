@@ -78,7 +78,7 @@ async fn pending_tool_completion_proof_runs_on_the_restate_server_double() {
 /// reconciles through `SessionDriver::reconcile` when it wants a pass; one
 /// that never asks sees no reconcile ask.
 #[tokio::test]
-async fn the_server_double_runs_no_wall_clock_reconcile_sweep() {
+async fn the_server_double_runs_no_wall_clock_reconcile() {
     let engine = crate::backend::SimEngine::new(0x5eed_70f1)
         .await
         .expect("Restate test backend");
@@ -96,7 +96,7 @@ async fn the_server_double_runs_no_wall_clock_reconcile_sweep() {
                     .payload
                     .windows(b"reconcile:".len())
                     .any(|window| window == b"reconcile:"),
-                "a wall-clock reconcile sweep's ask reached the server double: {}",
+                "a wall-clock reconcile's ask reached the server double: {}",
                 invocation.target
             );
         }

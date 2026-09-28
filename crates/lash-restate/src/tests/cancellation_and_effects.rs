@@ -1147,7 +1147,7 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
 /// FIG-430: durable acceptance is final once the pending-input row commits.
 /// The drive the enqueue schedules is a separate, fire-and-forget ask: an
 /// engine that cannot be reached leaves the row pending for the reconcile
-/// sweep, and never turns the committed enqueue into an error.
+/// pass, and never turns the committed enqueue into an error.
 #[tokio::test]
 pub(super) async fn restate_enqueue_never_errors_after_commit() {
     let dir = tempfile::tempdir().expect("tempdir");

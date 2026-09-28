@@ -1170,7 +1170,7 @@ impl lash_core::ProcessWorkSubstrate for RecordedWakes {
 /// where the last stopped, across a generation's end; an unmarked
 /// generation, a never-started process and an ended one are never woken; a
 /// failed wake is counted deferred without failing the page, and a later
-/// sweep wakes it again.
+/// pass wakes it again.
 #[tokio::test]
 async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
@@ -1241,7 +1241,7 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
     let page = NonZeroUsize::new(2).unwrap_or(NonZeroUsize::MIN);
     let mut cursor = None;
     let mut passes = Vec::new();
-    // Bounded: a cursor that does not advance would sweep forever.
+    // Bounded: a cursor that does not advance would page forever.
     for _ in 0..8 {
         let pass = lash_core::drive::drain_hand_over_slot(&processes, cursor.as_ref(), page)
             .await
@@ -1263,7 +1263,7 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
         "every live process of the marked generations, in order, each once"
     );
 
-    // A failed wake defers without failing the page; the next sweep, from
+    // A failed wake defers without failing the page; the next pass, from
     // the start, wakes it again.
     let failing = expected[1].0.clone();
     port.failing
@@ -1276,7 +1276,7 @@ async fn the_drain_slot_pages_every_draining_generation_but_its_own() {
         .await
         .expect("a slot pass");
     assert_eq!((pass.pass.handled, pass.pass.deferred), (5, 1));
-    assert_eq!(pass.next, None, "the sweep read every generation");
+    assert_eq!(pass.next, None, "the pass read every generation");
     port.failing.lock().expect("the failing set").clear();
     let pass = lash_core::drive::drain_hand_over_slot(&processes, None, whole)
         .await

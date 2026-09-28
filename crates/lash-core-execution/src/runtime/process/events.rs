@@ -279,7 +279,7 @@ pub enum ProcessAwaitOutput {
         output: Box<crate::ToolCallOutput>,
     },
     /// The owner stopped executing without recording an outcome. Written only by
-    /// the sweep or an owner's graceful drain, never round-tripped from a tool
+    /// a recovery pass or an owner's graceful drain, never round-tripped from a tool
     /// (a tool cannot self-report abandonment); see [`AbandonEvidence`]. The
     /// evidence is boxed so this rare terminal does not enlarge the pervasive
     /// `ProcessAwaitOutput` that flows through every tool result.

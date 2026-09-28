@@ -1,4 +1,4 @@
-//! The Restate engine's recovery-sweep schedule (FIG-3600 S7, ADR 0104
+//! The Restate engine's recovery-tick schedule (FIG-3600 S7, ADR 0104
 //! O2/O3/O4): a task of the driver's own deployment, not a
 //! Restate-scheduled send.
 //!

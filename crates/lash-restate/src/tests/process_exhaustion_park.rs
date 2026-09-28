@@ -5,7 +5,7 @@
 //! server double, which retries on the handler's own retry policy and pauses
 //! it on its last attempt, with virtual time making every backoff instant.
 //! A segment that keeps failing live pauses after its deployment's attempt
-//! bound. The deployment's sweep reconciles the pause into a process park
+//! bound. The deployment's reconcile pass turns the pause into a process park
 //! (`EngineRetryExhausted`, the invocation id as its engine handle) with no
 //! terminal evidence, and a resume under a fixed build completes the process
 //! once and closes the park.
@@ -92,7 +92,7 @@ async fn process_feed(
 }
 
 /// L-E4/L-E6 on Restate: a segment that exhausts its retries pauses, the
-/// sweep parks its process exactly once with `EngineRetryExhausted` and no
+/// reconcile pass parks its process exactly once with `EngineRetryExhausted` and no
 /// terminal evidence, and a resume under a fixed build completes the
 /// process once and closes the park.
 #[tokio::test]
@@ -147,11 +147,11 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         .await
         .expect("register the process")
         .id;
-    let sweep: Arc<dyn lash_core::ProcessWorkSubstrate> = deployment.test_process_work();
+    let port: Arc<dyn lash_core::ProcessWorkSubstrate> = deployment.test_process_work();
     let verdict = deliver_process_start_now(
         &stores.start_ledger,
         &registry,
-        &sweep,
+        &port,
         &stores.clock,
         &process_id,
     )
@@ -169,7 +169,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         "the segment runs its attempt bound and no more"
     );
 
-    // The next sweep reconciles the pause into a park.
+    // The next pass reconciles the pause into a park.
     reconcile_parked_processes(&admin, &registry, &stores.continuations).await;
     let parked = registry
         .get_process(&process_id)
@@ -206,7 +206,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
         "the park holds the paused invocation as its engine handle"
     );
 
-    // A further sweep over the same pause writes nothing.
+    // A further pass over the same pause writes nothing.
     reconcile_parked_processes(&admin, &registry, &stores.continuations).await;
     assert_eq!(
         process_feed(&registry, &process_id).await,

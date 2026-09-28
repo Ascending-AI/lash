@@ -62,8 +62,9 @@ impl RestateProcessRunner for TerminalRunner {
 const MAX_ATTEMPTS: u64 = 3;
 
 /// The server double serving the lash services over one SQLite memory store
-/// set, the deployment that sweeps it, and the `ProcessTerminal` relay a
-/// reconcile tick runs over the same registry and port.
+/// set, the deployment whose recovery pass reconciles it, and the
+/// `ProcessTerminal` relay a reconcile tick runs over the same registry and
+/// port.
 struct World {
     server: lash_restate_test::RestateTestServer,
     ingress: RestateIngressClient,
@@ -166,7 +167,9 @@ impl World {
             .id
     }
 
-    async fn sweep(&self) {
+    /// One recovery pass of the deployment: the due `ProcessStart` relay,
+    /// then the park reconcile and the lost-run scan.
+    async fn recovery_pass(&self) {
         relay_due(
             &self.start_relay,
             &lash_core::facade_support::SystemClock,
@@ -333,7 +336,7 @@ pub(super) async fn a_segment_that_publishes_its_terminal_settles_the_obligation
     let world = World::new(3857, false).await;
     let process_id = world.register().await;
     let waiter = world.waiter(&process_id);
-    world.sweep().await;
+    world.recovery_pass().await;
     world
         .wait_for_status(
             &format!("LashProcessWorkflow/{process_id}/run"),
@@ -366,14 +369,14 @@ pub(super) async fn a_segment_that_publishes_its_terminal_settles_the_obligation
 }
 
 /// A paused segment of a terminal process holds nothing once the terminal is
-/// published: the sweep leaves it while the publication is owed, the relay
+/// published: the pass leaves it while the publication is owed, the relay
 /// publishes through the root's shared handler with the root's `run` paused,
-/// and the next sweep kills the paused invocation.
+/// and the next pass kills the paused invocation.
 #[tokio::test]
 pub(super) async fn a_paused_terminal_segment_is_killed_once_its_terminal_is_published() {
     let world = World::new(3858, true).await;
     let process_id = world.register().await;
-    world.sweep().await;
+    world.recovery_pass().await;
     let target = format!("LashProcessWorkflow/{process_id}/run");
     let paused = world.wait_for_status(&target, "paused").await;
     assert_eq!(
@@ -384,14 +387,14 @@ pub(super) async fn a_paused_terminal_segment_is_killed_once_its_terminal_is_pub
     // The process ends while its only segment is paused.
     let waiter = world.waiter(&process_id);
     let stored = store_terminal_without_publishing(&world.registry, &process_id).await;
-    world.sweep().await;
+    world.recovery_pass().await;
     assert!(
         world
             .server
             .invocations()
             .iter()
             .any(|view| view.id == paused.id && view.status == "paused"),
-        "the sweep leaves a paused terminal segment while its publication is owed"
+        "the pass leaves a paused terminal segment while its publication is owed"
     );
 
     assert_eq!(world.relay_pass().await.delivered, 1);
@@ -402,7 +405,7 @@ pub(super) async fn a_paused_terminal_segment_is_killed_once_its_terminal_is_pub
         .expect("the waiter's call");
     assert_eq!(published, stored);
 
-    world.sweep().await;
+    world.recovery_pass().await;
     let killed = world.wait_for_status(&target, "completed").await;
     assert_eq!(killed.id, paused.id, "the paused segment itself ends");
     assert_eq!(
@@ -432,7 +435,7 @@ pub(super) async fn a_killed_run_ends_substrate_lost_however_many_newer_failed_r
     for _ in 0..65 {
         crowd.push(world.register().await);
     }
-    world.sweep().await;
+    world.recovery_pass().await;
     let target = |process: &ProcessId| format!("LashProcessWorkflow/{process}/run");
     for process in [&process_id].into_iter().chain(crowd.iter()) {
         world.wait_for_status(&target(process), "running").await;

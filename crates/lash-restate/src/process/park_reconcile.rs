@@ -33,7 +33,7 @@
 //! lash cannot see from inside: an operator's kill, which Restate cascades
 //! from the invocation that started the run, ends it `409 killed` with no
 //! lash code running. Restate runs a workflow key's `run` once, so no redrive
-//! or sweep ever reaches the process again. The same pass reads those runs
+//! or resubmission ever runs the process again. The same pass reads those runs
 //! back ([`end_lost_process_runs`]): it walks the registry's live processes
 //! and asks the engine only about their current segments' runs, bounded by
 //! the work lash still waits on rather than the engine's retained history,

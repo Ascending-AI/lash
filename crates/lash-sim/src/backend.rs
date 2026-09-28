@@ -271,7 +271,7 @@ impl DecoratedBackend {
     ///
     /// The session-work port is the engine's minus its wall-clock
     /// reconcile interval: the sim's serial scheduling pins one grant
-    /// order per seed, and a sweep that ticks on wall time would land its
+    /// order per seed, and a pass that ticks on wall time would land its
     /// drive asks — each named for a per-process nonce — wherever its
     /// store reads happened to finish. A scenario reconciles explicitly
     /// through `SessionDriver::reconcile` when it wants a pass.

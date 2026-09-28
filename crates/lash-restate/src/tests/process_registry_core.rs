@@ -1005,9 +1005,10 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
 /// FIG-2964 acceptance: if the StartFailed compensation write itself fails, the
 /// start returns the record rather than the error.
 ///
-/// The row is then exactly the shape the recovery sweep resubmits — nonterminal,
-/// no external reference, no cancel request — so recovery owns the run and the
-/// honest answer to the caller is the record it registered.
+/// The row is then exactly the shape the `ProcessStart` obligation's relay
+/// retries — nonterminal, no external reference, no cancel request — so the
+/// obligation owns the start and the honest answer to the caller is the
+/// record it registered.
 #[tokio::test]
 pub(super) async fn restate_failed_start_compensation_returns_the_registered_record() {
     let context = Arc::new(RecordingContext::default());
@@ -1043,11 +1044,11 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
     let stored = the_only_process(registry.as_ref()).await;
     assert!(
         !stored.is_terminal(),
-        "the uncompensated row must stay nonterminal so the sweep can resubmit it"
+        "the uncompensated row must stay nonterminal so the start obligation can be redelivered"
     );
     assert!(
         stored.external_ref.is_none() && stored.cancel_request.is_none(),
-        "the row must match the shape the recovery sweep resubmits, got {stored:?}"
+        "the row must match the shape the start obligation's relay retries, got {stored:?}"
     );
 }
 
@@ -1113,7 +1114,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
 /// StartFailed terminal there would terminalise a row whose workflow is doing
 /// the child's work, and the workflow's own terminal write would then fail
 /// against the row it was supposed to settle. The row is left alive and
-/// sweep-owned, and the start returns the record.
+/// obligation-owned, and the start returns the record.
 #[tokio::test]
 pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_recovery() {
     let context = Arc::new(RecordingContext::default());

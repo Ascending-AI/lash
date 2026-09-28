@@ -153,7 +153,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 /// survives the failure — and the relay's next attempt deletes it. Nothing
 /// asks the caller to retry the deletion.
 ///
-/// The law runs on the sweep-less double: no reconcile tick can claim the
+/// The law runs on the explicit-reconcile double: no reconcile tick can claim the
 /// close intent's obligation out from under the delete call's own delivery
 /// and leave the verb answering `CloseIntent(Pending)` (FIG-3926).
 #[tokio::test]

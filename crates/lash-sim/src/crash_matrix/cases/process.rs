@@ -16,8 +16,8 @@
 //! open, and once the process's run has started an operator kills the job:
 //! Restate's kill cascades into the run the job sent, which ends `409
 //! killed` without the process's terminal, and Restate never runs that
-//! workflow key again. The recovery tick's sweep finds the finished run and
-//! ends the process `SubstrateLost` (ADR 0110), and the terminal's
+//! workflow key again. The recovery tick's lost-run scan finds the finished
+//! run and ends the process `SubstrateLost` (ADR 0110), and the terminal's
 //! publication answers the waiter.
 
 use std::sync::Arc;
