@@ -488,7 +488,10 @@ pub enum SessionStreamEvent {
         args: serde_json::Value,
     },
     #[serde(rename = "message")]
-    Message { text: String, kind: String },
+    Message {
+        text: String,
+        kind: StreamMessageKind,
+    },
     #[serde(rename = "llm_request")]
     LlmRequest {
         protocol_iteration: usize,
@@ -542,6 +545,30 @@ pub enum SessionStreamEvent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         envelope: Option<ErrorEnvelope>,
     },
+}
+
+/// Discriminator of a [`SessionStreamEvent::Message`]: the closed set of
+/// display-only messages Lash and its protocols put on the stream.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub enum StreamMessageKind {
+    /// Source of a TypeScript cell about to execute, shown above the tool
+    /// activity it produces.
+    #[serde(rename = "typescript_code")]
+    TypescriptCode,
+    /// A recorded tool child's stream outgrew its recording budget and its
+    /// later events were dropped.
+    #[serde(rename = "child_stream_truncated")]
+    ChildStreamTruncated,
+}
+
+impl StreamMessageKind {
+    /// The wire spelling serde writes for this kind.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::TypescriptCode => "typescript_code",
+            Self::ChildStreamTruncated => "child_stream_truncated",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -801,6 +828,9 @@ pub fn model_tool_specs_iter<'a>(
 pub fn model_tool_specs(tools: &[ToolDefinition]) -> Vec<LlmToolSpec> {
     model_tool_specs_iter(tools.iter())
 }
+
+#[cfg(test)]
+mod stream_event_tests;
 
 #[cfg(test)]
 mod tests {

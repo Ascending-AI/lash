@@ -118,16 +118,14 @@ fn record_stream_event(transcript: &mut Transcript, actor: &str, event: &Session
                     .attr(Attr::int("attachments", summary.attachments.len() as u64)),
             );
         }
-        SessionStreamEvent::Message { text, kind } if kind == "final" => {
-            transcript.record(
-                Entry::new(Kind::Outcome, session(), "turn.final_message")
-                    .attr(Attr::text("text", text)),
-            );
-        }
         SessionStreamEvent::Message { text, kind } => {
             transcript.record(
-                Entry::new(Kind::Observe, session(), format!("message.{kind}"))
-                    .attr(Attr::text("text", text)),
+                Entry::new(
+                    Kind::Observe,
+                    session(),
+                    format!("message.{}", kind.as_str()),
+                )
+                .attr(Attr::text("text", text)),
             );
         }
         SessionStreamEvent::RetryStatus {

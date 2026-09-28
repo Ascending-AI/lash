@@ -338,7 +338,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 state.assistant_parts = parts;
                 actions.push(DriverAction::Emit(SessionStreamEvent::Message {
                     text: code.clone(),
-                    kind: self.dialect.code_stream_kind().to_string(),
+                    kind: self.dialect.code_stream_kind(),
                 }));
                 actions.push(DriverAction::Start(PendingWork::Exec {
                     language: self.dialect.language_id().to_string(),

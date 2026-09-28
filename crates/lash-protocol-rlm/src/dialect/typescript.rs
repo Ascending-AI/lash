@@ -615,8 +615,8 @@ impl TypescriptDialect {
         )
     }
 
-    pub(crate) fn code_stream_kind(&self) -> &'static str {
-        "typescript_code"
+    pub(crate) fn code_stream_kind(&self) -> lash_core::session_model::StreamMessageKind {
+        lash_core::session_model::StreamMessageKind::TypescriptCode
     }
 
     pub(crate) fn execution_diagnostic_name(&self) -> &'static str {

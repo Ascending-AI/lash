@@ -133,10 +133,10 @@ pub use session_model::{
     Namespace, NoProgressBudget, Part, PartAttachment, PartKind, PromptBuiltin, PromptLayer,
     PromptSectionTitle, PromptSlot, PromptSlotLayer, PromptTemplate, PromptTemplateEntry,
     PromptTemplateSection, PromptTitleBuiltin, ProtocolEvent, RenderedPrompt, ResolvedPromptLayer,
-    SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, TokenUsage, TokenUsageOverflow,
-    TurnBudget, TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnFailureCode,
-    TurnFailureKind, TurnFinish, TurnOutcome, TurnStop, default_prompt_template,
-    messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StreamMessageKind, TokenUsage,
+    TokenUsageOverflow, TurnBudget, TurnCancelDisposition, TurnCancelMode,
+    TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
+    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_catalog::{

@@ -917,7 +917,7 @@ impl RuntimeExecutionContext<'_> {
                              {} later events ({} bytes) were dropped",
                         truncated.dropped_events, truncated.dropped_bytes
                     ),
-                    kind: "child_stream_truncated".to_string(),
+                    kind: crate::StreamMessageKind::ChildStreamTruncated,
                 }),
             );
         }

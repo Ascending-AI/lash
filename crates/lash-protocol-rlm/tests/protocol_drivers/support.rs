@@ -672,7 +672,6 @@ pub(crate) struct RlmProtocolExpectations {
     pub(crate) llm_call_count: Option<usize>,
     pub(crate) done: Option<bool>,
     pub(crate) no_exec_code: bool,
-    pub(crate) no_final_message_event: bool,
     pub(crate) no_tool_call_events: bool,
     pub(crate) tool_call_events: bool,
     pub(crate) no_assistant_conversation_progress: bool,
@@ -739,12 +738,6 @@ impl RlmProtocolExpectations {
                 run.exec_codes.is_empty(),
                 "{scenario_name} unexpectedly executed code: {:?}",
                 run.exec_codes
-            );
-        }
-        if self.no_final_message_event {
-            assert!(
-                !run.final_message_event,
-                "{scenario_name} emitted duplicate protocol final message"
             );
         }
         if self.no_tool_call_events {
@@ -961,7 +954,6 @@ pub(crate) struct RlmProtocolRun {
     pub(crate) checkpoints: Vec<CheckpointKind>,
     pub(crate) llm_call_count: usize,
     pub(crate) turn_outcomes: Vec<lash_sansio::TurnOutcome>,
-    pub(crate) final_message_event: bool,
     pub(crate) tool_call_event: bool,
     pub(crate) assistant_conversation_progress: bool,
     pub(crate) plugin_stream_visible_texts: Vec<String>,
@@ -983,9 +975,6 @@ impl RlmProtocolRun {
                 Effect::Checkpoint { checkpoint, .. } => self.checkpoints.push(*checkpoint),
                 Effect::Emit(SessionStreamEvent::TurnOutcome { outcome }) => {
                     self.turn_outcomes.push(outcome.clone());
-                }
-                Effect::Emit(SessionStreamEvent::Message { kind, .. }) if kind == "final" => {
-                    self.final_message_event = true;
                 }
                 Effect::Emit(SessionStreamEvent::ToolCall { .. }) => {
                     self.tool_call_event = true;

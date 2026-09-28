@@ -513,7 +513,6 @@ struct RlmContractObserved {
     llm_response_text_streamed: Vec<bool>,
     llm_call_count: usize,
     turn_outcomes: Vec<lash_core::facade_support::TurnOutcome>,
-    final_message_event: bool,
     tool_call_event: bool,
     assistant_conversation_progress: bool,
 }
@@ -538,11 +537,6 @@ impl RlmContractObserved {
                     lash_core::facade_support::SessionStreamEvent::TurnOutcome { outcome },
                 ) => {
                     self.turn_outcomes.push(outcome.clone());
-                }
-                lash_core::Effect::Emit(
-                    lash_core::facade_support::SessionStreamEvent::Message { kind, .. },
-                ) if kind == "final" => {
-                    self.final_message_event = true;
                 }
                 lash_core::Effect::Emit(
                     lash_core::facade_support::SessionStreamEvent::ToolCall { .. },
@@ -701,7 +695,6 @@ pub(super) fn run_rlm_protocol_contract(
         "checkpoints": observed.checkpoints,
         "exec_codes": observed.exec_codes,
         "turn_outcomes": observed.turn_outcomes.iter().map(turn_outcome_contract_json).collect::<Vec<_>>(),
-        "final_message_event": observed.final_message_event,
         "tool_call_event": observed.tool_call_event,
         "assistant_conversation_progress": observed.assistant_conversation_progress,
         "llm_extraction_diagnostics": rlm_contract_llm_extraction_diagnostics(&machine),

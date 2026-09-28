@@ -426,6 +426,7 @@ pub mod facade_support {
     pub use lash_sansio::SchemaResolutionError;
     pub use lash_sansio::SchemaResolutionRequest;
     pub use lash_sansio::SessionStreamEvent;
+    pub use lash_sansio::StreamMessageKind;
     pub use lash_sansio::ToolCatalogBuildError;
     pub use lash_sansio::TurnFinish;
     pub use lash_sansio::TurnOutcome;

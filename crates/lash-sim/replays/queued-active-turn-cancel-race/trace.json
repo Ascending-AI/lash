@@ -12106,7 +12106,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12181,7 +12180,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12278,7 +12276,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -12351,7 +12348,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -12444,7 +12440,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12518,7 +12513,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12616,7 +12610,6 @@
               "missing_name"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12700,7 +12693,6 @@
               "missing_name"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12808,7 +12800,6 @@
               "finish({ ok: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -12909,7 +12900,6 @@
               "finish({ ok: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13030,7 +13020,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13103,7 +13092,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13198,7 +13186,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13268,7 +13255,6 @@
             "driver": "lash_protocol_rlm::RlmDriver",
             "exec_codes": [],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13362,7 +13348,6 @@
               "print(\"hi\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13450,7 +13435,6 @@
               "print(\"hi\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13558,7 +13542,6 @@
               "const text = \"%%lashlang is just source here\";\nprint(text);"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13628,7 +13611,6 @@
               "const text = \"%%lashlang is just source here\";\nprint(text);"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -13722,7 +13704,6 @@
               "print(\"hi\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -13806,7 +13787,6 @@
               "print(\"hi\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -13912,7 +13892,6 @@
               "print(\"streamed\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -13996,7 +13975,6 @@
               "print(\"streamed\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -14102,7 +14080,6 @@
               "finish(\"done\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14187,7 +14164,6 @@
               "finish(\"done\");"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14294,7 +14270,6 @@
               "const x = await tools.read_file({ path: \"foo\" });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14379,7 +14354,6 @@
               "const x = await tools.read_file({ path: \"foo\" });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14486,7 +14460,6 @@
               "const x = await tools.custom_frame_switch({});"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14592,7 +14565,6 @@
               "const x = await tools.custom_frame_switch({});"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14720,7 +14692,6 @@
               "const x = await tools.custom_fail({});"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14810,7 +14781,6 @@
               "const x = await tools.custom_fail({});"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -14922,7 +14892,6 @@
               "finish({ ok: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -15011,7 +14980,6 @@
               "finish({ ok: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -15122,7 +15090,6 @@
               "finish({ missing: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -15215,7 +15182,6 @@
               "finish({ missing: true });"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 2,
             "llm_extraction_diagnostics": [
@@ -15330,7 +15296,6 @@
               "finish(true);"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [
@@ -15422,7 +15387,6 @@
               "finish(true);"
             ],
             "execution_api": "lash_core::sansio::TurnMachine",
-            "final_message_event": false,
             "initial_request_tools_empty": true,
             "llm_call_count": 1,
             "llm_extraction_diagnostics": [

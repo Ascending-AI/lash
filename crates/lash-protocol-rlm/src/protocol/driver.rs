@@ -469,11 +469,11 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for RlmDriver {
         state.prose = cell.prose.clone();
 
         // Emit the raw cell source as a `Message` with kind
-        // `lashlang_code` so the CLI can reveal it in the full-expand
+        // `typescript_code` so the CLI can reveal it in the full-expand
         // view (Alt+O) above the tool activities it produced.
         actions.push(DriverAction::Emit(SessionStreamEvent::Message {
             text: cell.code.clone(),
-            kind: self.dialect.code_stream_kind().to_string(),
+            kind: self.dialect.code_stream_kind(),
         }));
         actions.push(DriverAction::Start(PendingWork::Exec {
             language: self.dialect.language_id().to_string(),

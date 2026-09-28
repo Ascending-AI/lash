@@ -285,7 +285,6 @@ fn rlm_prompt_history_finish_final_value_keeps_reasoning_prose_and_code_exact() 
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["finish(\"done\");"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
-            no_final_message_event: true,
             assistant_reasoning_texts: Some(vec!["ready to finish"]),
             assistant_visible_texts: Some(vec!["Finishting."]),
             trajectory_last: Some(RlmTrajectoryExpectation {
@@ -311,7 +310,6 @@ fn rlm_prompt_history_reasoning_part_is_preserved_in_trajectory() {
         .expect(RlmProtocolExpectations {
             exec_codes: vec!["finish(\"Hi.\");"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
-            no_final_message_event: true,
             assistant_reasoning_texts: Some(vec!["I'll answer directly."]),
             assistant_visible_texts: Some(Vec::new()),
             trajectory_last: Some(RlmTrajectoryExpectation {

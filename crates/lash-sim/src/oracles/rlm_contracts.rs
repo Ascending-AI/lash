@@ -288,7 +288,6 @@ fn check_rlm_natural_prose_finalizes(
     require_bool(result, "/done", true, contract)?;
     require_u64(result, "/llm_call_count", 1, contract)?;
     require_bool(result, "/initial_request_tools_empty", true, contract)?;
-    require_bool(result, "/final_message_event", false, contract)?;
     require_bool(result, "/assistant_conversation_progress", false, contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     require_rlm_turn_outcome_contains(result, "finished", "AssistantMessage", contract)?;
@@ -568,14 +567,12 @@ fn check_rlm_typed_finish_emits_outcome_and_done(
     require_rlm_exec_code(result, "finish({ ok: true });", contract)?;
     require_checkpoint(result, "before_completion", contract)?;
     require_rlm_final_value(result, &json!({ "ok": true }), contract)?;
-    require_bool(result, "/final_message_event", false, contract)?;
     require_rlm_trajectory_error(result, None, contract)?;
     Ok(json!({
         "mode": "finish_required_schema",
         "done": true,
         "final_value": { "ok": true },
         "exec_code": "finish({ ok: true });",
-        "final_message_event": false,
         "checkpoint": "before_completion",
     }))
 }

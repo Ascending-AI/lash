@@ -257,7 +257,6 @@ fn rlm_protocol_scenario_prose_only_response_finishes_by_default() {
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             llm_call_count: Some(1),
             done: Some(true),
-            no_final_message_event: true,
             no_assistant_conversation_progress: true,
             turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
                 lash_sansio::TurnFinish::AssistantMessage {
@@ -784,7 +783,6 @@ fn rlm_protocol_scenario_typed_finish_emits_turn_outcome_and_done() {
             exec_codes: vec!["finish({ ok: true });"],
             checkpoints: vec![CheckpointKind::BeforeCompletion],
             done: Some(true),
-            no_final_message_event: true,
             turn_outcome: Some(lash_sansio::TurnOutcome::Finished(
                 lash_sansio::TurnFinish::FinalValue {
                     value: serde_json::json!({ "ok": true }),
