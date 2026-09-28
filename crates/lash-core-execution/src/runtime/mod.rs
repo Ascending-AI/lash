@@ -8,7 +8,6 @@ pub mod host;
 pub use lash_core_store::input_normalization as io;
 pub mod process;
 pub mod work;
-#[cfg(feature = "testing")]
 pub(crate) use lash_core_store::queued_drain_policy;
 use lash_core_store::session_catalog;
 pub use lash_core_store::session_state as state;

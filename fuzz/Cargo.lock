@@ -53,15 +53,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 
 [[package]]
-name = "arc-swap"
-version = "1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
-dependencies = [
- "rustversion",
-]
-
-[[package]]
 name = "arrayvec"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -336,7 +327,6 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer",
  "crypto-common",
- "subtle",
 ]
 
 [[package]]
@@ -587,15 +577,6 @@ name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
-
-[[package]]
-name = "hmac"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
-dependencies = [
- "digest",
-]
 
 [[package]]
 name = "http"
@@ -970,15 +951,84 @@ dependencies = [
 ]
 
 [[package]]
-name = "lash-internal-core"
+name = "lash-internal-core-effect"
 version = "0.0.0-dev"
 dependencies = [
- "arc-swap",
+ "async-trait",
+ "lash-internal-core-ids",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "serde",
+ "serde_json",
+ "tokio-util",
+]
+
+[[package]]
+name = "lash-internal-core-execution"
+version = "0.0.0-dev"
+dependencies = [
  "async-trait",
  "chrono",
  "futures-util",
- "hmac",
+ "lash-internal-core-effect",
+ "lash-internal-core-ids",
+ "lash-internal-core-llm",
+ "lash-internal-core-store",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "rmp-serde",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "lash-internal-core-ids"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "lash-internal-core-llm"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "chrono",
+ "futures-util",
+ "lash-internal-core-ids",
  "lash-internal-http-transport",
+ "lash-internal-sansio",
+ "lash-internal-trace",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "lash-internal-core-store"
+version = "0.0.0-dev"
+dependencies = [
+ "async-trait",
+ "lash-internal-core-ids",
+ "lash-internal-core-llm",
  "lash-internal-sansio",
  "lash-internal-trace",
  "rmp-serde",
@@ -986,10 +1036,8 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
- "sha2",
  "thiserror",
  "tokio",
- "tokio-util",
  "tracing",
  "uuid",
 ]
@@ -1014,7 +1062,8 @@ dependencies = [
  "async-trait",
  "compact_str",
  "futures-executor",
- "lash-internal-core",
+ "lash-internal-core-execution",
+ "lash-internal-render",
  "lash-internal-sansio",
  "lash-regress",
  "num-bigint",
@@ -1022,7 +1071,9 @@ dependencies = [
  "rmp-serde",
  "rustc-hash",
  "ryu-js",
+ "schemars",
  "serde",
+ "serde_ignored",
  "serde_json",
  "sha2",
  "smallvec",
@@ -1036,10 +1087,19 @@ version = "0.0.0-dev"
 dependencies = [
  "base64",
  "lash-internal-sansio",
+ "lash-internal-trace",
  "schemars",
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "lash-internal-render"
+version = "0.0.0-dev"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1059,6 +1119,7 @@ version = "0.0.0-dev"
 dependencies = [
  "chrono",
  "lash-internal-sansio",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -1659,6 +1720,7 @@ version = "0.8.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3fbf2ae1b8bc8e02df939598064d22402220cd5bbcca1c76f7d6a310974d5615"
 dependencies = [
+ "chrono",
  "dyn-clone",
  "schemars_derive",
  "serde",
@@ -1761,6 +1823,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "serde_ignored"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "115dffd5f3853e06e746965a20dcbae6ee747ae30b543d91b0e089668bb07798"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
