@@ -14,9 +14,8 @@
 //!
 //! A deposit wakes every waiting handle ([`deposited`]), so a handle whose
 //! root settled answers the moment its report lands rather than on its next
-//! poll: the root's commit is durable before its drive hands the report
-//! over, which it does before the root's scope closes (FIG-3979), and a
-//! handle that saw the commit first waits for this wake (FIG-3843).
+//! poll: the root's commit is durable before its run returns the report, and
+//! a handle that saw the commit first waits for this wake (FIG-3843).
 //!
 //! A root's run is marked while it runs ([`running`]): a handle whose root
 //! settled waits for a report only while that root's run is under way in
@@ -27,29 +26,15 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, LazyLock, Mutex};
 
-use lash_core::facade_support::{AssembledTurn, RuntimeHandle, WeakRuntimeHandle};
+use lash_core::facade_support::AssembledTurn;
 use lash_core::{InputId, SessionId, StoreBindingId, TurnId};
 use lash_sansio::sync::MutexExt;
 
 /// Entries kept before the oldest is evicted.
 const CAPACITY: usize = 4096;
 
-/// A root this process ran to its commit: its final physical turn, and the
-/// runtime that ran it.
-#[derive(Clone)]
-pub(super) struct SettledRoot {
-    pub(super) root: TurnId,
-    pub(super) turn: Arc<AssembledTurn>,
-    ran_on: WeakRuntimeHandle,
-}
-
-impl SettledRoot {
-    /// Whether `runtime` ran the root: its resident state holds the root's
-    /// commit, and its observation was published with the deposit.
-    pub(super) fn ran_on(&self, runtime: &RuntimeHandle) -> bool {
-        self.ran_on.names(runtime)
-    }
-}
+/// A root this process ran to its commit, and its final physical turn.
+pub(super) type SettledRoot = (TurnId, Arc<AssembledTurn>);
 
 type Entry = ((StoreBindingId, SessionId, InputId), SettledRoot);
 
@@ -111,31 +96,34 @@ pub(super) fn may_deposit(binding: &StoreBindingId, session: &SessionId, root: &
         })
 }
 
-/// Deposit `settled`'s final turn for every input its claim drove, in the
-/// stores `binding` names, from the drive `runtime` ran it on.
+/// Deposit `report`'s final turn for every input its claim drove, in the
+/// stores `binding` names.
 pub(crate) fn deposit_settled_root(
     binding: &StoreBindingId,
     session: &SessionId,
-    settled: lash_core::drive::SettledRoot<'_>,
-    runtime: &RuntimeHandle,
+    report: lash_core::drive::RootReport,
 ) {
-    if settled.driven_inputs.is_empty() {
+    let lash_core::drive::RootReport {
+        outcome,
+        run,
+        driven_inputs,
+    } = report;
+    let lash_core::engine::RootOutcome::Committed { root, .. } = outcome else {
         return;
-    }
-    let entry = SettledRoot {
-        root: settled.root.clone(),
-        turn: Arc::new(settled.turn.clone()),
-        ran_on: runtime.downgrade(),
     };
+    let Some(turn) = run.and_then(|run| run.into_final_turn()) else {
+        return;
+    };
+    let turn = Arc::new(turn);
     {
         let mut entries = SETTLED_ROOTS.lock_recover();
-        for input in settled.driven_inputs {
+        for input in driven_inputs {
             if entries.len() >= CAPACITY {
                 entries.pop_front();
             }
             entries.push_back((
-                (binding.clone(), session.clone(), input.clone()),
-                entry.clone(),
+                (binding.clone(), session.clone(), input),
+                (root.clone(), Arc::clone(&turn)),
             ));
         }
     }
@@ -157,24 +145,6 @@ pub(super) fn holds_settled_root(
         })
 }
 
-/// Resolves once this process holds `input`'s entry in the stores
-/// `binding` names.
-pub(super) async fn settled_root_held(
-    binding: &StoreBindingId,
-    session: &SessionId,
-    input: &InputId,
-) {
-    loop {
-        let deposited = deposited();
-        tokio::pin!(deposited);
-        deposited.as_mut().enable();
-        if holds_settled_root(binding, session, input) {
-            return;
-        }
-        deposited.await;
-    }
-}
-
 /// Take `input`'s entry in the stores `binding` names, if this process
 /// holds one.
 pub(super) fn take_settled_root(
@@ -189,5 +159,5 @@ pub(super) fn take_settled_root(
             .position(|((entry_binding, entry_session, entry_input), _)| {
                 entry_binding == binding && entry_session == session && entry_input == input
             })?;
-    entries.remove(position).map(|(_, settled)| settled)
+    entries.remove(position).map(|(_, turn)| turn)
 }

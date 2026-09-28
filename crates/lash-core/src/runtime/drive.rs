@@ -84,8 +84,6 @@ pub struct DriveSinks<'a> {
     pub events: &'a dyn EventSink,
     pub turn_events: &'a dyn TurnActivitySink,
     pub local_stop: LocalTurnStop,
-    /// Where each root this drive commits hands its report over.
-    pub settled: &'a dyn RootSettledSink,
 }
 
 impl Default for DriveSinks<'_> {
@@ -94,35 +92,8 @@ impl Default for DriveSinks<'_> {
             events: &crate::runtime::NOOP_EVENT_SINK,
             turn_events: &crate::runtime::NOOP_TURN_ACTIVITY_SINK,
             local_stop: LocalTurnStop::default(),
-            settled: &NoopRootSettledSink,
         }
     }
-}
-
-/// A root this runtime ran to its final commit: its final physical turn as
-/// it ran, and the accepted inputs its admission drove.
-pub struct SettledRoot<'r> {
-    pub root: &'r TurnId,
-    pub turn: &'r crate::AssembledTurn,
-    pub driven_inputs: &'r [crate::InputId],
-}
-
-/// Where a drive hands a committed root's report over (FIG-3979): once its
-/// final commit and that commit's `TurnPersisted` delivery are done, before
-/// the root's recorded scope close. The runtime passed is the one that ran
-/// the root, holding its commit. Nothing a sink does decides anything, and
-/// the drive waits for it before the close, so a sink returns at once.
-#[async_trait::async_trait]
-pub trait RootSettledSink: Send + Sync {
-    async fn settled(&self, runtime: &LashRuntime, root: SettledRoot<'_>);
-}
-
-/// A sink that takes no report.
-pub struct NoopRootSettledSink;
-
-#[async_trait::async_trait]
-impl RootSettledSink for NoopRootSettledSink {
-    async fn settled(&self, _runtime: &LashRuntime, _root: SettledRoot<'_>) {}
 }
 
 /// The admitted root a runtime is running, and the fence its seal raised
@@ -803,27 +774,6 @@ impl LashRuntime {
             }
         };
         let ran = std::mem::replace(&mut self.drive_root, outer);
-        // A committed root's report is handed over before its scope closes
-        // (FIG-3979): the close is a recorded step, and the terminal
-        // transaction armed its `ScopeClose` obligation, so an execution
-        // that dies between the two still closes the scope on its redrive
-        // or through the obligation's relay.
-        if let Ok(run) = &result
-            && let RootOutcome::Committed { root, .. } = &run.outcome
-            && let Some(turn) = run.run.as_ref().and_then(AgentFrameRun::final_turn)
-        {
-            sinks
-                .settled
-                .settled(
-                    self,
-                    SettledRoot {
-                        root,
-                        turn,
-                        driven_inputs: &run.driven_inputs,
-                    },
-                )
-                .await;
-        }
         // The root ended here: its final commit wrote its evidence, so its
         // scope closes (FIG-3607 item 7). A root that did not end holds its
         // scope open, and a host that owns no scopes has nothing to close.

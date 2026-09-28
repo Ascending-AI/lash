@@ -98,19 +98,6 @@ impl SendContext {
         Ok(())
     }
 
-    /// [`refresh`](Self::refresh), unless the drive that deposited
-    /// `settled` ran on the open session's own runtime: that runtime holds
-    /// the root's commit and published it with the deposit, and its drive
-    /// may still hold it while the root's scope closes (FIG-3979).
-    async fn refresh_unless_ran_on(&self, settled: Option<&mailbox::SettledRoot>) -> Result<()> {
-        if let (Some(runtime), Some(settled)) = (&self.live, settled)
-            && settled.ran_on(runtime)
-        {
-            return Ok(());
-        }
-        self.refresh().await
-    }
-
     /// The session's state as of the committed head.
     async fn session_snapshot(&self) -> Result<lash_core::SessionSnapshot> {
         if let Some(runtime) = &self.live {
