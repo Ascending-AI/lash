@@ -5,7 +5,7 @@ error[E0061]: this method takes 2 arguments but 1 argument was supplied
   |                                         ^^^^^--------- argument #2 of type `ScopedEffectController<'_>` is missing
   |
 note: method defined here
- --> src/admin.rs
+ --> src/admin/process_admin.rs
   |
   |     pub async fn start(
   |                  ^^^^^
