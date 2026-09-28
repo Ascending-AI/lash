@@ -1,8 +1,8 @@
 use super::*;
 use crate::ast::{AssignTarget, Expr, FunctionExpr, Program};
 use crate::runtime::HEAP_SIZE_SCHEDULE_VERSION;
-use crate::runtime::ProjectedValue;
 use crate::runtime::entry_points::compile_program_internal;
+use crate::runtime::{ProjectedBindings, ProjectedValue};
 
 #[test]
 fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
@@ -1876,11 +1876,11 @@ fn taking_the_runtime_leaves_the_host_view_as_a_plain_state() {
     );
 }
 
-/// Rebinding a reload's projection placeholders writes inside the objects that
-/// hold them: two bindings that shared an object before still share it, and
-/// both see the live projection (FIG-3628).
+/// Refreshing a reload's projection placeholders writes inside the objects
+/// that hold them: two bindings that shared an object before still share it,
+/// and both see the live projection (FIG-3628).
 #[test]
-fn rebinding_projections_keeps_every_binding_on_the_same_object() {
+fn refreshing_projections_keeps_every_binding_on_the_same_object() {
     let placeholder = ProjectedValue::unavailable_after_restore_with_projection_ref(
         "report",
         "object",
@@ -1899,24 +1899,19 @@ fn rebinding_projections_keeps_every_binding_on_the_same_object() {
         .install_runtime(roots, heap)
         .expect("install the shared holder");
 
-    let found = state.unavailable_projections();
-    assert_eq!(
-        found
-            .iter()
-            .map(|(name, projected)| (name.as_str(), projected.name()))
-            .collect::<Vec<_>>(),
-        [("alias", "report"), ("holder", "report")],
-        "both bindings depend on the one placeholder"
-    );
-
     let live = ProjectedValue::scalar("report", Value::String("live".into()));
-    state
-        .rebind_projections(|placeholder| (placeholder.name() == "report").then(|| live.clone()))
-        .expect("rebind in place");
+    let mut projected = ProjectedBindings::new();
+    projected.insert("report", live.clone());
+    let StateMode::HeapBacked(backed) = &mut state.mode else {
+        panic!("the installed runtime is heap-backed");
+    };
+    crate::runtime::projected_refresh::refresh_record(&mut backed.runtime_globals, &projected);
+    crate::runtime::projected_refresh::refresh_heap(&mut backed.heap, &projected);
+    backed.projected = host_view(&backed.runtime_globals, &mut backed.heap).expect("host view");
+
     let roots = heap_backed_roots(&state);
     assert_eq!(roots["alias"], holder, "`alias` still names the holder");
     assert_eq!(roots["holder"], holder, "`holder` still names the holder");
-    assert!(state.unavailable_projections().is_empty());
     let Some(Value::Record(view)) = state.globals().get("holder") else {
         panic!("the holder is in the host view")
     };

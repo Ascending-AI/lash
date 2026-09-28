@@ -139,7 +139,6 @@ fn cell_attempt(
                 LashlangSurface::default(),
                 run.resolver,
                 RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
             )
             .await;
@@ -505,7 +504,6 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -542,7 +540,6 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -571,7 +568,6 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver.clone()),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -601,7 +597,6 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -675,7 +670,6 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -777,7 +771,6 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1314,7 +1307,6 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 LashlangSurface::default(),
                 Some(resolver),
                 RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
@@ -1408,7 +1400,6 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             LashlangSurface::default(),
             Some(resolver),
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1493,7 +1484,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             finish(1);"#
                 .to_string(),
         };
-        let resolver = || Arc::new(ProjectionRegistry::new());
         let surface = || {
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
@@ -1518,7 +1508,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            resolver(),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1542,7 +1531,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            resolver(),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1587,7 +1575,6 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             ),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
@@ -2205,7 +2192,6 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
@@ -2339,7 +2325,6 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
@@ -2372,7 +2357,6 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
                     surface,
                     None,
                     RlmProjectedBindings::default(),
-                    Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
@@ -2461,7 +2445,6 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         surface,
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,

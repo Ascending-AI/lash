@@ -140,7 +140,6 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })),
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig {
             sink: Some(sink.clone()),
             trace_context: TraceContext::default(),
@@ -493,7 +492,6 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         surface,
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,

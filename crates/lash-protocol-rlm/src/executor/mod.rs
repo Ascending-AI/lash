@@ -31,8 +31,8 @@ use self::host_bridge::{
     CollectedExecutionOutput, HostBridge, HostBridgeConfig, LashlangExecutionTrace,
 };
 use crate::projection::{
-    ProjectionResolver, RlmProjectedBindings, flow_to_json_value, json_to_flow_value,
-    projected_bindings, prune_projected_binding_names, rehydrate_projected_globals,
+    RlmProjectedBindings, flow_to_json_value, json_to_flow_value, projected_bindings,
+    prune_projected_binding_names,
 };
 
 #[cfg(any(test, feature = "testing"))]
@@ -59,7 +59,6 @@ async fn execute_code_unbounded_for_tests(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
 ) -> ExecResponse {
     Box::pin(execute_code_with_bounds(
@@ -70,7 +69,6 @@ async fn execute_code_unbounded_for_tests(
         lashlang_surface,
         deferred_tool_resolver,
         session_projected_bindings,
-        projection_resolver,
         lashlang_execution_trace_config,
         lashlang::ExecutionBounds::unbounded(),
     ))
@@ -90,7 +88,6 @@ pub(crate) async fn execute_code_with_bounds(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
 ) -> ExecResponse {
@@ -102,7 +99,6 @@ pub(crate) async fn execute_code_with_bounds(
         lashlang_surface,
         deferred_tool_resolver,
         session_projected_bindings,
-        projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
         crate::plugin::RlmChannel::Cell,
@@ -119,7 +115,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -138,7 +133,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds(
         deferred_tool_resolver,
         None,
         session_projected_bindings,
-        projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
@@ -157,7 +151,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -192,7 +185,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         deferred_tool_resolver,
         deferred_trigger_resolver,
         session_projected_bindings,
-        projection_resolver,
         lashlang_execution_trace_config,
         execution_bounds,
         channel,
@@ -385,7 +377,6 @@ impl RlmCheckpointPerfFixture {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(crate::ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
         )
@@ -432,7 +423,6 @@ async fn execute_code_inner(
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<lash_lashlang_runtime::SharedDeferredTriggerResolver>,
     session_projected_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig,
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
@@ -481,7 +471,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
-                    Vec::new(),
                 );
             }
         }
@@ -525,7 +514,6 @@ async fn execute_code_inner(
                         &ctx,
                         lash_core::CellFailureKind::Host,
                         message,
-                        Vec::new(),
                     );
                 }
             }
@@ -560,7 +548,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
-                    Vec::new(),
                 );
             }
         }
@@ -578,7 +565,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     format!("invalid Lashlang host tool surface: {error}"),
-                    Vec::new(),
                 );
             }
         }
@@ -656,7 +642,7 @@ async fn execute_code_inner(
     let cached_program = match compile_result {
         Ok(program) => program,
         Err((kind, error)) => {
-            return exec_setup_failure_or_stop(state, &ctx, kind, error, Vec::new());
+            return exec_setup_failure_or_stop(state, &ctx, kind, error);
         }
     };
     let linked_module = cached_program.linked_module();
@@ -680,7 +666,6 @@ async fn execute_code_inner(
                 &ctx,
                 lash_core::CellFailureKind::Host,
                 format!("failed to store lashlang module artifact: {err}"),
-                Vec::new(),
             );
         }
         state
@@ -689,26 +674,9 @@ async fn execute_code_inner(
     }
     let compiled = cached_program.compiled_program();
 
-    let rehydrated = {
-        let _phase = ctx.named_phase("rlm_lashlang.rehydrate_projected_globals");
-        rehydrate_projected_globals(&mut state.rlm, Arc::clone(&projection_resolver)).await
-    };
-    let degraded_bindings = match rehydrated {
-        Ok(rehydrated) => rehydrated.degraded_bindings,
-        Err(err) => {
-            return exec_setup_failure_or_stop(
-                state,
-                &ctx,
-                lash_core::CellFailureKind::Host,
-                err,
-                Vec::new(),
-            );
-        }
-    };
-
     let projected = {
         let _phase = ctx.named_phase("rlm_lashlang.resolve_projected_bindings");
-        match projected_bindings(&ctx, session_projected_bindings, projection_resolver).await {
+        match projected_bindings(&ctx, session_projected_bindings) {
             Ok(projected) => projected,
             Err(err) => {
                 return exec_setup_failure_or_stop(
@@ -716,7 +684,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     err,
-                    degraded_bindings,
                 );
             }
         }
@@ -770,7 +737,6 @@ async fn execute_code_inner(
                     format!("foreground execution stopped while returning failure: {value}"),
                 )),
                 None,
-                degraded_bindings.clone(),
             );
         }
         Ok(ExecutionOutcome::Failed(value)) => {
@@ -781,7 +747,6 @@ async fn execute_code_inner(
                     format!("process failed in foreground execution: {value}"),
                 )),
                 None,
-                degraded_bindings.clone(),
             );
         }
         Err(error) => {
@@ -806,16 +771,10 @@ async fn execute_code_inner(
                 host.into_collected(),
                 Some(lash_core::CellFailure::new(kind, message)),
                 None,
-                degraded_bindings.clone(),
             );
         }
     };
-    exec_response_from(
-        host.into_collected(),
-        None,
-        terminal_finish,
-        degraded_bindings,
-    )
+    exec_response_from(host.into_collected(), None, terminal_finish)
 }
 
 fn process_handle_names(globals: &lashlang::Record) -> BTreeSet<String> {
@@ -849,16 +808,13 @@ fn lashlang_runtime_feedback_kind(
     }
 }
 
-fn exec_setup_failure_with_degraded(
-    error: lash_core::CellFailure,
-    degraded_bindings: Vec<lash_core::DegradedBinding>,
-) -> ExecResponse {
+fn exec_setup_failure(error: lash_core::CellFailure) -> ExecResponse {
     ExecResponse {
         observations: Vec::new(),
         calls: Vec::new(),
         printed_images: Vec::new(),
         error: Some(error),
-        degraded_bindings,
+        degraded_bindings: Vec::new(),
         terminal_finish: None,
     }
 }
@@ -868,33 +824,28 @@ fn exec_setup_failure_or_stop(
     ctx: &RuntimeExecutionContext<'_>,
     kind: lash_core::CellFailureKind,
     error: impl Into<String>,
-    degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     if ctx.is_cancelled() {
         state.cancel_code_execution();
-        return exec_setup_failure_with_degraded(
-            lash_core::CellFailure::new(
-                lash_core::CellFailureKind::Host,
-                "foreground execution stopped during setup",
-            ),
-            degraded_bindings,
-        );
+        return exec_setup_failure(lash_core::CellFailure::new(
+            lash_core::CellFailureKind::Host,
+            "foreground execution stopped during setup",
+        ));
     }
-    exec_setup_failure_with_degraded(lash_core::CellFailure::new(kind, error), degraded_bindings)
+    exec_setup_failure(lash_core::CellFailure::new(kind, error))
 }
 
 fn exec_response_from(
     collected: CollectedExecutionOutput,
     error: Option<lash_core::CellFailure>,
     terminal_finish: Option<serde_json::Value>,
-    degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     ExecResponse {
         observations: collected.observations,
         calls: collected.calls,
         printed_images: collected.printed_images,
         error,
-        degraded_bindings,
+        degraded_bindings: Vec::new(),
         terminal_finish,
     }
 }

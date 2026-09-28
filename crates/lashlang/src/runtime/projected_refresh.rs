@@ -15,13 +15,9 @@
 //!
 //! [`RuntimeError::ProjectedValueUnavailable`]: super::RuntimeError::ProjectedValueUnavailable
 //!
-//! A host can also re-resolve a placeholder by its `projection_ref` rather than
-//! its name ([`State::rebind_projections`]). Both go through the one walk here,
-//! and both write in place: a projection nested in a heap object is replaced
+//! The walk writes in place: a projection nested in a heap object is replaced
 //! inside that object, so every binding that reaches the object sees it, and
 //! nothing is copied (FIG-3628).
-//!
-//! [`State::rebind_projections`]: super::State::rebind_projections
 
 use std::sync::Arc;
 

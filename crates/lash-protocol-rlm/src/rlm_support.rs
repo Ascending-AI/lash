@@ -172,14 +172,6 @@ impl ReadOnlyVariableDoc {
             value,
         }
     }
-
-    pub(crate) fn descriptor_only(name: String, descriptor_type: String) -> Self {
-        Self {
-            name,
-            descriptor_type,
-            value: None,
-        }
-    }
 }
 
 pub(crate) fn render_read_only_variables(

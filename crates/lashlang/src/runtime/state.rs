@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use super::{
     CANONICAL_NAN_BITS, CompiledProgram, ContinuationError, DateObject, ErrorKind, ErrorObject,
-    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots,
-    ProjectedValue, Record, RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject,
-    UrlSearchParamsObject, Value, record_with_capacity,
+    Heap, HeapId, HeapObject, HeapRestoreWire, ImageValue, MapObject, PersistedRoots, Record,
+    RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject, UrlSearchParamsObject, Value,
+    record_with_capacity,
 };
 use lash_core_execution::surface_format;
 use serde::{Deserialize, Serialize};

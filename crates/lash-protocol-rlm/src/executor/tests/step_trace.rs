@@ -109,7 +109,6 @@ async fn run_step_with_sink(
         LashlangSurface::default(),
         Some(Arc::new(InboxResolver)),
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig {
             sink: Some(sink.clone()),
             trace_context: TraceContext::default(),

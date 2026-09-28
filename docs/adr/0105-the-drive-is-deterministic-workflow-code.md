@@ -543,8 +543,10 @@ through its command bytes.
 - **Memory projection refs are refused on durable paths.** A `memory` ref is
   worker-local by definition, so a replay on another worker cannot resolve
   it. Every durable path (envelope, global, seed) refuses it typed; embedders
-  register durable, content-derived kinds. This breaks the facade's
-  `ProjectionRegistry::register_memory` (P4).
+  register durable, content-derived kinds. Nothing minted them outside tests,
+  so the lane is deleted: the facade's registry export, the `Ref` seed kind
+  and its transport are gone, and a legacy `kind:"ref"` seed payload fails
+  decoding (P4).
 - **Implemented (P7, first part).** The turn-effect state update is deleted: a
   step body runs on a copy of the driver and hands back nothing but its
   outcome.

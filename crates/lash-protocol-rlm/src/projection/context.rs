@@ -13,7 +13,7 @@ use lashlang::{
     ProjectedValue, State as FlowState, Value as FlowValue,
 };
 
-use super::bindings::{ProjectionResolver, RlmProjectedBindings};
+use super::bindings::RlmProjectedBindings;
 use super::transport::json_to_flow_value;
 
 #[expect(
@@ -187,10 +187,9 @@ pub fn rlm_history_projection(
     RlmHistoryProjection::from_chronological(projection)
 }
 
-pub(crate) async fn projected_bindings(
+pub(crate) fn projected_bindings(
     ctx: &RuntimeExecutionContext<'_>,
     session_bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
 ) -> Result<ProjectedBindings, String> {
     let mut bindings = ProjectedBindings::new();
     bindings
@@ -206,12 +205,7 @@ pub(crate) async fn projected_bindings(
             ),
         )
         .map_err(|err| format!("`{}` is reserved as an RLM built-in binding", err.name()))?;
-    insert_projected_bindings(
-        &mut bindings,
-        session_bindings,
-        Arc::clone(&projection_resolver),
-    )
-    .await?;
+    insert_projected_bindings(&mut bindings, session_bindings)?;
     Ok(bindings)
 }
 
@@ -219,15 +213,11 @@ pub(crate) async fn projected_bindings(
     clippy::expect_used,
     reason = "each name is collected from the same projected-binding map it is read from, so get is always Some"
 )]
-async fn insert_projected_bindings(
+fn insert_projected_bindings(
     target: &mut ProjectedBindings,
     bindings: RlmProjectedBindings,
-    projection_resolver: Arc<dyn ProjectionResolver>,
 ) -> Result<(), String> {
-    let host_bindings = bindings
-        .into_projected_bindings(projection_resolver)
-        .await
-        .map_err(|err| err.to_string())?;
+    let host_bindings = bindings.into_projected_bindings();
     for name in host_bindings.names().collect::<Vec<_>>() {
         let value = host_bindings
             .get(&name)

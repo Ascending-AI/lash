@@ -105,7 +105,6 @@ async fn run_cell(
         lash_lashlang_runtime::LashlangSurface::default(),
         None,
         crate::projection::RlmProjectedBindings::default(),
-        std::sync::Arc::new(crate::projection::ProjectionRegistry::new()),
         crate::executor::RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,

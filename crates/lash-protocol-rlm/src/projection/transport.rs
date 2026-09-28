@@ -2,12 +2,8 @@ use std::sync::Arc;
 
 use lash_core::{SessionAppendNode, ToolArgumentProjectionPolicy};
 use lash_rlm_types::{PROJECTED_JSON_TAG, RlmProjectedSeedEntry};
-use lashlang::{
-    ImageValue, ProjectedValue, Record as FlowRecord, State as FlowState, Value as FlowValue,
-};
+use lashlang::{ImageValue, Record as FlowRecord, Value as FlowValue};
 use serde_json::Value;
-
-use super::bindings::{ProjectionRef, ProjectionResolver};
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum ProjectionTransportError {
@@ -39,13 +35,11 @@ impl RlmSeed {
         for (name, value) in raw.iter() {
             let name = decode_seed_name(name, &out)?;
             if let Some(entry) = projected_entry(value).map_err(|error| error.to_string())? {
-                let entry = match entry {
-                    RlmProjectedSeedEntry::Materialized(value) => {
-                        RlmProjectedSeedEntry::Materialized(decode_escaped_json(value)?)
-                    }
-                    RlmProjectedSeedEntry::Ref(reference) => RlmProjectedSeedEntry::Ref(reference),
-                };
-                out.projected.push(name, entry);
+                let RlmProjectedSeedEntry::Materialized(value) = entry;
+                out.projected.push(
+                    name,
+                    RlmProjectedSeedEntry::Materialized(decode_escaped_json(value)?),
+                );
             } else {
                 out.globals
                     .insert(name, decode_escaped_json(value.clone())?);
@@ -131,13 +125,10 @@ fn normalize_projected_seed(seed: Value) -> Result<Value, ProjectionTransportErr
     let mut normalized = serde_json::Map::with_capacity(seed.len());
     for (key, value) in seed {
         let value = if let Some(entry) = projected_entry(&value)? {
-            let entry = match entry {
-                RlmProjectedSeedEntry::Materialized(value) => RlmProjectedSeedEntry::Materialized(
-                    materialize_projected_json_preserving_escapes(value)?,
-                ),
-                RlmProjectedSeedEntry::Ref(reference) => RlmProjectedSeedEntry::Ref(reference),
-            };
-            projected_wrapper(entry)
+            let RlmProjectedSeedEntry::Materialized(value) = entry;
+            projected_wrapper(RlmProjectedSeedEntry::Materialized(
+                materialize_projected_json_preserving_escapes(value)?,
+            ))
         } else {
             materialize_projected_json_preserving_escapes(value)?
         };
@@ -167,18 +158,8 @@ fn materialize_projected_json_with_keys(
     key_mode: TransportKeyMode,
 ) -> Result<Value, ProjectionTransportError> {
     if let Some(entry) = projected_entry(&value)? {
-        return match entry {
-            RlmProjectedSeedEntry::Materialized(value) => {
-                materialize_projected_json_with_keys(value, key_mode)
-            }
-            RlmProjectedSeedEntry::Ref(reference) => {
-                serde_json::to_value(reference).map_err(|error| {
-                    ProjectionTransportError::NonCanonicalWrapper {
-                        reason: format!("projection reference did not serialize: {error}"),
-                    }
-                })
-            }
-        };
+        let RlmProjectedSeedEntry::Materialized(value) = entry;
+        return materialize_projected_json_with_keys(value, key_mode);
     }
     match value {
         Value::Array(items) => items
@@ -307,21 +288,12 @@ pub(crate) fn flow_to_json_value(value: &FlowValue) -> Value {
         }
         FlowValue::Record(record) => flow_record_to_json_value(record),
         FlowValue::Projected(value) => {
-            let entry = match value
-                .projection_ref()
-                .cloned()
-                .map(serde_json::from_value::<ProjectionRef>)
-            {
-                Some(Ok(reference)) => RlmProjectedSeedEntry::Ref(reference),
-                Some(Err(_)) | None => {
-                    RlmProjectedSeedEntry::Materialized(match value.materialize() {
-                        Ok(value) => flow_to_json_value(&value),
-                        // No descriptor and no usable `projection_ref`
-                        // leaves nothing to seed with (FIG-2865).
-                        Err(_) => Value::Null,
-                    })
-                }
-            };
+            let entry = RlmProjectedSeedEntry::Materialized(match value.materialize() {
+                Ok(value) => flow_to_json_value(&value),
+                // A projection that cannot materialize leaves nothing to seed
+                // with (FIG-2865).
+                Err(_) => Value::Null,
+            });
             projected_wrapper(entry)
         }
         FlowValue::Ref(_) => {
@@ -376,88 +348,6 @@ pub(crate) fn json_to_flow_value(value: Value) -> FlowValue {
                 ))
             }),
     }
-}
-
-/// Result of restoring process-local projected host references.
-pub(crate) struct ProjectedGlobalRehydration {
-    pub(crate) degraded_bindings: Vec<lash_core::DegradedBinding>,
-}
-
-/// Re-resolves every projection placeholder a reload left, by its
-/// `projection_ref`, and rebinds it in place.
-///
-/// The rebinding writes inside the objects that hold the placeholders, so a
-/// binding is never replaced by a copy of itself: an object two bindings share
-/// stays one object (FIG-3628). A live projection is left alone. A reference
-/// that fails to resolve leaves its placeholder, which refuses reads, and
-/// degrades every binding that reaches it.
-pub(crate) async fn rehydrate_projected_globals(
-    rlm: &mut FlowState,
-    projection_resolver: Arc<dyn ProjectionResolver>,
-) -> Result<ProjectedGlobalRehydration, String> {
-    let placeholders = rlm.unavailable_projections();
-    let mut resolved = std::collections::BTreeMap::<String, Result<ProjectedValue, String>>::new();
-    for (_, placeholder) in &placeholders {
-        let Some(key) = placeholder_key(placeholder) else {
-            continue;
-        };
-        if resolved.contains_key(&key) {
-            continue;
-        }
-        let outcome = resolve_placeholder(placeholder, &projection_resolver).await;
-        resolved.insert(key, outcome);
-    }
-    let mut degraded_bindings = Vec::<lash_core::DegradedBinding>::new();
-    for (name, placeholder) in &placeholders {
-        let Some(Err(reason)) = placeholder_key(placeholder).and_then(|key| resolved.get(&key))
-        else {
-            continue;
-        };
-        if !degraded_bindings
-            .iter()
-            .any(|degraded| degraded.name == *name)
-        {
-            degraded_bindings.push(lash_core::DegradedBinding {
-                name: name.clone(),
-                reason: reason.clone(),
-            });
-        }
-    }
-    rlm.rebind_projections(|placeholder| {
-        placeholder_key(placeholder)
-            .and_then(|key| resolved.get(&key))
-            .and_then(|outcome| outcome.as_ref().ok().cloned())
-    })
-    .map_err(|error| error.to_string())?;
-    Ok(ProjectedGlobalRehydration { degraded_bindings })
-}
-
-/// A placeholder's identity for re-resolution: its name and its reference.
-/// A placeholder without a reference has nothing to re-resolve by.
-fn placeholder_key(placeholder: &ProjectedValue) -> Option<String> {
-    placeholder
-        .projection_ref()
-        .map(|reference| format!("{}\u{0}{reference}", placeholder.name()))
-}
-
-async fn resolve_placeholder(
-    placeholder: &ProjectedValue,
-    projection_resolver: &Arc<dyn ProjectionResolver>,
-) -> Result<ProjectedValue, String> {
-    let name = placeholder.name().to_string();
-    let ref_json = placeholder
-        .projection_ref()
-        .cloned()
-        .ok_or_else(|| format!("projection `{name}` carries no reference"))?;
-    let reference = serde_json::from_value::<ProjectionRef>(ref_json.clone())
-        .map_err(|err| format!("invalid projection ref for `{name}`: {err}"))?;
-    let resolved = projection_resolver
-        .resolve_projection(&reference)
-        .await
-        .map_err(|err| err.to_string())?;
-    Ok(ProjectedValue::custom_with_projection_ref(
-        name, resolved, ref_json,
-    ))
 }
 
 fn json_map_to_image(map: &serde_json::Map<String, Value>) -> Option<ImageValue> {

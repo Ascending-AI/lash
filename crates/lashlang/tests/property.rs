@@ -306,15 +306,10 @@ fn canonical_snapshot_variant_corpus_strategy() -> impl Strategy<Value = Vec<Val
         snapshot_string_strategy(),
     )
         .prop_map(
-            |(number_bits, boolean, text, image_size, width, height, projection_text)| {
-                let projection_ref = serde_json::json!({
-                    "z-last": [projection_text, 7, true, null],
-                    "a-first": {"nul": "\0", "edge": "\u{fffd}"},
-                });
-                let projected = Value::Projected(ProjectedValue::custom_with_projection_ref(
+            |(number_bits, boolean, text, image_size, width, height, _projection_text)| {
+                let projected = Value::Projected(ProjectedValue::custom(
                     "session.items[3]",
                     Arc::new(SnapshotProjectedDescriptor),
-                    projection_ref,
                 ));
                 let tuple =
                     Value::Tuple(vec![Value::String(text.clone().into()), Value::Null].into());

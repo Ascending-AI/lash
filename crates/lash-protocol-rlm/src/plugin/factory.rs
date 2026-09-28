@@ -15,7 +15,6 @@ use super::registration::register_rlm_protocol_plugin;
 use super::{RLM_PROTOCOL_PLUGIN_ID, RlmProtocolPluginConfig};
 use crate::dialect::{RlmDialectServices, TypescriptDialect};
 use crate::executor::RlmLashlangExecutionTraceConfig;
-use crate::projection::{ProjectionRegistry, ProjectionResolver};
 
 /// Apply the RLM protocol config transformation: enable, when process lifecycle
 /// is available, the process/sleep/signal abilities.
@@ -59,7 +58,6 @@ pub fn rlm_lashlang_surface(
 
 pub struct RlmProtocolPluginFactory {
     config: RlmProtocolPluginConfig,
-    projection_resolver: Arc<dyn ProjectionResolver>,
     deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
     artifact_store: LashlangArtifacts,
@@ -91,7 +89,6 @@ impl RlmProtocolPluginFactory {
     pub fn new(config: RlmProtocolPluginConfig, backend: &lash_core::Backend) -> Self {
         Self {
             config,
-            projection_resolver: Arc::new(ProjectionRegistry::default()),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,
             artifact_store: LashlangArtifacts::of_backend(backend),
@@ -99,14 +96,6 @@ impl RlmProtocolPluginFactory {
             lashlang_execution_trace_config: RlmLashlangExecutionTraceConfig::default(),
             process_lifecycle: OnceLock::new(),
         }
-    }
-
-    pub fn with_projection_resolver(
-        mut self,
-        projection_resolver: Arc<dyn ProjectionResolver>,
-    ) -> Self {
-        self.projection_resolver = projection_resolver;
-        self
     }
 
     /// Wire a host-provided [`DeferredToolResolver`](lash_lashlang_runtime::DeferredToolResolver)
@@ -370,7 +359,6 @@ impl PluginFactory for RlmProtocolPluginFactory {
         .map_err(|err| PluginError::Registration(err.to_string()))?;
         let services = RlmDialectServices {
             code_renderer: config.code_renderer.clone(),
-            projection_resolver: Arc::clone(&self.projection_resolver),
             artifact_store: self.artifact_store.clone(),
             deferred_tool_resolver: self.deferred_tool_resolver.clone(),
             deferred_trigger_resolver: self.deferred_trigger_resolver.clone(),

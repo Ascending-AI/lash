@@ -94,7 +94,6 @@ pub(super) async fn typescript_process_body_resolves_journaled_clock_and_randomn
         surface.clone(),
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,

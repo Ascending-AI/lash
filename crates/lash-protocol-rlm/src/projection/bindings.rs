@@ -1,109 +1,13 @@
-use lash_sansio::sync::RwLockExt;
 use std::any::Any;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use lash_core::{PromptContribution, ProtocolSessionExtension};
-pub use lash_rlm_types::ProjectionRef;
 
-use lashlang::{
-    ProjectedBindingError, ProjectedBindings, ProjectedHostDescriptor, ProjectedValue,
-    Value as FlowValue,
-};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ProjectionResolveError {
-    message: String,
-}
-
-impl ProjectionResolveError {
-    pub fn unavailable(reference: &ProjectionRef) -> Self {
-        Self {
-            message: format!(
-                "projection ref unavailable: kind `{}`, key {}",
-                reference.kind, reference.key
-            ),
-        }
-    }
-
-    pub fn invalid(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-}
-
-impl std::fmt::Display for ProjectionResolveError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for ProjectionResolveError {}
-
-#[async_trait::async_trait]
-pub trait ProjectionResolver: Send + Sync {
-    async fn resolve_projection(
-        &self,
-        reference: &ProjectionRef,
-    ) -> Result<Arc<dyn ProjectedHostDescriptor>, ProjectionResolveError>;
-}
-
-#[derive(Clone, Default)]
-pub struct ProjectionRegistry {
-    memory: Arc<std::sync::RwLock<BTreeMap<String, Arc<dyn ProjectedHostDescriptor>>>>,
-    next_memory_key: Arc<std::sync::atomic::AtomicU64>,
-}
-
-impl ProjectionRegistry {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn register_memory(&self, value: Arc<dyn ProjectedHostDescriptor>) -> ProjectionRef {
-        let descriptor_type = value.type_name().to_string();
-        let key = format!(
-            "memory-{}",
-            self.next_memory_key
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        );
-        self.memory.write_recover().insert(key.clone(), value);
-        ProjectionRef::new("memory", serde_json::Value::String(key))
-            .with_descriptor_type(descriptor_type)
-    }
-}
-
-#[async_trait::async_trait]
-impl ProjectionResolver for ProjectionRegistry {
-    async fn resolve_projection(
-        &self,
-        reference: &ProjectionRef,
-    ) -> Result<Arc<dyn ProjectedHostDescriptor>, ProjectionResolveError> {
-        if reference.kind != "memory" {
-            return Err(ProjectionResolveError::unavailable(reference));
-        }
-        let Some(key) = reference.key.as_str() else {
-            return Err(ProjectionResolveError::invalid(
-                "memory projection ref key must be a string",
-            ));
-        };
-        self.memory
-            .read_recover()
-            .get(key)
-            .cloned()
-            .ok_or_else(|| ProjectionResolveError::unavailable(reference))
-    }
-}
-
-#[derive(Clone)]
-enum RlmProjectedBinding {
-    Value(FlowValue),
-    Lazy(ProjectionRef),
-}
+use lashlang::{ProjectedBindingError, ProjectedBindings, ProjectedValue, Value as FlowValue};
 
 #[derive(Clone, Default)]
 pub struct RlmProjectedBindings {
-    bindings: BTreeMap<String, RlmProjectedBinding>,
+    bindings: BTreeMap<String, FlowValue>,
 }
 
 impl RlmProjectedBindings {
@@ -120,8 +24,7 @@ impl RlmProjectedBindings {
         if self.bindings.contains_key(&name) {
             return Err(ProjectedBindingError::duplicate(name));
         }
-        self.bindings
-            .insert(name, RlmProjectedBinding::Value(value.into()));
+        self.bindings.insert(name, value.into());
         Ok(self)
     }
 
@@ -133,20 +36,6 @@ impl RlmProjectedBindings {
         self.bind_value(name, lashlang::from_json(value))
     }
 
-    pub fn bind_lazy(
-        mut self,
-        name: impl Into<String>,
-        reference: ProjectionRef,
-    ) -> Result<Self, ProjectedBindingError> {
-        let name = name.into();
-        if self.bindings.contains_key(&name) {
-            return Err(ProjectedBindingError::duplicate(name));
-        }
-        self.bindings
-            .insert(name, RlmProjectedBinding::Lazy(reference));
-        Ok(self)
-    }
-
     pub fn names(&self) -> impl Iterator<Item = String> + '_ {
         self.bindings.keys().cloned()
     }
@@ -154,19 +43,8 @@ impl RlmProjectedBindings {
     fn prompt_docs(&self) -> Vec<crate::rlm_support::ReadOnlyVariableDoc> {
         self.bindings
             .iter()
-            .map(|(name, binding)| match binding {
-                RlmProjectedBinding::Value(value) => {
-                    crate::rlm_support::ReadOnlyVariableDoc::from_flow_value(name.clone(), value)
-                }
-                RlmProjectedBinding::Lazy(reference) => {
-                    crate::rlm_support::ReadOnlyVariableDoc::descriptor_only(
-                        name.clone(),
-                        reference
-                            .descriptor_type
-                            .clone()
-                            .unwrap_or_else(|| "any".to_string()),
-                    )
-                }
+            .map(|(name, value)| {
+                crate::rlm_support::ReadOnlyVariableDoc::from_flow_value(name.clone(), value)
             })
             .collect()
     }
@@ -175,28 +53,13 @@ impl RlmProjectedBindings {
         clippy::expect_used,
         reason = "projected bindings refuse duplicate names at assembly, so try_insert in this one-shot build cannot conflict"
     )]
-    pub(crate) async fn into_projected_bindings(
-        self,
-        resolver: Arc<dyn ProjectionResolver>,
-    ) -> Result<ProjectedBindings, ProjectionResolveError> {
+    pub(crate) fn into_projected_bindings(self) -> ProjectedBindings {
         let mut out = ProjectedBindings::new();
-        for (name, binding) in self.bindings {
-            let value = match binding {
-                RlmProjectedBinding::Value(value) => ProjectedValue::scalar(name.clone(), value),
-                RlmProjectedBinding::Lazy(reference) => {
-                    let resolved = resolver.resolve_projection(&reference).await?;
-                    let ref_json = serde_json::to_value(&reference).map_err(|err| {
-                        ProjectionResolveError::invalid(format!(
-                            "projection ref did not serialize: {err}"
-                        ))
-                    })?;
-                    ProjectedValue::custom_with_projection_ref(name.clone(), resolved, ref_json)
-                }
-            };
-            out.try_insert(name, value)
+        for (name, value) in self.bindings {
+            out.try_insert(name.clone(), ProjectedValue::scalar(name, value))
                 .expect("RLM projected bindings already reject duplicates");
         }
-        Ok(out)
+        out
     }
 
     pub fn merge(mut self, other: Self) -> Result<Self, ProjectedBindingError> {
@@ -216,14 +79,8 @@ impl RlmProjectedBindings {
     ) -> Result<Self, ProjectedBindingError> {
         let mut out = Self::new();
         for (name, entry) in &snapshot.entries {
-            out = match entry {
-                lash_rlm_types::RlmProjectedSeedEntry::Materialized(value) => {
-                    out.bind_json(name.clone(), value.clone())?
-                }
-                lash_rlm_types::RlmProjectedSeedEntry::Ref(reference) => {
-                    out.bind_lazy(name.clone(), reference.clone())?
-                }
-            };
+            let lash_rlm_types::RlmProjectedSeedEntry::Materialized(value) = entry;
+            out = out.bind_json(name.clone(), value.clone())?;
         }
         Ok(out)
     }
@@ -269,25 +126,6 @@ pub fn rlm_session_projection_extension(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lashlang::{ProjectedReadRequest, ProjectedReadResponse};
-
-    struct TestProjectedValue;
-
-    impl ProjectedHostDescriptor for TestProjectedValue {
-        fn type_name(&self) -> &str {
-            "string"
-        }
-
-        fn read_one(&self, request: ProjectedReadRequest) -> Option<ProjectedReadResponse> {
-            match request {
-                ProjectedReadRequest::Materialize => Some(ProjectedReadResponse::Value(
-                    FlowValue::String("lazy".into()),
-                )),
-                ProjectedReadRequest::Render => Some(ProjectedReadResponse::Text("lazy".into())),
-                _ => None,
-            }
-        }
-    }
 
     #[test]
     fn bind_rejects_duplicate_names() {
@@ -317,56 +155,13 @@ mod tests {
     }
 
     #[test]
-    fn register_memory_mints_a_deterministic_key_sequence() {
-        let registry = ProjectionRegistry::new();
-        let first = registry.register_memory(Arc::new(TestProjectedValue));
-        let second = registry.register_memory(Arc::new(TestProjectedValue));
-        assert_eq!(first.key, serde_json::json!("memory-0"));
-        assert_eq!(second.key, serde_json::json!("memory-1"));
-    }
-
-    #[tokio::test]
-    async fn bind_lazy_resolves_memory_projection_ref() {
-        let registry = Arc::new(ProjectionRegistry::new());
-        let reference = registry.register_memory(Arc::new(TestProjectedValue));
-        let bindings = RlmProjectedBindings::new()
-            .bind_lazy("doc", reference.clone())
-            .expect("lazy bind");
-
-        let projected = bindings
-            .into_projected_bindings(registry)
-            .await
-            .expect("resolve projected bindings");
-        let value = projected.get("doc").expect("doc binding");
-        assert_eq!(value.projection_ref(), Some(&serde_json::json!(reference)));
-        assert_eq!(value.render().expect("render"), "lazy");
-    }
-
-    #[tokio::test]
-    async fn bind_lazy_reports_missing_memory_projection_ref() {
-        let registry = Arc::new(ProjectionRegistry::new());
-        let reference = ProjectionRef::new("memory", serde_json::json!("missing"));
-        let bindings = RlmProjectedBindings::new()
-            .bind_lazy("doc", reference)
-            .expect("lazy bind");
-
-        let err = match bindings.into_projected_bindings(registry).await {
-            Ok(_) => panic!("missing ref should fail"),
-            Err(err) => err,
-        };
-        assert!(err.to_string().contains("projection ref unavailable"));
-    }
-
-    #[test]
-    fn projected_seed_snapshot_preserves_projection_refs() {
-        let reference = ProjectionRef::new("memory", serde_json::json!("stable"));
-        let mut snapshot = lash_rlm_types::RlmProjectedSeedSnapshot::new();
-        snapshot.push("doc", lash_rlm_types::RlmProjectedSeedEntry::Ref(reference));
-
-        let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
-        assert_eq!(
-            bindings.names().collect::<Vec<_>>(),
-            vec!["doc".to_string()]
+    fn projected_seed_snapshot_rejects_the_ref_entry_kind() {
+        let snapshot = serde_json::json!({
+            "entries": [["doc", { "kind": "ref", "value": { "kind": "memory", "key": "doc" } }]],
+        });
+        assert!(
+            serde_json::from_value::<lash_rlm_types::RlmProjectedSeedSnapshot>(snapshot).is_err(),
+            "a durable ref seed entry must fail to decode"
         );
     }
 
@@ -390,11 +185,8 @@ mod tests {
         let bindings = RlmProjectedBindings::from_snapshot(&snapshot).expect("snapshot");
 
         assert!(
-            matches!(
-                bindings.bindings.get("data"),
-                Some(RlmProjectedBinding::Value(_))
-            ),
-            "materialized projection-ref-shaped data must not become a lazy reference"
+            matches!(bindings.bindings.get("data"), Some(FlowValue::Record(_))),
+            "materialized projection-ref-shaped data must stay ordinary data"
         );
     }
 

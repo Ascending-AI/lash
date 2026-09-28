@@ -219,13 +219,10 @@ pub use lash_protocol_rlm::{
     RlmProtocolPluginConfigBuilder, RlmProtocolPluginFactory, RlmSessionConfigDecodeError,
     TypeExpr, TypeField, UnsetBound, format_type_expr,
 };
-/// Projection vocabulary: register lazy host projections on a
-/// [`ProjectionRegistry`] or bind projected values to the active session via
+/// Projection vocabulary: bind projected values to the active session via
 /// [`rlm_session_projection_extension`]. Session extensions are process-local
 /// runtime configuration; durable session seeds use [`RlmSeed`].
-pub use lash_protocol_rlm::{
-    ProjectionRegistry, RlmProjectedBindings, RlmSeed, rlm_session_projection_extension,
-};
+pub use lash_protocol_rlm::{RlmProjectedBindings, RlmSeed, rlm_session_projection_extension};
 pub use lash_render::{RenderParams, RenderParamsPatch};
 pub use lash_rlm_types::{
     RlmCreateExtras, RlmFinalAnswerFormat, RlmRenderPatch, RlmSessionConfig,

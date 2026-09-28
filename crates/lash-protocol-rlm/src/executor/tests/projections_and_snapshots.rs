@@ -282,9 +282,8 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
 }
 
 #[test]
-pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_restore() {
+pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_restore() {
     block_on(async {
-        let projected = ProjectedBindings::new();
         // history = [{ role: "user" }]
         // kept = [{ nested: [2] }]
         let setup = lashlang::testing::harness::try_compile_program(&b::program(vec![
@@ -302,20 +301,16 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
         ]))
         .expect("compile setup");
         let mut state = lashlang::State::new();
-        execute_with_projected(&setup, &mut state, &projected)
+        execute_with_projected(&setup, &mut state, &ProjectedBindings::new())
             .await
             .expect("execute setup");
 
-        let registry = Arc::new(ProjectionRegistry::new());
-        let descriptor = Arc::new(SnapshotProjectedToolText::default());
-        let reference = registry.register_memory(descriptor.clone());
         state
             .insert_global(
                 "doc",
-                FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
+                FlowValue::Projected(ProjectedValue::custom(
                     "doc",
-                    descriptor,
-                    serde_json::to_value(&reference).expect("projection ref"),
+                    Arc::new(SnapshotProjectedToolText::default()),
                 )),
             )
             .expect("insert projected value");
@@ -327,12 +322,13 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
             lashlang::Snapshot::from_canonical_bytes(&unavailable)
                 .expect("restore projected state as unavailable"),
         );
-        rehydrate_projected_globals(
-            &mut state,
-            Arc::clone(&registry) as Arc<dyn ProjectionResolver>,
-        )
-        .await
-        .expect("rehydrate heap-backed projected value");
+        // The restore left `doc` a placeholder; a same-named projected
+        // binding re-supplies it in place at the next execution.
+        let mut projected = ProjectedBindings::new();
+        projected.insert(
+            "doc",
+            ProjectedValue::custom("doc", Arc::new(SnapshotProjectedToolText::default())),
+        );
         crate::projection::prune_reserved_projected_bindings(&mut state);
 
         let finish = lashlang::testing::harness::try_compile_program(&finish_record(&[
@@ -360,7 +356,7 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
         assert_eq!(
             execute_with_projected(&finish, &mut state, &projected)
                 .await
-                .expect("next cell sees rehydrate and prune"),
+                .expect("next cell sees the re-supplied projection and prune"),
             expected
         );
         assert!(state.globals().get("history").is_none());
@@ -368,44 +364,32 @@ pub(super) fn heap_backed_projection_rehydrate_and_prune_survive_execution_and_r
         let bytes = state
             .snapshot()
             .to_canonical_bytes()
-            .expect("encode rehydrated and pruned state");
+            .expect("encode refreshed and pruned state");
         let snapshot = lashlang::Snapshot::from_canonical_bytes(&bytes)
-            .expect("decode rehydrated and pruned state");
+            .expect("decode refreshed and pruned state");
         let mut restored = lashlang::State::from_snapshot(snapshot);
-        rehydrate_projected_globals(
-            &mut restored,
-            Arc::clone(&registry) as Arc<dyn ProjectionResolver>,
-        )
-        .await
-        .expect("rehydrate after cold restore");
         assert_eq!(
             execute_with_projected(&finish, &mut restored, &projected)
                 .await
-                .expect("cold-restored cell sees rehydrate and prune"),
+                .expect("cold-restored cell sees the re-supplied projection and prune"),
             expected
         );
         assert!(restored.globals().get("history").is_none());
     });
 }
 
-pub(super) fn restored_projection_degradation_fixture()
--> (RlmExecutionState, Arc<ProjectionRegistry>) {
-    let registry = Arc::new(ProjectionRegistry::new());
+/// A restored session whose `healthy` and `dead` globals decode as the
+/// unavailable placeholders a snapshot leaves for projected values
+/// (FIG-2865), plus one ordinary binding.
+pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
     let descriptor = Arc::new(SnapshotProjectedToolText::default());
-    let healthy_reference = registry.register_memory(descriptor.clone());
-    let dead_reference =
-        ProjectionRef::new("memory", serde_json::json!("missing")).with_descriptor_type("string");
     let mut source = RlmExecutionState::new();
-    for (name, reference) in [("healthy", healthy_reference), ("dead", dead_reference)] {
+    for name in ["healthy", "dead"] {
         source
             .rlm
             .insert_global(
                 name.to_string(),
-                FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
-                    name,
-                    descriptor.clone(),
-                    serde_json::to_value(reference).expect("projection ref"),
-                )),
+                FlowValue::Projected(ProjectedValue::custom(name, descriptor.clone())),
             )
             .expect("insert projected global");
     }
@@ -421,20 +405,21 @@ pub(super) fn restored_projection_degradation_fixture()
     let mut restored = RlmExecutionState::new();
     restored
         .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
-        .expect("restore projected globals as unavailable references");
-    (restored, registry)
+        .expect("restore projected globals as placeholders");
+    restored
 }
 
 #[test]
-pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_at_touch() {
+pub(super) fn a_placeholder_errors_by_name_at_touch_and_a_resupplied_binding_serves() {
     block_on(async {
-        let (mut state, registry) = restored_projection_degradation_fixture();
+        let mut state = restored_projection_placeholder_fixture();
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
         let handler = double
             .open_handler(crate::testing::default_cell_scope())
             .await
             .expect("open the cell's handler");
+        // The session re-supplies only `healthy`; `dead` stays a placeholder.
         let response = execute_code_unbounded_for_tests(
             &mut state,
             lash_core::testing::code_execution_context(crate::testing::double_ports(
@@ -447,21 +432,14 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             crate::testing::memory_artifact_store().await,
             LashlangSurface::default(),
             None,
-            RlmProjectedBindings::default(),
-            registry as Arc<dyn ProjectionResolver>,
+            RlmProjectedBindings::new()
+                .bind_json("healthy", serde_json::json!("materialized tool text"))
+                .expect("bind resupplied projection"),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
         handler.close().await.expect("close the cell's handler");
 
-        // Only the dead binding degrades: the healthy one still renders.
-        assert_eq!(response.degraded_bindings.len(), 1);
-        assert_eq!(response.degraded_bindings[0].name, "dead");
-        assert!(
-            response.degraded_bindings[0]
-                .reason
-                .contains("projection ref unavailable")
-        );
         let touched = response
             .observations
             .iter()
@@ -469,18 +447,13 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             .collect::<Vec<_>>()
             .join("\n");
         // A TypeScript `console.log` argument is an ordinary expression, so
-        // the healthy binding resolves through the materialize path rather
-        // than the render path a bare `print` used to take. Either way the
-        // healthy projection still resolves; only the dead one degrades.
+        // the resupplied binding resolves through the materialize path.
         assert!(touched.contains("materialized tool text"), "{touched}");
 
-        // Touching the dead binding now fails the cell by name (FIG-2865).
-        // It used to render the unavailability sentence as the value, so
-        // `console.log(dead)` observed an English diagnostic where the host's
-        // view belonged and the turn finished as if nothing were missing.
+        // Touching the placeholder fails the cell by name (FIG-2865).
         let failure = response
             .error
-            .expect("touching a dead projection must fail");
+            .expect("touching an unsupplied placeholder must fail");
         assert!(
             failure.message.contains("projected host descriptor `dead`"),
             "{failure:?}"
@@ -490,56 +463,6 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             "{failure:?}"
         );
         assert_eq!(response.terminal_finish, None);
-    });
-}
-
-#[test]
-pub(super) fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
-    fn strict_host_policy(bindings: &[lash_core::DegradedBinding]) -> Result<(), String> {
-        if bindings.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "strict host rejected degraded bindings: {}",
-                bindings
-                    .iter()
-                    .map(|binding| binding.name.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ))
-        }
-    }
-
-    block_on(async {
-        let (mut state, registry) = restored_projection_degradation_fixture();
-        let double =
-            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-        let handler = double
-            .open_handler(crate::testing::default_cell_scope())
-            .await
-            .expect("open the cell's handler");
-        let response = execute_code_unbounded_for_tests(
-            &mut state,
-            lash_core::testing::code_execution_context(crate::testing::double_ports(
-                &double, &handler,
-            )),
-            ExecRequest {
-                language: "typescript".to_string(),
-                code: "finish(healthy);".to_string(),
-            },
-            crate::testing::memory_artifact_store().await,
-            LashlangSurface::default(),
-            None,
-            RlmProjectedBindings::default(),
-            registry as Arc<dyn ProjectionResolver>,
-            RlmLashlangExecutionTraceConfig::default(),
-        )
-        .await;
-        handler.close().await.expect("close the cell's handler");
-
-        let error = strict_host_policy(&response.degraded_bindings)
-            .expect_err("strict host policy must reject degraded setup");
-        assert_eq!(error, "strict host rejected degraded bindings: dead");
     });
 }
 
@@ -1156,7 +1079,6 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             ),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1221,7 +1143,6 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             ),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1273,42 +1194,10 @@ pub(super) fn flow_to_json_value_emits_projected_marker_for_projected_values() {
 }
 
 #[test]
-pub(super) fn flow_to_json_value_preserves_projection_ref_without_materializing() {
+pub(super) fn flow_to_json_value_materializes_a_custom_projection() {
     block_on(async {
         let host = Arc::new(SnapshotProjectedToolText::default());
-        let reference = ProjectionRef::new("memory", serde_json::json!("doc"));
-        let projected = ProjectedValue::custom_with_projection_ref(
-            "doc",
-            host.clone(),
-            serde_json::json!(reference),
-        );
-        let value = flow_to_json_value(&FlowValue::Projected(projected));
-        assert_eq!(host.render_count.load(Ordering::SeqCst), 0);
-        assert_eq!(host.materialize_count.load(Ordering::SeqCst), 0);
-        assert_eq!(
-            value,
-            serde_json::json!({
-                PROJECTED_JSON_TAG: {
-                    "kind": "ref",
-                    "value": {
-                        "kind": "memory",
-                        "key": "doc",
-                    }
-                }
-            })
-        );
-    });
-}
-
-#[test]
-pub(super) fn flow_to_json_value_materializes_an_invalid_projection_ref() {
-    block_on(async {
-        let host = Arc::new(SnapshotProjectedToolText::default());
-        let projected = ProjectedValue::custom_with_projection_ref(
-            "doc",
-            host.clone(),
-            serde_json::Value::Null,
-        );
+        let projected = ProjectedValue::custom("doc", host.clone());
         let value = flow_to_json_value(&FlowValue::Projected(projected));
         assert_eq!(host.materialize_count.load(Ordering::SeqCst), 1);
         assert_eq!(
@@ -1341,43 +1230,6 @@ pub(super) fn image_json_round_trip_preserves_mime_and_image_type() {
         assert!(json.get("media_type").is_none());
         assert_eq!(json_to_flow_value(json), flow);
     });
-}
-
-#[test]
-pub(super) fn executor_snapshot_round_trips_projection_ref_metadata() {
-    let reference = ProjectionRef::new("memory", serde_json::json!("doc"));
-    let mut state = RlmExecutionState::new();
-    state
-        .rlm
-        .insert_global(
-            "doc".to_string(),
-            FlowValue::Projected(ProjectedValue::custom_with_projection_ref(
-                "doc",
-                Arc::new(SnapshotProjectedToolText::default()),
-                serde_json::json!(reference),
-            )),
-        )
-        .expect("insert projected global");
-
-    let snapshot = hydrate_snapshot(
-        state
-            .snapshot_execution_state(lash_core::FleetFormat::current())
-            .expect("executor snapshot"),
-    );
-
-    let mut restored_execution = RlmExecutionState::new();
-    restored_execution
-        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
-        .expect("restore runtime");
-    let restored = restored_execution.rlm;
-    let restored_snapshot = restored.snapshot();
-    let Some(FlowValue::Projected(projected)) = restored_snapshot.globals().get("doc") else {
-        panic!("expected restored projected value");
-    };
-    assert_eq!(
-        projected.projection_ref(),
-        Some(&serde_json::json!({"kind": "memory", "key": "doc"}))
-    );
 }
 
 #[test]
@@ -1422,12 +1274,8 @@ pub(super) fn flow_record_to_tool_args_materializes_ordinary_tools() {
 #[test]
 pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
     block_on(async {
-        let reference = ProjectionRef::new("memory", serde_json::json!("doc"));
-        let projected_root = ProjectedValue::custom_with_projection_ref(
-            "doc",
-            Arc::new(SnapshotProjectedToolText::default()),
-            serde_json::json!(reference),
-        );
+        let projected_root =
+            ProjectedValue::custom("doc", Arc::new(SnapshotProjectedToolText::default()));
         let mut computed = FlowRecord::default();
         computed.insert(
             "summary".to_string(),
@@ -1466,11 +1314,8 @@ pub(super) fn flow_record_to_tool_args_preserves_only_seed_projected_roots() {
                 "seed": {
                     "problem": {
                         "__projected__": {
-                            "kind": "ref",
-                            "value": {
-                                "kind": "memory",
-                                "key": "doc"
-                            }
+                            "kind": "materialized",
+                            "value": "materialized tool text"
                         }
                     },
                     "computed": {

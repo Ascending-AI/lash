@@ -16,7 +16,7 @@ use crate::executor::{
     ParkedCellEvidence, RlmExecutionState, RlmLashlangExecutionTraceConfig,
     execute_code_with_channel_and_bounds, execute_parked_cell_for_tests,
 };
-use crate::projection::{ProjectionRegistry, RlmProjectedBindings, flow_to_json_value};
+use crate::projection::{RlmProjectedBindings, flow_to_json_value};
 
 /// The one language an RLM session runs (ADR 0096).
 pub(crate) const LANGUAGE_ID: &str = crate::dialect::typescript::LANGUAGE_ID;
@@ -93,11 +93,9 @@ pub(crate) struct Session {
     /// The leaf bodies a host has been handed, by component key: what a
     /// rehydrating worker reads an unchanged leaf back from.
     stored_leaves: BTreeMap<String, Arc<[u8]>>,
-    /// The host's read-only projected bindings, bound lazily through
-    /// `projections` exactly as a host binds a projection it can re-resolve.
-    /// Both belong to the host, so both outlive every restart.
+    /// The host's read-only projected bindings, re-supplied to every cell.
+    /// They belong to the host, so they outlive every restart.
     host_bindings: RlmProjectedBindings,
-    projections: Arc<ProjectionRegistry>,
 }
 
 impl Session {
@@ -105,18 +103,16 @@ impl Session {
         Self::open_with_host(mode, &BTreeMap::new())
     }
 
-    /// A session whose host projects `host` as read-only bindings, each a lazy
-    /// projection the host's registry resolves again after every restart.
+    /// A session whose host projects `host` as read-only bindings, bound
+    /// again for every cell the way a host re-supplies them after a restart.
     pub(crate) fn open_with_host(
         mode: HarnessMode,
         host: &BTreeMap<String, serde_json::Value>,
     ) -> Self {
-        let projections = Arc::new(ProjectionRegistry::new());
         let mut host_bindings = RlmProjectedBindings::new();
         for (name, value) in host {
-            let reference = projections.register_memory(Arc::new(HostJson(value.clone())));
             host_bindings = host_bindings
-                .bind_lazy(name.clone(), reference)
+                .bind_json(name.clone(), value.clone())
                 .expect("host binding names are unique");
         }
         let runtime = tokio::runtime::Builder::new_current_thread()
@@ -135,7 +131,6 @@ impl Session {
             history: Vec::new(),
             stored_leaves: BTreeMap::new(),
             host_bindings,
-            projections,
         }
     }
 
@@ -164,7 +159,6 @@ impl Session {
         };
         let state = &mut self.state;
         let host_bindings = self.host_bindings.clone();
-        let projections = Arc::clone(&self.projections);
         let artifact_store = lashlang::LashlangArtifacts::of_backend(&self.double.lash_backend());
         let cell = self.history.len();
         let double = &self.double;
@@ -196,7 +190,6 @@ impl Session {
                 LashlangSurface::default(),
                 None,
                 host_bindings,
-                projections,
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
@@ -415,51 +408,5 @@ impl Session {
         });
         self.state = state;
         result.expect_err("the deliberately broken continuation must fail")
-    }
-}
-
-/// A host's read-only JSON value, projected: it answers materialization and
-/// the structural reads a host document answers (a field, an index, its keys
-/// and length); every other read falls back to materializing.
-struct HostJson(serde_json::Value);
-
-impl lashlang::ProjectedHostDescriptor for HostJson {
-    fn type_name(&self) -> &str {
-        match &self.0 {
-            serde_json::Value::Null => "null",
-            serde_json::Value::Bool(_) => "boolean",
-            serde_json::Value::Number(_) => "number",
-            serde_json::Value::String(_) => "string",
-            serde_json::Value::Array(_) => "array",
-            serde_json::Value::Object(_) => "object",
-        }
-    }
-
-    fn read_one(
-        &self,
-        request: lashlang::ProjectedReadRequest,
-    ) -> Option<lashlang::ProjectedReadResponse> {
-        use lashlang::{ProjectedReadRequest as Read, ProjectedReadResponse as Answer};
-        let json = |value: Option<&serde_json::Value>| {
-            Answer::Value(
-                value
-                    .cloned()
-                    .map_or(lashlang::Value::Undefined, lashlang::from_json),
-            )
-        };
-        match (request, &self.0) {
-            (Read::Materialize, value) => Some(json(Some(value))),
-            (Read::Field(name), serde_json::Value::Object(fields)) => {
-                Some(json(fields.get(name.as_ref())))
-            }
-            (Read::Index(lashlang::Value::Number(index)), serde_json::Value::Array(items)) => {
-                Some(json(items.get(index as usize)))
-            }
-            (Read::Keys, serde_json::Value::Object(fields)) => {
-                Some(Answer::Keys(fields.keys().cloned().collect()))
-            }
-            (Read::Len, serde_json::Value::Array(items)) => Some(Answer::Len(items.len())),
-            _ => None,
-        }
     }
 }

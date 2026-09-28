@@ -1640,7 +1640,7 @@ must_cover = ["RlmSnapshotRoot", "RlmDriverState", "DeferredTriggerResolutionRec
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-rlm-types/src/lib.rs"]
-symbols = ["ProjectionRef"]
+symbols = ["RlmProjectedSeedEntry"]
 
 # `DeferredResolutionRecord.resolutions` carries `Resolution::Resolved` ->
 # `ToolGrant.definition` into the snapshot, and `link_key` carries

@@ -1739,10 +1739,10 @@ fn nested_projection_snapshot() -> Snapshot {
             "rows".to_string(),
             Value::List(
                 vec![Value::Projected(
-                    ProjectedValue::custom_with_projection_ref(
+                    ProjectedValue::unavailable_after_restore_with_projection_ref(
                         "report",
-                        Arc::new(SnapshotGuardProjectedValue::default()),
-                        serde_json::json!({ "kind": "report", "id": 7 }),
+                        "string",
+                        Some(serde_json::json!({ "kind": "report", "id": 7 })),
                     ),
                 )]
                 .into(),

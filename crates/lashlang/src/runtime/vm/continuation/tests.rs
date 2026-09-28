@@ -348,24 +348,6 @@ fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
     );
 }
 
-/// A host descriptor that answers nothing: only its identity crosses the wire.
-#[derive(Default)]
-struct WireProbeDescriptor;
-
-impl crate::runtime::ProjectedHostDescriptor for WireProbeDescriptor {
-    fn type_name(&self) -> &str {
-        "string"
-    }
-
-    /// Identity only: this descriptor answers no read (FIG-2863).
-    fn read_one(
-        &self,
-        _request: crate::runtime::ProjectedReadRequest,
-    ) -> Option<crate::runtime::ProjectedReadResponse> {
-        None
-    }
-}
-
 /// FIG-2865: the continuation wire refused `Value::Projected` recursively, so a
 /// slot holding `[report]` could not park at all while the `State` snapshot
 /// wrote the identical value without complaint. Both writers now use the same
@@ -375,10 +357,10 @@ fn nested_projection_survives_the_continuation_wire() {
     let mut continuation = empty_continuation(Heap::default());
     continuation.operand_stack = vec![Value::List(
         vec![Value::Projected(
-            crate::runtime::ProjectedValue::custom_with_projection_ref(
+            crate::runtime::ProjectedValue::unavailable_after_restore_with_projection_ref(
                 "report",
-                std::sync::Arc::new(WireProbeDescriptor),
-                serde_json::json!({ "kind": "report", "id": 7 }),
+                "string",
+                Some(serde_json::json!({ "kind": "report", "id": 7 })),
             ),
         )]
         .into(),

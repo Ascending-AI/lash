@@ -25,9 +25,6 @@ impl TypescriptDialect {
         Self {
             surface,
             services: RlmDialectServices {
-                projection_resolver: std::sync::Arc::new(
-                    crate::projection::ProjectionRegistry::new(),
-                ),
                 artifact_store: lashlang::LashlangArtifacts::new(std::sync::Arc::new(
                     PromptOnlyArtifactStore,
                 )),
@@ -696,7 +693,6 @@ impl TypescriptDialect {
 #[cfg(test)]
 mod tests {
     use lash_sansio::SessionId;
-    use std::sync::Arc;
 
     use super::*;
     use crate::projection::RlmProjectedBindings;
@@ -711,7 +707,6 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -770,7 +765,6 @@ mod tests {
                 resources,
             },
             RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -851,7 +845,6 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -913,7 +906,6 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -998,7 +990,6 @@ mod tests {
         let dialect = TypescriptDialect::new(
             LashlangSurface::default(),
             RlmDialectServices {
-                projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                 artifact_store: crate::testing::memory_artifact_store_blocking(),
                 deferred_tool_resolver: None,
                 deferred_trigger_resolver: None,
@@ -1145,7 +1136,6 @@ mod tests {
                 let dialect = TypescriptDialect::new(
                     LashlangSurface::default(),
                     RlmDialectServices {
-                        projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
                         artifact_store: crate::testing::memory_artifact_store().await,
                         deferred_tool_resolver: None,
                         deferred_trigger_resolver: None,

@@ -46,13 +46,10 @@ pub use plugin::{
     rlm_protocol_config, rlm_session_config, rlm_session_config_options,
 };
 pub use projection::{
-    ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,
-    RlmProjectedBindings, rlm_session_projection_extension,
-};
-pub use projection::{
     RlmHistoryProjection, RlmSeed, decode_rlm_protocol_event, rlm_history_projection,
     rlm_protocol_event, rlm_seed_initial_nodes,
 };
+pub use projection::{RlmProjectedBindings, rlm_session_projection_extension};
 #[cfg(feature = "testing")]
 pub use protocol::project_conformance_messages_through_rlm_history;
 pub use protocol::{RlmDriver, RlmPromptFeatures};

@@ -47,9 +47,8 @@ pub(crate) use validation::{PersistedRoots, ensure_value_depth};
 pub(crate) use crate::ecma_stdlib::{BuiltinFunction, BuiltinPrototype};
 
 use super::{
-    CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, ProjectedValue, Record,
-    RuntimeError, Value, add_values, coerce_string, record_with_capacity,
-    resolve_existing_list_assignment_index,
+    CompiledAssignPath, CompiledAssignPathStep, CompiledFunction, Name, Record, RuntimeError,
+    Value, add_values, coerce_string, record_with_capacity, resolve_existing_list_assignment_index,
 };
 
 /// Which byte-charge schedule a persisted heap's `live_logical_bytes` was

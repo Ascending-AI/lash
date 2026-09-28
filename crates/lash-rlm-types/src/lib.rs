@@ -726,38 +726,11 @@ impl std::fmt::Display for RlmSessionConfigConflict {
 
 impl std::error::Error for RlmSessionConfigConflict {}
 
-/// Durable identity for a host projection that can be resolved in another
-/// process-local RLM runtime.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ProjectionRef {
-    pub kind: String,
-    pub key: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub descriptor_type: Option<String>,
-}
-
-impl Eq for ProjectionRef {}
-
-impl ProjectionRef {
-    pub fn new(kind: impl Into<String>, key: serde_json::Value) -> Self {
-        Self {
-            kind: kind.into(),
-            key,
-            descriptor_type: None,
-        }
-    }
-
-    pub fn with_descriptor_type(mut self, descriptor_type: impl Into<String>) -> Self {
-        self.descriptor_type = Some(descriptor_type.into());
-        self
-    }
-}
-
 /// One durable projected seed binding.
 ///
-/// The explicit tag makes projection references disjoint from ordinary JSON:
-/// materialized data can spell any object keys without acquiring reference
-/// semantics during restore.
+/// The explicit tag keeps the entry disjoint from ordinary JSON: materialized
+/// data can spell any object keys — `kind` and `value` included — without
+/// acquiring entry semantics during restore.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(
     tag = "kind",
@@ -767,7 +740,6 @@ impl ProjectionRef {
 )]
 pub enum RlmProjectedSeedEntry {
     Materialized(serde_json::Value),
-    Ref(ProjectionRef),
 }
 
 /// Wire-format snapshot of a set of projected bindings. Pairs of
@@ -848,6 +820,17 @@ mod projected_seed_tests {
             }))
             .is_err(),
             "the untagged legacy seed entry must not decode"
+        );
+        assert!(
+            serde_json::from_value::<RlmProjectedSeedEntry>(serde_json::json!({
+                "kind": "ref",
+                "value": {
+                    "kind": "memory",
+                    "key": "data",
+                }
+            }))
+            .is_err(),
+            "a durable projection ref must not decode"
         );
     }
 }

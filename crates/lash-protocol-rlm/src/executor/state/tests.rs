@@ -1390,7 +1390,6 @@ fn the_dialect_pins_snapshot_engine_id() {
     let dialect = TypescriptDialect::new(
         lash_lashlang_runtime::LashlangSurface::default(),
         RlmDialectServices {
-            projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
             artifact_store: crate::testing::memory_artifact_store_blocking(),
             deferred_tool_resolver: None,
             deferred_trigger_resolver: None,

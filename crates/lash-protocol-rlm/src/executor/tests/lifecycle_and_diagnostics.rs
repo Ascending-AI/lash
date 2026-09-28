@@ -74,20 +74,6 @@ impl lash_core::ModuleArtifactStore for FailingArtifactStore {
     }
 }
 
-struct FailingProjectionResolver;
-
-#[async_trait::async_trait]
-impl ProjectionResolver for FailingProjectionResolver {
-    async fn resolve_projection(
-        &self,
-        _reference: &ProjectionRef,
-    ) -> Result<Arc<dyn ProjectedHostDescriptor>, crate::projection::ProjectionResolveError> {
-        Err(crate::projection::ProjectionResolveError::invalid(
-            "injected projection resolution failure",
-        ))
-    }
-}
-
 fn colliding_host_catalog() -> lash_core::ToolCatalog {
     let definition = |id, name| {
         lash_core::ToolDefinition::raw(
@@ -195,7 +181,6 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut surface = LashlangSurface::default();
     let mut deferred_resolver = None;
     let mut projected_bindings = RlmProjectedBindings::default();
-    let mut projection_resolver: Arc<dyn ProjectionResolver> = Arc::new(ProjectionRegistry::new());
 
     match site {
         HostSetupFailureSite::DeferredResolution => {
@@ -240,13 +225,12 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             );
         }
         HostSetupFailureSite::ResolveProjectedBindings => {
+            // `history` is the reserved built-in: binding it through the
+            // session collides when the executor assembles projected
+            // bindings.
             projected_bindings = RlmProjectedBindings::new()
-                .bind_lazy(
-                    "doc",
-                    ProjectionRef::new("injected", serde_json::json!("missing")),
-                )
+                .bind_json("history", serde_json::json!("injected"))
                 .expect("bind injected projection");
-            projection_resolver = Arc::new(FailingProjectionResolver);
         }
         HostSetupFailureSite::CancelledSetup => {
             context = Some(lash_core::testing::cancelled_code_execution_context(
@@ -267,7 +251,6 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         surface,
         deferred_resolver,
         projected_bindings,
-        projection_resolver,
         RlmLashlangExecutionTraceConfig::default(),
     )
     .await;
@@ -282,12 +265,7 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
         // classifications in `executor/mod.rs` intentionally has no row: the
         // cache currently constructs only `Parse` and `Link`, which are
         // classified by the preceding arms, so no host-classified variant can
-        // be injected through its public API. Projection rehydration has none
-        // either: it rebinds placeholders in place and allocates nothing
-        // (FIG-3628), so the memory bound it used to be able to cross while
-        // re-inserting a copy is gone, and its only remaining failure —
-        // re-deriving a host view the install path already derived — has no
-        // input that reaches it.
+        // be injected through its public API.
         let cases = [
             (
                 HostSetupFailureSite::DeferredResolution,
@@ -303,7 +281,7 @@ pub(super) fn every_host_setup_failure_is_classified_as_host() {
             ),
             (
                 HostSetupFailureSite::ResolveProjectedBindings,
-                "injected projection resolution failure",
+                "`history` is already bound as an RLM projected binding",
             ),
             (
                 HostSetupFailureSite::CancelledSetup,
@@ -456,7 +434,6 @@ pub(super) async fn execute_and_collect_inventory(
             calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })),
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig {
             sink: Some(sink.clone()),
             trace_context: TraceContext::default(),
@@ -570,7 +547,6 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
@@ -602,7 +578,6 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
@@ -671,7 +646,6 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
@@ -712,7 +686,6 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
@@ -786,7 +759,6 @@ pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
@@ -833,7 +805,6 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 LashlangSurface::default(),
                 None,
                 RlmProjectedBindings::default(),
-                Arc::new(ProjectionRegistry::new()),
                 RlmLashlangExecutionTraceConfig::default(),
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
@@ -883,7 +854,6 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
@@ -945,7 +915,6 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
@@ -981,7 +950,6 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     LashlangSurface::default(),
                     None,
                     RlmProjectedBindings::default(),
-                    Arc::new(ProjectionRegistry::new()),
                     RlmLashlangExecutionTraceConfig::default(),
                     lashlang::ExecutionBounds::unbounded(),
                     crate::plugin::RlmChannel::Cell,
@@ -1375,7 +1343,6 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig {
             sink: trace_sink,
             trace_context: TraceContext::default(),
@@ -1490,7 +1457,6 @@ pub(super) async fn execute_test_code(
         LashlangSurface::default(),
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
     ))
     .await;
@@ -1629,7 +1595,6 @@ pub(super) async fn execute_with_host_environment(
         surface,
         None,
         RlmProjectedBindings::default(),
-        Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
         lashlang::ExecutionBounds::new(
             lashlang::ExecutionBound::instructions(1_000_000),
@@ -1665,7 +1630,6 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
@@ -1701,7 +1665,6 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             LashlangSurface::default(),
             None,
             RlmProjectedBindings::default(),
-            Arc::new(ProjectionRegistry::new()),
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::new(
                 lashlang::ExecutionBound::instructions(1),
@@ -1728,7 +1691,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             language: "typescript".to_string(),
             code: "finish(1);".to_string(),
         };
-        let resolver = || Arc::new(ProjectionRegistry::new());
         let surface = || {
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
@@ -1753,7 +1715,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            resolver(),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
@@ -1780,7 +1741,6 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             surface(),
             None,
             RlmProjectedBindings::default(),
-            resolver(),
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;

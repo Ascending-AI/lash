@@ -14,7 +14,6 @@ pub(crate) use typescript::TypescriptDialect;
 use crate::executor::{
     RlmExecutionState, execute_code_with_channel_and_bounds_with_trigger_resolver,
 };
-use crate::projection::ProjectionResolver;
 use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 
 /// Everything one execution session needs from the host that opened it.
@@ -26,7 +25,6 @@ use crate::rlm_support::{BoundVariableRenderCache, render_bound_variables};
 #[derive(Clone)]
 pub(crate) struct RlmDialectServices {
     pub(crate) code_renderer: crate::render::CodeRendererSlot,
-    pub(crate) projection_resolver: Arc<dyn ProjectionResolver>,
     pub(crate) artifact_store: LashlangArtifacts,
     pub(crate) deferred_tool_resolver: Option<SharedDeferredToolResolver>,
     pub(crate) deferred_trigger_resolver: Option<SharedDeferredTriggerResolver>,
@@ -122,7 +120,6 @@ impl DialectSession {
             self.services.deferred_tool_resolver.clone(),
             self.services.deferred_trigger_resolver.clone(),
             session_projected_bindings,
-            Arc::clone(&self.services.projection_resolver),
             self.services.execution_trace_config.clone(),
             self.services.execution_bounds.into_engine(),
             self.services.channel,
@@ -411,7 +408,6 @@ mod tests {
 #[cfg(test)]
 pub(crate) fn test_dialect_services() -> RlmDialectServices {
     RlmDialectServices {
-        projection_resolver: Arc::new(crate::projection::ProjectionRegistry::new()),
         artifact_store: crate::testing::memory_artifact_store_blocking(),
         deferred_tool_resolver: None,
         deferred_trigger_resolver: None,

@@ -2,10 +2,7 @@ mod bindings;
 mod context;
 mod transport;
 
-pub use bindings::{
-    ProjectionRef, ProjectionRegistry, ProjectionResolveError, ProjectionResolver,
-    RlmProjectedBindings, rlm_session_projection_extension,
-};
+pub use bindings::{RlmProjectedBindings, rlm_session_projection_extension};
 pub use context::{
     RlmHistoryProjection, decode_rlm_protocol_event, rlm_history_projection, rlm_protocol_event,
 };
@@ -22,5 +19,4 @@ pub(crate) use context::{
 pub(crate) use transport::{flow_record_to_json_value, flow_record_to_tool_args};
 pub(crate) use transport::{
     flow_to_json_value, json_to_flow_value, normalize_tool_args_for_projection,
-    rehydrate_projected_globals,
 };

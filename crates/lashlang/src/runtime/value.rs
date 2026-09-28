@@ -876,26 +876,10 @@ impl ProjectedValue {
     }
 
     pub fn custom(name: impl Into<Arc<str>>, value: Arc<dyn ProjectedHostDescriptor>) -> Self {
-        Self::custom_inner(name, value, None)
-    }
-
-    pub fn custom_with_projection_ref(
-        name: impl Into<Arc<str>>,
-        value: Arc<dyn ProjectedHostDescriptor>,
-        projection_ref: serde_json::Value,
-    ) -> Self {
-        Self::custom_inner(name, value, Some(projection_ref))
-    }
-
-    fn custom_inner(
-        name: impl Into<Arc<str>>,
-        value: Arc<dyn ProjectedHostDescriptor>,
-        projection_ref: Option<serde_json::Value>,
-    ) -> Self {
         Self {
             name: name.into(),
             kind: ProjectedKind::Custom(value),
-            projection_ref,
+            projection_ref: None,
         }
     }
 
