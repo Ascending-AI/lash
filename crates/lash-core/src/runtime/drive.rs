@@ -649,15 +649,32 @@ impl LashRuntime {
 
     /// Run `admitted`'s root as an engine's attempt of its own: the engine
     /// retries the attempt on a live fault (FIG-3897).
+    ///
+    /// An engine also ends an attempt by dropping it where it stands:
+    /// Restate stops polling a handler that suspends at an await, or whose
+    /// attempt failed. Nothing after that await runs, so the attempt's flag
+    /// is still up when the engine's next attempt enters, and the resident
+    /// session still holds what the dropped attempt did to it: a code cell
+    /// that returned but was never settled, the root's claims, its sealed
+    /// run. The next attempt replays the journal from its start, so it must
+    /// start from the durable session exactly as a redrive in a fresh
+    /// process does, never from that residue: a cell that refuses to start
+    /// over an unsettled one skips the effects its first execution journaled
+    /// (FIG-3982).
     async fn run_engine_root(
         &mut self,
         controller: &ScopedEffectController<'_>,
         admitted: Admitted,
         sinks: &DriveSinks<'_>,
     ) -> Result<RootRun, DriveAbort> {
-        let outer = std::mem::replace(&mut self.engine_retries_root, true);
+        if std::mem::replace(&mut self.engine_retries_root, true) {
+            self.drive_root = None;
+            self.journaled_drive_claims.clear();
+            self.admitted_turn_index = None;
+            self.invalidate_resident_session_state();
+        }
         let run = Box::pin(self.run_admitted_root_step(controller, admitted, sinks, None)).await;
-        self.engine_retries_root = outer;
+        self.engine_retries_root = false;
         run
     }
 

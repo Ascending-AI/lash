@@ -1979,6 +1979,8 @@ mod plugin_stack;
 #[cfg(feature = "rlm")]
 mod processes_endstate;
 #[cfg(feature = "rlm")]
+mod redrive_residue;
+#[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;
 mod session_control;
