@@ -1186,6 +1186,8 @@ pub(crate) async fn delete_session_tx(
     }
     // The session's logical roots and their input bindings go with it; a
     // `close_session` intent stays as its deletion tombstone.
+    report.removed_capture_frame_count =
+        crate::capture::delete_session_capture_tx(tx, session_id).await?;
     crate::session_roots::delete_session_roots_conn(tx, session_id).await?;
     for statement in [
         turn_ingress.queued_items_postgres.delete_by_session.sql(),

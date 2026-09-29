@@ -625,7 +625,7 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // queued-work head is admitted as an ordinary root (FIG-3927, changed in
 // place under the version freeze). A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
-const SCHEMA_VERSION: i32 = 141;
+const SCHEMA_VERSION: i32 = 142;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -1428,6 +1428,8 @@ mod attachments;
 mod backend;
 #[path = "postgres/blobs.rs"]
 mod blobs;
+#[path = "postgres/capture.rs"]
+mod capture;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]

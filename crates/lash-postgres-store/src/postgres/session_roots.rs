@@ -202,6 +202,7 @@ pub(crate) async fn end_lost_root_tx(
         cause,
         head_revision: None,
         at_ms,
+        stopped_partial: None,
     };
     sqlx::query(
         crate::session_sql::session_sql()
@@ -663,6 +664,7 @@ pub(crate) async fn begin_session_close_tx(
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,
+                    stopped_partial: None,
                 },
             )
             .await?;

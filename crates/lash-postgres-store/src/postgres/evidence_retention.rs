@@ -34,6 +34,12 @@ pub(crate) async fn reclaim(
                 .await
                 .map_err(store_sqlx_error)?
                 .rows_affected() as usize;
+        let removed_stopped_partial_count = sqlx::query(crate::capture::retention_delete_sql())
+            .bind(clamp_epoch_ms(bound.committed_before_epoch_ms))
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected() as usize;
         // Only terminal usage becomes eligible; live ledgers reconstruct
         // resumed accounting. Anti-join after the receipt-root sweep.
         let removed_usage_delta_count = sqlx::query(session_sql().usage.delete_reclaimable.sql())
@@ -56,6 +62,7 @@ pub(crate) async fn reclaim(
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::RetentionReport {
             removed_receipt_count,
+            removed_stopped_partial_count,
             removed_usage_delta_count,
             removed_attachment_root_count,
             // Effect scopes are the engine's to retire; this catalog holds
