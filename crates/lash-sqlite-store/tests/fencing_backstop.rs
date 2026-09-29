@@ -26,8 +26,8 @@ use lash_core_execution::store::{AdmittedHead, DriveFence, RootAdmission, RootSt
 use lash_core_execution::store_backend_support::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
 };
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
-use lash_core_execution::{IngressStore, LeaseOwnerIdentity, StoreError, TurnId};
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
+use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore, StoreError, TurnId};
 use lash_sansio::SessionId;
 use lash_sqlite_store::SqliteStore;
 use tracing_subscriber::layer::{Context, SubscriberExt};

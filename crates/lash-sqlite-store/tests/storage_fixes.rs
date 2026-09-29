@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use lash_core_execution::runtime::{ProcessWakeDelivery, QueuedWorkBatchDraft, RuntimeSubject};
 use lash_core_execution::store::RootStore as _;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
+use lash_core_execution::testing::store_fixtures::RuntimeStoreTestDriveExt;
 use lash_core_execution::{
-    AttachmentRootSet, IngressStore, LeaseOwnerIdentity, PluginState, RuntimeCommit,
+    AttachmentRootSet, LeaseOwnerIdentity, PluginState, QueuedWorkStore, RuntimeCommit,
     RuntimeInvocation, RuntimeSessionState, SessionCatalogStore, SessionCommitStore, StoreError,
     ToolState,
 };
@@ -175,7 +175,7 @@ fn head_revision_cas_holds_across_two_connections() {
 
     // The persisted head must reflect exactly one applied commit.
     let store = block_on(SqliteStore::open_file_for_testing(&path)).expect("reopen store");
-    let read = block_on(store.load_session())
+    let read = block_on(store.load_session_head_meta(&SessionId::from("root")))
         .expect("load")
         .expect("session present");
     assert_eq!(read.head_revision, 1);
@@ -214,11 +214,15 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
     }));
     state.set_execution_state_snapshot(Some(vec![0xDE, 0xAD, 0xBE, 0xEF].into()));
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-            state.session_id.clone(),
-        ))
+        .admit_session(&lash_core_execution::SessionStoreCreateRequest {
+            session_id: state.session_id.clone(),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: state.policy.clone(),
+            pending_observer_intents: Vec::new(),
+            owning_process_id: None,
+        })
         .await
-        .expect("bind session to store");
+        .expect("admit session");
     let commit = RuntimeCommit {
         expected_head_revision: 0,
         ..RuntimeCommit::persisted_state_for_test(&state, &[])

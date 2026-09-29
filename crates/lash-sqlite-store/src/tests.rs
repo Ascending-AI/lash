@@ -25,7 +25,7 @@ fn one_process_module(process_name: &str, param: &str) -> lashlang::Program {
 
 use lash_core_execution::{
     ProcessLifecycle as _, ProcessObserverRegistry as _, ProcessRegistrar as _,
-    SessionCatalogStore as _,
+    SessionCatalogStore as _, SessionHistoryStore as _,
 };
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
@@ -423,22 +423,26 @@ async fn durable_state(
         ))
     };
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(session_id))
+        .admit_session(&SessionStoreCreateRequest {
+            session_id: session_id.clone(),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: state.policy.clone(),
+            pending_observer_intents: Vec::new(),
+            owning_process_id: None,
+        })
         .await
-        .expect("bind SQLite test session");
+        .expect("admit SQLite test session");
     state
 }
 
 lash_conformance::checkpoint_admission_probe_tests!({
-    let store = Arc::new(
-        crate::test_support::memory_store()
-            .await
-            .expect("open counter store"),
-    );
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open counter store");
     let counting_store = Arc::clone(&store);
     (
         (),
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn lash_core_execution::RuntimeStore>,
         SessionId::from("sqlite-checkpoint-counter"),
         move || counting_store.checkpoint_admission_counts(),
         // An in-memory SQLite store needs no session teardown.
@@ -450,11 +454,9 @@ lash_conformance::checkpoint_admission_probe_tests!({
 async fn checkpoint_component_statement_count_is_depth_invariant() {
     let mut observed = Vec::new();
     for depth in [10, 100, 1_000, 4_000] {
-        let store = Arc::new(
-            crate::test_support::memory_store()
-                .await
-                .expect("open depth-invariance store"),
-        );
+        let store = crate::test_support::memory_store()
+            .await
+            .expect("open depth-invariance store");
         let mut state = durable_state(
             &store,
             &SessionId::from(format!("sqlite-checkpoint-depth-{depth}")),
@@ -493,7 +495,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
         set_checkpoint_statement_trace(&store, true).await;
         let load_started = std::time::Instant::now();
         let loaded = store
-            .load_session()
+            .load_session_window(&state.session_id, lash_core_execution::WindowSelector::Current)
             .await
             .expect("load checkpoint component bodies")
             .expect("stored checkpoint session");
@@ -767,11 +769,11 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
-    let store = lashlang::LashlangArtifacts::new(Arc::new(
+    let store = lashlang::LashlangArtifacts::new(
         crate::test_support::memory_store()
             .await
             .expect("memory store"),
-    ));
+    );
     // process scan(root: str) -> str { finish root }
     let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
@@ -925,63 +927,26 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     );
 }
 
-// FIG-1282: two concurrent admissions on one unbound handle race to bind it.
-// The loser's SessionBindingMismatch must arrive without its session being
-// durably created — rejection precedes creation, atomically (the
-// SessionCommitStore contract), so the binding decision runs inside the
-// admission's write transaction.
 #[tokio::test]
-async fn concurrent_admission_loser_leaves_no_metadata() {
-    let dir = tempfile::tempdir().expect("admission race tempdir");
-    let path = dir.path().join("admission-race.db");
-    let store = Arc::new(
-        SqliteStore::open_file_for_testing(&path)
-            .await
-            .expect("open unbound store"),
-    );
-
-    let first_id = SessionId::from("admission-race-a");
-    let second_id = SessionId::from("admission-race-b");
-    let first_binding = lash_core_execution::SessionBinding::root(first_id.clone());
-    let second_binding = lash_core_execution::SessionBinding::root(second_id.clone());
-    let (first, second) = tokio::join!(
-        store.admit_and_bind_session(&first_binding),
-        store.admit_and_bind_session(&second_binding),
-    );
-
-    let rejected_id = match (first, second) {
-        (Ok(lash_core_execution::SessionAdmission::Created), Err(error)) => {
-            assert!(
-                matches!(error, StoreError::SessionBindingMismatch { .. }),
-                "the losing admission must report SessionBindingMismatch, got {error:?}"
-            );
-            second_id
-        }
-        (Err(error), Ok(lash_core_execution::SessionAdmission::Created)) => {
-            assert!(
-                matches!(error, StoreError::SessionBindingMismatch { .. }),
-                "the losing admission must report SessionBindingMismatch, got {error:?}"
-            );
-            first_id
-        }
-        (first, second) => panic!(
-            "concurrent admissions must yield one Created and one SessionBindingMismatch, \
-             got {first:?} and {second:?}"
-        ),
+async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
+    let dir = tempfile::tempdir().expect("admission tempdir");
+    let store = SqliteStore::open(dir.path()).await.expect("open catalog");
+    let request = |session_id: &str| SessionStoreCreateRequest {
+        session_id: SessionId::from(session_id),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        pending_observer_intents: Vec::new(),
+        owning_process_id: None,
     };
-
-    let rejected = SqliteStore::open_bound_readonly(
-        &crate::location::DatabaseLocation::standalone_file(&path),
-        &rejected_id,
-    )
-    .await
-    .expect("open rejected session read-only");
-    assert!(
-        rejected
-            .load_session_meta()
-            .await
-            .expect("read rejected session metadata")
-            .is_none(),
-        "a refused admission must leave no durable session metadata"
-    );
+    let first = request("admission-a");
+    let second = request("admission-b");
+    let (a, b) = tokio::join!(store.admit_session(&first), store.admit_session(&second));
+    assert!(matches!(a, Ok(lash_core_execution::SessionAdmission::Created)));
+    assert!(matches!(b, Ok(lash_core_execution::SessionAdmission::Created)));
+    for session_id in [&first.session_id, &second.session_id] {
+        assert!(matches!(
+            store.lookup_session(session_id).await.expect("lookup admitted session"),
+            lash_core_execution::SessionLookup::Live(_)
+        ));
+    }
 }

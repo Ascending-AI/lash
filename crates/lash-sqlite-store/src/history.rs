@@ -149,9 +149,11 @@ fn window(
     };
     let mut config = meta.config.clone();
     let graph = if let Some(leaf) = leaf {
-        let last = visible_header(conn, session, leaf.as_str())?
-            .filter(|h| !h.tombstoned)
-            .ok_or_else(|| corrupt("SessionGraph", format!("leaf `{leaf}` is not readable")))?;
+        let last = match visible_header(conn, session, leaf.as_str())?.filter(|h| !h.tombstoned) {
+            Some(last) => last,
+            None if admitted => return Err(StoreError::TurnBaseNotRetained { revision }),
+            None => return Err(corrupt("SessionGraph", format!("leaf `{leaf}` is not readable"))),
+        };
         if !admitted
             && meta.current_frame_node_id.as_ref().map(|id| id.as_str())
                 != Some(last.frame.as_str())
@@ -164,9 +166,11 @@ fn window(
                 derived: Some(last.frame),
             });
         }
-        let frame = visible_header(conn, session, &last.frame)?
-            .filter(|h| !h.tombstoned)
-            .ok_or_else(|| corrupt("SessionGraph", "frame is not readable"))?;
+        let frame = match visible_header(conn, session, &last.frame)?.filter(|h| !h.tombstoned) {
+            Some(frame) => frame,
+            None if admitted => return Err(StoreError::TurnBaseNotRetained { revision }),
+            None => return Err(corrupt("SessionGraph", "frame is not readable")),
+        };
         if frame.generation < 0 || frame.generation > last.generation {
             return Err(corrupt("SessionGraph", "frame generation exceeds leaf"));
         }

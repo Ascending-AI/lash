@@ -4,10 +4,21 @@
 //! Exercise real SQLite receipt adjudication with an intervening committed head.
 
 use lash_core_execution::{
-    ExecutionScope, OperationId, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionPolicy, StoreError, TurnBudget,
+    ExecutionScope, FleetFormatStore, OperationId, RuntimeCommit, RuntimeSessionState,
+    SessionCommitStore, SessionHistoryStore, SessionPolicy, StoreError, TurnBudget, WindowSelector,
 };
 use lash_sqlite_store::SqliteStore;
+
+async fn loaded_state(store: &SqliteStore) -> RuntimeSessionState {
+    let read = store
+        .load_session_window(&lash_sansio::SessionId::from("root"), WindowSelector::Current)
+        .await
+        .expect("load current window")
+        .expect("committed session has a window");
+    lash_core_execution::store::window_state(read, store.fleet_format())
+        .expect("adopt current window")
+        .state
+}
 
 fn commit(boundary: &str, key: &str, revision: u64) -> RuntimeCommit {
     let state = RuntimeSessionState {
@@ -51,10 +62,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
         .commit_runtime_state(first.clone())
         .await
         .expect("first commit");
-    let mut advanced_state = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("load initial state")
-        .expect("initial state");
+    let mut advanced_state = loaded_state(&store).await;
     advanced_state.turn_index += 1;
     let advanced = store
         .commit_runtime_state(commit_state("intervening", "advance", &advanced_state))
@@ -73,10 +81,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     assert_eq!(replay.checkpoint_ref, original.checkpoint_ref);
     // FIG-2480: a rebuilt same-request retry at the advanced head is answered
     // from durable receipt evidence, not refused for its moved commit hash.
-    let loaded = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("load advanced state")
-        .expect("advanced state");
+    let loaded = loaded_state(&store).await;
     let rebuilt = store
         .commit_runtime_state(semantic_commit_state(boundary, key, &loaded))
         .await
@@ -102,7 +107,7 @@ async fn semantic_boundary_retry_after_head_advance(boundary: &str, key: &str) {
     );
     assert_eq!(
         store
-            .load_session()
+            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("read head")
             .expect("session")
@@ -161,10 +166,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
         .commit_runtime_state(first.clone())
         .await
         .expect("first usage flush");
-    let mut advanced_state = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("load initial state")
-        .expect("initial state");
+    let mut advanced_state = loaded_state(&store).await;
     advanced_state.turn_index += 1;
     let advanced = store
         .commit_runtime_state(commit_state("intervening", "advance", &advanced_state))
@@ -172,10 +174,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
         .expect("advance head");
     // FIG-2480: a rebuilt retry carrying the same staged usage is answered from
     // durable receipt evidence and publishes no second ledger row.
-    let loaded = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("load advanced state")
-        .expect("advanced state");
+    let loaded = loaded_state(&store).await;
     let rebuilt = store
         .commit_runtime_state(usage_commit(&loaded, "child-turn-usage"))
         .await
@@ -201,7 +200,7 @@ async fn usage_ledger_retry_with_staged_usage_after_head_advance() {
     );
     assert_eq!(
         store
-            .load_session()
+            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("read head")
             .expect("session")
@@ -231,7 +230,7 @@ async fn initial_park_exact_commit_retry_after_head_advance() {
     let first = park_commit(&state);
     assert!(
         store
-            .load_session()
+            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("preview has no store effects")
             .is_none()
@@ -297,19 +296,13 @@ async fn append_identity_replays_after_head_advance() {
     )
     .expect("append identity");
     let original = store.commit_runtime_state(first).await.expect("append");
-    let mut advanced = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("load")
-        .expect("state");
+    let mut advanced = loaded_state(&store).await;
     advanced.turn_index += 1;
     let advanced_receipt = store
         .commit_runtime_state(commit_state("intervening", "advance", &advanced))
         .await
         .expect("advance head");
-    let mut loaded = lash_core_execution::store::load_persisted_session_state(&store)
-        .await
-        .expect("reload")
-        .expect("state");
+    let mut loaded = loaded_state(&store).await;
     let retry = lash_core_execution::store::append_request_commit_with_clock_for_testing(
         &mut loaded,
         "append-audit",
@@ -330,7 +323,7 @@ async fn append_identity_replays_after_head_advance() {
     assert_eq!(replay.head_revision, original.head_revision);
     assert_eq!(
         store
-            .load_session()
+            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("head")
             .expect("session")
@@ -371,7 +364,7 @@ async fn non_append_operations_refuse_append_identity_metadata() {
     }
     assert!(
         store
-            .load_session()
+            .load_session_head_meta(&lash_sansio::SessionId::from("root"))
             .await
             .expect("unchanged store")
             .is_none()
