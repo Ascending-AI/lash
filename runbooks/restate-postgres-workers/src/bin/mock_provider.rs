@@ -802,11 +802,13 @@ finish({{
 /// The failover variant loses its worker twice (FIG-608): once inside the
 /// batch, after the witness committed `slow` and before the tool returned, and
 /// once from `crash_once` after `Promise.all` settled, so the replay that
-/// follows runs over effects that already completed.
+/// follows runs over effects that already completed. The first loss waits
+/// for the rest of the `batch_width`-wide batch to journal its attempts, so
+/// `fast` has completed by then wherever its child runs.
 fn tool_batch_script(workflow_id: &str, fail_once: bool) -> String {
     let (lose, crash) = if fail_once {
         (
-            ",\n    lose_after_commit: true",
+            ",\n    lose_after_commit: true,\n    batch_width: 2",
             format!(
                 r#"
 const crash = await tools.crash_once({{ workflow_id: "{workflow_id}" }});

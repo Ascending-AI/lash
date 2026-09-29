@@ -1,5 +1,6 @@
 use lash::ProcessId;
 use lash::SessionId;
+mod batch_journal;
 pub mod local_restate;
 mod schema;
 pub use schema::ensure_e2e_schema;
@@ -768,7 +769,8 @@ fn e2e_tool_provider(
                         "workflow_id": { "type": "string" },
                         "key": { "type": "string" },
                         "delay_ms": { "type": "integer" },
-                        "lose_after_commit": { "type": "boolean" }
+                        "lose_after_commit": { "type": "boolean" },
+                        "batch_width": { "type": "integer" }
                     },
                     "required": ["workflow_id", "key"],
                     "additionalProperties": false
@@ -1068,6 +1070,8 @@ impl E2eTools {
     /// committed and before the reply is recorded or the tool returns: the
     /// window in which Restate must re-enter the closure, and a second
     /// physical attempt must find the first commit rather than make another.
+    /// It exits only once every other member of its `batch_width`-wide batch
+    /// has its attempt journaled, so the replay runs over completed siblings.
     async fn witness_effect(
         &self,
         workflow_id: &str,
@@ -1098,6 +1102,17 @@ impl E2eTools {
             && lose
             && should_exit_for_peer_failover(&self.pool, &marker, &self.worker_id, false).await
         {
+            let batch_width = call
+                .args
+                .get("batch_width")
+                .and_then(serde_json::Value::as_u64)
+                .context("a lose_after_commit call names its batch_width")?;
+            batch_journal::await_batch_siblings_journaled(
+                workflow_id,
+                call.context.tool_call_id().unwrap_or_default(),
+                batch_width,
+            )
+            .await?;
             witness::record_nemesis(
                 &self.witness,
                 witness::NEMESIS_LOSS_AFTER_COMMIT,

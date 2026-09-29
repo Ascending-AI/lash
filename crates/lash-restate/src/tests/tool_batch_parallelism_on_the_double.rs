@@ -31,3 +31,24 @@ lash_conformance::tool_batch_parallelism_tests!({
         runner,
     )
 });
+
+// FIG-4064 on the double: the turn's handler execution is killed while its
+// batch holds a settled member and a held one, and Restate's redelivery of
+// the same invocation must reuse the settled member's recorded completion.
+lash_conformance::tool_batch_crash_redrive_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let host = harness.endpoint_host();
+    let runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-batch-redrive-{}", harness.run_nonce()).into_boxed_str());
+    (
+        harness,
+        prefix,
+        host,
+        stores,
+        vec![lash_conformance::parallel_model_tool_calls_producer()],
+        runner,
+    )
+});

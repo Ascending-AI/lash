@@ -59,6 +59,7 @@ pub use super::store_contract_state_machine::*;
 pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;
 pub use super::tool_access_persistence::*;
+pub use super::tool_batch_crash_redrive::*;
 pub use super::tool_batch_parallelism::*;
 pub use super::tool_child_drift::*;
 pub use super::tool_child_invocation::*;
