@@ -247,3 +247,176 @@ fn second_round_history_teaches_images_only_when_enabled() {
         assert_eq!(tail.contains("images?"), images, "{tail}");
     }
 }
+
+fn native_envelope(payload: serde_json::Value) -> SessionHistoryRecord {
+    SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
+        RlmProtocolEvent::RlmDiagnostic(lash_rlm_types::RlmDiagnosticEvent {
+            phase: "native_transport".into(),
+            payload,
+        }),
+    ))
+}
+
+fn envelope_payload(event: &SessionHistoryRecord) -> serde_json::Value {
+    let SessionHistoryRecord::Protocol(event) = event else {
+        panic!("expected protocol event");
+    };
+    let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) = decode_rlm_protocol_event(event) else {
+        panic!("expected diagnostic");
+    };
+    diagnostic.payload
+}
+
+#[test]
+fn duplicate_execution_ids_keep_the_first_binding() {
+    let first = pair(step("first-call", None, false));
+    let second = pair(step("second-call", None, false));
+    let mut first_payload = envelope_payload(&first[0]);
+    first_payload["step_id"] = "shared".into();
+    let mut second_payload = envelope_payload(&second[0]);
+    second_payload["step_id"] = "shared".into();
+    for later in [
+        second_payload,
+        serde_json::json!({"schema_version": 2, "step_id": "shared"}),
+    ] {
+        let mut events = vec![
+            native_envelope(first_payload.clone()),
+            native_envelope(later),
+        ];
+        events.push(pair(step("shared", None, false)).remove(1));
+        assert_eq!(ids(&render(&events)).0, ["first-call"]);
+    }
+}
+
+#[test]
+fn matching_corruption_refuses_a_later_execution_without_harming_other_steps() {
+    for corrupt in [
+        serde_json::json!({"kind": "execution", "step_id": "bad", "parts": "invalid"}),
+        serde_json::json!({"schema_version": 2, "step_id": "bad"}),
+    ] {
+        let mut events = pair(step("before", None, false));
+        events.push(native_envelope(corrupt));
+        events.extend(pair(step("bad", None, false)));
+        events.extend(pair(step("after", None, false)));
+        let messages = render(&events);
+        assert_eq!(ids(&messages).0, ["before", "after"]);
+        let text = serde_json::to_string(&messages).unwrap();
+        assert_eq!(text.matches("degraded binding").count(), 2);
+        assert!(matches!(messages[2].role, LlmRole::User));
+        assert!(matches!(messages[3].role, LlmRole::User));
+    }
+}
+
+#[test]
+fn repair_with_raw_step_id_is_skipped_only_when_valid() {
+    let execution = pair(step("execution", None, false));
+    let repair = crate::native::transport::repair_event(
+        &TurnId::from("turn"),
+        0,
+        serde_json::from_value(envelope_payload(&execution[0])["parts"].clone()).unwrap(),
+        "repair feedback".into(),
+        crate::native::transport::NATIVE_TRANSPORT_VERSION,
+    );
+    let mut payload = envelope_payload(&repair);
+    payload["step_id"] = "execution".into();
+    for version in [1, 2] {
+        let mut payload = payload.clone();
+        payload["schema_version"] = version.into();
+        let mut events = vec![native_envelope(payload)];
+        events.extend(execution.clone());
+        let messages = render(&events);
+        if version == 1 {
+            // The later successful trajectory scrubs the earlier repair pair.
+            assert_eq!(ids(&messages).0, ["execution"]);
+        } else {
+            assert!(ids(&messages).0.is_empty());
+            assert_eq!(
+                serde_json::to_string(&messages)
+                    .unwrap()
+                    .matches("degraded binding")
+                    .count(),
+                2
+            );
+        }
+    }
+    let mut malformed = envelope_payload(&repair);
+    malformed["step_id"] = "execution".into();
+    malformed["parts"] = "invalid".into();
+    let mut events = vec![native_envelope(malformed)];
+    events.extend(execution);
+    assert!(ids(&render(&events)).0.is_empty());
+}
+
+#[test]
+fn unbound_malformed_envelopes_degrade_at_their_chronological_positions() {
+    let mut events = pair(step("before", None, false));
+    for payload in [
+        serde_json::json!("malformed"),
+        serde_json::json!({"schema_version": 2}),
+        serde_json::json!({"kind": "execution", "parts": []}),
+        serde_json::json!({"kind": "execution", "step_id": 42, "parts": []}),
+    ] {
+        events.push(native_envelope(payload));
+    }
+    events.extend(pair(step("after", None, false)));
+    let messages = render(&events);
+    assert_eq!(ids(&messages).0, ["before", "after"]);
+    assert_eq!(messages.len(), 8);
+    for message in &messages[2..6] {
+        assert!(matches!(message.role, LlmRole::User));
+        assert!(
+            serde_json::to_string(message)
+                .unwrap()
+                .contains("degraded binding")
+        );
+    }
+}
+
+#[test]
+fn many_step_projection_matches_bytes_with_one_transport_pass_and_decode() {
+    let dialect = crate::dialect::TypescriptDialect::prompt_only(
+        lash_lashlang_runtime::LashlangSurface::default(),
+    );
+    for count in [128, 16, 1] {
+        let mut events = Vec::new();
+        let mut expected = Vec::new();
+        for index in 0..count {
+            let entry = step(&format!("step-{index}"), None, false);
+            let exchange = pair(entry.clone());
+            let parts: Vec<Part> =
+                serde_json::from_value(envelope_payload(&exchange[0])["parts"].clone()).unwrap();
+            crate::native::transport::append_pair(
+                &mut expected,
+                &parts,
+                &crate::driver::history::step_output_text(
+                    dialect.prompt_vocabulary(),
+                    index,
+                    &entry,
+                ),
+            );
+            events.extend(exchange);
+        }
+        let repair = crate::native::transport::repair_event(
+            &TurnId::from("turn"),
+            count,
+            serde_json::from_value(envelope_payload(&events[0])["parts"].clone()).unwrap(),
+            "repair feedback".into(),
+            crate::native::transport::NATIVE_TRANSPORT_VERSION,
+        );
+        let parts: Vec<Part> =
+            serde_json::from_value(envelope_payload(&repair)["parts"].clone()).unwrap();
+        crate::native::transport::append_pair(&mut expected, &parts, "repair feedback");
+        events.push(repair);
+        crate::native::transport::work::reset();
+        let actual = render(&events);
+        assert_eq!(
+            serde_json::to_vec(&actual).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+        assert_eq!(
+            crate::native::transport::work::counts(),
+            (events.len(), count + 1),
+            "transport must visit history once and decode each native envelope once per render"
+        );
+    }
+}

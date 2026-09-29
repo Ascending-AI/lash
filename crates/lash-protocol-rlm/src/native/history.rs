@@ -106,6 +106,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
         input.events,
         input.turn_messages,
     );
+    let transport = super::transport::NativeTransportIndex::new(&chronological);
     let history_projection = rlm_history_projection(&chronological);
     let active_cause_ids = input
         .turn_causes
@@ -113,7 +114,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
         .map(|cause| cause.id.as_str())
         .collect::<HashSet<_>>();
     let mut pending: Option<PendingProse> = None;
-    let superseded = superseded_failure_indices(input.events, input.turn_messages);
+    let superseded = superseded_failure_indices(input.events, input.turn_messages, &transport);
 
     lash_core::facade_support::visit_turn_view(input.events, input.turn_messages, |entry| {
         if borrowed_entry_is_active_cause(entry, &active_cause_ids) {
@@ -140,7 +141,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                 });
             }
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                let repair = match super::transport::repair_parts(event) {
+                let repair = match transport.repair_parts(entry.index) {
                     Ok(repair) => repair,
                     Err(error) => {
                         flush_pending_prose(&mut messages, &mut pending);
@@ -150,7 +151,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                 };
                 if let Some((parts, repair)) = repair {
                     flush_pending_prose(&mut messages, &mut pending);
-                    super::transport::append_pair(&mut messages, &parts, &repair);
+                    super::transport::append_pair(&mut messages, parts, repair);
                     return;
                 }
                 let Some(event) = decode_rlm_protocol_event(event) else {
@@ -177,7 +178,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                         .unwrap_or(entry.index),
                     &step,
                 );
-                let parts = match super::transport::execution_parts(input.events, &step.id) {
+                let parts = match transport.execution_parts(&step.id) {
                     Ok(parts) => parts,
                     Err(error) => {
                         append_decode_failure(&mut messages, error);
@@ -185,7 +186,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
                     }
                 };
                 if let Some(parts) = parts {
-                    super::transport::append_pair(&mut messages, &parts, &observation);
+                    super::transport::append_pair(&mut messages, parts, &observation);
                 } else {
                     // Frame seeds carry semantic history, not authority to mint
                     // provider calls. Keep the facts visible as user context.
@@ -240,6 +241,7 @@ pub(super) fn render_history_messages(input: &RlmHistoryRenderInput<'_>) -> Vec<
 fn superseded_failure_indices(
     events: &[lash_core::SessionHistoryRecord],
     turn_messages: &lash_core::facade_support::MessageSequence,
+    transport: &super::transport::NativeTransportIndex,
 ) -> HashSet<usize> {
     let mut superseded = HashSet::new();
     // Entries belonging to failures not yet repaired, oldest first.
@@ -273,7 +275,7 @@ fn superseded_failure_indices(
                 }
             },
             BorrowedChronologicalPayload::ProtocolEvent(event) => {
-                if matches!(super::transport::repair_parts(event), Ok(Some(_))) {
+                if matches!(transport.repair_parts(entry.index), Ok(Some(_))) {
                     pending_failure_entries.push(entry.index);
                     any_failure_pending = true;
                 }
@@ -601,7 +603,7 @@ pub(crate) fn preview_retained_copy(
 #[path = "history_tests.rs"]
 mod tests;
 
-fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: super::transport::DecodeError) {
+fn append_decode_failure(messages: &mut Vec<LlmMessage>, error: &super::transport::DecodeError) {
     let binding = super::transport::degraded_binding(error);
     messages.push(LlmMessage::text(
         LlmRole::User,
