@@ -38,7 +38,7 @@ use rusqlite::{Row, params_from_iter};
 
 use crate::conn::SqliteConnection;
 use crate::schema_layout::Schema;
-use crate::{StoreError, sqlite_error, stored_data_corrupt};
+use crate::{StoreError, sqlite_conversion_error, sqlite_error, stored_data_corrupt};
 
 static INTENTS: LazyLock<ControlIntentObligationStatements> =
     LazyLock::new(|| ControlIntentObligationStatements::render(Schema::Main.dialect()));
@@ -732,9 +732,11 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
         let cleanup = cleanup.clone();
         self.core
             .conn
-            .write(move |tx| Ok(arm_cleanup_tx(tx, &cleanup, now_ms, "core")))
+            .write(move |tx| {
+                arm_cleanup_tx(tx, &cleanup, now_ms, "core").map_err(sqlite_conversion_error)
+            })
             .await
-            .map_err(sqlite_error)?
+            .map_err(sqlite_error)
     }
 
     async fn nudge(&self, referrer: &ArtifactReferrer, now_ms: u64) -> Result<bool, StoreError> {
@@ -800,6 +802,208 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
 mod artifact_cleanup_tests {
     use super::*;
     use lash_core_execution::ArtifactCleanupPlan;
+    use rusqlite::OptionalExtension;
+
+    /// The stored row of one referrer's cleanup obligation, compared whole
+    /// across an aborted arm.
+    #[derive(Debug, PartialEq)]
+    struct CleanupRow {
+        id: String,
+        body: String,
+        state: String,
+        attempts: i64,
+        due_at_ms: Option<i64>,
+        claim_token: Option<String>,
+        stall_reason: Option<String>,
+        last_error: Option<String>,
+        settled_at_ms: Option<i64>,
+    }
+
+    async fn cleanup_row(
+        core: &crate::SqliteStore,
+        referrer: &ArtifactReferrer,
+    ) -> Option<CleanupRow> {
+        let kind = referrer.kind().as_str().to_owned();
+        let id = referrer.canonical_id();
+        core.conn
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT obligation_id, cleanup_json, obligation_state, obligation_attempts, \
+                            obligation_due_at_ms, obligation_claim_token, obligation_stall_reason, \
+                            obligation_last_error, obligation_settled_at_ms \
+                     FROM artifact_cleanup_obligations \
+                     WHERE referrer_kind = ?1 AND referrer_id = ?2",
+                    rusqlite::params![kind, id],
+                    |row| {
+                        Ok(CleanupRow {
+                            id: row.get(0)?,
+                            body: row.get(1)?,
+                            state: row.get(2)?,
+                            attempts: row.get(3)?,
+                            due_at_ms: row.get(4)?,
+                            claim_token: row.get(5)?,
+                            stall_reason: row.get(6)?,
+                            last_error: row.get(7)?,
+                            settled_at_ms: row.get(8)?,
+                        })
+                    },
+                )
+                .optional()
+            })
+            .await
+            .expect("read the cleanup row")
+    }
+
+    async fn fenced(core: &crate::SqliteStore, referrer: &ArtifactReferrer) -> bool {
+        let referrer = referrer.clone();
+        core.conn
+            .call(move |conn| crate::artifact_store::artifact_fenced_tx(conn, &referrer))
+            .await
+            .expect("read the referrer fence")
+    }
+
+    /// FIG-4180: an `Ended` arm whose fence insert fails aborts the whole
+    /// transaction — the cleanup row the same call inserted or rewrote
+    /// rolls back with it, so `arm_cleanup`'s `Err` never leaves a
+    /// committed mutation behind. File and memory store sets alike.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cleanup_arm_rolls_back_when_the_end_fence_fails() {
+        let memory = crate::SqliteStoreSet::memory()
+            .await
+            .expect("open the memory store set");
+        let dir = tempfile::tempdir().expect("file store set root");
+        let file = crate::SqliteStoreSet::open(dir.path())
+            .await
+            .expect("open the file store set");
+        for set in [&memory, &file] {
+            cleanup_arm_rolls_back_when_the_end_fence_fails_on(set).await;
+        }
+    }
+
+    async fn cleanup_arm_rolls_back_when_the_end_fence_fails_on(set: &crate::SqliteStoreSet) {
+        use lash_core_execution::StoreSet as _;
+        let ledger = set.artifact_cleanup();
+        let core = set.process_env_store();
+        let execution = |name: &str| {
+            ArtifactReferrer::Execution(
+                lash_sansio::ExecutionScope::runtime_operation(name)
+                    .journal_identity()
+                    .expect("journal identity"),
+            )
+        };
+
+        // A claimed guard: the state an `Ended` arm replaces, and the
+        // claim, state and attempts a partial commit would reset.
+        let referrer = execution("guarded");
+        let guard = ArtifactCleanup {
+            referrer: referrer.clone(),
+            plan: ArtifactCleanupPlan::AwaitJournal,
+            gate: None,
+        };
+        let guard_id = ledger
+            .arm_cleanup(&guard, 100)
+            .await
+            .expect("arm the guard");
+        let claimed = ledger
+            .claim(&guard_id, &ClaimToken::mint(), 110, 60_000)
+            .await
+            .expect("claim the guard")
+            .expect("the due guard claims");
+        assert_eq!(claimed.attempts, 1);
+        let claimed_row = cleanup_row(&core, &referrer)
+            .await
+            .expect("the claimed guard's row");
+        assert_eq!(claimed_row.state, "claimed");
+
+        // Every fence insert aborts its statement.
+        core.conn
+            .write(|tx| {
+                tx.execute_batch(
+                    "CREATE TRIGGER fig_4180_fence_fault BEFORE INSERT \
+                     ON artifact_referrer_fences \
+                     BEGIN SELECT RAISE(ABORT, 'fig-4180 fence fault'); END",
+                )
+            })
+            .await
+            .expect("install the fence fault");
+
+        // A fresh `Ended` arm fails — and must leave no cleanup row at all.
+        let fresh_referrer = execution("fresh");
+        let fresh_ended = ArtifactCleanup::ended(fresh_referrer.clone(), Vec::new(), None);
+        let error = ledger
+            .arm_cleanup(&fresh_ended, 200)
+            .await
+            .expect_err("the fence fault fails the arm");
+        assert!(error.to_string().contains("fig-4180"), "{error}");
+        assert!(
+            cleanup_row(&core, &fresh_referrer).await.is_none(),
+            "the aborted arm committed no cleanup row"
+        );
+        assert!(
+            !fenced(&core, &fresh_referrer).await,
+            "the aborted arm committed no fence"
+        );
+
+        // `Ended` over the claimed guard fails — and the guard's claim,
+        // state, attempts, id and body all stand.
+        let ended = ArtifactCleanup::ended(referrer.clone(), Vec::new(), None);
+        let error = ledger
+            .arm_cleanup(&ended, 210)
+            .await
+            .expect_err("the fence fault fails the replacement");
+        assert!(error.to_string().contains("fig-4180"), "{error}");
+        assert_eq!(
+            cleanup_row(&core, &referrer).await,
+            Some(claimed_row),
+            "the aborted replacement left the claimed guard untouched"
+        );
+        assert!(
+            !fenced(&core, &referrer).await,
+            "the aborted replacement committed no fence"
+        );
+
+        // Lift the fault: the retry commits the replacement and the fence,
+        // keeping the row's obligation id, and replays idempotently.
+        core.conn
+            .write(|tx| tx.execute_batch("DROP TRIGGER fig_4180_fence_fault"))
+            .await
+            .expect("drop the fence fault");
+        let retried = ledger
+            .arm_cleanup(&ended, 220)
+            .await
+            .expect("the cleared fault admits the retry");
+        assert_eq!(retried, guard_id);
+        assert_eq!(
+            ledger
+                .arm_cleanup(&ended, 230)
+                .await
+                .expect("an `Ended` arm replays"),
+            guard_id
+        );
+        assert!(fenced(&core, &referrer).await, "the retry fenced");
+        let replaced = cleanup_row(&core, &referrer)
+            .await
+            .expect("the replaced row");
+        assert_eq!(
+            (
+                replaced.state.as_str(),
+                replaced.attempts,
+                replaced.due_at_ms,
+                replaced.claim_token.as_deref()
+            ),
+            ("due", 0, Some(220), None)
+        );
+        assert_eq!(
+            ArtifactCleanup::from_json(&replaced.body, &referrer).expect("decode the body"),
+            ended
+        );
+        let fresh_id = ledger
+            .arm_cleanup(&fresh_ended, 240)
+            .await
+            .expect("the fresh arm commits");
+        assert!(fresh_id.as_str().starts_with("core:"));
+        assert!(fenced(&core, &fresh_referrer).await);
+    }
 
     #[test]
     fn guard_upsert_and_ended_replacement_share_one_obligation() {
