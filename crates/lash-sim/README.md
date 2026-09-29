@@ -33,6 +33,13 @@ workload's seed, on virtual time (`backend::SimEngine`). SQLite is storage
 only. Server attempts run concurrently, so sessions interleave as they would
 against a real server. A failed run records its full history.
 
+Generated trigger boundaries register scheduler-owned external processes in
+the world's process registry under the reservation's stable start key. Each
+boundary binds its process before reporting success, which delivers the
+trigger-delivery obligation. A replay binds the same process. These boundaries
+model trigger routing; the runtime relay's engine-start recovery and typed
+refusals are separate SQLite and PostgreSQL conformance laws.
+
 Count-based runs partition deterministically with `--shard <i>/<n>`: shard
 `i/n` owns every seed index where `index % n == i - 1`, so the union of all
 shards covers the configured seed space exactly once. The summary records

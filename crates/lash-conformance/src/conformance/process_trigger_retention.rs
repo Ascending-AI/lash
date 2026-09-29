@@ -62,6 +62,93 @@ where
     a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process(make().await).await;
 }
 
+/// A reserved non-engine target cannot start through the runtime router. Its
+/// due pass stalls with a typed refusal instead of leaving the delivery owed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn trigger_delivery_refusal<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    let handles = make().await;
+    let session = SessionId::from("delivery-refusal-session");
+    handles
+        .triggers
+        .execute_command(
+            "delivery-refusal-register",
+            TriggerCommand::Register {
+                owner_scope: owner(&session),
+                actor: actor(&session),
+                draft: TriggerSubscriptionDraft {
+                    target: ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    ..draft(&session, "delivery-refusal-key", "delivery-refusal-source")
+                },
+            },
+        )
+        .await
+        .expect("register non-engine target")
+        .expect("store the captured subscription");
+    let reserved = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            "delivery-refusal-source",
+            serde_json::json!({"button": "Blue"}),
+            "delivery-refusal-occurrence",
+        ))
+        .await
+        .expect("reserve delivery");
+    assert_eq!(reserved.reservations.len(), 1);
+    let relay = lash_core::runtime::trigger_delivery::TriggerDeliveryRelay::new(
+        Arc::clone(&handles.deliveries),
+        lash_core::facade_support::TriggerRouter::new(
+            Arc::clone(&handles.triggers),
+            crate::ProcessWorkWiring::without_process_work(Arc::clone(&handles.registry)),
+        )
+        .with_process_artifacts(
+            Arc::clone(&handles.process_env),
+            crate::ProcessEngineRegistry::new(),
+        ),
+    );
+    let clock = crate::testing::TestClock::new(4_000_000_000_000);
+    let pass = lash_core::drive::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
+        .await
+        .expect("run the due pass");
+    assert_eq!((pass.claimed, pass.retried, pass.stalled), (1, 0, 1));
+    let stalled = handles
+        .deliveries
+        .list_stalled(None, std::num::NonZeroUsize::MIN)
+        .await
+        .expect("read typed refusal");
+    assert_eq!(stalled.len(), 1);
+    assert_eq!(stalled[0].reason, crate::StallReason::Refused);
+    assert!(
+        stalled[0].last_error.as_deref().is_some_and(
+            |error| error.contains("trigger target must be an engine process, got external")
+        ),
+        "the runtime refuses a non-engine target: {stalled:?}"
+    );
+    assert!(
+        handles
+            .registry
+            .get_process_by_start_key(&lash_core::facade_support::trigger_delivery_start_key(
+                &reserved.reservations[0],
+            ))
+            .await
+            .expect("read the refused start")
+            .is_none()
+    );
+    let next = lash_core::drive::relay::relay_due(&relay, &clock, std::num::NonZeroUsize::MIN)
+        .await
+        .expect("a later due pass");
+    assert_eq!(next.claimed, 0, "the refused delivery is settled");
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"

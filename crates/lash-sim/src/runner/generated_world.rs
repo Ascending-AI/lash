@@ -153,7 +153,7 @@ impl GeneratedRuntimeWorld {
             queued_inputs: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::over(engine.backend().trigger_store()),
+            trigger_harness: SimTriggerHarness::over(engine.backend().stores()),
             runtime_boundaries: RuntimeBoundaryHarness::new(engine.clone()),
             seed,
             engine,
@@ -1581,92 +1581,5 @@ impl SimProviderMutationHarness {
             .augment_observation(event, observed)
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
-    }
-}
-
-/// Trigger boundaries delivered through the world backend's own trigger
-/// store.
-struct SimTriggerHarness {
-    store: Arc<dyn lash_core::TriggerStore>,
-    registered_source_keys: BTreeSet<String>,
-}
-
-impl SimTriggerHarness {
-    fn over(store: Arc<dyn lash_core::TriggerStore>) -> Self {
-        Self {
-            store,
-            registered_source_keys: BTreeSet::new(),
-        }
-    }
-}
-
-impl SimTriggerHarness {
-    async fn deliver(&mut self, event: &BoundaryEvent) -> Result<Value, FixedScriptRunnerError> {
-        let session = event
-            .payload
-            .get("session")
-            .and_then(Value::as_str)
-            .unwrap_or(&event.actor_alias)
-            .to_string();
-        let source_key = event
-            .payload
-            .get("source_key")
-            .and_then(Value::as_str)
-            .unwrap_or(&event.boundary_id)
-            .to_string();
-        let source_type = "sim.trigger";
-        if self.registered_source_keys.insert(source_key.clone()) {
-            let draft = lash_core::TriggerSubscriptionDraft::for_process(
-                format!("sim/{}", event.boundary_id),
-                lash_core::ProcessExecutionEnvRef::new("process-env:sim-trigger"),
-                source_type,
-                source_key.clone(),
-                lash_core::ProcessInput::External {
-                    metadata: json!({
-                        "trigger_boundary": event.boundary_id,
-                    }),
-                },
-                lash_core::ProcessIdentity::labelled("sim-trigger", Some("sim trigger")),
-            )
-            .with_wake_target(lash_core::SessionScope::new(session.clone()));
-            self.store
-                .execute_command(
-                    &format!("sim-trigger-register:{}", event.boundary_id),
-                    lash_core::TriggerCommand::Register {
-                        owner_scope: lash_core::TriggerOwnerScope::session(session.clone()),
-                        actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
-                            session.clone(),
-                        )),
-                        draft,
-                    },
-                )
-                .await
-                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-                .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        }
-        let ingress = self
-            .store
-            .ingest_occurrence(
-                lash_core::TriggerOccurrenceRequest::new(
-                    source_type,
-                    source_key.clone(),
-                    json!({
-                        "boundary_id": event.boundary_id,
-                        "session": session,
-                    }),
-                    format!("sim-trigger:{}", event.boundary_id),
-                )
-                .with_source(json!({"sim": true})),
-            )
-            .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        Ok(json!({
-            "session": session,
-            "trigger_delivered": true,
-            "source_key": source_key,
-            "occurrence_id": ingress.occurrence.occurrence_id,
-            "reservation_count": ingress.reservations.len(),
-            "started_process": event.payload.get("started_process").cloned().unwrap_or(Value::Bool(true)),
-        }))
     }
 }

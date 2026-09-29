@@ -192,6 +192,7 @@ mod scenario_facts;
 mod standard_contracts;
 #[cfg(test)]
 mod tests;
+mod trigger_delivery;
 
 pub use agent_contracts::{FIXED_AGENT_PRODUCT_CONTRACTS, run_agent_contract_product_stack_probe};
 pub(crate) use contract_support::replay_contract_execution;
@@ -221,6 +222,7 @@ use scenario_artifacts::*;
 use scenario_evidence::*;
 use scenario_facts::*;
 use standard_contracts::*;
+use trigger_delivery::SimTriggerHarness;
 
 fn file_sha256(path: &Path) -> Result<String, FixedScriptRunnerError> {
     Ok(sha256_hex(&std::fs::read(path)?))
