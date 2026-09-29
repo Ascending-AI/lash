@@ -1189,8 +1189,8 @@ async fn record_child_settlement(
         }
     };
     // The §5 barrier: committed siblings below this child seat their
-    // settlements first. Each wake is durable, so a redrive of this
-    // handler re-reads the index's answer rather than racing it.
+    // settlements first. The last blocker's wake is durable, so a redrive
+    // of this handler re-reads the index's answer rather than racing it.
     for position in blocking_positions {
         let key = group_wait_key(
             &request.shape.wait_scope,

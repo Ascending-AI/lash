@@ -911,11 +911,9 @@ impl EffectGroupState for EffectGroupStateImpl {
         ))
     }
 
-    /// The siblings the §5 barrier still holds `commit_seq` behind: every
-    /// one that committed below it and has not seated its settlement. The
-    /// caller parks on each one's drained wake — the engine's own durable
-    /// wake, never a poll. An absent or retired group holds no committed
-    /// children, so nothing blocks.
+    /// The last-committed unseated sibling below `commit_seq`. Its drained
+    /// wake covers every lower-committed sibling by transitivity. An absent
+    /// or retired group holds no committed children, so nothing blocks.
     async fn drain_blockers(
         &self,
         ctx: SharedObjectContext<'_>,

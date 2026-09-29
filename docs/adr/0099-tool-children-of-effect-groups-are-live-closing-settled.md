@@ -553,8 +553,15 @@ past it.
 **Within a group, a child's intent drain is admitted in the order its final
 record won the §4 linearization point.** That order is durable, monotonic per
 group, assigned at the moment a final record commits, and journaled; a child never
-waits on an unfinished sibling. It is the order in which the group's children may
-emit nested semantic commands, and therefore the order a replay must reproduce.
+waits on a sibling that has not committed its final record. It is the order
+in which the group's children may emit nested semantic commands, and therefore
+the order a replay must reproduce.
+
+The drain waits on the drained wake of only the last-committed unseated blocker.
+That wait covers every lower-committed sibling: a blocker seats only after every
+lower one has seated, or the group retires and releases every barrier. The
+`drain_barrier_is_transitive` law pins this rule. The commit-order and rankability
+semantics above are unchanged.
 
 This replaces the cross-child **source** order of 2026-09-21, which cannot be
 carried into groups; the code quoted below was deleted by FIG-3397. `settle_terminal_attempt` in

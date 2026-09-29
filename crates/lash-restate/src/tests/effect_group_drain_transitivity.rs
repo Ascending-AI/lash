@@ -1,4 +1,4 @@
-//! The §5 drain barrier is transitive (ADR 0065 §5, FIG-4088).
+//! The §5 drain barrier is transitive (ADR 0099 §5, FIG-4088).
 //!
 //! The index names a drain only its last-committed unseated blocker, and the
 //! drain parks on that one sibling's drained wake. That is sound only if the
@@ -327,7 +327,7 @@ async fn seat(
 }
 
 /// One child's drain, as the host's drain admission runs it: read the
-/// barrier, park on each named sibling's drained wake, then go. It may crash
+/// barrier, park on its named sibling's drained wake, then go. It may crash
 /// once while parked and redrive: commit again and read the barrier afresh.
 async fn drain(
     ingress: RestateIngressClient,

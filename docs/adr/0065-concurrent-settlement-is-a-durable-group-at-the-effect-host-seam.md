@@ -7,6 +7,11 @@ passages are historical under
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
 The non-SQL decision and host-policy rules here survive.
 
+[ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) §5
+governs the tool-child intent drain. Its drain waits on the
+last-committed unseated blocker; seating is transitive, as pinned by
+`drain_barrier_is_transitive`.
+
 Accepted. Amended 2026-08-19 (FIG-1578): a group carries envelopes and nothing
 else, and what runs a child is the host's registered `GroupExecutors` resolver
 rather than a caller-supplied executor vec paired with the group.

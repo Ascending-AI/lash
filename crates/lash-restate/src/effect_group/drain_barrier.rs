@@ -1,8 +1,8 @@
 //! The §5 barrier on the engine's own wake: which lower-commit siblings still
 //! hold a drain, the drained wake each resolves when it seats, and what that
 //! wake's resolution means to the drain parked on it. A held drain parks on
-//! those wakes instead of polling the index. Split from the index handlers so
-//! the handler file keeps its line budget.
+//! the last-committed unseated sibling's wake instead of polling the index.
+//! Split from the index handlers so the handler file keeps its line budget.
 
 use super::*;
 
