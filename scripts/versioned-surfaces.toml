@@ -64,6 +64,13 @@ description = "NDJSON trace records, event variants, contexts, and graph payload
 outside_manifest = "trace wire: gates a trace reader, not state lash reopens"
 
 [[surface]]
+constant = "LASHCTL_JSON_SCHEMA_VERSION"
+constant_path = "crates/lashctl/src/main.rs"
+upgrade = "coexist"
+description = "lashctl --json operator wire: the {schema_version, command, result, error} envelope and its result DTO shapes (ADR 0115 §5)"
+outside_manifest = "operator CLI wire: gates a --json consumer, not state lash reopens"
+
+[[surface]]
 constant = "SQLITE_BLOB_ENVELOPE_VERSION"
 constant_path = "crates/lash-sqlite-store/src/codec.rs"
 upgrade = "migrate"
