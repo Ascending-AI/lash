@@ -504,6 +504,7 @@ impl LashRuntime {
                 &trace_turn_id,
                 "drive",
             ),
+            capture_base: 0,
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);

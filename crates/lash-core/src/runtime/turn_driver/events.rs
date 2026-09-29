@@ -6,6 +6,16 @@ impl RuntimeTurnDriver<'_> {
     /// through here, in program order.
     pub(super) fn emit_recorded(&mut self, event_tx: &TurnObserver, event: SessionStreamEvent) {
         self.recorded_assembly.record(&event);
+        // A stop publishes after the commit that seals its partial
+        // (ADR 0114 §4.3).
+        if matches!(
+            event,
+            SessionStreamEvent::TurnOutcome {
+                outcome: crate::TurnOutcome::Stopped(_)
+            }
+        ) {
+            event_tx.hold_terminal();
+        }
         self.turn_observations
             .observe(event_tx, crate::engine::ObservedEvent::Session(event));
     }

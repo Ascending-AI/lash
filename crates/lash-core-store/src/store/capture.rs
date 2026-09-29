@@ -192,7 +192,9 @@ pub struct CaptureBatch {
     pub lease: CaptureWriterLeaseRef,
     pub batch_ordinal: u64,
     /// At most `CAPTURE_BATCH_MAX_FRAMES` frames and
-    /// `CAPTURE_BATCH_MAX_BYTES` of encoded frames.
+    /// `CAPTURE_BATCH_MAX_BYTES` of encoded frames. One frame larger than
+    /// the byte bound travels alone: a tool's closed arguments or its settled
+    /// output cannot be split without changing what they say.
     pub frames: Vec<CaptureFrame>,
 }
 
@@ -213,10 +215,13 @@ impl CaptureBatch {
         })
     }
 
-    /// Refuses a batch over either bound with `CaptureBatchTooLarge`.
+    /// Refuses a batch over either bound with `CaptureBatchTooLarge`. A
+    /// batch of one frame is within the byte bound whatever its size.
     pub fn validate_bounds(&self) -> Result<(), StoreError> {
         let bytes = self.encoded_bytes()?;
-        if self.frames.len() > CAPTURE_BATCH_MAX_FRAMES || bytes > CAPTURE_BATCH_MAX_BYTES {
+        if self.frames.len() > CAPTURE_BATCH_MAX_FRAMES
+            || (self.frames.len() > 1 && bytes > CAPTURE_BATCH_MAX_BYTES)
+        {
             return Err(StoreError::CaptureBatchTooLarge {
                 frames: self.frames.len(),
                 bytes,

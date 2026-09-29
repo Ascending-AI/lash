@@ -1,6 +1,7 @@
 use super::*;
 use crate::runtime::turn_control::ActiveTurnControl;
 
+mod capture_writer;
 mod context;
 mod effects;
 mod events;
@@ -102,6 +103,10 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// effect body's emissions key under that effect's invocation replay key
     /// instead.
     pub(super) turn_observations: crate::engine::ObservationCursor,
+    /// Checkpoints this physical turn has issued: the capture base its next
+    /// checkpoint's body advances to (ADR 0114 §3.1). Counted where the
+    /// checkpoint is issued, so a replay counts the same.
+    pub(super) capture_base: u32,
 }
 
 impl RuntimeTurnDriver<'_> {

@@ -339,6 +339,7 @@ impl RuntimeTurnDriver<'_> {
         event_tx: &TurnObserver,
     ) -> Result<crate::CheckpointDelivery, RuntimeEffectControllerError> {
         let invocation = self.turn_effect_invocation(machine, id, RuntimeEffectKind::Checkpoint)?;
+        self.capture_base = self.capture_base.saturating_add(1);
         let (result, claims) = self
             .execute_typed_turn_effect(
                 machine,
@@ -476,6 +477,25 @@ impl RuntimeTurnDriver<'_> {
             RuntimeEffectOutcome::into_exec_code,
         )
         .await
+    }
+
+    /// Moves the turn capture's base to this checkpoint: the frames staged
+    /// before it belong to the content the checkpoint records and leave the
+    /// tail (ADR 0114 §3.1). Idempotent at the current base, so a body a
+    /// replay re-runs repeats it harmlessly.
+    pub(in crate::runtime) async fn advance_capture_base(
+        &self,
+    ) -> Result<(), RuntimeEffectControllerError> {
+        let Some(store) = self.session.history_store() else {
+            return Ok(());
+        };
+        store
+            .advance_capture_base(&crate::store::CaptureBaseAdvance {
+                turn: crate::TurnAddress::new(self.session_id.clone(), self.turn_id.clone()),
+                to: lash_sansio::CaptureBase(self.capture_base),
+            })
+            .await
+            .map_err(super::capture_writer::capture_write_fault)
     }
 
     pub(in crate::runtime) async fn run_checkpoint(

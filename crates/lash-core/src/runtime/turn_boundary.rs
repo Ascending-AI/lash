@@ -74,6 +74,9 @@ pub(super) struct TurnBoundary {
     /// The logical root the turn runs under, whose park the final commit
     /// clears (FIG-3600 S7, D2 §1.3 P3).
     park_root: Option<crate::TurnId>,
+    /// The sealed partial a stopped turn's final commit publishes
+    /// (ADR 0114 §3.3).
+    stopped_partial: Option<crate::store::StoppedPartialCommit>,
 }
 
 /// A final commit's drive fence, and the terminal evidence it writes.
@@ -152,6 +155,7 @@ impl TurnBoundary {
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
             drive_commit: None,
             park_root: None,
+            stopped_partial: None,
         }
     }
 
@@ -163,6 +167,14 @@ impl TurnBoundary {
     /// Clear `root`'s park with the final commit.
     pub(super) fn set_park_root(&mut self, root: crate::TurnId) {
         self.park_root = Some(root);
+    }
+
+    /// Publish the stopped turn's sealed partial with the final commit.
+    pub(super) fn set_stopped_partial(
+        &mut self,
+        partial: Option<crate::store::StoppedPartialCommit>,
+    ) {
+        self.stopped_partial = partial;
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -621,6 +633,7 @@ impl TurnBoundary {
         let commit_budget = self.commit_budget;
         let drive_commit = self.drive_commit.clone();
         let park_root = self.park_root.clone();
+        let stopped_partial = self.stopped_partial.clone();
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -659,6 +672,7 @@ impl TurnBoundary {
                 session_execution_lease_completion,
                 drive_commit,
                 park_root,
+                stopped_partial,
             )
             .await
         } else {
@@ -700,6 +714,7 @@ impl TurnBoundary {
         _session_execution_lease_completion: Option<crate::ClaimAuthority>,
         drive_commit: Option<DriveCommit>,
         park_root: Option<TurnId>,
+        stopped_partial: Option<crate::store::StoppedPartialCommit>,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
@@ -750,6 +765,7 @@ impl TurnBoundary {
             commit.root_terminal = root_terminal.map(Box::new);
         }
         commit.park_root = park_root;
+        commit.stopped_partial = stopped_partial;
         // Cancellation-intent retries are progress-fenced: every refusal
         // proves a newer durable intent revision. Refresh only that snapshot:
         // the settlement and materialized cancellation evidence are already

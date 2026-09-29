@@ -76,7 +76,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
                         .await
                 }))
-                .await?;
+                .await??;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,
@@ -118,15 +118,27 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     result: Box::new(result),
                 })
             }
-            RuntimeEffectCommand::Checkpoint { checkpoint } => Ok(runner
-                .driver
-                .execute_checkpoint_locally(
-                    runner.messages.clone(),
-                    runner.protocol_iteration,
-                    checkpoint,
-                    &runner.event_tx,
-                )
-                .await),
+            RuntimeEffectCommand::Checkpoint { checkpoint } => {
+                let outcome = runner
+                    .driver
+                    .execute_checkpoint_locally(
+                        runner.messages.clone(),
+                        runner.protocol_iteration,
+                        checkpoint,
+                        &runner.event_tx,
+                    )
+                    .await;
+                // What the turn produced before this checkpoint commits with
+                // it, so the capture tail restarts here; a recorded outcome
+                // implies the advance (ADR 0114 §3.1).
+                if matches!(
+                    &outcome,
+                    RuntimeEffectOutcome::Checkpoint { result: Ok(_), .. }
+                ) {
+                    runner.driver.advance_capture_base().await?;
+                }
+                Ok(outcome)
+            }
             RuntimeEffectCommand::SyncExecutionEnvironment => {
                 // A live fault rebuilding the environment (a store or lease
                 // fault) is not the sync's outcome: the claim is released
@@ -231,6 +243,7 @@ pub(super) fn turn_effect_executor(
         // turn cursor is the main driver's alone, and cloning it would put
         // body and driver emissions on colliding {key}#{ordinal} ids.
         turn_observations: body_observation_cursor(body_replay_key),
+        capture_base: driver.capture_base,
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {

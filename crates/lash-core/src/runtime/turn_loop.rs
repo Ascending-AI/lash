@@ -454,6 +454,10 @@ struct TerminalDiagnostic<'a> {
 /// between), then `TurnOutcome::Stopped(stop)`, then `Done`. Every session
 /// event is recorded on `recorded_assembly` as it is written, so the committed
 /// turn carries the same terminal facts the host streamed.
+///
+/// Recording happens here; publication waits for the commit that seals the
+/// turn's partial (ADR 0114 §4.3): the sequence is held on the observer and
+/// released after the commit, with `StoppedPartialAvailable` before `Done`.
 fn emit_terminal_sequence(
     recorded_assembly: &mut RecordedTurnAssembly,
     observer: &TurnObserver,
@@ -461,6 +465,7 @@ fn emit_terminal_sequence(
     diagnostic: Option<TerminalDiagnostic<'_>>,
     stop: TurnStop,
 ) {
+    observer.hold_terminal();
     if let Some(diagnostic) = diagnostic {
         let error_event = SessionStreamEvent::Error {
             message: diagnostic.message.clone(),

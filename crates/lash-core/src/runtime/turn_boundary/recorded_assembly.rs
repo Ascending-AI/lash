@@ -35,6 +35,9 @@ pub struct RecordedTurnAssembly {
     pub(in crate::runtime) issues: Vec<TurnIssue>,
     pub(in crate::runtime) saw_done: bool,
     pub(in crate::runtime) outcome: Option<TurnOutcome>,
+    /// The highest capture sequence the turn's recorded step outcomes
+    /// reference: a stop's seal must cover it (ADR 0114 §4.2).
+    pub(in crate::runtime) capture_watermark: Option<u64>,
 }
 
 impl Default for RecordedTurnAssembly {
@@ -57,6 +60,19 @@ impl RecordedTurnAssembly {
             issues: Vec::new(),
             saw_done: false,
             outcome: None,
+            capture_watermark: None,
+        }
+    }
+
+    /// Record the capture watermark a recorded step outcome carries.
+    pub(in crate::runtime) fn note_capture_watermark(
+        &mut self,
+        watermark: Option<&lash_core_execution::runtime::CaptureWatermark>,
+    ) {
+        if let Some(watermark) = watermark {
+            self.capture_watermark = self
+                .capture_watermark
+                .max(Some(watermark.acknowledged_through));
         }
     }
 
