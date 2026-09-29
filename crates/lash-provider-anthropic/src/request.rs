@@ -5,6 +5,8 @@
 use crate::policy::AnthropicThinkingConfig;
 use crate::support::*;
 use lash_core::llm::types::LlmMessage;
+use lash_sansio::core_support::Blake3DomainHasher;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BreakpointAddress {
@@ -61,6 +63,7 @@ impl AnthropicProvider {
     fn content_block_value(
         req: &LlmRequest,
         block: &LlmContentBlock,
+        tool_ids: &HashMap<String, String>,
     ) -> Result<Option<Value>, LlmTransportError> {
         match block {
             LlmContentBlock::Text { text, .. } => {
@@ -77,7 +80,7 @@ impl AnthropicProvider {
                 ..
             } => Ok(Some(json!({
                 "type": "tool_use",
-                "id": normalize_tool_call_id(call_id)?,
+                "id": mapped_tool_call_id(call_id, tool_ids)?,
                 "name": tool_name,
                 "input": tool_call_input_replay_value(input_json),
             }))),
@@ -86,7 +89,7 @@ impl AnthropicProvider {
             } => {
                 let mut result = json!({
                     "type": "tool_result",
-                    "tool_use_id": normalize_tool_call_id(call_id)?,
+                    "tool_use_id": mapped_tool_call_id(call_id, tool_ids)?,
                 });
                 // One result per call: a lone text block is the plain string
                 // form; anything else is the ordered text/image/document array.
@@ -189,6 +192,7 @@ impl AnthropicProvider {
         req: &LlmRequest,
     ) -> Result<BuiltMessages, LlmTransportError> {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
+        let tool_ids = tool_call_id_map(req)?;
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
         for (index, msg) in req.messages.iter().enumerate() {
@@ -234,7 +238,7 @@ impl AnthropicProvider {
                 msg.blocks.as_slice()
             };
             for block in source_blocks {
-                if let Some(value) = Self::content_block_value(req, block)? {
+                if let Some(value) = Self::content_block_value(req, block, &tool_ids)? {
                     if matches!(
                         block,
                         LlmContentBlock::Text {
@@ -696,24 +700,73 @@ fn collect_text(blocks: &[LlmContentBlock]) -> String {
     out
 }
 
-/// Normalize tool call IDs to the Anthropic-allowed character set and length.
-fn normalize_tool_call_id(id: &str) -> Result<String, LlmTransportError> {
-    if id.is_empty() {
+/// Look up the request-wide wire ID shared by a tool call and its result.
+fn mapped_tool_call_id<'a>(
+    id: &str,
+    tool_ids: &'a HashMap<String, String>,
+) -> Result<&'a str, LlmTransportError> {
+    tool_ids.get(id).map(String::as_str).ok_or_else(|| {
+        LlmTransportError::new("Anthropic tool identity must not be empty")
+            .with_kind(ProviderFailureKind::Validation)
+            .with_retry_verdict(TransportRetryVerdict::NotRetryable)
+    })
+}
+
+fn tool_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, LlmTransportError> {
+    let ids: BTreeSet<&str> = req
+        .messages
+        .iter()
+        .flat_map(|message| message.blocks.iter())
+        .filter_map(|block| match block {
+            LlmContentBlock::ToolCall { call_id, .. }
+            | LlmContentBlock::ToolResult { call_id, .. } => Some(call_id.as_str()),
+            _ => None,
+        })
+        .collect();
+    if ids.contains("") {
         return Err(
             LlmTransportError::new("Anthropic tool identity must not be empty")
                 .with_kind(ProviderFailureKind::Validation)
                 .with_retry_verdict(TransportRetryVerdict::NotRetryable),
         );
     }
-    Ok(id
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
+
+    let mut mapped = HashMap::with_capacity(ids.len());
+    let mut used = HashSet::with_capacity(ids.len());
+    for id in ids.iter().copied().filter(|id| legal_tool_call_id(id)) {
+        used.insert(id.to_string());
+        mapped.insert(id.to_string(), id.to_string());
+    }
+    for id in ids.into_iter().filter(|id| !legal_tool_call_id(id)) {
+        let prefix: String = id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(47)
+            .collect();
+        for attempt in 0u64.. {
+            let mut hash = Blake3DomainHasher::new("lash-anthropic-tool-call-wire/v1");
+            hash.update(id.as_bytes());
+            hash.update(attempt.to_le_bytes());
+            let digest = hash.finalize_hex();
+            let candidate = format!("{prefix}_{}", &digest[..16]);
+            if used.insert(candidate.clone()) {
+                mapped.insert(id.to_string(), candidate);
+                break;
             }
-        })
-        .take(64)
-        .collect())
+        }
+    }
+    Ok(mapped)
+}
+
+fn legal_tool_call_id(id: &str) -> bool {
+    id.len() <= 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }

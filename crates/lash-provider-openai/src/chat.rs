@@ -619,7 +619,7 @@ impl OpenAiCompatibleProvider {
                         .get("id")
                         .and_then(Value::as_str)
                         .map(str::to_string)
-                        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                        .unwrap_or_default(),
                     tool_name: name.to_string(),
                     input_json: tool_argument_decoder.decode(name, arguments),
                     replay: tool_call
@@ -1129,9 +1129,6 @@ impl ChatStreamState {
             {
                 continue;
             }
-            if tool_call.call_id.is_empty() {
-                tool_call.call_id = uuid::Uuid::new_v4().to_string();
-            }
             let tool_name = tool_call.tool_name.clone();
             let input_json = if tool_call.input_json.is_empty() {
                 "{}".to_string()
@@ -1191,11 +1188,7 @@ impl ChatStreamState {
                 tool_call.input_json.clone()
             };
             parts.push(LlmOutputPart::ToolCall {
-                call_id: if tool_call.call_id.is_empty() {
-                    uuid::Uuid::new_v4().to_string()
-                } else {
-                    tool_call.call_id.clone()
-                },
+                call_id: tool_call.call_id.clone(),
                 input_json: self.tool_argument_decoder.decode(&tool_name, input_json),
                 tool_name,
                 replay: tool_call

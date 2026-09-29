@@ -6,8 +6,10 @@
 //! content is assembled elsewhere, from recorded state
 //! (`turn_boundary::recorded_assembly`).
 
+use std::collections::HashSet;
 use std::time::Instant;
 
+use lash_sansio::core_support::Blake3DomainHasher;
 use serde_json::json;
 
 use crate::llm::types::{
@@ -361,11 +363,6 @@ impl LlmStreamAccumulator {
         input_json: String,
         replay: Option<ProviderReplayMeta>,
     ) {
-        if self.parts.iter().any(|part| {
-            matches!(part, LlmOutputPart::ToolCall { call_id: existing, .. } if existing == &call_id)
-        }) {
-            return;
-        }
         self.parts.push(LlmOutputPart::ToolCall {
             call_id,
             tool_name,
@@ -596,20 +593,66 @@ impl LlmStreamAccumulator {
         })
     }
 
+    pub fn apply_to_response_for_request(&self, response: &mut LlmResponse, request_id: &str) {
+        if !self.is_empty() {
+            if response.parts.is_empty() {
+                response.parts = self.parts.clone();
+            } else if !response_contains_accumulated_parts(response, &self.parts)
+                || !tool_call_ids_unique(&self.parts)
+            {
+                response.parts = reconcile_accumulated_parts(&self.parts, &response.parts);
+            }
+        }
+        repair_tool_call_ids(&mut response.parts, request_id);
+    }
+
+    #[cfg(any(test, feature = "testing"))]
     pub fn apply_to_response(&self, response: &mut LlmResponse) {
-        if self.is_empty() {
-            return;
-        }
-        if response.parts.is_empty() {
-            response.parts = self.parts.clone();
-            return;
-        }
+        self.apply_to_response_for_request(response, "test-request");
+    }
+}
 
-        if response_contains_accumulated_parts(response, &self.parts) {
-            return;
-        }
+fn tool_call_ids_unique(parts: &[LlmOutputPart]) -> bool {
+    let mut seen = HashSet::new();
+    parts.iter().all(|part| match part {
+        LlmOutputPart::ToolCall { call_id, .. } => seen.insert(call_id),
+        _ => true,
+    })
+}
 
-        response.parts = reconcile_accumulated_parts(&self.parts, &response.parts);
+fn repair_tool_call_ids(parts: &mut [LlmOutputPart], request_id: &str) {
+    // Reserve every provider id first so a minted id cannot displace a later
+    // valid id in this response.
+    let mut used: HashSet<String> = parts
+        .iter()
+        .filter_map(|part| match part {
+            LlmOutputPart::ToolCall { call_id, .. } if !call_id.trim().is_empty() => {
+                Some(call_id.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    let mut seen = HashSet::new();
+    for (index, part) in parts.iter_mut().enumerate() {
+        let LlmOutputPart::ToolCall { call_id, .. } = part else {
+            continue;
+        };
+        if !call_id.trim().is_empty() && seen.insert(call_id.clone()) {
+            continue;
+        }
+        for attempt in 0u64.. {
+            let mut hash = Blake3DomainHasher::new("lash-provider-call-correlation/v1");
+            hash.update((request_id.len() as u64).to_le_bytes());
+            hash.update(request_id.as_bytes());
+            hash.update((index as u64).to_le_bytes());
+            hash.update(attempt.to_le_bytes());
+            let digest = hash.finalize_hex();
+            let replacement = format!("lashcall_{}", &digest[..24]);
+            if used.insert(replacement.clone()) {
+                *call_id = replacement;
+                break;
+            }
+        }
     }
 }
 
@@ -745,18 +788,24 @@ fn reconcile_accumulated_parts(
     final_parts: &[LlmOutputPart],
 ) -> Vec<LlmOutputPart> {
     let mut out = accumulated_parts.to_vec();
+    let mut matched_tool_slots = HashSet::new();
+    for final_part in final_parts
+        .iter()
+        .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
+    {
+        if let Some(index) = out.iter().enumerate().position(|(index, candidate)| {
+            !matched_tool_slots.contains(&index) && tool_calls_match(candidate, final_part)
+        }) {
+            out[index] = final_part.clone();
+            matched_tool_slots.insert(index);
+        } else {
+            out.push(final_part.clone());
+            matched_tool_slots.insert(out.len() - 1);
+        }
+    }
     for final_part in final_parts {
         match final_part {
-            LlmOutputPart::ToolCall { .. } => {
-                if let Some(existing) = out
-                    .iter_mut()
-                    .find(|candidate| tool_calls_match(candidate, final_part))
-                {
-                    *existing = final_part.clone();
-                } else {
-                    out.push(final_part.clone());
-                }
-            }
+            LlmOutputPart::ToolCall { .. } => {}
             LlmOutputPart::Reasoning { .. } => {
                 let final_item_id = reasoning_part_item_id(final_part);
                 if let Some(item_id) = final_item_id
@@ -820,8 +869,11 @@ fn tool_calls_match(candidate: &LlmOutputPart, expected: &LlmOutputPart) -> bool
             let expected_item_id = expected_replay
                 .as_ref()
                 .and_then(|meta| meta.item_id.as_ref());
-            call_id == expected_call_id
-                || (item_id.is_some() && expected_item_id.is_some() && item_id == expected_item_id)
+            if item_id.is_some() && expected_item_id.is_some() {
+                item_id == expected_item_id
+            } else {
+                call_id == expected_call_id
+            }
         }
         _ => false,
     }

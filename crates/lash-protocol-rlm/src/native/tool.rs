@@ -48,13 +48,6 @@ pub(super) fn normalize(parts: &[Part]) -> NativeAction {
         decision,
         repair_copy: copy.to_string(),
     };
-    let mut ids = std::collections::HashSet::new();
-    if calls.iter().any(|p| !ids.insert(p.tool_call_id())) {
-        return malformed(
-            "retry_duplicate_call_id",
-            "No code executed: duplicate call ids. Send exactly one execute_code call with a unique id.",
-        );
-    }
     if calls.len() > 1 {
         return malformed(
             "retry_multiple_calls",

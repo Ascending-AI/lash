@@ -5,6 +5,7 @@
 
 use crate::support::*;
 use lash_sansio::ToolInputIdentity;
+use std::collections::HashSet;
 
 /// One `content_block_*` slot, keyed by the block type announced at
 /// `content_block_start`. Each variant carries only the state its deltas can
@@ -121,6 +122,8 @@ pub(crate) struct StreamState {
     pub(crate) message_started: bool,
     pub(crate) message_stopped: bool,
     pub(crate) next_tool_ordinal: u64,
+    /// A repeated stop for one content block must not emit a second part.
+    pub(crate) stopped_blocks: HashSet<usize>,
     /// Stamped from `ProviderOptions::expose_thinking` at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
@@ -342,15 +345,7 @@ impl AnthropicProvider {
                         let call_id = block_meta
                             .get("id")
                             .and_then(Value::as_str)
-                            .filter(|id| !id.is_empty())
-                            .ok_or_else(|| {
-                                LlmTransportError::new(
-                                    "Anthropic tool_use requires a nonempty string id",
-                                )
-                                .with_raw(raw.to_string())
-                                .with_kind(ProviderFailureKind::Stream)
-                                .with_retry_verdict(TransportRetryVerdict::NotRetryable)
-                            })?;
+                            .unwrap_or_default();
                         *slot = StreamBlock::ToolUse {
                             ordinal: state.next_tool_ordinal,
                             input_buffer: String::new(),
@@ -490,6 +485,9 @@ impl AnthropicProvider {
             }
             "content_block_stop" => {
                 let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                if !state.stopped_blocks.insert(index) {
+                    return Ok(());
+                }
                 let block_id = format!("content_block:{index}");
                 if let Some(tx) = stream_events {
                     if let Some(StreamBlock::ToolUse {
