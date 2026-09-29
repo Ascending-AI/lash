@@ -27,7 +27,6 @@ fn tool_call_completed_observation_projects_frame_switch_without_seed_bodies() {
         output,
         duration_ms: 12,
         graph_key: None,
-        parent_call_id: None,
     });
     let store = lash_core::facade_support::InMemoryLiveReplayStore::default();
     let prepared = lash_core::LiveReplayStore::prepare_publication(

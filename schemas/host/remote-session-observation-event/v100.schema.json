@@ -2210,12 +2210,6 @@
             "name": {
               "type": "string"
             },
-            "parent_call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "type": {
               "enum": [
                 "tool_call_started"
@@ -2254,12 +2248,6 @@
               "type": "string"
             },
             "output": true,
-            "parent_call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "type": {
               "enum": [
                 "tool_call_completed"

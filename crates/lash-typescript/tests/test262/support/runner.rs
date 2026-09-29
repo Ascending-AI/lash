@@ -36,7 +36,7 @@ const INSTRUCTION_BUDGET: u64 = 4_000_000_000;
 
 /// The wall-clock bound one test may take, on top of the instruction budget.
 /// A worker cannot be killed once a test starts, so the bound is enforced by
-/// the orchestrating thread: past it, the run reports the unfinished tests by
+/// the coordinating thread: past it, the run reports the unfinished tests by
 /// name and exits non-zero rather than letting the lane hang.
 const TEST_WALL_CLOCK: Duration = Duration::from_secs(300);
 
@@ -848,7 +848,7 @@ fn classify_run(
 /// Runs `paths` on every available core and returns what each observed, in
 /// input order. A panic inside the dialect is itself a divergence. A test that
 /// runs past the wall-clock bound fails the run with the unfinished tests'
-/// names: a running worker cannot be killed, so the orchestrating thread
+/// names: a running worker cannot be killed, so the coordinating thread
 /// watches the per-test start times and exits non-zero itself.
 pub(crate) fn run_all(paths: &[String]) -> Vec<Observed> {
     let next = AtomicUsize::new(0);

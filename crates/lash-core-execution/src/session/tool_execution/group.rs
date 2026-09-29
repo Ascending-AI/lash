@@ -161,8 +161,9 @@ pub(crate) struct ToolChildGroupSettled {
 impl RuntimeExecutionContext<'_> {
     /// The group key one batch's children are journaled under:
     /// `{scope_id}:group:{batch_id}` for a top-level batch and
-    /// `{scope_id}:group:{parent_effect_id}:{batch_id}` for a nested one,
-    /// mirroring how [`Self::tool_batch_invocation`] prefixes a nested batch.
+    /// `{scope_id}:group:{parent_effect_id}:{batch_id}` for one opened under a
+    /// parent effect, mirroring how [`Self::tool_batch_invocation`] prefixes
+    /// it.
     ///
     /// Host-code batches only: a language runtime's aggregate is keyed by its
     /// command key instead (FIG-3586).

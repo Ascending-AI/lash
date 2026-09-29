@@ -4524,8 +4524,7 @@
       return JSON.stringify({
         name: event?.name || "",
         args: stableToolMatchValue(event?.args || {}),
-        graph_key: event?.graph_key || null,
-        parent_call_id: event?.parent_call_id || null
+        graph_key: event?.graph_key || null
       });
     }
 

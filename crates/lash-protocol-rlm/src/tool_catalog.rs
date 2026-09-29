@@ -19,7 +19,7 @@ pub(crate) fn rlm_tool_catalog(
 
 /// Being a member *is* being presented.
 ///
-/// Registration already requires the binding on every non-internal tool, so the dialect's path
+/// Registration already requires the binding on every tool, so the dialect's path
 /// is always available.
 #[expect(
     clippy::expect_used,

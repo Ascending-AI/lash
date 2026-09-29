@@ -1442,7 +1442,6 @@ fn remote_activity_preserves_semantic_fields() {
             output,
             duration_ms: 42,
             graph_key: None,
-            parent_call_id: None,
         },
     );
     let remote = RemoteTurnActivity::from_core(9, activity).expect("tool call completed activity");
@@ -2431,7 +2430,6 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         output,
         duration_ms: 100,
         graph_key: None,
-        parent_call_id: None,
     };
     let remote_event = RemoteTurnEvent::try_from(event).expect("turn event converts");
     match remote_event {
@@ -2442,7 +2440,6 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
             output,
             duration_ms,
             graph_key,
-            parent_call_id,
         } => {
             assert_eq!(call_id.as_deref(), Some("call-1"));
             assert_eq!(name, "test_tool");
@@ -2454,7 +2451,6 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
             );
             assert_eq!(duration_ms, 100);
             assert_eq!(graph_key, None);
-            assert_eq!(parent_call_id, None);
         }
         other => panic!("unexpected event: {other:?}"),
     }

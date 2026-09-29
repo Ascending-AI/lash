@@ -405,13 +405,11 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 name,
                 args,
                 graph_key,
-                parent_call_id,
             } => Ok(Self::ToolCallStarted {
                 call_id,
                 name,
                 args,
                 graph_key,
-                parent_call_id,
             }),
             lash_core::TurnEvent::ToolCallCompleted {
                 call_id,
@@ -420,7 +418,6 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 output,
                 duration_ms,
                 graph_key,
-                parent_call_id,
             } => Ok(Self::ToolCallCompleted {
                 call_id,
                 name,
@@ -428,7 +425,6 @@ impl TryFrom<lash_core::TurnEvent> for RemoteTurnEvent {
                 output: encode_remote_tool_call_output(output)?,
                 duration_ms,
                 graph_key,
-                parent_call_id,
             }),
             lash_core::TurnEvent::ToolIntentOutcome { call_id, outcome } => {
                 Ok(Self::ToolIntentOutcome {

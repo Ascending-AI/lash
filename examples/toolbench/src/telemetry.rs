@@ -377,7 +377,6 @@ mod tests {
                 name: "kv_get".into(),
                 args: serde_json::json!({"key":"project"}),
                 graph_key: None,
-                parent_call_id: None,
             })],
             true,
         );

@@ -5,7 +5,7 @@
 //! live where it runs, and otherwise the deployment builds one. Either way,
 //! what decides which commands the child may issue must come from the same
 //! recorded facts, never from whichever context happened to serve it: the
-//! tool surface nested calls are admitted against, the session's tool access,
+//! tool surface the child's catalog is built from, the session's tool access,
 //! and its subagent context (which caps recursive spawning). The rebind binds
 //! these from the request on both paths.
 //!
@@ -29,7 +29,7 @@ use crate::{SessionToolAccess, SubagentSessionContext, ToolDefinition};
 #[serde(deny_unknown_fields)]
 pub struct ToolChildSessionFacts {
     /// The tool surface the opener's calls were admitted against: the
-    /// catalog the child's nested calls are admitted against on either path.
+    /// catalog the child's attempt reads on either path.
     pub tool_surface: Vec<ToolDefinition>,
     /// The session's tool access.
     pub tool_access: SessionToolAccess,

@@ -474,7 +474,6 @@ fn emit_started(context: &RuntimeExecutionContext<'_>, material: &str, sink: &Ob
                 name: "tool".to_string(),
                 args: serde_json::json!({}),
                 graph_key: None,
-                parent_call_id: None,
             },
         },
     );
