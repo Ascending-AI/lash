@@ -442,7 +442,7 @@ pub(super) fn host_view(runtime_globals: &Record, heap: &mut Heap) -> Result<Rec
         match heap.export_for_instruction(&entry.value) {
             Ok(value) => {
                 if let Some(value) = host_visible(value) {
-                    globals.insert_symbolized(entry.symbol, entry.name.clone(), value);
+                    globals.insert_symbolized(&entry.symbol, value);
                 }
             }
             // Function values remain VM-private heap objects, and the remaining
@@ -526,7 +526,7 @@ impl Snapshot {
     /// Decodes canonical snapshot MessagePack after enforcing Lashlang's own
     /// structural nesting bound and canonical wire representation in one raw
     /// byte pass, before serde deserialization.
-    pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SnapshotDecodeError> {
+    pub(crate) fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SnapshotDecodeError> {
         Self::from_canonical_bytes_for_fleet(bytes, lash_core_execution::FleetFormat::current())
     }
 
@@ -537,7 +537,7 @@ impl Snapshot {
     /// before it decodes; this canonical form has no lift step yet, so an
     /// admitted older version is refused closed rather than decoded on shape
     /// alone.
-    pub fn from_canonical_bytes_for_fleet(
+    pub(crate) fn from_canonical_bytes_for_fleet(
         bytes: &[u8],
         fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Self, SnapshotDecodeError> {

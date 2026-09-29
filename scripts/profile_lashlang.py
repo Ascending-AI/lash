@@ -20,7 +20,6 @@ except ImportError:  # pragma: no cover - Windows-only fallback.
 
 PERF_MODES = [
     "one_shot",
-    "prewarmed_one_shot",
     "link_artifact",
     "compiled_execute",
     "snapshot",
@@ -31,7 +30,6 @@ PERF_MODES = [
 
 DEFAULT_PERF_MODES = [
     "one_shot",
-    "prewarmed_one_shot",
     "link_artifact",
     "compiled_execute",
     "snapshot",

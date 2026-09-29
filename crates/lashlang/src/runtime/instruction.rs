@@ -13,7 +13,7 @@ use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use crate::span::Span;
 use crate::tracking::LashlangExecutionSite;
 
-use super::record::{Symbol, intern_symbol, symbol_name};
+use super::record::Symbol;
 use super::schema::ValidationPlan;
 use super::{FormatError, ProfileReport, ProfileStat, Value};
 
@@ -258,12 +258,20 @@ pub(crate) struct ResultWrapperNames {
     pub(crate) error: Name,
 }
 
-pub(crate) fn transient_name(name: &str) -> Name {
-    let symbol = intern_symbol(name);
-    Name {
-        symbol,
-        text: symbol_name(symbol),
+impl Name {
+    /// A name and its symbol share one allocation, so a record entry keyed by
+    /// this name compares against it by pointer.
+    pub(crate) fn new(name: &str) -> Self {
+        let text: Arc<str> = Arc::from(name);
+        Self {
+            symbol: Symbol::from_text(text.clone()),
+            text,
+        }
     }
+}
+
+pub(crate) fn transient_name(name: &str) -> Name {
+    Name::new(name)
 }
 
 pub(crate) fn result_wrapper_names() -> &'static ResultWrapperNames {

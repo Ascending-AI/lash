@@ -43,6 +43,7 @@ members = [
     "crates/lash-regress",
     "crates/lashlang",
     "crates/lash-typescript",
+    "crates/lash-vm-protocol",
     "examples/agent-service",
     "examples/agent-workbench",
     "examples/toolbench",
@@ -207,6 +208,7 @@ channel = "0.1.0-alpha"
 # Centralized external versions. Members opt in with
 # `dep = { workspace = true, features = [...] }`.
 [workspace.dependencies]
+lash-vm-protocol = { package = "lash-internal-vm-protocol", path = "crates/lash-vm-protocol", version = "=0.0.0-dev" }
 lash-render = { package = "lash-internal-render", path = "crates/lash-render", version = "=0.0.0-dev" }
 lash-conformance = { package = "lash-internal-conformance", path = "crates/lash-conformance" }
 anyhow = "1"

@@ -21,7 +21,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         let mut record = record_with_capacity(key_indices.len());
         for (key, value) in key_indices.iter().zip(self.stack.drain(start..)) {
             let name_entry = &self.chunk.names[*key];
-            record.insert_symbolized(name_entry.symbol, name_entry.text.clone(), value);
+            record.insert_symbolized(&name_entry.symbol, value);
         }
         Ok(record)
     }

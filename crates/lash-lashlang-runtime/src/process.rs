@@ -184,10 +184,21 @@ impl ReplayOrdinals {
     }
 }
 
+/// The most continuation bytes a parked segment may carry: the preset the
+/// measurement lane finalises.
+const MAX_SEGMENT_CONTINUATION_BYTES: u64 = 64 * 1024 * 1024;
+
+/// The segment envelope a boundary hands to the next segment.
+///
+/// It is assembled by the parent: `vm` is the worker's continuation, held as
+/// opaque bytes the parent checks structurally and never decodes (ADR 0123),
+/// and every other field is a ledger the parent owns — the ordinals, the
+/// started children, incorporation, the pending summary and the groups. The
+/// worker contributes the VM bytes and nothing else.
 #[derive(serde::Serialize, serde::Deserialize)]
 struct LashlangSegmentState {
     version: u32,
-    vm: lashlang::VmContinuation,
+    vm: lash_vm_protocol::OpaqueVmState,
     #[serde(flatten)]
     ordinals: ReplayOrdinalsState,
     started_process_ids: Vec<ProcessId>,
@@ -379,7 +390,24 @@ pub async fn run_lashlang_process(
     }
     let mut segment_state: Option<LashlangSegmentState> = match handover {
         Some(handover) => match decode_lashlang_segment_state(&handover.engine_state) {
-            Ok(state) => Some(state),
+            Ok(state) => {
+                // The parent's only look at the VM bytes: size, owner, the
+                // VM contract they were written under, format and hash.
+                let owner = segment_continuation_owner(context.process_id());
+                let vm_contract = lashlang::vm_contract_identity();
+                if let Err(refusal) = state
+                    .vm
+                    .check(&segment_continuation_expectation(&owner, &vm_contract))
+                {
+                    return Ok(process_lashlang_failure(
+                        LashlangProcessFailureCode::ProcessSegmentHandoverInvalid,
+                        format!("invalid lashlang segment handover: {refusal}"),
+                        None,
+                    )
+                    .into());
+                }
+                Some(state)
+            }
             Err(LashlangSegmentStateError::VersionMismatch { found, .. }) => {
                 return Ok(retired_generation(
                     format!("lashlang-segment-state-v{found}"),
@@ -673,7 +701,10 @@ async fn execute_lashlang(
 ) -> lash_core::ProcessRunOutcome {
     let (segment_state, program_hash) = segment;
     let mut vm = if let Some(segment_state) = segment_state {
-        match lashlang::Vm::resume_from(segment_state.vm, compiled.as_ref(), env) {
+        let resumed = worker_side::open_continuation(&segment_state.vm).and_then(|continuation| {
+            lashlang::Vm::resume_from(continuation, compiled.as_ref(), env)
+        });
+        match resumed {
             Ok(vm) => vm,
             Err(err) => {
                 let exhausted = err.is_execution_bound_exhausted();
@@ -770,24 +801,25 @@ async fn execute_lashlang(
     }
 }
 
-/// The segment state a boundary hands over: the VM's continuation beside the
-/// host state the next segment resumes with. An error names why the state
-/// could not be captured.
+/// The segment state a boundary hands over: the worker's continuation bytes,
+/// sealed as opaque state, beside the parent's own ledgers the next segment
+/// resumes with. An error names why the state could not be captured.
 fn capture_segment(
     vm: &mut lashlang::Vm<'_, lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>>,
     host: &LashlangProcessHost<'_>,
     reason: lash_core::BoundaryReason,
     program_hash: &str,
 ) -> Result<lash_core::SegmentHandover, (String, &'static str)> {
-    let continuation = vm.suspend().map_err(|error| {
-        (
-            error.to_string(),
-            "lashlang segment boundary declined at non-capturable point",
-        )
-    })?;
+    let continuation = worker_side::capture_continuation(vm)?;
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: continuation,
+        vm: lash_vm_protocol::OpaqueVmState::seal(
+            lash_vm_protocol::VmStateKind::Continuation,
+            segment_continuation_owner(&host.process_id),
+            lashlang::vm_contract_identity(),
+            lashlang::VM_CONTINUATION_FORMAT_VERSION,
+            continuation,
+        ),
         ordinals: host.ordinals.snapshot(&host.run),
         started_process_ids: host.ctx.started_process_ids(),
         incorporation_ledger: host.ctx.incorporation_ledger_snapshot(),
@@ -806,6 +838,61 @@ fn capture_segment(
         program_hash: program_hash.to_owned(),
         engine_state,
     })
+}
+
+/// Whose continuation a segment carries: the durable process it parks.
+fn segment_continuation_owner(process_id: &ProcessId) -> lash_vm_protocol::VmOwner {
+    lash_vm_protocol::VmOwner::new(format!("process:{process_id}"))
+}
+
+/// What a segment's continuation must be: this process's, written under this
+/// build's VM contracts, within the size bound.
+fn segment_continuation_expectation<'a>(
+    owner: &'a lash_vm_protocol::VmOwner,
+    vm_contract: &'a str,
+) -> lash_vm_protocol::StateExpectation<'a> {
+    lash_vm_protocol::StateExpectation {
+        kind: lash_vm_protocol::VmStateKind::Continuation,
+        owner,
+        vm_contract,
+        format_version: lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        max_bytes: MAX_SEGMENT_CONTINUATION_BYTES,
+    }
+}
+
+/// The work a worker does for a process segment: decoding the continuation
+/// it resumes and encoding the one it parks. Until execution moves out of
+/// process (tsvm-d), the parent calls these in process; nothing else in this
+/// file touches VM bytes semantically.
+mod worker_side {
+    use super::LashlangProcessHost;
+
+    /// The semantic decode: guest values, regular expressions and program
+    /// checks, on the worker's own instance.
+    pub(super) fn open_continuation(
+        state: &lash_vm_protocol::OpaqueVmState,
+    ) -> Result<lashlang::VmContinuation, lashlang::ContinuationError> {
+        lashlang::VmInstance::pristine().open_continuation(state.bytes())
+    }
+
+    /// The parked VM's continuation bytes: all the worker hands back at a
+    /// boundary.
+    pub(super) fn capture_continuation(
+        vm: &mut lashlang::Vm<'_, lashlang::ExecutionEnvironment<'_, LashlangProcessHost<'_>>>,
+    ) -> Result<Vec<u8>, (String, &'static str)> {
+        let continuation = vm.suspend().map_err(|error| {
+            (
+                error.to_string(),
+                "lashlang segment boundary declined at non-capturable point",
+            )
+        })?;
+        continuation.to_bytes().map_err(|error| {
+            (
+                error.to_string(),
+                "lashlang segment continuation was not serializable; continuing",
+            )
+        })
+    }
 }
 
 struct LashlangProcessHost<'run> {
@@ -1663,3 +1750,7 @@ mod segment_trace_tests;
 #[cfg(test)]
 #[path = "process/signal_wait_tests.rs"]
 mod signal_wait_tests;
+
+#[cfg(test)]
+#[path = "process/opaque_state_tests.rs"]
+mod opaque_state_tests;

@@ -11,7 +11,7 @@ use bench_support::{
 };
 use lashlang::{
     CompiledProcessCache, ExecutionEnvironment, ExecutionOutcome, ExecutionScratch, LinkedModule,
-    LinkedProgramCache, ProjectedBindings, Snapshot, State, execute, prewarm,
+    LinkedProgramCache, ProjectedBindings, State, execute,
 };
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::env;
@@ -91,7 +91,6 @@ fn record_dealloc(bytes: u64) {
 #[derive(Clone, Copy, Debug)]
 enum Mode {
     OneShot,
-    PrewarmedOneShot,
     LinkArtifact,
     CompiledExecute,
     Snapshot,
@@ -123,7 +122,7 @@ fn main() {
         .next()
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(match mode {
-            Mode::OneShot | Mode::PrewarmedOneShot => 25_000,
+            Mode::OneShot => 25_000,
             Mode::CompiledExecute | Mode::Snapshot | Mode::CompiledProcessCache => 100_000,
             Mode::LinkArtifact => 25_000,
             Mode::LinkedProgramCache => 25_000,
@@ -157,28 +156,9 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
     let mut phase_breakdown = None;
 
     reset_alloc_counters();
-    let mut started = Instant::now();
+    let started = Instant::now();
     match mode {
         Mode::OneShot => {
-            for _ in 0..iterations {
-                let mut state = seeded_state_for(scenario);
-                let mut scratch = ExecutionScratch::new();
-                let linked = linked_benchmark_program(std::hint::black_box(scenario));
-                let compiled = lashlang::compile(
-                    &linked.artifact,
-                    lashlang::Entry::Main,
-                    Some(linked.spans()),
-                )
-                .expect("a module main entry compiles");
-                let outcome =
-                    execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
-                expect_finished(outcome);
-            }
-        }
-        Mode::PrewarmedOneShot => {
-            prewarm();
-            reset_alloc_counters();
-            started = Instant::now();
             for _ in 0..iterations {
                 let mut state = seeded_state_for(scenario);
                 let mut scratch = ExecutionScratch::new();
@@ -230,7 +210,9 @@ fn run_perf(rt: &tokio::runtime::Runtime, mode: Mode, scenario: Scenario, iterat
                 let mut state = seeded_state_for(scenario);
                 let snapshot = state.snapshot();
                 let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-                let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+                let decoded = lashlang::VmInstance::pristine()
+                    .open_snapshot(&encoded)
+                    .expect("snapshot decode");
                 state = State::from_snapshot(decoded);
                 let outcome =
                     execute_benchmark(rt, &compiled, &mut state, &host, &mut scratch, &projected);
@@ -482,7 +464,6 @@ fn parse_scenarios(value: Option<&str>) -> Vec<Scenario> {
 fn parse_mode(value: &str) -> Mode {
     match value {
         "one_shot" => Mode::OneShot,
-        "prewarmed_one_shot" => Mode::PrewarmedOneShot,
         "link_artifact" => Mode::LinkArtifact,
         "compiled_execute" => Mode::CompiledExecute,
         "snapshot" => Mode::Snapshot,
@@ -490,7 +471,7 @@ fn parse_mode(value: &str) -> Mode {
         "linked_program_cache" => Mode::LinkedProgramCache,
         "phase_breakdown" => Mode::PhaseBreakdown,
         other => panic!(
-            "unknown mode `{other}`; expected one_shot, prewarmed_one_shot, link_artifact, compiled_execute, snapshot, compiled_process_cache, linked_program_cache, or phase_breakdown"
+            "unknown mode `{other}`; expected one_shot, link_artifact, compiled_execute, snapshot, compiled_process_cache, linked_program_cache, or phase_breakdown"
         ),
     }
 }

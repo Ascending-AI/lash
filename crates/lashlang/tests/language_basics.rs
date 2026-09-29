@@ -245,7 +245,9 @@ async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
         .collect(),
     );
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&encoded)
+        .expect("snapshot decode");
     let restored = State::from_snapshot(snapshot);
     assert!(matches!(restored.globals()["pair"], Value::Tuple(_)));
 }

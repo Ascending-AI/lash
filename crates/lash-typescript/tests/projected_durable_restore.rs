@@ -98,8 +98,9 @@ async fn a_nested_projection_parks_and_resumes_against_the_live_binding() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
 
     let host = RestoreHost::live();
     let mut resumed =
@@ -135,8 +136,9 @@ async fn an_unrefreshed_nested_projection_refuses_the_read_after_resume() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
 
     let host = RestoreHost::without_bindings();
     let mut resumed =
@@ -204,7 +206,9 @@ fn restored_state_with_a_nested_placeholder() -> State {
         ),
     )]));
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    let decoded = lashlang::VmInstance::pristine()
+        .open_snapshot(&encoded)
+        .expect("snapshot decode");
     State::from_snapshot(decoded)
 }
 
@@ -235,8 +239,9 @@ async fn a_projection_inside_an_error_refreshes_across_a_park() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
 
     let host = RestoreHost::live();
     let mut resumed =
@@ -324,6 +329,8 @@ fn restored_state_with_a_top_level_placeholder() -> State {
         )),
     )]));
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    let decoded = lashlang::VmInstance::pristine()
+        .open_snapshot(&encoded)
+        .expect("snapshot decode");
     State::from_snapshot(decoded)
 }

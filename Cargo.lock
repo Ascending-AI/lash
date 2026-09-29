@@ -2294,6 +2294,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-tool-support",
  "lash-internal-trace",
+ "lash-internal-vm-protocol",
  "serde",
  "serde_json",
  "tempfile",
@@ -2434,6 +2435,7 @@ dependencies = [
  "lash-internal-sqlite-store",
  "lash-internal-trace",
  "lash-internal-typescript",
+ "lash-internal-vm-protocol",
  "rmp-serde",
  "serde",
  "serde_bytes",
@@ -2786,6 +2788,19 @@ dependencies = [
  "swc_ecma_parser",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "lash-internal-vm-protocol"
+version = "0.0.0-dev"
+dependencies = [
+ "base64",
+ "blake3",
+ "rmp-serde",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

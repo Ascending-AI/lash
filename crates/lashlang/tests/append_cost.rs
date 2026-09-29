@@ -26,7 +26,7 @@ use std::cell::Cell;
 
 use lashlang::{
     AbilityOp, AbilityResult, AssignPathStep, AssignTarget, ExecutionHost, ExecutionHostError,
-    ExecutionOutcome, Expr, JavaScriptBinaryOp, Program, Snapshot, State, Value, execute,
+    ExecutionOutcome, Expr, JavaScriptBinaryOp, Program, State, Value, execute,
 };
 
 #[global_allocator]
@@ -327,7 +327,8 @@ fn an_append_charges_what_the_object_measures() {
         .expect("state carrying the appended array should encode");
     // This is the assertion: the decoder re-measures every object and refuses
     // the snapshot unless the charge the appends accumulated matches.
-    let snapshot = Snapshot::from_canonical_bytes(&bytes)
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
         .expect("the charge accumulated by the appends must equal the objects' measured size");
     let mut restored = State::from_snapshot(snapshot);
 

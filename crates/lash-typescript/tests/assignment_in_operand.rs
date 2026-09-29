@@ -157,8 +157,9 @@ async fn an_assignment_inside_a_pending_operand_survives_a_park_and_resume() {
     drop(vm);
 
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
 
     let host = Host;
     let mut resumed =

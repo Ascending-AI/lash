@@ -22,7 +22,7 @@ use rustc_hash::FxHashMap;
 use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::record::{Symbol, intern_symbol, symbol_name};
+use super::record::Symbol;
 use super::{
     HeapId, Name, Record, RuntimeError, RuntimeJson, append_tuple_literal_direct,
     execute_contains_direct, from_json, is_truthy as value_truthy, materialize_value,
@@ -693,26 +693,34 @@ impl ProjectedBindings {
         value: ProjectedValue,
     ) -> Result<(), ProjectedBindingError> {
         let name = name.into();
-        let symbol = intern_symbol(&name);
-        if self.bindings.contains_key(&symbol) {
+        if self.bindings.contains_key(name.as_str()) {
             return Err(ProjectedBindingError::duplicate(name));
         }
-        self.bindings.insert(intern_symbol(&name), value);
+        self.bindings.insert(Symbol::new(&name), value);
         Ok(())
     }
 
-    pub(crate) fn get_symbol(&self, symbol: Symbol) -> Option<ProjectedValue> {
-        self.bindings.get(&symbol).cloned()
+    pub(crate) fn get_symbol(&self, symbol: &Symbol) -> Option<ProjectedValue> {
+        self.bindings.get(symbol).cloned()
     }
 
     pub fn get(&self, name: &str) -> Option<ProjectedValue> {
-        self.bindings.get(&intern_symbol(name)).cloned()
+        self.bindings.get(name).cloned()
     }
 
     pub fn names(&self) -> impl Iterator<Item = String> + '_ {
         self.bindings
             .keys()
-            .map(|symbol| symbol_name(*symbol).to_string())
+            .map(|symbol| symbol.as_str().to_string())
+    }
+
+    /// The first binding backed by a host descriptor rather than an owned
+    /// value: a host object, which cannot cross to a worker.
+    pub(crate) fn host_backed_name(&self) -> Option<String> {
+        self.bindings
+            .iter()
+            .find(|(_, value)| matches!(value.kind, ProjectedKind::Custom(_)))
+            .map(|(symbol, _)| symbol.as_str().to_string())
     }
 }
 

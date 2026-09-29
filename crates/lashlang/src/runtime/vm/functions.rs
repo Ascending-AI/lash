@@ -618,8 +618,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let mut slots = self.take_slot_state(function.slot_names.len());
         slots
             .extras
-            .insert_str("lash:argv", Value::List(arguments_argv.into()));
-        slots.extras.insert_str("lash:callee", Value::Ref(id));
+            .insert_constant("lash:argv", Value::List(arguments_argv.into()));
+        slots.extras.insert_constant("lash:callee", Value::Ref(id));
         if let Some(slot) = function.self_slot {
             slots.values[slot] = Some(Value::Ref(id));
         }

@@ -210,11 +210,13 @@ fn every_module_a_global_references_is_held_by_the_frame_once() {
         let mut record = FlowRecord::new();
         record.insert("inner".to_string(), held_value);
         state
-            .rlm
+            .vm
+            .state_mut()
             .insert_global("nested", FlowValue::Record(Arc::new(record)))
             .expect("bind a global holding a definition");
         state
-            .rlm
+            .vm
+            .state_mut()
             .insert_global("dangling", missing_value)
             .expect("bind a global naming absent bytes");
 
@@ -268,9 +270,9 @@ fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
                 lash_core::FleetFormat::current(),
             )
             .expect("restore");
-        assert!(restored.rlm.remove_global("q"));
+        assert!(restored.vm.state_mut().remove_global("q"));
         assert!(
-            restored.rlm.globals().get("m").is_none(),
+            restored.vm.state().globals().get("m").is_none(),
             "the host view omits the map"
         );
         let before = store.writes().len();

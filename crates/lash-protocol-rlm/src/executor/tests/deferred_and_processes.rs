@@ -1528,7 +1528,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(state.frame_held_module_refs().count(), 1);
-        let stats = state.linked_programs.stats();
+        let stats = state.vm.linked_programs().stats();
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
     });

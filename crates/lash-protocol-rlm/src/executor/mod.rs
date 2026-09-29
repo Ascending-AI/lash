@@ -325,7 +325,8 @@ impl RlmCheckpointPerfFixture {
         // took ownership of them, so seed through the state's own insert.
         for index in 0..binding_count {
             state
-                .rlm
+                .vm
+                .state_mut()
                 .insert_global(
                     format!("mid_{index}"),
                     json_to_flow_value(serde_json::json!([format!(
@@ -579,7 +580,8 @@ async fn execute_code_inner(
     // `Map` or a `Date` has no host view, but a later cell names it all the
     // same (ADR 0076: no existence decision reads the view).
     let mut live_global_names = state
-        .rlm
+        .vm
+        .state()
         .binding_names()
         .map(str::to_string)
         .collect::<BTreeSet<_>>();
@@ -587,11 +589,11 @@ async fn execute_code_inner(
     live_global_names.extend(session_projected_bindings.names());
     host_environment = host_environment.with_globals(live_global_names);
     host_environment =
-        host_environment.with_process_handles(process_handle_names(state.rlm.globals()));
+        host_environment.with_process_handles(process_handle_names(state.vm.state().globals()));
     // A function an earlier cell bound did not survive its cell, and a
     // reference to it is refused by name rather than as a name never bound.
-    host_environment =
-        host_environment.with_expired_functions(state.rlm.expired_functions().iter().cloned());
+    host_environment = host_environment
+        .with_expired_functions(state.vm.state().expired_functions().iter().cloned());
 
     // The kind is decided here, while the failure is still a typed diagnostic.
     // "Compilation failed" is not enough to classify it: a misspelled name and a
@@ -602,7 +604,8 @@ async fn execute_code_inner(
         // asked first: otherwise every cell would pay a full parse even when
         // its linked program is already cached.
         match state
-            .linked_programs
+            .vm
+            .linked_programs_mut()
             .cached_linked_program(code, &host_environment)
         {
             Some(program) => Ok(program),
@@ -619,7 +622,8 @@ async fn execute_code_inner(
                 })
                 .and_then(|program| {
                     state
-                        .linked_programs
+                        .vm
+                        .linked_programs_mut()
                         .get_or_compile_ast(code, program, &host_environment)
                         .map_err(|error| {
                             (
@@ -679,7 +683,10 @@ async fn execute_code_inner(
         }
     };
     let projected_names = projected.names().collect::<Vec<_>>();
-    prune_projected_binding_names(&mut state.rlm, projected_names.iter().map(String::as_str));
+    prune_projected_binding_names(
+        state.vm.state_mut(),
+        projected_names.iter().map(String::as_str),
+    );
     let deferred_execution_grants = deferred_execution_grants(&state.deferred_resolutions);
     let lashlang_execution_trace = foreground_lashlang_execution_trace(
         &ctx,
@@ -703,13 +710,15 @@ async fn execute_code_inner(
     let env = lashlang::ExecutionEnvironment::new(&host)
         .traced()
         .with_execution_bounds(execution_bounds)
-        .with_scratch(std::mem::take(&mut state.scratch))
+        .with_scratch(state.vm.take_scratch())
         .with_projected_bindings(projected);
     let result = {
         let _phase = ctx.named_phase("rlm_lashlang.execute");
-        Box::pin(lashlang::execute(compiled, &mut state.rlm, &env)).await
+        Box::pin(lashlang::execute(compiled, state.vm.state_mut(), &env)).await
     };
-    state.scratch = env.take_recycled_scratch().unwrap_or_default();
+    state
+        .vm
+        .restore_scratch(env.take_recycled_scratch().unwrap_or_default());
     let runtime_failure = env.take_runtime_failure();
     if let Some(trace) = &lashlang_execution_trace {
         emit_foreground_execution_finished(trace, &result, runtime_failure.as_ref());
@@ -861,7 +870,7 @@ async fn hold_global_modules(
     let Some(frame) = frame_environment(ctx) else {
         return Ok(());
     };
-    for module_ref in state.rlm.referenced_module_refs() {
+    for module_ref in state.vm.state().referenced_module_refs() {
         if state.frame_holds(&frame, &module_ref) {
             continue;
         }

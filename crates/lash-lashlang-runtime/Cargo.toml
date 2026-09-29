@@ -39,6 +39,7 @@ lash-remote-protocol = { workspace = true }
 lash-tool-support = { workspace = true }
 lash-trace = { workspace = true }
 lashlang = { workspace = true }
+lash-vm-protocol = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["sync", "time", "rt", "macros"] }

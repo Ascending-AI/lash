@@ -1484,7 +1484,9 @@ fn suspend_and_resume_process(
         );
         let encoded = serde_json::to_vec(&vm.suspend().expect("capture continuation"))
             .expect("encode continuation");
-        let continuation = serde_json::from_slice(&encoded).expect("decode continuation");
+        let continuation = lashlang::VmInstance::pristine()
+            .open_continuation(&encoded)
+            .expect("decode continuation");
         let mut resumed = Vm::resume_from(continuation, &compiled, &execution_environment)
             .expect("resume process VM");
         loop {

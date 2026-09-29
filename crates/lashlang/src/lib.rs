@@ -93,11 +93,13 @@ pub use runtime::{
     ProjectedValue, Record, ResourceHandle, ResourceOperation, ResourceOperationBatch,
     ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult,
     RuntimeError, RuntimeFailure, Sleep, SleepKind, Snapshot, SnapshotDecodeError, State,
-    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmContinuation, VmFinallyCompletionContinuation,
-    VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
-    VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
-    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
-    is_process_handle, prewarm, unwrap_type_value,
+    VM_CONTINUATION_FORMAT_VERSION, Value, Vm, VmComplete, VmContinuation, VmExecutionStart,
+    VmFinallyCompletionContinuation, VmFinallyContinuation, VmGuestError, VmHandlerContinuation,
+    VmHeapContinuation, VmInstance, VmInterrupt, VmIteratorContinuation, VmIteratorCursor,
+    VmParkReason, VmParked, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRequest,
+    VmResume, VmResumePoint, VmRunConfig, VmRunOutcome, VmStep, VmStepError, VmSuspended,
+    VmSuspendedOperation, cancel_checkpoint_reached, compile, execute, from_json,
+    is_javascript_builtin_global, is_process_handle, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -180,6 +182,20 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// identity; resume refuses any other program. A v29 continuation names no
 /// executable and is refused.
 pub const BYTECODE_FORMAT_VERSION: u32 = 30;
+
+/// The identity of the VM contracts that decide how parked VM state decodes:
+/// the bytecode, continuation and snapshot formats, the instruction
+/// accounting, the heap size schedule and the VM ABI.
+///
+/// Opaque VM state carries it (ADR 0123): a parent checks that the bytes it
+/// holds were written under the contracts this build decodes, without
+/// decoding them. It is the part of the build identity durable state is
+/// fenced by.
+pub fn vm_contract_identity() -> String {
+    format!(
+        "lashlang-vm/bytecode-{BYTECODE_FORMAT_VERSION}/continuation-{VM_CONTINUATION_FORMAT_VERSION}/snapshot-{LASHLANG_SNAPSHOT_VERSION}/accounting-{INSTRUCTION_ACCOUNTING_VERSION}/heap-{HEAP_SIZE_SCHEDULE_VERSION}/{LASHLANG_VM_ABI_VERSION}"
+    )
+}
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,
@@ -523,8 +539,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn compile_prewarm_and_environment_scratch_execution_work_together() {
-        prewarm();
+    async fn compile_and_environment_scratch_execution_work_together() {
         let compiled = compile_ast(&b::program(vec![b::finish(b::num(7.0))]))
             .expect("the program should compile");
         let mut state = State::new();

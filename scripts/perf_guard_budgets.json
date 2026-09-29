@@ -3259,10 +3259,6 @@
           "allocated_bytes_per_iter_max": 496249,
           "allocations_per_iter_max": 3752
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 496260,
-          "allocations_per_iter_max": 3752
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 257544,
           "allocations_per_iter_max": 2992
@@ -3291,10 +3287,6 @@
       "language_host_environment": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 1760850,
-          "allocations_per_iter_max": 12109
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 1760843,
           "allocations_per_iter_max": 12109
         },
         "link_artifact": {
@@ -3327,10 +3319,6 @@
           "allocated_bytes_per_iter_max": 189701,
           "allocations_per_iter_max": 1637
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 189693,
-          "allocations_per_iter_max": 1637
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 101431,
           "allocations_per_iter_max": 1213
@@ -3359,10 +3347,6 @@
       "direct_unwrap": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 161177,
-          "allocations_per_iter_max": 1843
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 161168,
           "allocations_per_iter_max": 1843
         },
         "link_artifact": {
@@ -3395,10 +3379,6 @@
           "allocated_bytes_per_iter_max": 195883,
           "allocations_per_iter_max": 1733
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 195888,
-          "allocations_per_iter_max": 1733
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 113738,
           "allocations_per_iter_max": 1352
@@ -3427,10 +3407,6 @@
       "loop_control": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 311927,
-          "allocations_per_iter_max": 5247
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 311922,
           "allocations_per_iter_max": 5247
         },
         "link_artifact": {
@@ -3463,10 +3439,6 @@
           "allocated_bytes_per_iter_max": 394240,
           "allocations_per_iter_max": 3285
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 394241,
-          "allocations_per_iter_max": 3285
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 212689,
           "allocations_per_iter_max": 2428
@@ -3495,10 +3467,6 @@
       "projected_values": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 316452,
-          "allocations_per_iter_max": 2413
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 316459,
           "allocations_per_iter_max": 2413
         },
         "link_artifact": {
@@ -3531,10 +3499,6 @@
           "allocated_bytes_per_iter_max": 2590682,
           "allocations_per_iter_max": 13310
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2590697,
-          "allocations_per_iter_max": 13310
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 228249,
           "allocations_per_iter_max": 2668
@@ -3563,10 +3527,6 @@
       "cache_pressure": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 600186,
-          "allocations_per_iter_max": 4280
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 600177,
           "allocations_per_iter_max": 4280
         },
         "link_artifact": {
@@ -3599,10 +3559,6 @@
           "allocated_bytes_per_iter_max": 319285,
           "allocations_per_iter_max": 2486
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 319268,
-          "allocations_per_iter_max": 2486
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 193425,
           "allocations_per_iter_max": 2061
@@ -3631,10 +3587,6 @@
       "type_system_stress": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 2390709,
-          "allocations_per_iter_max": 10453
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2390710,
           "allocations_per_iter_max": 10453
         },
         "link_artifact": {
@@ -3667,10 +3619,6 @@
           "allocated_bytes_per_iter_max": 258249,
           "allocations_per_iter_max": 2375
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 258237,
-          "allocations_per_iter_max": 2375
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 134139,
           "allocations_per_iter_max": 1829
@@ -3699,10 +3647,6 @@
       "tool_control_host_environment": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 368082,
-          "allocations_per_iter_max": 3143
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 368084,
           "allocations_per_iter_max": 3143
         },
         "link_artifact": {
@@ -3735,10 +3679,6 @@
           "allocated_bytes_per_iter_max": 231030,
           "allocations_per_iter_max": 1848
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 231015,
-          "allocations_per_iter_max": 1848
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 124224,
           "allocations_per_iter_max": 1551
@@ -3766,10 +3706,6 @@
       },
       "continue_as_seed_host_environment": {
         "one_shot": {
-          "allocated_bytes_per_iter_max": 318712,
-          "allocations_per_iter_max": 2744
-        },
-        "prewarmed_one_shot": {
           "allocated_bytes_per_iter_max": 318712,
           "allocations_per_iter_max": 2744
         },
@@ -3803,10 +3739,6 @@
           "allocated_bytes_per_iter_max": 507701,
           "allocations_per_iter_max": 3965
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 507715,
-          "allocations_per_iter_max": 3965
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 254177,
           "allocations_per_iter_max": 3207
@@ -3835,10 +3767,6 @@
       "syntax_text_host_environment": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 192770,
-          "allocations_per_iter_max": 1793
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 192776,
           "allocations_per_iter_max": 1793
         },
         "link_artifact": {
@@ -3871,10 +3799,6 @@
           "allocated_bytes_per_iter_max": 408467,
           "allocations_per_iter_max": 2997
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 408432,
-          "allocations_per_iter_max": 2997
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 223145,
           "allocations_per_iter_max": 2501
@@ -3903,10 +3827,6 @@
       "fanout_expression_host_environment": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 327065,
-          "allocations_per_iter_max": 2543
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 327058,
           "allocations_per_iter_max": 2543
         },
         "link_artifact": {
@@ -3939,10 +3859,6 @@
           "allocated_bytes_per_iter_max": 202654,
           "allocations_per_iter_max": 1701
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 202651,
-          "allocations_per_iter_max": 1701
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 113793,
           "allocations_per_iter_max": 1419
@@ -3971,10 +3887,6 @@
       "heap_list_iteration": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 3654006,
-          "allocations_per_iter_max": 3985
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 3654039,
           "allocations_per_iter_max": 3985
         },
         "link_artifact": {
@@ -4008,10 +3920,6 @@
           "allocated_bytes_per_iter_max": 4144969,
           "allocations_per_iter_max": 22584
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 4144985,
-          "allocations_per_iter_max": 22584
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 115084,
           "allocations_per_iter_max": 1452
@@ -4041,10 +3949,6 @@
       "heap_allocation_churn": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 2325071,
-          "allocations_per_iter_max": 18138
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2325073,
           "allocations_per_iter_max": 18138
         },
         "link_artifact": {
@@ -4078,10 +3982,6 @@
           "allocated_bytes_per_iter_max": 4334422,
           "allocations_per_iter_max": 30988
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 4334429,
-          "allocations_per_iter_max": 30988
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 159458,
           "allocations_per_iter_max": 1993
@@ -4111,10 +4011,6 @@
       "heap_comprehension_build": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 2293124,
-          "allocations_per_iter_max": 7180
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2293122,
           "allocations_per_iter_max": 7180
         },
         "link_artifact": {
@@ -4148,10 +4044,6 @@
           "allocated_bytes_per_iter_max": 409092,
           "allocations_per_iter_max": 2137
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 409093,
-          "allocations_per_iter_max": 2137
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 92781,
           "allocations_per_iter_max": 1194
@@ -4183,10 +4075,6 @@
           "allocated_bytes_per_iter_max": 2478218,
           "allocations_per_iter_max": 18301
         },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 2478223,
-          "allocations_per_iter_max": 18301
-        },
         "link_artifact": {
           "allocated_bytes_per_iter_max": 170878,
           "allocations_per_iter_max": 2116
@@ -4216,10 +4104,6 @@
       "heap_deep_chain_mutation_24": {
         "one_shot": {
           "allocated_bytes_per_iter_max": 6679535,
-          "allocations_per_iter_max": 54041
-        },
-        "prewarmed_one_shot": {
-          "allocated_bytes_per_iter_max": 6679530,
           "allocations_per_iter_max": 54041
         },
         "link_artifact": {

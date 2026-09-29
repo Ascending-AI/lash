@@ -1,64 +1,84 @@
 use super::Value;
-use lash_sansio::sync::RwLockExt;
 use rustc_hash::FxHashMap;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
+use std::borrow::Borrow;
+use std::hash::{Hash, Hasher};
 use std::ops::Index;
-use std::sync::{Arc, OnceLock, RwLock};
+use std::sync::Arc;
 
 const RECORD_INDEX_THRESHOLD: usize = 8;
 const RECORD_INLINE_CAPACITY: usize = 4;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct Symbol(u32);
+/// A property or binding name, identified by its text.
+///
+/// Two symbols are equal exactly when their text is equal, so a symbol needs
+/// no table to mean anything: there is no process-wide interner for guest
+/// names to accumulate in, and nothing one execution names can outlive the
+/// values that hold it (FIG-4158). A constant name the runtime spells itself
+/// borrows its text and allocates nothing; a name compiled into a program
+/// shares one allocation with every symbol minted from it, so the common
+/// comparison is a pointer check. Text equality is the fallback, never a hash.
+#[derive(Clone, Debug)]
+pub(crate) struct Symbol(SymbolText);
 
-#[derive(Default)]
-struct SymbolTable {
-    lookup: FxHashMap<Arc<str>, Symbol>,
-    names: Vec<Arc<str>>,
+#[derive(Clone, Debug)]
+enum SymbolText {
+    Constant(&'static str),
+    Shared(Arc<str>),
 }
 
-fn symbol_table() -> &'static RwLock<SymbolTable> {
-    static TABLE: OnceLock<RwLock<SymbolTable>> = OnceLock::new();
-    TABLE.get_or_init(|| RwLock::new(SymbolTable::default()))
-}
+impl Symbol {
+    pub(crate) fn new(name: &str) -> Self {
+        Self(SymbolText::Shared(Arc::from(name)))
+    }
 
-pub(crate) fn lookup_symbol(name: &str) -> Option<Symbol> {
-    symbol_table().read_recover().lookup.get(name).copied()
-}
+    pub(crate) const fn constant(name: &'static str) -> Self {
+        Self(SymbolText::Constant(name))
+    }
 
-pub(crate) fn intern_symbol(name: &str) -> Symbol {
-    intern_symbol_with_name(name).0
-}
+    pub(crate) fn from_text(text: Arc<str>) -> Self {
+        Self(SymbolText::Shared(text))
+    }
 
-pub(crate) fn intern_symbol_with_name(name: &str) -> (Symbol, Arc<str>) {
-    {
-        let table = symbol_table().read_recover();
-        if let Some(symbol) = table.lookup.get(name) {
-            return (*symbol, table.names[symbol.0 as usize].clone());
+    pub(crate) fn as_str(&self) -> &str {
+        match &self.0 {
+            SymbolText::Constant(text) => text,
+            SymbolText::Shared(text) => text,
         }
     }
-
-    let mut table = symbol_table().write_recover();
-    if let Some(symbol) = table.lookup.get(name) {
-        return (*symbol, table.names[symbol.0 as usize].clone());
-    }
-
-    let symbol = Symbol(table.names.len() as u32);
-    let text: Arc<str> = Arc::<str>::from(name);
-    table.names.push(text.clone());
-    table.lookup.insert(text.clone(), symbol);
-    (symbol, text)
 }
 
-pub(crate) fn symbol_name(symbol: Symbol) -> Arc<str> {
-    symbol_table().read_recover().names[symbol.0 as usize].clone()
+impl PartialEq for Symbol {
+    fn eq(&self, other: &Self) -> bool {
+        if let (SymbolText::Shared(left), SymbolText::Shared(right)) = (&self.0, &other.0)
+            && Arc::ptr_eq(left, right)
+        {
+            return true;
+        }
+        self.as_str() == other.as_str()
+    }
+}
+
+impl Eq for Symbol {}
+
+/// Hashes exactly as the text does, so a map keyed by symbols answers a
+/// lookup by `&str` through [`Borrow`].
+impl Hash for Symbol {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_str().hash(state);
+    }
+}
+
+impl Borrow<str> for Symbol {
+    fn borrow(&self) -> &str {
+        self.as_str()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct RecordEntry {
     pub(super) symbol: Symbol,
-    pub(super) name: Arc<str>,
     pub(super) value: Value,
 }
 
@@ -90,34 +110,45 @@ impl Record {
     }
 
     pub fn get(&self, name: &str) -> Option<&Value> {
-        self.get_symbol(lookup_symbol(name)?)
+        let index = self.position_for(name)?;
+        Some(&self.entries[index].value)
     }
 
     pub fn get_mut(&mut self, name: &str) -> Option<&mut Value> {
-        let symbol = lookup_symbol(name)?;
-        let index = self.position_for(symbol)?;
+        let index = self.position_for(name)?;
         Some(&mut self.entries[index].value)
     }
 
     pub fn remove(&mut self, name: &str) -> Option<Value> {
-        let symbol = lookup_symbol(name)?;
-        self.remove_symbol(symbol)
+        let index = self.position_for(name)?;
+        Some(self.remove_at(index))
     }
 
     pub fn insert(&mut self, name: String, value: Value) -> Option<Value> {
-        let (symbol, name) = intern_symbol_with_name(&name);
-        self.insert_symbolized(symbol, name, value)
+        if let Some(index) = self.position_for(&name) {
+            return Some(std::mem::replace(&mut self.entries[index].value, value));
+        }
+        self.push_new(Symbol::from_text(Arc::from(name)), value);
+        None
+    }
+
+    /// Inserts under a name the runtime spells itself, allocating no key.
+    pub(crate) fn insert_constant(&mut self, name: &'static str, value: Value) -> Option<Value> {
+        self.insert_symbolized(&Symbol::constant(name), value)
     }
 
     pub fn insert_str(&mut self, name: &str, value: Value) -> Option<Value> {
-        let (symbol, name) = intern_symbol_with_name(name);
-        self.insert_symbolized(symbol, name, value)
+        if let Some(index) = self.position_for(name) {
+            return Some(std::mem::replace(&mut self.entries[index].value, value));
+        }
+        self.push_new(Symbol::new(name), value);
+        None
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
         self.entries
             .iter()
-            .map(|entry| (entry.name.as_ref(), &entry.value))
+            .map(|entry| (entry.symbol.as_str(), &entry.value))
     }
 
     pub(crate) fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
@@ -125,45 +156,40 @@ impl Record {
     }
 
     pub fn keys(&self) -> impl Iterator<Item = &str> {
-        self.entries.iter().map(|entry| entry.name.as_ref())
+        self.entries.iter().map(|entry| entry.symbol.as_str())
     }
 
     pub fn values(&self) -> impl Iterator<Item = &Value> {
         self.entries.iter().map(|entry| &entry.value)
     }
 
-    pub(crate) fn get_symbol(&self, symbol: Symbol) -> Option<&Value> {
-        let index = self.position_for(symbol)?;
-        Some(&self.entries[index].value)
+    pub(crate) fn get_symbol(&self, symbol: &Symbol) -> Option<&Value> {
+        self.get(symbol.as_str())
     }
 
-    pub(crate) fn get_symbol_mut(&mut self, symbol: Symbol) -> Option<&mut Value> {
-        let index = self.position_for(symbol)?;
-        Some(&mut self.entries[index].value)
+    pub(crate) fn get_symbol_mut(&mut self, symbol: &Symbol) -> Option<&mut Value> {
+        self.get_mut(symbol.as_str())
     }
 
-    pub(crate) fn insert_symbolized(
-        &mut self,
-        symbol: Symbol,
-        name: Arc<str>,
-        value: Value,
-    ) -> Option<Value> {
-        if let Some(index) = self.position_for(symbol) {
+    pub(crate) fn insert_symbolized(&mut self, symbol: &Symbol, value: Value) -> Option<Value> {
+        if let Some(index) = self.position_for(symbol.as_str()) {
             return Some(std::mem::replace(&mut self.entries[index].value, value));
         }
-
-        let index = self.entries.len();
-        self.entries.push(RecordEntry {
-            symbol,
-            name,
-            value,
-        });
-        self.reindex_after_insert(index);
+        self.push_new(symbol.clone(), value);
         None
     }
 
-    pub(super) fn remove_symbol(&mut self, symbol: Symbol) -> Option<Value> {
-        let index = self.position_for(symbol)?;
+    fn push_new(&mut self, symbol: Symbol, value: Value) {
+        let index = self.entries.len();
+        self.entries.push(RecordEntry { symbol, value });
+        self.reindex_after_insert(index);
+    }
+
+    pub(super) fn remove_symbol(&mut self, symbol: &Symbol) -> Option<Value> {
+        self.remove(symbol.as_str())
+    }
+
+    fn remove_at(&mut self, index: usize) -> Value {
         // Property order is observable — `Object.keys`, `JSON.stringify`, and
         // object rest all read it — so the vacated slot cannot be backfilled
         // from the end. `{ a, ...rest }` lowers to copy-then-delete, and a
@@ -175,7 +201,7 @@ impl Record {
         // already said.
         if let Some(map) = &mut self.index {
             if self.entries.len() > RECORD_INDEX_THRESHOLD {
-                map.remove(&removed.symbol);
+                map.remove(removed.symbol.as_str());
                 for slot in map.values_mut() {
                     if *slot > index {
                         *slot -= 1;
@@ -187,14 +213,16 @@ impl Record {
                 self.index = None;
             }
         }
-        Some(removed.value)
+        removed.value
     }
 
-    fn position_for(&self, symbol: Symbol) -> Option<usize> {
+    fn position_for(&self, name: &str) -> Option<usize> {
         if let Some(index) = &self.index {
-            return index.get(&symbol).copied();
+            return index.get(name).copied();
         }
-        self.entries.iter().position(|entry| entry.symbol == symbol)
+        self.entries
+            .iter()
+            .position(|entry| entry.symbol.as_str() == name)
     }
 
     fn rebuild_index(&mut self) {
@@ -202,7 +230,7 @@ impl Record {
             let mut index =
                 FxHashMap::with_capacity_and_hasher(self.entries.len(), Default::default());
             for (slot, entry) in self.entries.iter().enumerate() {
-                index.insert(entry.symbol, slot);
+                index.insert(entry.symbol.clone(), slot);
             }
             index
         });
@@ -210,7 +238,7 @@ impl Record {
 
     fn reindex_after_insert(&mut self, index: usize) {
         if let Some(map) = &mut self.index {
-            map.insert(self.entries[index].symbol, index);
+            map.insert(self.entries[index].symbol.clone(), index);
             return;
         }
         if self.entries.len() > RECORD_INDEX_THRESHOLD {
@@ -235,7 +263,7 @@ impl PartialEq for Record {
         }
         self.entries.iter().all(|entry| {
             other
-                .get_symbol(entry.symbol)
+                .get_symbol(&entry.symbol)
                 .is_some_and(|value| value == &entry.value)
         })
     }
@@ -262,7 +290,7 @@ impl Serialize for Record {
 
         let mut map = serializer.serialize_map(Some(self.entries.len()))?;
         for entry in &self.entries {
-            map.serialize_entry(entry.name.as_ref(), &entry.value)?;
+            map.serialize_entry(entry.symbol.as_str(), &entry.value)?;
         }
         map.end()
     }

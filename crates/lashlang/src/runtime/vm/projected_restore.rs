@@ -25,12 +25,12 @@ impl SlotState {
     ) {
         if let Some(slot_names) = slot_names {
             for (index, name) in slot_names.iter().enumerate() {
-                let Some(live) = bindings.get_symbol(name.symbol) else {
+                let Some(live) = bindings.get_symbol(&name.symbol) else {
                     continue;
                 };
                 if index < self.values.len() {
                     self.values[index] = Some(Value::Projected(live));
-                    self.extras.remove_symbol(name.symbol);
+                    self.extras.remove_symbol(&name.symbol);
                 }
             }
         }

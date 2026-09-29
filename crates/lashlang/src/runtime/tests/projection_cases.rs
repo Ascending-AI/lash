@@ -255,10 +255,7 @@ fn projected_response_from_value(
             Err(_) => None,
         },
         ProjectedReadRequest::Field(field) => {
-            let field = Name {
-                symbol: intern_symbol(field.as_ref()),
-                text: field,
-            };
+            let field = Name::new(field.as_ref());
             read_field_ref_direct(value, &field)
                 .ok()
                 .map(ProjectedReadResponse::Value)
@@ -1125,10 +1122,7 @@ impl ProjectedHostDescriptor for OverrideProjectedValue {
                 }
                 ProjectedReadRequest::Field(field) => {
                     self.push_call("get_field");
-                    let field = Name {
-                        symbol: intern_symbol(field.as_ref()),
-                        text: field,
-                    };
+                    let field = Name::new(field.as_ref());
                     read_field_ref_direct(&self.value, &field)
                         .ok()
                         .map(ProjectedReadResponse::Value)

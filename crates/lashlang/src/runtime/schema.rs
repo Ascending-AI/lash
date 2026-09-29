@@ -1,7 +1,5 @@
 use super::{
-    ImageValue, RuntimeError, Value, debug_assert_exported_value,
-    record::{Symbol, intern_symbol},
-    unwrap_type_value,
+    ImageValue, RuntimeError, Value, debug_assert_exported_value, record::Symbol, unwrap_type_value,
 };
 use smallvec::SmallVec;
 use std::fmt::Write as _;
@@ -25,7 +23,6 @@ enum ValidationPlanKind {
 #[derive(Clone)]
 struct ValidationFieldPlan {
     symbol: Symbol,
-    name: Arc<str>,
     required: bool,
     plan: ValidationPlan,
 }
@@ -207,13 +204,13 @@ impl ValidationPlan {
             ValidationPlanKind::Object(fields) => match value {
                 Value::Record(record) => fields.iter().all(|field| {
                     record
-                        .get_symbol(field.symbol)
+                        .get_symbol(&field.symbol)
                         .map_or(!field.required, |field_value| {
                             field.plan.accepts(field_value)
                         })
                 }),
                 Value::Image(image) => fields.iter().all(|field| {
-                    image_field_value(image, field.name.as_ref())
+                    image_field_value(image, field.symbol.as_str())
                         .map_or(!field.required, |field_value| {
                             field.plan.accepts(&field_value)
                         })
@@ -284,13 +281,13 @@ impl ValidationPlan {
                             return format!(
                                 "{}: missing required field `{}`",
                                 format_schema_path(path),
-                                field.name
+                                field.symbol.as_str()
                             );
                         }
                         continue;
                     };
                     if !field.plan.accepts(field_value.as_ref()) {
-                        path.push(PathSegment::Field(field.name.as_ref()));
+                        path.push(PathSegment::Field(field.symbol.as_str()));
                         let message = field.plan.describe_failure(field_value.as_ref(), path);
                         path.pop();
                         return message;
@@ -339,7 +336,7 @@ fn compile_object_fields(schema_obj: &super::Record) -> Box<[ValidationFieldPlan
         Some(Value::List(required)) => required
             .iter()
             .filter_map(|field| match field {
-                Value::String(name) => Some((intern_symbol(name.as_str()), name.as_str())),
+                Value::String(name) => Some(Symbol::new(name.as_str())),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -351,24 +348,20 @@ fn compile_object_fields(schema_obj: &super::Record) -> Box<[ValidationFieldPlan
             .entries
             .iter()
             .map(|entry| ValidationFieldPlan {
-                symbol: entry.symbol,
-                name: entry.name.clone(),
-                required: required_symbols
-                    .iter()
-                    .any(|(symbol, _)| *symbol == entry.symbol),
+                symbol: entry.symbol.clone(),
+                required: required_symbols.contains(&entry.symbol),
                 plan: compile_schema_value(&entry.value),
             })
             .collect::<Vec<_>>(),
         _ => Vec::new(),
     };
 
-    for (symbol, name) in required_symbols {
+    for symbol in required_symbols {
         if fields.iter().any(|field| field.symbol == symbol) {
             continue;
         }
         fields.push(ValidationFieldPlan {
             symbol,
-            name: Arc::<str>::from(name),
             required: true,
             plan: ValidationPlan {
                 kind: ValidationPlanKind::Any,
@@ -395,8 +388,10 @@ impl AsRef<Value> for FieldValue<'_> {
 
 fn plan_field_value<'a>(value: &'a Value, field: &ValidationFieldPlan) -> Option<FieldValue<'a>> {
     match value {
-        Value::Record(record) => record.get_symbol(field.symbol).map(FieldValue::Borrowed),
-        Value::Image(image) => image_field_value(image, field.name.as_ref()).map(FieldValue::Owned),
+        Value::Record(record) => record.get_symbol(&field.symbol).map(FieldValue::Borrowed),
+        Value::Image(image) => {
+            image_field_value(image, field.symbol.as_str()).map(FieldValue::Owned)
+        }
         _ => None,
     }
 }

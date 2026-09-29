@@ -24,7 +24,10 @@ fn capture(id: String, source: &str, state: &State, snapshot: Snapshot, host: &H
     );
     let continuation = vm.suspend().expect("corpus continuation");
     let bytes = serde_json::to_vec(&continuation).expect("continuation encode");
-    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("continuation decode");
+    let decoder = lashlang::VmInstance::pristine();
+    let restored = decoder
+        .open_continuation(&bytes)
+        .expect("continuation decode");
     assert_eq!(
         serde_json::to_vec(&restored).expect("restored encode"),
         bytes
@@ -37,7 +40,8 @@ fn capture(id: String, source: &str, state: &State, snapshot: Snapshot, host: &H
     assert_eq!(outcome, expected);
     let snapshot_bytes = snapshot.to_canonical_bytes().expect("snapshot encode");
     assert_eq!(
-        Snapshot::from_canonical_bytes(&snapshot_bytes)
+        decoder
+            .open_snapshot(&snapshot_bytes)
             .expect("snapshot decode")
             .to_canonical_bytes()
             .expect("snapshot reencode"),

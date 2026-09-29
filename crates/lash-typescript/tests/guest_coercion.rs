@@ -290,7 +290,9 @@ async fn conversions_around_a_park_match_the_resident_run() {
     let continuation = vm.suspend().expect("capturable");
     drop(vm);
     let bytes = serde_json::to_vec(&continuation).expect("serialize");
-    let restored: VmContinuation = serde_json::from_slice(&bytes).expect("deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("deserialize");
     let host = Host;
     let mut resumed = Vm::resume_from(restored, &program, &host).expect("resume");
     assert_eq!(

@@ -24,6 +24,7 @@ fn empty_continuation(heap: Heap) -> VmContinuation {
         pending_error_span: None,
         instructions_executed: 0,
         heap: VmHeapContinuation::new(heap),
+        resume: VmResumePoint::NextInstruction,
     }
 }
 

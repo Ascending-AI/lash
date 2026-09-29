@@ -4,8 +4,8 @@
 use super::*;
 use crate::dialect::{RlmDialectServices, TypescriptDialect};
 use lashlang::{
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue,
-    Record as FlowRecord, Value as FlowValue,
+    DurableFragment, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, Record as FlowRecord, Value as FlowValue,
 };
 use serde_json::json;
 
@@ -386,7 +386,8 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     let mut state = RlmExecutionState::new();
     for index in 0..50 {
         state
-            .rlm
+            .vm
+            .state_mut()
             .insert_global(
                 format!("page_{index}"),
                 FlowValue::String(format!("page-{index}-{}", "x".repeat(100 * 1024)).into()),
@@ -400,7 +401,8 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
     state.acknowledge_execution_state_capture();
 
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "page_0".to_string(),
             FlowValue::String(format!("changed-{}", "y".repeat(100 * 1024)).into()),
@@ -411,7 +413,8 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
         .snapshot_execution_state(lash_core::FleetFormat::current())
         .expect("changed snapshot");
     let retained_bytes = state
-        .rlm
+        .vm
+        .state()
         .snapshot()
         .to_canonical_bytes()
         .expect("retained canonical state")
@@ -687,7 +690,8 @@ fn reordered_tool_definition_subtree_is_rejected_not_renormalized() {
 fn rlm_snapshot_accepts_inline_global_named_schema() {
     let mut state = RlmExecutionState::new();
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global("schema".to_string(), FlowValue::String("note".into()))
         .expect("seed schema global");
     state.mark_execution_started();
@@ -1068,7 +1072,8 @@ fn leaf_bearing_hydration_and_live_target()
 -> (lash_core::plugin::HydratedExecutionState, RlmExecutionState) {
     let mut source = RlmExecutionState::new();
     source
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "kept".to_string(),
             FlowValue::List(vec![FlowValue::String("source".repeat(2048).into())].into()),
@@ -1086,7 +1091,8 @@ fn leaf_bearing_hydration_and_live_target()
     );
 
     let mut live = RlmExecutionState::new();
-    live.rlm
+    live.vm
+        .state_mut()
         .insert_global("live".to_string(), FlowValue::String("untouched".into()))
         .expect("seed a global");
     live.mark_execution_started();
@@ -1095,12 +1101,12 @@ fn leaf_bearing_hydration_and_live_target()
 
 fn assert_live_state_untouched(live: &RlmExecutionState) {
     assert_eq!(
-        live.rlm.snapshot().globals().get("live"),
+        live.vm.state().snapshot().globals().get("live"),
         Some(&FlowValue::String("untouched".into())),
         "a rejected restore must not replace live globals"
     );
     assert!(
-        live.rlm.snapshot().globals().get("kept").is_none(),
+        live.vm.state().snapshot().globals().get("kept").is_none(),
         "a rejected restore must not leak the source's globals"
     );
 }
@@ -1222,7 +1228,8 @@ fn resolving_an_absent_leaf_is_a_typed_missing_leaf_rejection() {
 fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
     let mut state = RlmExecutionState::new();
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "large".to_string(),
             FlowValue::List(vec![FlowValue::String("x".repeat(8 * 1024).into())].into()),
@@ -1280,7 +1287,8 @@ fn includes_globals_excludes_history_and_named() {
 fn excludes_direct_projected_globals() {
     let mut state = RlmExecutionState::new();
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "projected".to_string(),
             FlowValue::Projected(ProjectedValue::scalar(
@@ -1290,7 +1298,8 @@ fn excludes_direct_projected_globals() {
         )
         .expect("seed a global");
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global("plain".to_string(), FlowValue::String("local".into()))
         .expect("seed a global");
 
@@ -1319,11 +1328,13 @@ fn excludes_top_level_globals_containing_nested_projected_values() {
     );
     record.insert("title".to_string(), FlowValue::String("local".into()));
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global("doc".to_string(), FlowValue::Record(Arc::new(record)))
         .expect("seed a global");
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "plain".to_string(),
             FlowValue::List(vec![FlowValue::Number(1.0)].into()),
@@ -1369,7 +1380,8 @@ fn excludes_custom_projected_globals_without_rendering_or_materializing() {
     let projected = Arc::new(CountingProjectedValue::default());
     let mut state = RlmExecutionState::new();
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "projected".to_string(),
             FlowValue::Projected(ProjectedValue::custom("projected", projected.clone())),

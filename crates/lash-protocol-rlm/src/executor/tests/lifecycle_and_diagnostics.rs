@@ -569,11 +569,11 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 "{language}: cancellation must never be classified as a program failure"
             );
             assert!(
-                state.rlm.globals().get(cancelled_binding).is_none(),
+                state.vm.state().globals().get(cancelled_binding).is_none(),
                 "{language}: the cancelled tail must roll back to the execution checkpoint"
             );
             assert!(
-                state.rlm.globals().get("survives").is_some(),
+                state.vm.state().globals().get("survives").is_some(),
                 "{language}: the earlier successful cell must remain live"
             );
 
@@ -587,11 +587,16 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
                 .expect("cold restore after cancelled cell");
             assert!(
-                restored.rlm.globals().get("survives").is_some(),
+                restored.vm.state().globals().get("survives").is_some(),
                 "{language}: a cold restore must retain the earlier successful cell"
             );
             assert!(
-                restored.rlm.globals().get(cancelled_binding).is_none(),
+                restored
+                    .vm
+                    .state()
+                    .globals()
+                    .get(cancelled_binding)
+                    .is_none(),
                 "{language}: a cold restore must exclude the cancelled tail"
             );
         }
@@ -690,8 +695,8 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
                 .kind,
             lash_core::CellFailureKind::Host
         );
-        assert!(state.rlm.globals().get("cancelledTail").is_none());
-        assert!(state.rlm.globals().get("survives").is_some());
+        assert!(state.vm.state().globals().get("cancelledTail").is_none());
+        assert!(state.vm.state().globals().get("survives").is_some());
         let snapshot = hydrate_snapshot(
             state
                 .snapshot_execution_state(lash_core::FleetFormat::current())
@@ -701,8 +706,8 @@ pub(super) fn spinning_code_observes_a_mid_execution_host_stop() {
         restored
             .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
             .expect("cold restore after mid-spin cancellation");
-        assert!(restored.rlm.globals().get("cancelledTail").is_none());
-        assert!(restored.rlm.globals().get("survives").is_some());
+        assert!(restored.vm.state().globals().get("cancelledTail").is_none());
+        assert!(restored.vm.state().globals().get("survives").is_some());
     });
 }
 
@@ -836,10 +841,10 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                 assert_eq!(response.error, None, "{language}: `{code}`");
             }
 
-            assert!(state.rlm.globals().get(tail_binding).is_some());
+            assert!(state.vm.state().globals().get(tail_binding).is_some());
             state.cancel_code_execution();
-            assert!(state.rlm.globals().get(tail_binding).is_none());
-            assert!(state.rlm.globals().get("survives").is_some());
+            assert!(state.vm.state().globals().get(tail_binding).is_none());
+            assert!(state.vm.state().globals().get("survives").is_some());
 
             let snapshot = hydrate_snapshot(
                 state
@@ -850,8 +855,8 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
             restored
                 .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
                 .expect("cold restore after late cancellation");
-            assert!(restored.rlm.globals().get(tail_binding).is_none());
-            assert!(restored.rlm.globals().get("survives").is_some());
+            assert!(restored.vm.state().globals().get(tail_binding).is_none());
+            assert!(restored.vm.state().globals().get("survives").is_some());
         }
     });
 }
@@ -942,8 +947,8 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 restored
                     .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
                     .expect("cold restore after late cancellation");
-                assert!(restored.rlm.globals().get("survives").is_some());
-                assert!(restored.rlm.globals().get(tail_binding).is_none());
+                assert!(restored.vm.state().globals().get("survives").is_some());
+                assert!(restored.vm.state().globals().get(tail_binding).is_none());
             }
         }
     });
@@ -1692,7 +1697,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(first.terminal_finish, Some(serde_json::json!(1)));
-        let first_stats = state.linked_programs.stats();
+        let first_stats = state.vm.linked_programs().stats();
         assert_eq!(first_stats.hits, 0);
         assert_eq!(first_stats.misses, 1);
 
@@ -1718,7 +1723,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
         handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(second.terminal_finish, Some(serde_json::json!(1)));
-        let second_stats = state.linked_programs.stats();
+        let second_stats = state.vm.linked_programs().stats();
         assert_eq!(second_stats.hits, 1);
         assert_eq!(second_stats.misses, 1);
         assert_eq!(second_stats.entries, 1);

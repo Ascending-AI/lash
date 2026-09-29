@@ -19,7 +19,7 @@ use super::*;
 pub(crate) fn read_field_ref_direct(value: &Value, field: &Name) -> Result<Value, RuntimeError> {
     match value {
         Value::Record(record) => Ok(record
-            .get_symbol(field.symbol)
+            .get_symbol(&field.symbol)
             .cloned()
             .unwrap_or(Value::Null)),
         Value::Image(image) => read_image_field(image, field),
@@ -39,14 +39,14 @@ pub(crate) fn unwrap_tool_result(value: Value) -> Result<Value, RuntimeError> {
     };
 
     let result_names = result_wrapper_names();
-    match record.get_symbol(result_names.ok.symbol) {
+    match record.get_symbol(&result_names.ok.symbol) {
         Some(Value::Bool(true)) => record
-            .get_symbol(result_names.value.symbol)
+            .get_symbol(&result_names.value.symbol)
             .cloned()
             .ok_or(RuntimeError::ToolResultMissingValue),
         Some(Value::Bool(false)) => {
             let message = record
-                .get_symbol(result_names.error.symbol)
+                .get_symbol(&result_names.error.symbol)
                 .map(Value::to_string)
                 .unwrap_or_else(|| "unknown error".to_string());
             Err(RuntimeError::UnwrappedToolResultFailed { message })
@@ -163,7 +163,7 @@ pub(crate) fn read_javascript_field_direct(
 ) -> Result<Value, RuntimeError> {
     match value {
         Value::Record(record) => Ok(record
-            .get_symbol(field.symbol)
+            .get_symbol(&field.symbol)
             .cloned()
             .unwrap_or(Value::Undefined)),
         Value::List(values) | Value::Tuple(values) if field.text.as_ref() == "length" => {
@@ -318,11 +318,11 @@ pub(crate) fn prototype_chain_data_key_error(value: &Value) -> Option<RuntimeErr
         match value {
             Value::Record(record) => {
                 for entry in record.entries.iter() {
-                    if is_prototype_chain_key(&entry.name) {
+                    if is_prototype_chain_key(entry.symbol.as_str()) {
                         return Some(RuntimeError::ValidationFailed {
                             reason: format!(
                                 "TS_PROTOTYPE_MUTATION_UNSUPPORTED: `{}` names the prototype chain, which this value model does not have, so a value entering from JSON.parse or a host result cannot carry it as a data key",
-                                entry.name
+                                entry.symbol.as_str()
                             ),
                         });
                     }
@@ -747,7 +747,7 @@ pub(crate) fn read_javascript_heap_field(
                 return Err(arguments_poison_error(field.text.as_ref()));
             }
             record
-                .get_symbol(field.symbol)
+                .get_symbol(&field.symbol)
                 .cloned()
                 .unwrap_or(Value::Undefined)
         }
@@ -959,7 +959,7 @@ pub(crate) fn assign_record_field(
 ) -> Result<(), RuntimeError> {
     match target {
         Value::Record(record) => {
-            Arc::make_mut(record).insert_symbolized(field.symbol, field.text.clone(), value);
+            Arc::make_mut(record).insert_symbolized(&field.symbol, value);
             Ok(())
         }
         Value::Image(_) => Err(RuntimeError::ImmutableImageFields),
@@ -976,7 +976,7 @@ pub(crate) fn descend_record_field<'a>(
 ) -> Result<&'a mut Value, RuntimeError> {
     match target {
         Value::Record(record) => Arc::make_mut(record)
-            .get_symbol_mut(field.symbol)
+            .get_symbol_mut(&field.symbol)
             .ok_or_else(|| RuntimeError::MissingAssignmentField {
                 field: field.text.to_string(),
             }),

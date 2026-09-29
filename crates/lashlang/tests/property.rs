@@ -521,7 +521,7 @@ proptest! {
 
         let snapshot = state.snapshot();
         let encoded = snapshot.to_canonical_bytes().expect("heap-backed snapshot encode");
-        let decoded = Snapshot::from_canonical_bytes(&encoded).expect("heap-backed snapshot decode");
+        let decoded = lashlang::VmInstance::pristine().open_snapshot(&encoded).expect("heap-backed snapshot decode");
         prop_assert_eq!(&decoded, &snapshot);
         prop_assert_eq!(
             decoded.to_canonical_bytes().expect("re-encode"),
@@ -551,7 +551,7 @@ proptest! {
         ));
 
         let encoded = state.snapshot().to_canonical_bytes().expect("snapshot encode");
-        let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+        let decoded = lashlang::VmInstance::pristine().open_snapshot(&encoded).expect("snapshot decode");
         let restored = State::from_snapshot(decoded);
 
         prop_assert_eq!(restored.globals(), state.globals());
@@ -569,7 +569,7 @@ proptest! {
         let snapshot = Snapshot::new(globals);
 
         let encoded = snapshot.to_canonical_bytes().expect("canonical snapshot encode");
-        let decoded = Snapshot::from_canonical_bytes(&encoded)
+        let decoded = lashlang::VmInstance::pristine().open_snapshot(&encoded)
             .expect("canonical snapshot decode");
         let reencoded = decoded
             .to_canonical_bytes()
@@ -606,7 +606,7 @@ proptest! {
             .snapshot()
             .to_canonical_bytes()
             .expect("snapshot encode");
-        let snapshot = Snapshot::from_canonical_bytes(&blob).expect("snapshot decode");
+        let snapshot = lashlang::VmInstance::pristine().open_snapshot(&blob).expect("snapshot decode");
         restored = State::from_snapshot(snapshot);
 
         let fresh_value = finished(run_execute(&source, &mut fresh, &host).expect("fresh execution"));

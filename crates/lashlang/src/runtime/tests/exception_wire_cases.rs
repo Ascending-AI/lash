@@ -128,6 +128,7 @@ async fn a_non_monotonic_handler_stack_is_refused() {
         pending_error_span: None,
         instructions_executed: 0,
         heap: VmHeapContinuation::default(),
+        resume: VmResumePoint::NextInstruction,
     };
     assert_exception_wire_refused(&program, authored, "not nested inside");
 }

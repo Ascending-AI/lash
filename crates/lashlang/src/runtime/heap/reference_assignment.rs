@@ -353,7 +353,7 @@ impl Heap {
         for step in parents {
             let child = match (self.get(target_id)?.clone(), *step) {
                 (HeapObject::Record(record), CompiledAssignPathStep::Field(field)) => record
-                    .get_symbol(names[field].symbol)
+                    .get_symbol(&names[field].symbol)
                     .cloned()
                     .ok_or_else(|| RuntimeError::MissingAssignmentField {
                         field: names[field].text.to_string(),
@@ -515,7 +515,7 @@ impl Heap {
         let mut new_object = old_object.clone();
         match (&mut new_object, *leaf) {
             (HeapObject::Record(record), CompiledAssignPathStep::Field(field)) => {
-                record.insert_symbolized(names[field].symbol, names[field].text.clone(), imported);
+                record.insert_symbolized(&names[field].symbol, imported);
             }
             (HeapObject::List(values), CompiledAssignPathStep::Field(field))
                 if names[field].text.as_ref() == "length" =>

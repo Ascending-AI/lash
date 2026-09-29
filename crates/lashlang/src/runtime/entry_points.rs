@@ -11,9 +11,8 @@ use crate::span::Span;
 use crate::tracking::LashlangExecutionContext;
 use crate::{ModuleArtifact, ProcessRef};
 
-use super::record::intern_symbol;
 use super::{
-    CompiledProgram, Compiler, ExecutionHost, ExecutionOutcome, ExecutionScratch, LASH_TYPE_KEY,
+    CompiledProgram, Compiler, ExecutionHost, ExecutionOutcome, ExecutionScratch,
     ProjectedBindings, RuntimeError, SlotState, State, Vm,
 };
 
@@ -138,29 +137,6 @@ pub(crate) fn compile_program_internal(program: &Program) -> CompiledProgram {
     CompiledProgram {
         chunk,
         executable: super::ExecutableIdentity::unlinked(),
-    }
-}
-
-pub fn prewarm() {
-    for name in [
-        "ok",
-        "value",
-        "error",
-        "__handle__",
-        "handle",
-        LASH_TYPE_KEY,
-        "type",
-        "properties",
-        "required",
-        "items",
-        "enum",
-        "id",
-        "label",
-        "size",
-        "width",
-        "height",
-    ] {
-        intern_symbol(name);
     }
 }
 

@@ -519,10 +519,11 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         1,
         "the predecessor must be parked inside its loop"
     );
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: continuation,
-        ordinals: ReplayOrdinalsState {
+    // The predecessor's envelope embedded its continuation inline; the capture
+    // writes that shape.
+    let segment_state = predecessor_envelope(
+        &continuation,
+        ReplayOrdinalsState {
             commands: crate::LashlangRunOrdinals {
                 next: 0,
                 dispatched: crate::DispatchedOrdinalsDigest::empty(),
@@ -530,12 +531,7 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
             event_sequence: 0,
             signal_wait_ordinals: Default::default(),
         },
-        started_process_ids: Vec::new(),
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-        pending_summary: Vec::new(),
-        effect_omissions: std::collections::BTreeMap::new(),
-        outstanding_groups: Vec::new(),
-    };
+    );
     let input = bytecode_v17_loop_input();
     let mut fixture = serde_json::json!({
         "bytecode_format_version": 17,
@@ -573,10 +569,9 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
     let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
     let mut vm =
         lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct fixture VM");
-    let segment_state = LashlangSegmentState {
-        version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: vm.suspend().expect("capture fixture VM continuation"),
-        ordinals: ReplayOrdinalsState {
+    let mut wire = predecessor_envelope(
+        &vm.suspend().expect("capture fixture VM continuation"),
+        ReplayOrdinalsState {
             commands: crate::LashlangRunOrdinals {
                 next: 3,
                 dispatched: crate::DispatchedOrdinalsDigest::empty(),
@@ -584,13 +579,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
             event_sequence: 5,
             signal_wait_ordinals: [("ready".to_string(), 11)].into(),
         },
-        started_process_ids: Vec::new(),
-        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
-        pending_summary: Vec::new(),
-        effect_omissions: std::collections::BTreeMap::new(),
-        outstanding_groups: Vec::new(),
-    };
-    let mut wire = serde_json::to_value(segment_state).expect("serialize segment-state writer");
+    );
     wire["vm"]["execution_nonce"] = serde_json::json!(16294208416658607535_u64);
     wire["vm"]["active_execution_elapsed"] = serde_json::json!({"nanos": 0, "secs": 0});
     let mut bytes = serde_json::to_vec(&wire).expect("serialize v10 predecessor");
@@ -601,6 +590,41 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         bytes,
     )
     .expect("write v10 predecessor fixture");
+}
+
+/// The envelope shape the predecessor writers wrote, with the continuation
+/// inline under `vm`; only the ignored capture tools write it.
+fn predecessor_envelope(
+    continuation: &lashlang::VmContinuation,
+    ordinals: ReplayOrdinalsState,
+) -> serde_json::Value {
+    let mut wire = serde_json::to_value(LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: sealed_continuation(continuation, &lash_sansio::ProcessId::fixture("fixture")),
+        ordinals,
+        started_process_ids: Vec::new(),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
+        effect_omissions: std::collections::BTreeMap::new(),
+        outstanding_groups: Vec::new(),
+    })
+    .expect("serialize segment-state writer");
+    wire["vm"] = serde_json::to_value(continuation).expect("serialize the inline continuation");
+    wire
+}
+
+/// A continuation sealed the way a boundary seals it for `process_id`.
+fn sealed_continuation(
+    continuation: &lashlang::VmContinuation,
+    process_id: &lash_sansio::ProcessId,
+) -> lash_vm_protocol::OpaqueVmState {
+    lash_vm_protocol::OpaqueVmState::seal(
+        lash_vm_protocol::VmStateKind::Continuation,
+        super::segment_continuation_owner(process_id),
+        lashlang::vm_contract_identity(),
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        continuation.to_bytes().expect("encode the continuation"),
+    )
 }
 
 #[test]
@@ -655,6 +679,10 @@ fn the_v11_envelope_is_refused_by_the_current_envelope_version() {
     );
 }
 
+/// The predecessor's v10 continuation, sealed as the opaque state a current
+/// envelope carries, is refused twice: the parent's structural check refuses
+/// its format version without decoding it, and the worker's semantic decode
+/// refuses the bytes on their own.
 #[test]
 fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
     assert!(
@@ -663,16 +691,35 @@ fn vm_v10_shape_with_projected_slots_is_a_versioned_rejection() {
             .any(|window| window == b"projected_slots"),
         "the predecessor fixture must preserve the retired key"
     );
-    let mut wire: serde_json::Value =
+    let wire: serde_json::Value =
         serde_json::from_slice(VM_V10_SEGMENT_STATE).expect("the predecessor fixture is JSON");
-    wire["version"] = serde_json::json!(LASHLANG_SEGMENT_STATE_VERSION);
-    let re_enveloped = serde_json::to_vec(&wire).expect("re-envelope the predecessor continuation");
+    assert_eq!(wire["vm"]["format_version"], 10);
+    let process_id = lash_sansio::ProcessId::fixture("fixture");
+    let owner = super::segment_continuation_owner(&process_id);
+    let bytes = serde_json::to_vec(&wire["vm"]).expect("the predecessor continuation encodes");
+    let sealed = lash_vm_protocol::OpaqueVmState::seal(
+        lash_vm_protocol::VmStateKind::Continuation,
+        owner.clone(),
+        lashlang::vm_contract_identity(),
+        10,
+        bytes,
+    );
 
-    let Err(LashlangSegmentStateError::FormatMismatch { details }) =
-        decode_lashlang_segment_state(&re_enveloped)
-    else {
+    let vm_contract = lashlang::vm_contract_identity();
+    assert_eq!(
+        sealed.check(&super::segment_continuation_expectation(
+            &owner,
+            &vm_contract
+        )),
+        Err(lash_vm_protocol::OpaqueStateRefusal::WrongFormatVersion {
+            expected: lashlang::VM_CONTINUATION_FORMAT_VERSION,
+            found: 10,
+        })
+    );
+    let Err(refusal) = super::worker_side::open_continuation(&sealed) else {
         panic!("the v10 VM continuation must be refused by the current decoder");
     };
+    let details = refusal.to_string();
     assert!(
         details.contains("version 10"),
         "unexpected refusal: {details}"
@@ -776,10 +823,25 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
             list["collection"] = serde_json::json!({"kind": "unset"});
         }
     }
+    // A current continuation names where it resumes; the predecessor parked
+    // after a completed sleep.
+    fixture["segment_state"]["vm"]["resume"] = serde_json::json!({"kind": "next_instruction"});
+    let continuation = serde_json::to_vec(&fixture["segment_state"]["vm"])
+        .expect("the patched continuation encodes");
+    fixture["segment_state"]["vm"] = serde_json::to_value(lash_vm_protocol::OpaqueVmState::seal(
+        lash_vm_protocol::VmStateKind::Continuation,
+        super::segment_continuation_owner(&lash_sansio::ProcessId::fixture("fixture")),
+        lashlang::vm_contract_identity(),
+        lashlang::VM_CONTINUATION_FORMAT_VERSION,
+        continuation,
+    ))
+    .expect("the sealed continuation encodes");
     let segment: LashlangSegmentState = serde_json::from_value(fixture["segment_state"].clone())
-        .expect("the fixture carries a structurally valid current-envelope continuation");
+        .expect("the fixture carries a structurally valid current envelope");
+    let continuation = super::worker_side::open_continuation(&segment.vm)
+        .expect("the worker decodes the re-enveloped continuation");
     assert_eq!(
-        segment.vm.iterator_stack.len(),
+        continuation.iterator_stack.len(),
         1,
         "the refused continuation is parked inside the predecessor loop"
     );
@@ -799,7 +861,10 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         lashlang::Vm::from_state(&program, &mut state, &environment).expect("construct pinning VM");
     let segment_state = LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: vm.suspend().expect("capture pinning VM continuation"),
+        vm: sealed_continuation(
+            &vm.suspend().expect("capture pinning VM continuation"),
+            &lash_sansio::ProcessId::fixture("pinning"),
+        ),
         ordinals: ReplayOrdinalsState {
             commands: crate::LashlangRunOrdinals {
                 next: 1,
@@ -858,7 +923,10 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         .expect("construct the boundary VM");
     let encoded = serde_json::to_vec(&LashlangSegmentState {
         version: LASHLANG_SEGMENT_STATE_VERSION,
-        vm: vm.suspend().expect("capture the boundary continuation"),
+        vm: sealed_continuation(
+            &vm.suspend().expect("capture the boundary continuation"),
+            &lash_sansio::ProcessId::fixture("boundary"),
+        ),
         ordinals: ReplayOrdinalsState {
             commands: crate::LashlangRunOrdinals::start(),
             event_sequence: 0,

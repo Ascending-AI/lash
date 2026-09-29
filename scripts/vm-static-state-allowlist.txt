@@ -1,0 +1,17 @@
+# Reviewed static items in the VM crates (scripts/check-vm-static-state.py, ADR 0123).
+#
+# Each entry is `<path>::<scope>::<NAME>  # <reason>`. Only guest-free constants,
+# build tables and test-only instrumentation belong here: guest-derived state
+# lives in the `VmInstance`, which a worker reset drops and replaces.
+
+crates/lashlang/src/ecma_stdlib.rs::is_instance_method::METHODS  # build table projected from the ECMA stdlib constant list; no guest input
+crates/lashlang/src/runtime/cache.rs::<module>::COMPILED_PROCESS_KEYS_BUILT  # cfg(test) counter of cache-key constructions; never compiled into a worker
+crates/lashlang/src/runtime/heap.rs::next_revision::CLOCK  # heap write-stamp uniqueness counter; carries no guest content and is never guest-readable, persisted or sent
+crates/lashlang/src/runtime/instruction.rs::result_wrapper_names::NAMES  # the constant `ok`/`value`/`error` result-wrapper names; no guest input
+crates/lashlang/src/runtime/vm/javascript_stdlib.rs::normalized_static_arguments::ARITIES  # build table of static-method arities from the ECMA stdlib constant list
+crates/lashlang/src/runtime/vm/javascript_stdlib.rs::normalized_instance_arguments::ARITIES  # build table of instance-method arities from the ECMA stdlib constant list
+crates/lash-typescript/src/lower/stdlib.rs::instance_stdlib_methods::METHODS  # build table projected from the constant signature table; no guest input
+crates/lash-typescript/src/workflow_graph/printer.rs::<module>::PROGRAM_PRINT_COUNT  # cfg(test) thread-local print counter; never compiled into a worker
+crates/lash-lashlang-runtime/src/lib_tests.rs::<module>::HELD_STORE_SETS  # test module fixture keeping stores alive; never compiled into a worker
+crates/lash-lashlang-runtime/src/process.rs::<module>::SEGMENT_BOUNDARY_DECLINED_TOTAL  # parent-side operator telemetry count of declined segment boundaries; a count, never guest-readable
+crates/lash-lashlang-runtime/src/process.rs::<module>::EXECUTION_BOUND_EXHAUSTION_LOUD  # test/testing-feature assertion toggle; never set by guest code

@@ -8,8 +8,7 @@ use bench_support::{
 };
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use lashlang::{
-    ExecutionEnvironment, ExecutionOutcome, Expr, LinkedModule, Program, Snapshot, State, Value,
-    execute, prewarm,
+    ExecutionEnvironment, ExecutionOutcome, Expr, LinkedModule, Program, State, Value, execute,
 };
 use std::hint::black_box;
 use std::time::Duration;
@@ -73,25 +72,6 @@ fn benchmark_one_shot_modes(
         });
     });
 
-    group.bench_function(BenchmarkId::new("prewarmed_one_shot", scenario), |b| {
-        prewarm();
-        b.iter(|| {
-            let mut state = seeded_state_for(scenario);
-            let linked = linked_benchmark_program(black_box(scenario));
-            let compiled = lashlang::compile(
-                &linked.artifact,
-                lashlang::Entry::Main,
-                Some(linked.spans()),
-            )
-            .expect("a module main entry compiles");
-            let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
-            let outcome = rt
-                .block_on(execute(&compiled, &mut state, &env))
-                .expect("benchmark execution");
-            black_box(expect_finished(outcome));
-        });
-    });
-
     group.bench_function(BenchmarkId::new("compiled_execute", scenario), |b| {
         b.iter(|| {
             let mut state = seeded_state_for(scenario);
@@ -108,7 +88,9 @@ fn benchmark_one_shot_modes(
             let mut state = seeded_state_for(scenario);
             let snapshot = state.snapshot();
             let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-            let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+            let decoded = lashlang::VmInstance::pristine()
+                .open_snapshot(&encoded)
+                .expect("snapshot decode");
             state = State::from_snapshot(decoded);
             let env = ExecutionEnvironment::new(host).with_projected_bindings(projected.clone());
             let outcome = rt

@@ -224,7 +224,7 @@ impl State {
     /// before it decodes; this canonical form has no lift step yet, so an
     /// admitted older version is refused closed rather than decoded on shape
     /// alone.
-    pub fn from_durable_parts<'a>(
+    pub(crate) fn from_durable_parts<'a>(
         header: &[u8],
         fragments: impl IntoIterator<Item = (&'a str, &'a [u8])>,
         fleet_format: lash_core_execution::FleetFormat,

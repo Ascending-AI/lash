@@ -494,8 +494,9 @@ async fn path_assignment_rhs_shares_the_assigned_object_across_a_snapshot() {
         .snapshot()
         .to_canonical_bytes()
         .expect("snapshot should encode");
-    let snapshot =
-        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
         execute("finish(a.x);", &mut restored, &host)
@@ -526,8 +527,9 @@ async fn iterator_binding_aliases_the_iterated_element() {
         .snapshot()
         .to_canonical_bytes()
         .expect("snapshot should encode");
-    let snapshot =
-        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
         execute("finish(a);", &mut restored, &host)
@@ -673,8 +675,9 @@ async fn heap_aware_global_patches_survive_next_cell_and_cold_restore() {
         .snapshot()
         .to_canonical_bytes()
         .expect("patched snapshot should encode");
-    let snapshot =
-        lashlang::Snapshot::from_canonical_bytes(&bytes).expect("snapshot should decode");
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("snapshot should decode");
     let mut restored = State::from_snapshot(snapshot);
     let value = finished(
         execute("finish(diary);", &mut restored, &host)
@@ -957,8 +960,9 @@ async fn snapshot_round_trip_preserves_repl_like_state() {
     let encoded = snapshot
         .to_canonical_bytes()
         .expect("snapshot should serialize");
-    let decoded =
-        lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot should deserialize");
+    let decoded = lashlang::VmInstance::pristine()
+        .open_snapshot(&encoded)
+        .expect("snapshot should deserialize");
     let mut restored = State::from_snapshot(decoded);
 
     let value = finished(

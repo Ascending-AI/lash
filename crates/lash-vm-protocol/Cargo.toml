@@ -1,0 +1,32 @@
+[package]
+name = "lash-internal-vm-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+rust-version.workspace = true
+description = "Parent-worker VM protocol for lash: owned messages, opaque VM state and bounded frame codecs."
+
+[lib]
+name = "lash_vm_protocol"
+doctest = false
+
+[lints]
+workspace = true
+
+# No dependency reaches lashlang or its regexp engine: the parent handles VM
+# state through this crate as opaque bytes, and the type-level proof that it
+# cannot decode them semantically is that nothing here can (ADR 0123).
+[dependencies]
+base64 = { workspace = true }
+blake3 = { workspace = true }
+rmp-serde = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

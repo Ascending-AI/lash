@@ -197,8 +197,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // The wait moved to a successor segment without
                     // completing. The instruction takes no operand, so
                     // standing on it again is the whole rewind: a
-                    // continuation captured now issues the same wait.
+                    // continuation captured now names the wait and issues it
+                    // again.
                     self.ip = instruction_ip;
+                    self.resume_point = super::VmResumePoint::ReissueOperation {
+                        operation: super::VmSuspendedOperation::WaitSignal {
+                            name: self.chunk.names[name].text.to_string(),
+                        },
+                    };
                     return Ok(Some(VmOutcome::HandedOver));
                 }
                 let value = result
@@ -819,14 +825,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     let mut record = record_with_capacity(handles.len());
                     for entry in handles.entries.iter() {
                         record.insert_symbolized(
-                            entry.symbol,
-                            entry.name.clone(),
+                            &entry.symbol,
                             self.await_value_at(
                                 entry.value.clone(),
                                 if path.is_empty() {
-                                    entry.name.to_string()
+                                    entry.symbol.as_str().to_string()
                                 } else {
-                                    format!("{path}.{}", entry.name)
+                                    format!("{path}.{}", entry.symbol.as_str())
                                 },
                             )
                             .await?,
@@ -1049,7 +1054,7 @@ fn build_aggregate_await_shape<H: ExecutionHost>(
                 let name_entry = &vm.chunk.names[*key];
                 let value =
                     build_aggregate_await_shape(value_shape, stack_values, leaf_values, vm)?;
-                record.insert_symbolized(name_entry.symbol, name_entry.text.clone(), value);
+                record.insert_symbolized(&name_entry.symbol, value);
             }
             Ok(Value::Record(Arc::new(record)))
         }

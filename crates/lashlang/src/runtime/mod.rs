@@ -29,6 +29,7 @@ mod format;
 mod fuel;
 mod heap;
 mod host;
+mod instance;
 mod instruction;
 mod javascript;
 mod json;
@@ -50,7 +51,7 @@ pub use cache::{
 pub(crate) use compiler::*;
 #[cfg(test)]
 pub(crate) use entry_points::compile_ast;
-pub use entry_points::{Entry, compile, execute, prewarm};
+pub use entry_points::{Entry, compile, execute};
 #[cfg(any(test, feature = "testing"))]
 pub(crate) use heap::HEAP_OBJECT_KINDS;
 pub(crate) use heap::{
@@ -70,12 +71,16 @@ pub use host::{
     ResourceOperationBatchLeaf, ResourceOperationBatchResult, ResourceOperationResult, Sleep,
     SleepKind,
 };
+pub use instance::{
+    VmComplete, VmExecutionStart, VmGuestError, VmInstance, VmInterrupt, VmParkReason, VmParked,
+    VmRequest, VmResume, VmRunConfig, VmStep, VmStepError, VmSuspended,
+};
 #[allow(unused_imports)]
 pub(crate) use instruction::*;
 pub use json::from_json;
 pub use record::Record;
 #[allow(unused_imports)]
-pub(crate) use record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
+pub(crate) use record::{Symbol, record_with_capacity};
 #[allow(unused_imports)]
 pub(crate) use schema::{
     SchemaScalarKind, ValidationPlan, compile_schema_value, execute_validate_builtin,
@@ -89,8 +94,8 @@ pub use vm::{
     TypeScriptRegExpValidationError, VM_CONTINUATION_FORMAT_VERSION, Vm, VmContinuation,
     VmFinallyCompletionContinuation, VmFinallyContinuation, VmHandlerContinuation,
     VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor, VmPendingErrorOriginContinuation,
-    VmProfileContinuation, VmRunOutcome, validate_typescript_regexp,
-    validate_typescript_regexp_shape,
+    VmProfileContinuation, VmResumePoint, VmRunOutcome, VmSuspendedOperation,
+    validate_typescript_regexp, validate_typescript_regexp_shape,
 };
 // Re-exports of helpers that live in the focused submodules but need to be
 // reachable via `use super::*` from sibling submodules + via `super::name`

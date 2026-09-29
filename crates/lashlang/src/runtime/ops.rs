@@ -827,11 +827,11 @@ fn grep_text_strings(text: &str, needle: &str) -> Result<Value, RuntimeError> {
             continue;
         };
         let mut record = record_with_capacity(5);
-        record.insert_str("line", Value::Number((line_index + 1) as f64));
-        record.insert_str("text", Value::String(line.into()));
-        record.insert_str("match", needle_value.clone());
-        record.insert_str("start", Value::Number(start as f64));
-        record.insert_str("end", Value::Number((start + needle_len) as f64));
+        record.insert_constant("line", Value::Number((line_index + 1) as f64));
+        record.insert_constant("text", Value::String(line.into()));
+        record.insert_constant("match", needle_value.clone());
+        record.insert_constant("start", Value::Number(start as f64));
+        record.insert_constant("end", Value::Number((start + needle_len) as f64));
         matches.push(Value::Record(Arc::new(record)));
     }
 
@@ -1176,23 +1176,15 @@ pub(crate) fn is_truthy(value: &Value) -> Result<bool, RuntimeError> {
 pub(crate) fn success(value: Value) -> Value {
     let result_names = result_wrapper_names();
     let mut record = record_with_capacity(2);
-    record.insert_symbolized(
-        result_names.ok.symbol,
-        result_names.ok.text.clone(),
-        Value::Bool(true),
-    );
-    record.insert_symbolized(
-        result_names.value.symbol,
-        result_names.value.text.clone(),
-        value,
-    );
+    record.insert_symbolized(&result_names.ok.symbol, Value::Bool(true));
+    record.insert_symbolized(&result_names.value.symbol, value);
     Value::Record(Arc::new(record))
 }
 
 pub(crate) fn execution_host_error_value(error: ExecutionHostError, operation: &str) -> Value {
     let result_names = result_wrapper_names();
     let mut details = record_with_capacity(2);
-    details.insert("kind".to_string(), Value::String("effect".into()));
+    details.insert_constant("kind", Value::String("effect".into()));
     details.insert(
         "operation".to_string(),
         Value::String(operation.to_string().into()),
@@ -1205,20 +1197,15 @@ pub(crate) fn execution_host_error_value(error: ExecutionHostError, operation: &
         );
         cause
     });
-    cause.insert("details".to_string(), Value::Record(Arc::new(details)));
+    cause.insert_constant("details", Value::Record(Arc::new(details)));
 
     let mut record = record_with_capacity(3);
+    record.insert_symbolized(&result_names.ok.symbol, Value::Bool(false));
     record.insert_symbolized(
-        result_names.ok.symbol,
-        result_names.ok.text.clone(),
-        Value::Bool(false),
-    );
-    record.insert_symbolized(
-        result_names.error.symbol,
-        result_names.error.text.clone(),
+        &result_names.error.symbol,
         Value::String(error.message().into()),
     );
-    record.insert("cause".to_string(), Value::Record(Arc::new(cause)));
+    record.insert_constant("cause", Value::Record(Arc::new(cause)));
     Value::Record(Arc::new(record))
 }
 
@@ -1245,26 +1232,26 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
     let retry = match error.tool_failure_retry()? {
         lash_sansio::ToolRetryStatus::Never => {
             let mut retry = record_with_capacity(1);
-            retry.insert("type".to_string(), Value::String("never".into()));
+            retry.insert_constant("type", Value::String("never".into()));
             retry
         }
         lash_sansio::ToolRetryStatus::Safe { after_ms } => {
             let mut retry = record_with_capacity(2);
-            retry.insert("type".to_string(), Value::String("safe".into()));
+            retry.insert_constant("type", Value::String("safe".into()));
             if let Some(after_ms) = after_ms {
-                retry.insert("after_ms".to_string(), Value::Number(*after_ms as f64));
+                retry.insert_constant("after_ms", Value::Number(*after_ms as f64));
             }
             retry
         }
         lash_sansio::ToolRetryStatus::Exhausted { attempts } => {
             let mut retry = record_with_capacity(2);
-            retry.insert("type".to_string(), Value::String("exhausted".into()));
-            retry.insert("attempts".to_string(), Value::Number((*attempts).into()));
+            retry.insert_constant("type", Value::String("exhausted".into()));
+            retry.insert_constant("attempts", Value::Number((*attempts).into()));
             retry
         }
         lash_sansio::ToolRetryStatus::UnknownLegacy => {
             let mut retry = record_with_capacity(1);
-            retry.insert("type".to_string(), Value::String("unknown_legacy".into()));
+            retry.insert_constant("type", Value::String("unknown_legacy".into()));
             retry
         }
     };
@@ -1274,9 +1261,9 @@ pub(crate) fn tool_failure_fields(error: &ExecutionHostError) -> Option<Record> 
         "code".to_string(),
         Value::String(error.tool_failure_code()?.into()),
     );
-    fields.insert("class".to_string(), Value::String(class.into()));
-    fields.insert("source".to_string(), Value::String(source.into()));
-    fields.insert("retry".to_string(), Value::Record(Arc::new(retry)));
+    fields.insert_constant("class", Value::String(class.into()));
+    fields.insert_constant("source", Value::String(source.into()));
+    fields.insert_constant("retry", Value::Record(Arc::new(retry)));
     Some(fields)
 }
 

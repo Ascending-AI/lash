@@ -96,7 +96,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
         .host_environment(ctx.tool_catalog().as_ref())
         .map_err(|error| error.to_string())?;
     let live_global_names = state
-        .rlm
+        .vm
+        .state()
         .globals()
         .keys()
         .map(str::to_string)
@@ -105,7 +106,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
 
     let cached_program = match language {
         "typescript" => match state
-            .linked_programs
+            .vm
+            .linked_programs_mut()
             .cached_linked_program(code, &host_environment)
         {
             Some(program) => program,
@@ -113,7 +115,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
                 let program = lash_typescript::parse_with_globals(code, &host_environment.globals)
                     .map_err(|error| error.to_string())?;
                 state
-                    .linked_programs
+                    .vm
+                    .linked_programs_mut()
                     .get_or_compile_ast(code, program, &host_environment)
                     .map_err(|error| error.to_string())?
             }
@@ -131,8 +134,12 @@ pub(crate) async fn execute_parked_cell_for_tests(
         artifact_store: crate::testing::memory_artifact_store().await,
     });
     let host = ParkedCellHost { bridge };
-    let mut vm = Vm::from_state(cached_program.compiled_program(), &mut state.rlm, &host)
-        .map_err(|error| error.to_string())?;
+    let mut vm = Vm::from_state(
+        cached_program.compiled_program(),
+        state.vm.state_mut(),
+        &host,
+    )
+    .map_err(|error| error.to_string())?;
     let parked = vm
         .run_process_until_effect()
         .await
@@ -165,8 +172,9 @@ pub(crate) async fn execute_parked_cell_for_tests(
     }
     drop(vm);
 
-    let restored: lashlang::VmContinuation =
-        serde_json::from_slice(&wire).map_err(|error| error.to_string())?;
+    let restored = lashlang::VmInstance::pristine()
+        .open_continuation(&wire)
+        .map_err(|error| error.to_string())?;
     let mut vm = Vm::resume_from(restored, cached_program.compiled_program(), &host)
         .map_err(|error| error.to_string())?;
     let finish = loop {
@@ -189,7 +197,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
     };
     let globals = vm.into_globals().map_err(|error| error.to_string())?;
     let existing = state
-        .rlm
+        .vm
+        .state()
         .globals()
         .keys()
         .map(str::to_string)
@@ -208,7 +217,8 @@ pub(crate) async fn execute_parked_cell_for_tests(
         value: value.clone(),
     }));
     state
-        .rlm
+        .vm
+        .state_mut()
         .patch_globals(patches)
         .map_err(|error| error.to_string())?;
     if break_retention {

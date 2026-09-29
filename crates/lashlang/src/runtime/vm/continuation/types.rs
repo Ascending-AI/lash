@@ -1,24 +1,39 @@
 use super::*;
-use serde::Deserializer;
 
-impl<'de> Deserialize<'de> for VmContinuation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = serde_json::Value::deserialize(deserializer)?;
+impl VmContinuation {
+    /// The continuation's wire bytes: what a worker hands its parent as
+    /// opaque VM state.
+    pub fn to_bytes(&self) -> Result<Vec<u8>, ContinuationError> {
+        serde_json::to_vec(self).map_err(|error| ContinuationError::Undecodable {
+            reason: format!("continuation does not encode: {error}"),
+        })
+    }
+
+    /// The semantic decode: it restores guest values and validates every
+    /// regular expression the heap holds, so it runs only on the worker side
+    /// ([`crate::VmInstance::open_continuation`]). There is deliberately no
+    /// `Deserialize` implementation a parent could reach through a serde
+    /// envelope.
+    pub(crate) fn decode(bytes: &[u8]) -> Result<Self, ContinuationError> {
+        let undecodable = |reason: String| ContinuationError::Undecodable { reason };
+        let raw: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|error| undecodable(error.to_string()))?;
         if let Some(version_val) = raw.get("format_version") {
             if let Some(version) = version_val.as_u64() {
                 if !super::decodes_format(version) {
-                    return Err(serde::de::Error::custom(format!(
-                        "continuation format version {} is incompatible with version {}",
-                        version, VM_CONTINUATION_FORMAT_VERSION
-                    )));
+                    return Err(match u32::try_from(version) {
+                        Ok(found) => ContinuationError::FormatVersionMismatch {
+                            expected: VM_CONTINUATION_FORMAT_VERSION,
+                            found,
+                        },
+                        Err(_) => undecodable(format!(
+                            "continuation format version {version} is incompatible with version {VM_CONTINUATION_FORMAT_VERSION}"
+                        )),
+                    });
                 }
-            } else if let Some(version) = version_val.as_i64() {
-                return Err(serde::de::Error::custom(format!(
-                    "continuation format version {} is incompatible with version {}",
-                    version, VM_CONTINUATION_FORMAT_VERSION
+            } else if version_val.as_i64().is_some() {
+                return Err(undecodable(format!(
+                    "continuation format version {version_val} is incompatible with version {VM_CONTINUATION_FORMAT_VERSION}"
                 )));
             }
         }
@@ -55,9 +70,10 @@ impl<'de> Deserialize<'de> for VmContinuation {
             instructions_executed: u64,
             #[serde(deserialize_with = "continuation_serde::deserialize_heap")]
             heap: VmHeapContinuation,
+            resume: VmResumePoint,
         }
 
-        let wire = Wire::deserialize(raw).map_err(serde::de::Error::custom)?;
+        let wire = Wire::deserialize(raw).map_err(|error| undecodable(error.to_string()))?;
         let continuation = Self {
             // A format this build decodes is lifted to its own.
             format_version: VM_CONTINUATION_FORMAT_VERSION,
@@ -81,10 +97,50 @@ impl<'de> Deserialize<'de> for VmContinuation {
             pending_error_span: wire.pending_error_span,
             instructions_executed: wire.instructions_executed,
             heap: wire.heap,
+            resume: wire.resume,
         };
-        validate_continuation(&continuation).map_err(serde::de::Error::custom)?;
+        validate_continuation(&continuation)?;
         Ok(continuation)
     }
+}
+
+/// The crate's own unit tests read continuations through serde envelopes;
+/// this delegates to the one semantic decode. It exists only in this crate's
+/// test build: no dependent sees a `Deserialize` for a continuation.
+#[cfg(test)]
+impl<'de> Deserialize<'de> for VmContinuation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        let bytes = serde_json::to_vec(&raw).map_err(serde::de::Error::custom)?;
+        Self::decode(&bytes).map_err(|error| match error {
+            ContinuationError::Undecodable { reason } => serde::de::Error::custom(reason),
+            other => serde::de::Error::custom(other),
+        })
+    }
+}
+
+/// Where a parked continuation resumes, stated explicitly rather than
+/// implied by its instruction pointer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VmResumePoint {
+    /// Parked between instructions, after an effect completed: resuming runs
+    /// the instruction at the instruction pointer.
+    NextInstruction,
+    /// Parked on an operation that did not complete: the instruction pointer
+    /// stands on it, and resuming issues exactly this operation again.
+    ReissueOperation { operation: VmSuspendedOperation },
+}
+
+/// The operation a continuation parked on without completing.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum VmSuspendedOperation {
+    /// A process signal wait the host handed to a successor segment.
+    WaitSignal { name: String },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +248,15 @@ pub struct VmProfileContinuation {
 pub enum ContinuationError {
     #[error("continuation format version {found} is incompatible with version {expected}")]
     FormatVersionMismatch { expected: u32, found: u32 },
+    #[error("continuation bytes do not decode: {reason}")]
+    Undecodable { reason: String },
+    #[error(
+        "continuation resumes by re-issuing {operation}, but instruction {instruction_pointer} does not issue it"
+    )]
+    ResumePointMismatch {
+        instruction_pointer: usize,
+        operation: String,
+    },
     #[error(
         "continuation was parked by executable `{found}`, not by this program's executable `{expected}`"
     )]

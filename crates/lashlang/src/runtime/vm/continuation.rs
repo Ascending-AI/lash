@@ -12,7 +12,7 @@ mod types;
 pub use types::{
     ContinuationError, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmSuspendedOperation,
 };
 
 use super::exceptions::PendingErrorOrigin;
@@ -269,6 +269,9 @@ pub struct VmContinuation {
         deserialize_with = "continuation_serde::deserialize_heap"
     )]
     pub heap: VmHeapContinuation,
+    /// Where the continuation resumes: the explicit suspended-operation and
+    /// resume discriminant a worker and its parent agree on (FIG-4158).
+    pub resume: VmResumePoint,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1246,7 +1249,7 @@ fn profile_from_continuation(
 
 mod program_validation;
 mod structural_validation;
-use program_validation::validate_program_continuation;
+use program_validation::{validate_program_continuation, validate_resume_point};
 use structural_validation::{
     validate_continuation, validate_optional_value, validate_value, validate_values,
 };
@@ -1325,6 +1328,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             heap_initialized: false,
             pending_tools: PendingToolMap::new(),
             execution_nonce: mint_execution_nonce(0),
+            resume_point: VmResumePoint::NextInstruction,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
             #[cfg(test)]
@@ -1510,6 +1514,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             pending_error_span: self.pending_error_span,
             instructions_executed: self.instructions_executed,
             heap: VmHeapContinuation::new(self.heap.clone()),
+            resume: self.resume_point.clone(),
         };
         if validate_continuation(&continuation).is_err() {
             // The forest form could not hold this heap, so record the shared
@@ -1552,6 +1557,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         // above, so there is nothing left to compare here.
         validate_continuation(&continuation)?;
         validate_program_continuation(&continuation, &program.chunk)?;
+        validate_resume_point(&continuation, program)?;
         let active_function = continuation.active_function.map(|index| index as usize);
         let active_slot_count = match active_function {
             Some(index) => program
@@ -1755,6 +1761,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             // no earlier marks to carry across the handover blob.
             pending_tools: continuation.pending_tools,
             execution_nonce: continuation.execution_nonce,
+            resume_point: VmResumePoint::NextInstruction,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
             #[cfg(test)]

@@ -38,7 +38,8 @@ pub use continuation::VM_CONTINUATION_FORMAT_VERSION;
 pub use continuation::{
     ContinuationError, VmContinuation, VmFinallyCompletionContinuation, VmFinallyContinuation,
     VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation, VmIteratorCursor,
-    VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
+    VmPendingErrorOriginContinuation, VmProfileContinuation, VmResumePoint, VmRunOutcome,
+    VmSuspendedOperation,
 };
 pub(crate) use continuation::{VmFrameContinuation, VmFrameReturnContinuation};
 use control::{VmMode, VmStep};
@@ -104,11 +105,11 @@ impl SlotState {
         for (index, name) in slot_names.iter().enumerate() {
             if private_slots.get(index).copied().unwrap_or(false) {
                 values.push(None);
-            } else if let Some(value) = projected_bindings.get_symbol(name.symbol) {
-                globals.remove_symbol(name.symbol);
+            } else if let Some(value) = projected_bindings.get_symbol(&name.symbol) {
+                globals.remove_symbol(&name.symbol);
                 values.push(Some(Value::Projected(value)));
             } else {
-                values.push(globals.remove_symbol(name.symbol));
+                values.push(globals.remove_symbol(&name.symbol));
             }
         }
         Self {
@@ -154,7 +155,7 @@ impl SlotState {
     ) -> Result<(), RuntimeError> {
         let is_binding = projected_bindings
             .zip(slot_names.get(slot))
-            .is_some_and(|(bindings, name)| bindings.get_symbol(name.symbol).is_some());
+            .is_some_and(|(bindings, name)| bindings.get_symbol(&name.symbol).is_some());
         if is_binding {
             return Err(RuntimeError::ReadOnlyProjectedBinding {
                 name: slot_names[slot].text.to_string(),
@@ -197,20 +198,16 @@ impl SlotState {
                 value.take();
                 continue;
             }
-            if projected_bindings.get_symbol(name.symbol).is_some() {
-                extras.remove_symbol(name.symbol);
+            if projected_bindings.get_symbol(&name.symbol).is_some() {
+                extras.remove_symbol(&name.symbol);
                 continue;
             }
             match value.take() {
                 Some(value) => {
-                    extras.insert_symbolized(
-                        name.symbol,
-                        name.text.clone(),
-                        materialize_value(value)?,
-                    );
+                    extras.insert_symbolized(&name.symbol, materialize_value(value)?);
                 }
                 None => {
-                    extras.remove_symbol(name.symbol);
+                    extras.remove_symbol(&name.symbol);
                 }
             }
         }
@@ -264,6 +261,9 @@ pub struct Vm<'a, H> {
     /// execution (or written by hand) cannot alias this execution's requests.
     /// Restored with the continuation: a resumed process is the same execution.
     execution_nonce: u64,
+    /// Where a continuation captured now resumes: after the last completed
+    /// effect, or on an operation that was handed over without completing.
+    resume_point: VmResumePoint,
     #[cfg(test)]
     test_suspension: TestSuspension,
     /// How many post-instruction import passes ran (FIG-3730): the law in

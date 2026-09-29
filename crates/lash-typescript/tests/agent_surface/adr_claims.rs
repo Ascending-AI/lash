@@ -41,7 +41,9 @@ fn pending_handle_survives_park_without_cross_cell_export() {
         );
         let bytes = serde_json::to_vec(&continuation).expect("encode");
         let mut resumed = Vm::resume_from(
-            serde_json::from_slice(&bytes).expect("decode"),
+            lashlang::VmInstance::pristine()
+                .open_continuation(&bytes)
+                .expect("decode"),
             &compiled,
             &execution,
         )
@@ -68,7 +70,9 @@ fn pending_handle_survives_park_without_cross_cell_export() {
         );
         let snapshot = state.snapshot().to_canonical_bytes().expect("snapshot");
         let mut next_state = State::from_snapshot(
-            lashlang::Snapshot::from_canonical_bytes(&snapshot).expect("restore session"),
+            lashlang::VmInstance::pristine()
+                .open_snapshot(&snapshot)
+                .expect("restore session"),
         );
         let next = lash_typescript::link(
             "const q = web.fetch({ value: 'new' }); finish(await q);",
@@ -123,8 +127,9 @@ pub(super) fn literal_elisions_are_holes_for_in_has_own_property_and_iteration()
             .to_canonical_bytes()
             .expect("canonical sparse snapshot");
         {
-            let restored =
-                lashlang::Snapshot::from_canonical_bytes(&bytes).expect("canonical restore");
+            let restored = lashlang::VmInstance::pristine()
+                .open_snapshot(&bytes)
+                .expect("canonical restore");
             let mut state = State::from_snapshot(restored);
             let linked = lash_typescript::link(
                 &format!("finish({probe});"),

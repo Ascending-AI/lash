@@ -233,35 +233,29 @@ impl Compiler {
     }
 
     pub(super) fn push_name(&mut self, name: &str) -> usize {
-        let symbol = intern_symbol(name);
-        if let Some(index) = self.name_lookup.get(&symbol) {
+        if let Some(index) = self.name_lookup.get(name) {
             return *index;
         }
 
         let index = self.names.len();
-        self.names.push(Name {
-            symbol,
-            text: symbol_name(symbol),
-        });
-        self.name_lookup.insert(symbol, index);
+        let name = Name::new(name);
+        self.name_lookup.insert(name.symbol.clone(), index);
+        self.names.push(name);
         index
     }
 
     pub(super) fn push_slot(&mut self, name: &str) -> usize {
-        let symbol = intern_symbol(name);
         let mut slots = self.slots.borrow_mut();
-        if let Some(index) = slots.lookup.get(&symbol) {
+        if let Some(index) = slots.lookup.get(name) {
             let index = *index;
             drop(slots);
             self.ensure_const_slot(index);
             return index;
         }
         let index = slots.names.len();
-        slots.names.push(Name {
-            symbol,
-            text: symbol_name(symbol),
-        });
-        slots.lookup.insert(symbol, index);
+        let name = Name::new(name);
+        slots.lookup.insert(name.symbol.clone(), index);
+        slots.names.push(name);
         drop(slots);
         self.ensure_const_slot(index);
         index
@@ -342,9 +336,8 @@ impl Compiler {
     }
 
     pub(super) fn const_for_name(&self, name: &str) -> Option<Value> {
-        let symbol = lookup_symbol(name)?;
         let slots = self.slots.borrow();
-        let slot = *slots.lookup.get(&symbol)?;
+        let slot = *slots.lookup.get(name)?;
         drop(slots);
         self.const_for_slot(slot)
     }

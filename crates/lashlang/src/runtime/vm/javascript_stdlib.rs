@@ -1249,9 +1249,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // own poisoned names: present for `hasOwnProperty`, absent
                 // from enumeration, and a `TypeError` on read or write.
                 let mut arguments = Record::new();
-                arguments.insert_str("callee", Value::Null);
-                arguments.insert_str("caller", Value::Null);
-                arguments.insert_str("length", Value::Number(argv.len() as f64));
+                arguments.insert_constant("callee", Value::Null);
+                arguments.insert_constant("caller", Value::Null);
+                arguments.insert_constant("length", Value::Number(argv.len() as f64));
                 for (index, value) in argv.iter().enumerate() {
                     arguments.insert_str(&index.to_string(), value.clone());
                 }
@@ -1260,7 +1260,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     self.heap.mark_arguments_record(id);
                     self.slots
                         .extras
-                        .insert_str("lash:arguments", Value::Ref(id));
+                        .insert_constant("lash:arguments", Value::Ref(id));
                 }
                 self.stack.push(arguments);
                 Ok(true)

@@ -306,7 +306,9 @@ fn global_last_index_survives_a_real_park_between_exec_calls() {
         );
         let continuation = vm.suspend().expect("suspend between exec calls");
         let wire = serde_json::to_vec(&continuation).expect("encode continuation");
-        let restored = serde_json::from_slice(&wire).expect("restore continuation");
+        let restored = lashlang::VmInstance::pristine()
+            .open_continuation(&wire)
+            .expect("restore continuation");
         let mut resumed = Vm::resume_from(restored, &program, &Host).expect("resume VM");
         let outcome = loop {
             match resumed

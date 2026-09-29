@@ -7,6 +7,8 @@
 //!   with a typed error an explicit, ratcheted allowlist names with a reason.
 //! * [`invariants`]: the structural invariants of every admitted artifact.
 //! * [`sessions`]: the Node session corpus's own discipline.
+//! * [`vm_instance`]: a reset VM instance is a fresh one, and a run driven
+//!   step by step, or parked and reopened, matches it run straight through.
 //!
 //! The corpora are listed in [`corpora`]. The multi-cell Node session oracle
 //! itself runs in `lash-protocol-rlm`, which owns the RLM executor.
@@ -43,6 +45,8 @@ mod metadata;
 mod round_trip;
 #[path = "corpus_laws/sessions.rs"]
 mod sessions;
+#[path = "corpus_laws/vm_instance.rs"]
+mod vm_instance;
 
 /// The identifier namespace the lowerer reserves for its generated bindings
 /// (ADR 0062); no authored name can begin with it.

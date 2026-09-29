@@ -21,7 +21,7 @@ use crate::span::Span;
 use crate::tracking::{LashlangExecutionContext, LashlangExecutionSite};
 use crate::workflow_graph::WorkflowOwnership;
 
-use super::record::{Symbol, intern_symbol, lookup_symbol, record_with_capacity, symbol_name};
+use super::record::{Symbol, record_with_capacity};
 use super::schema::{ValidationPlan, compile_schema_value};
 use super::{
     AggregateConsumer, Chunk, ClosureParameterModel, CompiledAggregateAwaitShape,

@@ -306,3 +306,37 @@ fn validate_exception_target(
         range_end: range.end,
     })
 }
+
+/// A continuation that re-issues an operation must stand on the instruction
+/// that issues it: the discriminant and the instruction pointer say the same
+/// thing, or the continuation is refused before anything runs.
+pub(super) fn validate_resume_point(
+    continuation: &VmContinuation,
+    program: &CompiledProgram,
+) -> Result<(), ContinuationError> {
+    let VmResumePoint::ReissueOperation { operation } = &continuation.resume else {
+        return Ok(());
+    };
+    let issues = match (
+        operation,
+        program.chunk.code.get(continuation.instruction_pointer),
+    ) {
+        (
+            VmSuspendedOperation::WaitSignal { name },
+            Some(Instruction::ProcessWaitSignal { name: index }),
+        ) => program
+            .chunk
+            .names
+            .get(*index)
+            .is_some_and(|candidate| candidate.text.as_ref() == name.as_str()),
+        _ => false,
+    };
+    if issues {
+        Ok(())
+    } else {
+        Err(ContinuationError::ResumePointMismatch {
+            instruction_pointer: continuation.instruction_pointer,
+            operation: format!("{operation:?}"),
+        })
+    }
+}

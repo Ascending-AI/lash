@@ -51,3 +51,4 @@ crates/lash-restate/src/process/workflow.rs  |  epoch_ms: restate_now_ms(),  |  
 crates/lash-restate/src/process/workflow.rs  |  restate_now_ms(),  |  1  # RECORDED stamped inside the journaled PARENT_END_STEP
 crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), ProfileMark::now()));  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
 crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| ProfileMark::now());  |  1  # BENIGN profiler mark; feeds observe_profile only, no replayed decision
+crates/lashlang/src/runtime/instance/step.rs  |  type RunFuture = Pin<Box<dyn Future<Output = (RunEnd, Option<State>)> + Send>>;  |  1  # BENIGN the VM's own run, polled by the stepper with a no-op waker; it suspends only on a request the host answers, so no race or clock decides anything

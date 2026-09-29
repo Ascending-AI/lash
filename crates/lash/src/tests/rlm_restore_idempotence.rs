@@ -197,16 +197,18 @@ fn snapshot_globals(
         };
         (global.as_str(), body)
     });
-    let (reloaded, _) = lashlang::State::from_durable_parts(
-        &root.state_header,
-        fragments,
-        lash_core::FleetFormat::current(),
-    )
-    .expect("reload the persisted globals");
+    let mut reloaded = lashlang::VmInstance::pristine();
+    reloaded
+        .restore_durable_parts(
+            &root.state_header,
+            fragments,
+            lash_core::FleetFormat::current(),
+        )
+        .expect("reload the persisted globals");
     let value = root
         .globals
         .contains_key(name)
-        .then(|| format!("{:?}", reloaded.globals().get(name)));
+        .then(|| format!("{:?}", reloaded.state().globals().get(name)));
     (root.globals.keys().cloned().collect(), value)
 }
 

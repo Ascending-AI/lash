@@ -250,8 +250,9 @@ async fn a_concat_accumulator_survives_a_park_and_resume() {
         "accumulator should serialize as flat text: {json}"
     );
 
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
 
     let host = Host::plain();
     let mut resumed =
@@ -274,7 +275,9 @@ async fn a_snapshot_restored_string_appends_the_same_way() {
         Value::String("seed".into()),
     )]));
     let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
-    let decoded = Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
+    let decoded = lashlang::VmInstance::pristine()
+        .open_snapshot(&encoded)
+        .expect("snapshot decode");
     let mut state = State::from_snapshot(decoded);
 
     let globals = BTreeSet::from(["acc".to_string()]);

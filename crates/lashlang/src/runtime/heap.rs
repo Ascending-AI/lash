@@ -597,8 +597,7 @@ impl Heap {
                 let mut imported = record_with_capacity(record.len());
                 for entry in record.entries.iter() {
                     imported.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
+                        &entry.symbol,
                         self.stage_import(entry.value.clone(), next_id, staged)?,
                     );
                 }
@@ -700,7 +699,7 @@ impl Heap {
                 let mut output = record_with_capacity(record.len());
                 for entry in &record.entries {
                     let value = export_child(self, &entry.value, active)?;
-                    output.insert_symbolized(entry.symbol, entry.name.clone(), value);
+                    output.insert_symbolized(&entry.symbol, value);
                 }
                 Value::Record(std::sync::Arc::new(output))
             }
@@ -913,8 +912,7 @@ impl Heap {
                 let mut output = record_with_capacity(record.len());
                 for entry in record.entries.iter() {
                     output.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
+                        &entry.symbol,
                         self.export_inner(&entry.value, active, depth + 1)?,
                     );
                 }
@@ -1072,8 +1070,7 @@ impl Heap {
                 let mut copied = record_with_capacity(record.len());
                 for entry in record.entries.iter() {
                     copied.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
+                        &entry.symbol,
                         self.stage_isolation(&entry.value, staging)?,
                     );
                 }
@@ -1178,8 +1175,7 @@ impl Heap {
                 let mut copied = record_with_capacity(record.len());
                 for entry in record.entries.iter() {
                     copied.insert_symbolized(
-                        entry.symbol,
-                        entry.name.clone(),
+                        &entry.symbol,
                         self.stage_isolation(&entry.value, staging)?,
                     );
                 }

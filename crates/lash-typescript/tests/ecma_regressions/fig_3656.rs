@@ -1,7 +1,7 @@
 //! FIG-3656: built-in objects are first-class values — member semantics, prototypes, expandos and lastIndex reads.
 
 use super::*;
-use lashlang::{DurableBaseline, DurableFragment, Snapshot, Vm, VmRunOutcome};
+use lashlang::{DurableBaseline, DurableFragment, Vm, VmInstance, VmRunOutcome};
 use std::collections::BTreeSet;
 
 /// A built-in object is a first-class value: a missing member reads
@@ -101,7 +101,9 @@ fn snapshot_reload(state: &State) -> State {
         .snapshot()
         .to_canonical_bytes()
         .expect("encode snapshot");
-    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("every emitted snapshot decodes");
+    let snapshot = VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("every emitted snapshot decodes");
     assert_eq!(
         snapshot.to_canonical_bytes().expect("re-encode snapshot"),
         bytes
@@ -122,13 +124,15 @@ fn fragment_reload(state: &State) -> State {
         };
         (name.as_str(), body.as_slice())
     });
-    State::from_durable_parts(
-        &parts.header,
-        bodies,
-        lash_core_execution::FleetFormat::current(),
-    )
-    .expect("every emitted fragment decodes")
-    .0
+    let mut instance = VmInstance::pristine();
+    instance
+        .restore_durable_parts(
+            &parts.header,
+            bodies,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .expect("every emitted fragment decodes");
+    instance.replace_state(State::new())
 }
 
 fn state_round_trip(reload: fn(&State) -> State) {
@@ -177,8 +181,9 @@ fn continuation_run(source: &str, restore: bool) -> Value {
         if restore {
             let continuation = vm.suspend().expect("capture raw lastIndex");
             let bytes = serde_json::to_vec(&continuation).expect("encode continuation");
-            let restored =
-                serde_json::from_slice(&bytes).expect("every emitted continuation decodes");
+            let restored = VmInstance::pristine()
+                .open_continuation(&bytes)
+                .expect("every emitted continuation decodes");
             vm = Vm::resume_from(restored, &program, &Host).expect("resume VM");
         }
         loop {
@@ -275,8 +280,11 @@ fn last_index_references_survive_collection_and_incremental_capture() {
         };
         (name.as_str(), body.as_slice())
     });
-    let (mut restored, baseline) = State::from_durable_parts(&delta.header, bodies, fleet)
+    let mut instance = VmInstance::pristine();
+    let baseline = instance
+        .restore_durable_parts(&delta.header, bodies, fleet)
         .expect("reload the incremental capture");
+    let mut restored = instance.replace_state(State::new());
     assert!(matches!(
         restored
             .durable_parts(&baseline, fleet)

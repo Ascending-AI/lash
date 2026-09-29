@@ -3,8 +3,8 @@ use crate::{
     LashlangHostEnvironment, LinkError, LinkedModule, ModuleArtifact, ProcessRef, Program,
 };
 
+use super::CompiledProgram;
 use super::entry_points::{Entry, compile, compile_main};
-use super::{CompiledProgram, prewarm};
 use rustc_hash::FxHasher;
 use std::borrow::Borrow;
 use std::collections::VecDeque;
@@ -168,7 +168,6 @@ impl CompiledProcessCache {
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        prewarm();
         Self {
             mru: MruEntries::with_capacity(capacity),
         }
@@ -258,7 +257,6 @@ impl LinkedProgramCache {
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
-        prewarm();
         Self {
             mru: MruEntries::with_capacity(capacity),
         }

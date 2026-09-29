@@ -287,8 +287,9 @@ fn suspended_typescript_run(stress_gc: bool) -> (Vec<u8>, ExecutionOutcome) {
         let continuation = vm.suspend().expect("capture TypeScript continuation");
         let wire_bytes = serde_json::to_vec(&continuation).expect("encode continuation");
         let bytes = wire_bytes.clone();
-        let restored =
-            serde_json::from_slice(&wire_bytes).expect("decode in a fresh process image");
+        let restored = lashlang::VmInstance::pristine()
+            .open_continuation(&wire_bytes)
+            .expect("decode in a fresh process image");
         let mut resumed = Vm::resume_from(restored, &program, &host).expect("resume TypeScript");
         let outcome = loop {
             match resumed
@@ -325,7 +326,9 @@ fn resumed_typescript_can_capture_aliases_created_after_the_first_suspend() {
         );
 
         let encoded = serde_json::to_vec(&first).expect("encode continuation");
-        let decoded = serde_json::from_slice(&encoded).expect("decode continuation");
+        let decoded = lashlang::VmInstance::pristine()
+            .open_continuation(&encoded)
+            .expect("decode continuation");
         let mut resumed = Vm::resume_from(decoded, &program, &Host).expect("resume TypeScript VM");
         assert_eq!(
             resumed
@@ -556,7 +559,9 @@ mod durability {
             );
             let encoded = serde_json::to_vec(&vm.suspend().expect("suspend exotics"))
                 .expect("encode continuation");
-            let continuation = serde_json::from_slice(&encoded).expect("decode continuation");
+            let continuation = lashlang::VmInstance::pristine()
+                .open_continuation(&encoded)
+                .expect("decode continuation");
             let mut resumed =
                 Vm::resume_from(continuation, &program, &Host).expect("resume exotics");
             let VmRunOutcome::Complete(outcome) = resumed
@@ -671,7 +676,9 @@ fn a_process_suspended_inside_for_of_resumes() {
                     // Round-trip the continuation at every effect boundary.
                     let continuation = vm.suspend().expect("suspend inside the loop");
                     let encoded = serde_json::to_vec(&continuation).expect("encode");
-                    let decoded = serde_json::from_slice(&encoded).expect("decode");
+                    let decoded = lashlang::VmInstance::pristine()
+                        .open_continuation(&encoded)
+                        .expect("decode");
                     vm = Vm::resume_from(decoded, &program, &Host).expect("resume");
                     suspensions += 1;
                 }
@@ -712,7 +719,9 @@ fn array_mutators_survive_a_park_in_the_middle_of_the_loop() {
         );
         let continuation = vm.suspend().expect("capture the mid-loop continuation");
         let encoded = serde_json::to_vec(&continuation).expect("encode the continuation");
-        let decoded = serde_json::from_slice(&encoded).expect("decode the continuation");
+        let decoded = lashlang::VmInstance::pristine()
+            .open_continuation(&encoded)
+            .expect("decode the continuation");
         let mut vm = Vm::resume_from(decoded, &program, &Host).expect("resume mid-loop");
         loop {
             match vm

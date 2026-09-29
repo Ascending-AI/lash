@@ -27,15 +27,15 @@ impl State {
         let mut closure_rooted = Vec::new();
         for entry in runtime_globals.entries.iter() {
             if closure_reach.covers(&entry.value) {
-                closure_rooted.push((entry.symbol, entry.name.to_string()));
+                closure_rooted.push(entry.symbol.clone());
             }
         }
         for name in runtime_globals.keys() {
             self.expired_functions.remove(name);
         }
-        for (symbol, name) in closure_rooted {
-            runtime_globals.remove_symbol(symbol);
-            self.expired_functions.insert(name);
+        for symbol in closure_rooted {
+            runtime_globals.remove_symbol(&symbol);
+            self.expired_functions.insert(symbol.as_str().to_string());
         }
     }
 }

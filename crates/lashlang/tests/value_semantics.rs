@@ -12,7 +12,7 @@
 
 use lashlang::{
     AbilityOp, AbilityResult, ExecutionHost, ExecutionHostError, ExecutionOutcome, Expr, Program,
-    Snapshot, State, Value, execute,
+    State, Value, execute,
 };
 
 // `a::list`/`a::number` build IR nodes; the bare `list`/`number` below build
@@ -75,7 +75,9 @@ fn round_trip(state: &State) -> State {
         .snapshot()
         .to_canonical_bytes()
         .expect("state should encode");
-    let snapshot = Snapshot::from_canonical_bytes(&bytes).expect("emitted bytes should decode");
+    let snapshot = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("emitted bytes should decode");
     State::from_snapshot(snapshot)
 }
 
@@ -571,7 +573,9 @@ async fn snapshot_equality_survives_a_round_trip_after_temporaries() {
 
     let snapshot = state.snapshot();
     let bytes = snapshot.to_canonical_bytes().expect("state should encode");
-    let decoded = Snapshot::from_canonical_bytes(&bytes).expect("state should decode");
+    let decoded = lashlang::VmInstance::pristine()
+        .open_snapshot(&bytes)
+        .expect("state should decode");
 
     assert_eq!(
         decoded, snapshot,

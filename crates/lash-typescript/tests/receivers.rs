@@ -258,8 +258,9 @@ async fn resident_and_restored(source: &str) -> (Value, Value) {
     let continuation = vm.suspend().expect("the parked turn must be capturable");
     drop(vm);
     let bytes = serde_json::to_vec(&continuation).expect("continuation should serialize");
-    let restored: VmContinuation =
-        serde_json::from_slice(&bytes).expect("continuation should deserialize");
+    let restored: VmContinuation = lashlang::VmInstance::pristine()
+        .open_continuation(&bytes)
+        .expect("continuation should deserialize");
     let host = Host;
     let mut resumed =
         Vm::resume_from(restored, &program, &host).expect("continuation should resume");

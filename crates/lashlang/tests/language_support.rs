@@ -215,7 +215,9 @@ async fn snapshot_round_trip_preserves_type_values() {
     };
     let snapshot = state.snapshot();
     let serialized = snapshot.to_canonical_bytes().expect("serialize");
-    let restored = lashlang::Snapshot::from_canonical_bytes(&serialized).expect("deserialize");
+    let restored = lashlang::VmInstance::pristine()
+        .open_snapshot(&serialized)
+        .expect("deserialize");
     let restored_state = State::from_snapshot(restored);
     // Re-execute a program that references Books — the ref should still resolve.
     let program2 = Program::block(vec![Expr::Finish(Box::new(Expr::Variable("Books".into())))]);

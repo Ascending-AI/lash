@@ -45,7 +45,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         let inherited = inline_inherited_builtin(&target, &field.text);
         if field.text.as_ref() == "constructor"
-            && !matches!(&target, Value::Record(record) if record.get_symbol(field.symbol).is_some())
+            && !matches!(&target, Value::Record(record) if record.get_symbol(&field.symbol).is_some())
             && let Some(name) = self.heap.javascript_constructor_of(&target)?
         {
             return self.heap.builtin_value(&name);

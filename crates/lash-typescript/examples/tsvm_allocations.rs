@@ -9,7 +9,6 @@ mod baseline;
 #[path = "tsvm_costs/corpus.rs"]
 mod corpus;
 
-use lashlang::{Snapshot, VmContinuation};
 use std::hint::black_box;
 use std::io::Write;
 use std::path::PathBuf;
@@ -36,13 +35,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let before = allocation::total();
     black_box(vec![0_u8; black_box(8192)]);
     assert!(allocation::total() - before >= 8192);
+    // The worker-side decoders, reached through a pristine instance built
+    // outside every measured decode.
+    let decoder = lashlang::VmInstance::pristine();
     for case in corpus::load(&root) {
         black_box((&case.source, &case.program));
         let continuation = serde_json::to_vec(&case.continuation)?;
         let snapshot = case.snapshot.to_canonical_bytes()?;
         for index in 0..count {
             let before = allocation::total();
-            black_box(serde_json::from_slice::<VmContinuation>(&continuation)?);
+            black_box(decoder.open_continuation(&continuation)?);
             let bytes = allocation::total() - before;
             writeln!(
                 file,
@@ -50,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 case.id, index, bytes
             )?;
             let before = allocation::total();
-            black_box(Snapshot::from_canonical_bytes(&snapshot)?);
+            black_box(decoder.open_snapshot(&snapshot)?);
             let bytes = allocation::total() - before;
             writeln!(
                 file,

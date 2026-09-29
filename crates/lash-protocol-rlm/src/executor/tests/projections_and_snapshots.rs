@@ -46,7 +46,7 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
             ("diary_len", b::builtin("len", vec![b::var("diary")])),
         ]))
         .expect("compile");
-        let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
+        let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
             .expect("execute");
         let ExecutionOutcome::Finished(FlowValue::Record(record)) = outcome else {
@@ -54,7 +54,15 @@ pub(super) fn projected_history_is_available_without_clobbering_executor_globals
         };
         assert_eq!(record["history_len"], FlowValue::Number(1.0));
         assert_eq!(record["diary_len"], FlowValue::Number(1.0));
-        assert!(state.rlm.snapshot().globals().get("history").is_none());
+        assert!(
+            state
+                .vm
+                .state()
+                .snapshot()
+                .globals()
+                .get("history")
+                .is_none()
+        );
     });
 }
 
@@ -69,7 +77,7 @@ pub(super) fn projected_history_defaults_to_empty_list_when_missing() {
             b::builtin("len", vec![b::var("history")]),
         )]))
         .expect("compile");
-        let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
+        let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
             .expect("execute");
         let ExecutionOutcome::Finished(FlowValue::Record(record)) = outcome else {
@@ -96,14 +104,15 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
         )
         .expect("apply defaults");
     assert_eq!(
-        state.rlm.snapshot().globals().get("diary"),
+        state.vm.state().snapshot().globals().get("diary"),
         Some(&FlowValue::List(
             vec![FlowValue::String("initial".into())].into()
         ))
     );
     assert!(
         state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .globals()
             .get("current_query")
@@ -122,7 +131,7 @@ pub(super) fn set_default_initializes_once_and_does_not_mutate_projected_globals
         )
         .expect("reapply defaults");
     assert_eq!(
-        state.rlm.snapshot().globals().get("diary"),
+        state.vm.state().snapshot().globals().get("diary"),
         Some(&FlowValue::List(
             vec![FlowValue::String("initial".into())].into()
         ))
@@ -136,7 +145,7 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
         let mut state = RlmExecutionState::new();
         let setup = lashlang::testing::harness::try_compile_program(&seed_nested_one())
             .expect("compile setup");
-        execute_with_projected(&setup, &mut state.rlm, &projected)
+        execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
         state
@@ -156,7 +165,7 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
         )]))
         .expect("compile finish");
         assert_eq!(
-            execute_with_projected(&finish, &mut state.rlm, &projected)
+            execute_with_projected(&finish, state.vm.state_mut(), &projected)
                 .await
                 .expect("next cell sees patch"),
             ExecutionOutcome::Finished(FlowValue::List(
@@ -165,12 +174,14 @@ pub(super) fn heap_backed_default_patch_survives_next_cell_and_cold_restore() {
         );
 
         let bytes = state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .to_canonical_bytes()
             .expect("encode patched state");
-        let snapshot =
-            lashlang::Snapshot::from_canonical_bytes(&bytes).expect("decode patched state");
+        let snapshot = lashlang::VmInstance::pristine()
+            .open_snapshot(&bytes)
+            .expect("decode patched state");
         let mut restored = lashlang::State::from_snapshot(snapshot);
         assert_eq!(
             execute_with_projected(&finish, &mut restored, &projected)
@@ -190,11 +201,12 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
         let mut state = RlmExecutionState::new();
         let setup = lashlang::testing::harness::try_compile_program(&seed_nested_one())
             .expect("compile setup");
-        execute_with_projected(&setup, &mut state.rlm, &projected)
+        execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
         let before = state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .to_canonical_bytes()
             .expect("encode pre-patch state");
@@ -218,12 +230,13 @@ pub(super) fn rejected_global_patch_leaves_byte_identical_state_and_no_dirty_mar
         assert!(error.to_string().contains("history"));
 
         assert!(
-            state.rlm.globals().get("a_good").is_none(),
+            state.vm.state().globals().get("a_good").is_none(),
             "no key from a rejected patch may be committed"
         );
         assert_eq!(
             state
-                .rlm
+                .vm
+                .state()
                 .snapshot()
                 .to_canonical_bytes()
                 .expect("encode post-patch state"),
@@ -248,11 +261,12 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
             b::list(vec![b::num(1.0)]),
         )]))
         .expect("compile setup");
-        execute_with_projected(&setup, &mut state.rlm, &projected)
+        execute_with_projected(&setup, state.vm.state_mut(), &projected)
             .await
             .expect("execute setup");
         let before = state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .to_canonical_bytes()
             .expect("encode pre-patch state");
@@ -272,7 +286,8 @@ pub(super) fn rejected_protected_name_patch_leaves_byte_identical_state() {
 
         assert_eq!(
             state
-                .rlm
+                .vm
+                .state()
                 .snapshot()
                 .to_canonical_bytes()
                 .expect("encode post-patch state"),
@@ -319,7 +334,8 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
             .to_canonical_bytes()
             .expect("encode projected state");
         state = lashlang::State::from_snapshot(
-            lashlang::Snapshot::from_canonical_bytes(&unavailable)
+            lashlang::VmInstance::pristine()
+                .open_snapshot(&unavailable)
                 .expect("restore projected state as unavailable"),
         );
         // The restore left `doc` a placeholder; a same-named projected
@@ -365,7 +381,8 @@ pub(super) fn heap_backed_projection_refresh_and_prune_survive_execution_and_res
             .snapshot()
             .to_canonical_bytes()
             .expect("encode refreshed and pruned state");
-        let snapshot = lashlang::Snapshot::from_canonical_bytes(&bytes)
+        let snapshot = lashlang::VmInstance::pristine()
+            .open_snapshot(&bytes)
             .expect("decode refreshed and pruned state");
         let mut restored = lashlang::State::from_snapshot(snapshot);
         assert_eq!(
@@ -386,7 +403,8 @@ pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
     let mut source = RlmExecutionState::new();
     for name in ["healthy", "dead"] {
         source
-            .rlm
+            .vm
+            .state_mut()
             .insert_global(
                 name.to_string(),
                 FlowValue::Projected(ProjectedValue::custom(name, descriptor.clone())),
@@ -394,7 +412,8 @@ pub(super) fn restored_projection_placeholder_fixture() -> RlmExecutionState {
             .expect("insert projected global");
     }
     source
-        .rlm
+        .vm
+        .state_mut()
         .insert_global("ordinary".to_string(), FlowValue::String("kept".into()))
         .expect("insert ordinary global");
     let snapshot = hydrate_snapshot(
@@ -512,7 +531,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
             ("value", b::var("current_query")),
         ]))
         .expect("compile read");
-        let outcome = execute_with_projected(&compiled, &mut state.rlm, &projected)
+        let outcome = execute_with_projected(&compiled, state.vm.state_mut(), &projected)
             .await
             .expect("execute read");
         let ExecutionOutcome::Finished(FlowValue::Record(record)) = outcome else {
@@ -522,7 +541,8 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
         assert_eq!(record["value"], FlowValue::String("host".into()));
         assert!(
             state
-                .rlm
+                .vm
+                .state()
                 .snapshot()
                 .globals()
                 .get("current_query")
@@ -538,7 +558,7 @@ pub(super) fn projected_scalar_bindings_are_read_only_and_not_snapshotted() {
         let env = ExecutionEnvironment::new(&NoopHost)
             .traced()
             .with_projected_bindings(projected.clone());
-        let error = lashlang::execute(&compiled, &mut state.rlm, &env)
+        let error = lashlang::execute(&compiled, state.vm.state_mut(), &env)
             .await
             .expect_err("projected write should fail");
         let failure = env
@@ -558,7 +578,8 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
     let projected = Arc::new(SnapshotProjectedToolText::default());
     let mut state = RlmExecutionState::new();
     state
-        .rlm
+        .vm
+        .state_mut()
         .insert_global(
             "m".to_string(),
             FlowValue::Projected(ProjectedValue::custom(
@@ -587,7 +608,7 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
     restored_execution
         .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
         .expect("restore runtime");
-    let restored = restored_execution.rlm;
+    let restored = restored_execution.vm.state().clone();
     assert!(matches!(
         restored.snapshot().globals().get("m"),
         Some(FlowValue::Projected(_))
@@ -725,8 +746,8 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
             .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen final capture");
         assert_eq!(
-            reopened.rlm.snapshot().globals().get("large"),
-            state.rlm.snapshot().globals().get("large"),
+            reopened.vm.state().snapshot().globals().get("large"),
+            state.vm.state().snapshot().globals().get("large"),
             "cold reopen must include the assignment made after the progress capture"
         );
 
@@ -740,8 +761,8 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
             .restore_execution_state(&retry_hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen retry capture");
         assert_eq!(
-            retry_reopened.rlm.snapshot().globals().get("large"),
-            state.rlm.snapshot().globals().get("large"),
+            retry_reopened.vm.state().snapshot().globals().get("large"),
+            state.vm.state().snapshot().globals().get("large"),
             "aborting a superseded capture must retain the post-progress assignment"
         );
     });
@@ -819,8 +840,8 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen final A capture");
         assert_eq!(
-            reopened.rlm.snapshot().globals().get("large"),
-            state.rlm.snapshot().globals().get("large")
+            reopened.vm.state().snapshot().globals().get("large"),
+            state.vm.state().snapshot().globals().get("large")
         );
 
         state.abort_execution_state_capture();
@@ -838,8 +859,8 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .restore_execution_state(&retry_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen retry A capture");
         assert_eq!(
-            retry_reopened.rlm.snapshot().globals().get("large"),
-            state.rlm.snapshot().globals().get("large")
+            retry_reopened.vm.state().snapshot().globals().get("large"),
+            state.vm.state().snapshot().globals().get("large")
         );
     });
 }
@@ -857,7 +878,8 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
         }
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let full_state_bytes = state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .to_canonical_bytes()
             .expect("pre-arc flat snapshot baseline")
@@ -935,7 +957,8 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
         }
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
         let full_state_bytes = state
-            .rlm
+            .vm
+            .state()
             .snapshot()
             .to_canonical_bytes()
             .expect("accumulated canonical state")

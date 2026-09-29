@@ -126,13 +126,15 @@ impl RlmExecutionSnapshotProbe {
                 Some((global.as_str(), body))
             })
             .collect::<Option<Vec<_>>>()?;
-        let (reloaded, _) = lashlang::State::from_durable_parts(
-            &self.state_header,
-            fragments,
-            lash_core::FleetFormat::current(),
-        )
-        .ok()?;
-        reloaded.globals().get(name).cloned()
+        let mut reloaded = lashlang::VmInstance::pristine();
+        reloaded
+            .restore_durable_parts(
+                &self.state_header,
+                fragments,
+                lash_core::FleetFormat::current(),
+            )
+            .ok()?;
+        reloaded.state().globals().get(name).cloned()
     }
 }
 

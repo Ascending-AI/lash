@@ -86,7 +86,8 @@ async fn run_in(
 /// a front end generated, and no projected host binding.
 fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) {
     let live = state
-        .rlm
+        .vm
+        .state()
         .globals()
         .iter()
         .map(|(name, _)| name.to_string())
