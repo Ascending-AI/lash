@@ -883,18 +883,22 @@ mod tests {
             })
             .await
             .expect("insert malformed edge");
+        let error = store
+            .get_module_artifact("malformed-edge")
+            .await
+            .expect_err("malformed referrer pair must fail the artifact read");
         assert!(matches!(
-            store
-                .get_artifact_ref_blob(
-                    MODULE_ARTIFACT_NAMESPACE,
-                    "malformed-edge".into(),
-                    "test artifact".into(),
-                )
-                .await,
-            Err(StoreError::StoredDataCorrupt {
+            &error,
+            ArtifactStoreError::StoredDataCorrupt {
                 record_kind: "artifact referrer edge",
                 ..
-            })
+            }
+        ));
+        let plugin_error: lash_core_execution::PluginError = error.into();
+        assert!(matches!(
+            plugin_error,
+            lash_core_execution::PluginError::Runtime(runtime)
+                if runtime.code == lash_core_execution::RuntimeErrorCode::RuntimeStoreCorrupt
         ));
     }
 }

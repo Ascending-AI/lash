@@ -544,10 +544,12 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     assert!(
         matches!(
             artifact_error,
-            lash_core::ArtifactStoreError::Backend(ref message)
-                if message.contains("stored artifact reference data is corrupt")
+            lash_core::ArtifactStoreError::StoredDataCorrupt {
+                record_kind: "artifact reference",
+                ..
+            }
         ),
-        "expected mapped StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
+        "expected typed StoredDataCorrupt for dangling artifact reference, got {artifact_error:?}"
     );
 
     raw.execute(

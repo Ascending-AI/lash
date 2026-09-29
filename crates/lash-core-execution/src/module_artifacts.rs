@@ -51,6 +51,12 @@ pub enum ArtifactStoreError {
     /// Different bytes under a stored reference.
     #[error("artifact `{artifact_ref}` is already stored with different bytes")]
     Immutable { artifact_ref: String },
+    /// Stored artifact data or a stored referrer pair failed validation.
+    #[error("stored {record_kind} is corrupt: {message}")]
+    StoredDataCorrupt {
+        record_kind: &'static str,
+        message: String,
+    },
     #[error("artifact store backend error: {0}")]
     Backend(String),
 }
@@ -67,6 +73,13 @@ impl From<crate::StoreError> for ArtifactStoreError {
             crate::StoreError::ArtifactCarryMissing { artifact_ref, to } => {
                 Self::CarryArtifactMissing { artifact_ref, to }
             }
+            crate::StoreError::StoredDataCorrupt {
+                record_kind,
+                message,
+            } => Self::StoredDataCorrupt {
+                record_kind,
+                message,
+            },
             other => Self::Backend(other.to_string()),
         }
     }
@@ -81,6 +94,12 @@ impl From<ArtifactStoreError> for crate::PluginError {
             ArtifactStoreError::ArtifactMissing { .. } => {
                 crate::PluginError::Runtime(crate::RuntimeError::new(
                     crate::RuntimeErrorCode::ArtifactMissing,
+                    error.to_string(),
+                ))
+            }
+            ArtifactStoreError::StoredDataCorrupt { .. } => {
+                crate::PluginError::Runtime(crate::RuntimeError::new(
+                    crate::RuntimeErrorCode::RuntimeStoreCorrupt,
                     error.to_string(),
                 ))
             }
