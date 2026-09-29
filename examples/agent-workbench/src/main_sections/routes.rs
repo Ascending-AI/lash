@@ -31,11 +31,13 @@ pub(crate) async fn app_state(
     let active_turn = state.active_turns.for_session(&session_id);
     let StateProjectionReads {
         read_view,
+        history_store,
         cursor,
         pending_turn_inputs,
         queued_work,
         turn_input_applications,
         usage,
+        turn_failure_settlements,
     } = read_state_projection(&state, &session_id).await?;
     let active_turn_ids = active_turn
         .iter()
@@ -54,15 +56,34 @@ pub(crate) async fn app_state(
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let mut pending_message_nodes = read_view.message_tree();
     let mut committed_input_turn_ids = BTreeSet::new();
-    while let Some(node) = pending_message_nodes.pop() {
-        if let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
-            node.message.origin.as_ref()
-        {
-            committed_input_turn_ids.insert(turn_id.clone());
+    let mut anchor = lash::persistence::HistoryAnchor::Head;
+    loop {
+        let page = history_store
+            .load_ancestors(
+                anchor,
+                lash::persistence::HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
+                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
+                        .expect("positive byte limit"),
+                },
+            )
+            .await
+            .map_err(AppError::internal)?;
+        for node in page.nodes {
+            if let lash::persistence::SessionNodePayload::Event {
+                event: lash::persistence::SessionHistoryRecord::Conversation(message),
+            } = node.record.payload
+                && let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
+                    message.origin
+            {
+                committed_input_turn_ids.insert(turn_id);
+            }
         }
-        pending_message_nodes.extend(node.children);
+        match page.next {
+            Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
+            None => break,
+        }
     }
     state.event_tx.reconcile_settled(
         &session_id,
@@ -84,7 +105,6 @@ pub(crate) async fn app_state(
     );
     splice_unknown_turn_terminal_notes(&mut transcript, &unknown_turn_terminals);
     let pending_approvals = state.approvals.pending().map_err(AppError::internal)?;
-    let turn_failure_settlements = read_view.turn_failure_settlements().to_vec();
     let observation = RemoteSessionObservation::from_core(lash::observe::SessionObservation {
         read_view,
         cursor: cursor.clone(),
@@ -975,14 +995,13 @@ pub(crate) async fn list_queued_work(
     // A read-only probe reads the durable records directly. Opening the session
     // to list them claimed the execution lease and raced the running turn for
     // it (FIG-3144).
-    let store = state
-        .session_store_factory
-        .create_store(&state_store_request(&state, &session_id))
-        .await
+    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+        state.session_store_factory.clone();
+    let store = lash::persistence::SessionStore::new(runtime_store, session_id)
         .map_err(AppError::internal)?;
     Ok(Json(
         store
-            .list_open_queued_work(&session_id)
+            .list_open_queued_work()
             .await
             .map_err(AppError::internal)?,
     ))

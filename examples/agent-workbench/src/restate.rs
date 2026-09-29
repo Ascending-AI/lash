@@ -542,26 +542,17 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     session_id: &SessionId,
     reason: &str,
 ) -> Result<(), AppError> {
-    let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
-    policy.session_id = Some(SessionId::from(session_id.to_string()));
-    policy.model = model_spec_from_selection(state.selected_model());
-    let store = state
-        .session_store_factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
-            relation: lash::persistence::SessionRelation::Root,
-            policy,
-        })
-        .await
-        .map_err(|error| {
+    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+        state.session_store_factory.clone();
+    let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone()).map_err(
+        |error| {
             state.session_admission_error(
                 session_id,
                 "cron.restate.cancel",
                 lash::EmbedError::Store(error),
             )
-        })?;
+        },
+    )?;
     store.read_session_state_version().await.map_err(|error| {
         state.session_admission_error(
             session_id,
@@ -576,12 +567,15 @@ pub(crate) async fn cancel_cron_jobs_for_session(
         .list_subscriptions(filter)
         .await
         .map_err(AppError::internal)?;
-    if state
-        .session_store_factory
-        .session_was_deleted(session_id)
+    if matches!(
+        lash::persistence::SessionCatalogStore::lookup_session(
+            state.session_store_factory.as_ref(),
+            session_id,
+        )
         .await
-        .map_err(AppError::internal)?
-    {
+        .map_err(AppError::internal)?,
+        lash::persistence::SessionLookup::Deleted
+    ) {
         return Err(state.session_admission_error(
             session_id,
             "cron.restate.cancel",

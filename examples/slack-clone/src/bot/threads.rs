@@ -12,10 +12,11 @@
 //! replies and its first mention.
 
 use std::collections::HashSet;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
-use lash::persistence::{ChronologicalPayload, StoreError};
+use lash::persistence::{ChronologicalPayload, HistoryAnchor, HistoryBudget, StoreError};
 use lash::{LashCore, LashSession};
 
 use super::ledger::{EventLedger, EventReason, EventRecord};
@@ -390,8 +391,8 @@ async fn retain_boundary(
     input_id: &str,
     derivation: Derivation,
 ) -> Result<bool> {
-    let applications = session
-        .durable()
+    let durable = session.durable();
+    let applications = durable
         .turn_input_applications()
         .await
         .context("read turn-input applications for fork boundary")?;
@@ -402,17 +403,7 @@ async fn retain_boundary(
     else {
         return Ok(false);
     };
-    // Application records are commit evidence. Read the graph from the store
-    // at this instant — the commit that wrote the application — rather than
-    // this handle's resident view, which the engine can advance past on a
-    // driver this process does not hold (a re-driven turn on a later boot).
-    let view = session
-        .durable()
-        .read()
-        .await
-        .context("read the committed channel view for fork boundary")?
-        .context("a committed turn application implies a readable committed view")?;
-    let Some(leaf) = committed_turn_boundary(&view, &applications, &turn_id)? else {
+    let Some(leaf) = committed_turn_boundary(&durable, &applications, &turn_id).await? else {
         if derivation == Derivation::MayBePending {
             return Ok(false);
         }
@@ -434,80 +425,66 @@ async fn retain_boundary(
 }
 
 /// Resolve the graph boundary committed by `turn_id`, even when later turns
-/// have advanced the session head.
-///
-/// Application records name the committed user message for every turn. On the
-/// active graph path, the parent of the next turn's first application is the
-/// exact leaf selected by this turn. When there is no later application, the
-/// current leaf is still this turn's boundary (the ordinary under-lock path).
-///
-/// `view` must post-date the commit that wrote `applications`: both are read
-/// from the store, so a view taken after the application is visible carries
-/// the commit's nodes. `None` then means the application is not on the active
-/// graph path — a broken graph, not a "come back later".
-fn committed_turn_boundary(
-    view: &lash::persistence::SessionReadView,
+/// have advanced the session head. The parent of the next turn's first
+/// application is this turn's committed leaf. Without a later application,
+/// the current leaf is still this turn's boundary.
+async fn committed_turn_boundary(
+    durable: &lash::DurableSession,
     applications: &[lash::TurnInputApplication],
     turn_id: &lash::TurnId,
 ) -> Result<Option<String>> {
-    let graph = view.session_graph().clone();
-    let nodes_by_id: std::collections::HashMap<&str, _> = graph
-        .nodes
-        .iter()
-        .map(|node| (node.node_id.as_str(), node))
-        .collect();
-    let mut active_path = Vec::new();
-    let mut cursor = graph.leaf_node_id.as_deref();
-    let mut visited = HashSet::new();
-    while let Some(node_id) = cursor {
-        if !visited.insert(node_id) {
-            bail!("channel session graph contains a cycle at {node_id}");
-        }
-        let node = nodes_by_id
-            .get(node_id)
-            .with_context(|| format!("channel graph leaf path is missing node {node_id}"))?;
-        active_path.push(*node);
-        cursor = node.parent_node_id.as_deref();
-    }
-    active_path.reverse();
-
     let target_message_ids: HashSet<&str> = applications
         .iter()
         .filter(|application| application.turn_id == turn_id)
         .map(|application| application.committed_message_id.as_str())
         .collect();
-    let Some(target_index) = active_path
-        .iter()
-        .enumerate()
-        .filter_map(|(index, node)| {
-            node_message_id(node)
-                .filter(|message_id| target_message_ids.contains(message_id))
-                .map(|_| index)
-        })
-        .next_back()
-    else {
-        return Ok(None);
-    };
-
     let later_application_ids: HashSet<&str> = applications
         .iter()
         .filter(|application| application.turn_id != turn_id)
         .map(|application| application.committed_message_id.as_str())
         .collect();
-    if let Some(next_turn) = active_path.iter().skip(target_index + 1).find(|node| {
-        node_message_id(node).is_some_and(|message_id| later_application_ids.contains(message_id))
-    }) {
-        return next_turn
-            .parent_node_id
-            .as_ref()
-            .map(|id| Some(id.to_string()))
-            .context("a later committed turn has no preceding graph boundary");
+    let mut anchor = HistoryAnchor::Head;
+    let mut leaf = None;
+    let mut next_turn_boundary = None;
+    loop {
+        let page = durable
+            .history(
+                anchor,
+                HistoryBudget {
+                    max_nodes: NonZeroU32::new(128).expect("positive history node limit"),
+                    max_bytes: NonZeroU64::new(32 * 1024 * 1024)
+                        .expect("positive history byte limit"),
+                },
+            )
+            .await
+            .context("read committed channel ancestry for fork boundary")?;
+        if leaf.is_none() {
+            leaf = page.pinned_leaf.map(|id| id.to_string());
+        }
+        for node in &page.nodes {
+            let Some(message_id) = node_message_id(&node.record) else {
+                continue;
+            };
+            if target_message_ids.contains(message_id) {
+                return Ok(Some(next_turn_boundary.unwrap_or_else(|| {
+                    leaf.expect("committed ancestry node implies a leaf")
+                })));
+            }
+            if later_application_ids.contains(message_id) {
+                next_turn_boundary = Some(
+                    node.record
+                        .parent_node_id
+                        .as_ref()
+                        .context("a later committed turn has no preceding graph boundary")?
+                        .to_string(),
+                );
+            }
+        }
+        let Some(next) = page.next else {
+            return Ok(None);
+        };
+        anchor = HistoryAnchor::Cursor(next);
     }
-    graph
-        .leaf_node_id
-        .as_ref()
-        .map(|id| Some(id.to_string()))
-        .context("committed turn has no graph leaf")
 }
 
 fn node_message_id(node: &lash::persistence::SessionNodeRecord) -> Option<&str> {

@@ -205,15 +205,18 @@ pub(crate) async fn await_durable_turn_cancel_request(
 ) -> lash::TurnCancelRequestRecord {
     tokio::time::timeout(Duration::from_secs(2), async {
         loop {
-            if let Some(store) = state
-                .session_store_factory
-                .open_existing_store_by_id(&address.session_id)
-                .await
-                .expect("open durable cancellation store")
-                && let Some(record) = store
-                    .turn_cancel_request(address)
+            if matches!(
+                state
+                    .session_store_factory
+                    .lookup_session(&address.session_id)
                     .await
-                    .expect("read durable cancellation request")
+                    .expect("look up durable cancellation session"),
+                lash::persistence::SessionLookup::Live(_)
+            ) && let Some(record) = state
+                .session_store_factory
+                .turn_cancel_request(address)
+                .await
+                .expect("read durable cancellation request")
             {
                 return record;
             }

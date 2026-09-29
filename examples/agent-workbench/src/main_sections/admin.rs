@@ -458,54 +458,33 @@ pub(crate) fn trace_store_maintenance(
     );
 }
 
-/// Vacuum one named session's store.
-///
-/// The handle comes from the factory, which is what binds it to the session;
-/// `vacuum` refuses an unbound handle rather than widening to a catalog-wide
-/// sweep. `open_existing_store` opens only what is already durable — the
-/// create-shaped request carries a policy it never applies on this path — so an
-/// unknown session is a `404` and never a freshly created empty store.
+/// Vacuum one named session's store after a non-creating catalog lookup.
 pub(crate) async fn vacuum_session_store(
     state: &AppState,
     session_id: &SessionId,
 ) -> Result<SessionVacuumReport, AppError> {
-    let request = lash::persistence::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
-        relation: lash::persistence::SessionRelation::Root,
-        policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
-    };
-    let store = lash::persistence::DeploymentStore::open_existing_store(
-        state.session_store_factory.as_ref(),
-        &request,
-    )
-    .await
-    .map_err(AppError::internal)?
-    .ok_or_else(|| {
-        AppError::not_found(format!(
+    let store = state.session_store_factory.as_ref();
+    if !matches!(
+        lash::persistence::SessionCatalogStore::lookup_session(store, session_id)
+            .await
+            .map_err(AppError::internal)?,
+        lash::persistence::SessionLookup::Live(_)
+    ) {
+        return Err(AppError::not_found(format!(
             "session `{session_id}` has no durable store to vacuum"
-        ))
-    })?;
-    let report = vacuum_bound_store(store.as_ref()).await?;
+        )));
+    }
+    let report = vacuum_bound_store(store, session_id).await?;
     Ok(session_vacuum_report(session_id, report))
 }
 
-/// Reclaim the settled rows of the session `store` is bound to.
-///
-/// Taking the bound handle as the parameter is the point: `vacuum` is scoped to
-/// that binding and refuses an unbound handle rather than widening into a
-/// catalog-wide sweep, so the binding is what the caller has to get right.
+/// Reclaim the settled rows scoped to `session_id`.
 pub(crate) async fn vacuum_bound_store(
     store: &dyn lash::persistence::RuntimeStore,
+    session_id: &SessionId,
 ) -> Result<lash::persistence::VacuumReport, AppError> {
-    lash::persistence::StoreMaintenance::vacuum(store)
+    lash::persistence::StoreMaintenance::vacuum(store, session_id)
         .await
-        // Audited: session-scoped store maintenance reclaims rows that already
-        // settled; it crosses no effect-controller boundary and produces no
-        // tombstone cause of its own. The stop carries the rows already
-        // reclaimed, so the operator is told how far the pass got instead of
-        // having to guess.
         .map_err(|failure| {
             AppError::internal(format!(
                 "{failure}; reclaimed before the stop: {} node rows, {} pending-turn-input rows",

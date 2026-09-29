@@ -2,14 +2,14 @@ use anyhow::{Context, Result, bail};
 use lash::ProcessId;
 use lash::SessionId;
 use lash::persistence::{
-    DeliveryPolicy, IngressStore as _, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft,
+    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, QueuedWorkBatchDraft, QueuedWorkStore as _,
 };
 use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
-    DeploymentStore as _, ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
-    ProcessWakeDelivery, ProcessWakeSpec, SessionRelation, SessionStoreCreateRequest,
-    WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
+    ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity,
+    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
+    ProcessWakeDelivery, ProcessWakeSpec, SessionCatalogStore as _, SessionRelation,
+    SessionStoreCreateRequest, WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::json;
@@ -154,7 +154,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     let factory = storage.session_store_factory_with_shared_process_registry();
     for session_id in [OLD_SESSION_ID, NEW_SESSION_ID] {
         factory
-            .create_store(&SessionStoreCreateRequest {
+            .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
@@ -250,12 +250,12 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         "new-target drive was not singular: {drive:?}"
     );
     let old_batches = storage
-        .session_store(OLD_SESSION_ID)
+        .store()
         .list_queued_work(&SessionId::from(OLD_SESSION_ID))
         .await
         .context("list old-target receiver rows")?;
     let new_batches = storage
-        .session_store(NEW_SESSION_ID)
+        .store()
         .list_queued_work(&SessionId::from(NEW_SESSION_ID))
         .await
         .context("list new-target receiver rows")?;
@@ -292,7 +292,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
 async fn prepare(storage: &PostgresStorage) -> Result<()> {
     storage
         .session_store_factory_with_shared_process_registry()
-        .create_store(&SessionStoreCreateRequest {
+        .admit_session(&SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
@@ -351,7 +351,7 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
         delivery.state()
     );
 
-    let target = storage.session_store(SESSION_ID);
+    let target = storage.store();
     let batch = target
         .enqueue_queued_work(wake_batch_draft(delivery.wake.clone()))
         .await
@@ -408,7 +408,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         .find(|delivery| delivery.wake.process_id == process_id)
         .context("recovered sender row is absent")?;
     let batches = storage
-        .session_store(SESSION_ID)
+        .store()
         .list_queued_work(&SessionId::from(SESSION_ID))
         .await
         .context("list recovered receiver rows")?

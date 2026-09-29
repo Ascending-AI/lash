@@ -831,7 +831,7 @@ pub(super) async fn assert_reopened_session_agrees(
     })?;
     let session = core.session(DEFAULT_SESSION_ID).open().await?;
     let read = storage
-        .session_store(DEFAULT_SESSION_ID)
+        .store()
         .load_session_window(
             &lash::SessionId::from(DEFAULT_SESSION_ID),
             lash::persistence::WindowSelector::Current,

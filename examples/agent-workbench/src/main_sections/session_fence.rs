@@ -77,16 +77,20 @@ impl AppState {
             }
             (Some(SessionRetirement::Retiring), SessionAdmission::Delete) | (None, _) => {}
         }
-        match self
-            .session_store_factory
-            .session_was_deleted(session_id)
-            .await
+        match lash::persistence::SessionCatalogStore::lookup_session(
+            self.session_store_factory.as_ref(),
+            session_id,
+        )
+        .await
         {
-            Ok(false) => Ok(()),
+            Ok(
+                lash::persistence::SessionLookup::Live(_)
+                | lash::persistence::SessionLookup::Absent,
+            ) => Ok(()),
             // Not memoized into the in-process mark: the evidence a refusal
             // records names the authority that was consulted, and for a
             // tombstoned session that authority is the store.
-            Ok(true) => Err(self.session_admission_error(
+            Ok(lash::persistence::SessionLookup::Deleted) => Err(self.session_admission_error(
                 session_id,
                 surface,
                 lash::EmbedError::Store(lash::persistence::StoreError::SessionDeleted {
@@ -148,13 +152,19 @@ impl AppState {
         match outcome {
             Ok(()) => self.confirm_retirement_and_rotate(session_id),
             Err(error) if error.verdict == AppErrorVerdict::Ambiguous => {}
-            Err(_) => match self
-                .session_store_factory
-                .session_was_deleted(session_id)
-                .await
+            Err(_) => match lash::persistence::SessionCatalogStore::lookup_session(
+                self.session_store_factory.as_ref(),
+                session_id,
+            )
+            .await
             {
-                Ok(true) => self.confirm_retirement_and_rotate(session_id),
-                Ok(false) => self.active_turns.abandon_retirement(session_id),
+                Ok(lash::persistence::SessionLookup::Deleted) => {
+                    self.confirm_retirement_and_rotate(session_id)
+                }
+                Ok(
+                    lash::persistence::SessionLookup::Live(_)
+                    | lash::persistence::SessionLookup::Absent,
+                ) => self.active_turns.abandon_retirement(session_id),
                 Err(_) => {}
             },
         }

@@ -91,16 +91,36 @@ fn emit(checkpoint: &Value) {
 }
 
 /// Read committed messages across both the old and current frames.
-fn durable_messages(view: &lash_core::SessionReadView) -> Vec<lash_core::Message> {
-    fn walk(nodes: &[lash::messages::SessionMessageTreeNode], out: &mut Vec<lash_core::Message>) {
-        for node in nodes {
-            out.push(node.message.clone());
-            walk(&node.children, out);
+async fn durable_messages(session: &lash::LashSession) -> Result<Vec<lash_core::Message>> {
+    let durable = session.durable();
+    let mut messages = Vec::new();
+    let mut anchor = lash::persistence::HistoryAnchor::Head;
+    loop {
+        let page = durable
+            .history(
+                anchor,
+                lash::persistence::HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
+                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
+                        .expect("positive byte limit"),
+                },
+            )
+            .await?;
+        for node in page.nodes {
+            if let lash::persistence::SessionNodePayload::Event {
+                event: lash::persistence::SessionHistoryRecord::Conversation(message),
+            } = node.record.payload
+            {
+                messages.push(message.to_message());
+            }
+        }
+        match page.next {
+            Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
+            None => break,
         }
     }
-    let mut messages = Vec::new();
-    walk(&view.message_tree(), &mut messages);
-    messages
+    messages.reverse();
+    Ok(messages)
 }
 
 fn plugin_record(message: &lash_core::Message, title: &str) -> bool {
@@ -142,7 +162,7 @@ async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
         .iter()
         .find(|frame| Some(&frame.frame_node_id) == frame_after.as_ref())
         .map(|frame| frame.reason.as_str().to_string());
-    let history = durable_messages(&after);
+    let history = durable_messages(&session).await?;
     let summary_chars = after
         .messages()
         .iter()

@@ -354,9 +354,8 @@ impl AppState {
         let mut policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
         policy.session_id = Some(session_id.clone());
         policy.model = model_spec_from_selection(self.selected_model());
-        let store = self
-            .session_store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
+        self.session_store_factory
+            .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -371,13 +370,16 @@ impl AppState {
                     lash::EmbedError::Store(error),
                 )
             })?;
-        store.read_session_state_version().await.map_err(|error| {
-            self.session_admission_error(
-                session_id,
-                "api.turn.cancel",
-                lash::EmbedError::Store(error),
-            )
-        })?;
+        self.session_store_factory
+            .read_session_state_version(session_id)
+            .await
+            .map_err(|error| {
+                self.session_admission_error(
+                    session_id,
+                    "api.turn.cancel",
+                    lash::EmbedError::Store(error),
+                )
+            })?;
         // At most one, structurally: the registry is keyed by session. The
         // receipts stay a list because that is what this returns to its
         // callers and what the traces are shaped around.

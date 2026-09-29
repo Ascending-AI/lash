@@ -3,11 +3,13 @@ use lash::SessionId;
 
 pub(crate) struct StateProjectionReads {
     pub(crate) read_view: lash::persistence::SessionReadView,
+    pub(crate) history_store: lash::persistence::SessionStore,
     pub(crate) cursor: SessionCursor,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
     pub(crate) turn_input_applications: Vec<lash::remote::observations::RemoteTurnInputApplication>,
     pub(crate) usage: lash::usage::SessionUsageReport,
+    pub(crate) turn_failure_settlements: Vec<lash::TurnFailureSettlement>,
 }
 
 impl AppState {
@@ -35,22 +37,25 @@ impl AppState {
         session_id: &SessionId,
     ) -> Result<lash::LashSession, lash::EmbedError> {
         let request = state_store_request(self, session_id);
-        let store = self
-            .session_store_factory
-            .create_store(&request)
-            .await
+        let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+            self.session_store_factory.clone();
+        let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
             .map_err(lash::EmbedError::Store)?;
-        let state = lash::persistence::load_persisted_session_state(store.as_ref())
-            .await
-            .map_err(lash::EmbedError::Store)?
-            .unwrap_or_else(|| {
-                // A session with no durable head yet: the same empty state the
-                // `/api/state` projection falls back to, so an observer that
-                // attaches before the first commit sees what the snapshot does.
-                let mut state = lash::persistence::RuntimeSessionState::new(request.policy.clone());
-                state.session_id = session_id.clone();
-                state
-            });
+        let state = lash::persistence::load_session_window_state(
+            &store,
+            lash::persistence::WindowSelector::Current,
+        )
+        .await
+        .map_err(lash::EmbedError::Store)?
+        .map(|loaded| loaded.state)
+        .unwrap_or_else(|| {
+            // A session with no durable head yet: the same empty state the
+            // `/api/state` projection falls back to, so an observer that
+            // attaches before the first commit sees what the snapshot does.
+            let mut state = lash::persistence::RuntimeSessionState::new(request.policy.clone());
+            state.session_id = session_id.clone();
+            state
+        });
         self.observer_session_builder(session_id.to_string())
             .observe_with_state(state)
             .await
@@ -88,19 +93,22 @@ pub(crate) async fn read_state_projection(
     session_id: &SessionId,
 ) -> Result<StateProjectionReads, AppError> {
     let request = state_store_request(state, session_id);
-    let store = state
-        .session_store_factory
-        .create_store(&request)
-        .await
+    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+        state.session_store_factory.clone();
+    let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
         .map_err(AppError::internal)?;
-    let persisted = lash::persistence::load_persisted_session_state(store.as_ref())
-        .await
-        .map_err(AppError::internal)?
-        .unwrap_or_else(|| {
-            let mut persisted = lash::persistence::RuntimeSessionState::new(request.policy);
-            persisted.session_id = SessionId::from(session_id.to_string());
-            persisted
-        });
+    let persisted = lash::persistence::load_session_window_state(
+        &store,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await
+    .map_err(AppError::internal)?
+    .map(|loaded| loaded.state)
+    .unwrap_or_else(|| {
+        let mut persisted = lash::persistence::RuntimeSessionState::new(request.policy);
+        persisted.session_id = SessionId::from(session_id.to_string());
+        persisted
+    });
     let revision = persisted
         .checkpoint_ref
         .as_ref()
@@ -117,28 +125,45 @@ pub(crate) async fn read_state_projection(
         .core
         .observation_cursor(session_id, lash::observe::SessionRevision(revision));
     let pending_turn_inputs = store
-        .list_pending_turn_inputs(session_id)
+        .list_pending_turn_inputs()
         .await
         .map_err(AppError::internal)?;
     let queued_work = store
-        .list_open_queued_work(session_id)
+        .list_open_queued_work()
         .await
         .map_err(AppError::internal)?;
     let turn_input_applications = store
-        .list_turn_input_applications(session_id)
+        .list_turn_input_applications()
         .await
         .map_err(AppError::internal)?
         .iter()
         .map(Into::into)
         .collect();
     let usage = persisted.usage_report();
+    let mut turn_failure_settlements = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store
+            .load_failure_evidence_page(
+                after.as_ref(),
+                std::num::NonZeroU32::new(128).expect("positive page limit"),
+            )
+            .await
+            .map_err(AppError::internal)?;
+        turn_failure_settlements.extend(page.settlements);
+        match page.next {
+            Some(next) => after = Some(next),
+            None => break,
+        }
+    }
     Ok(StateProjectionReads {
-        read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted)
-            .map_err(AppError::internal)?,
+        read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted),
+        history_store: store,
         cursor,
         pending_turn_inputs,
         queued_work,
         turn_input_applications,
         usage,
+        turn_failure_settlements,
     })
 }

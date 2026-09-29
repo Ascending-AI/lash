@@ -314,15 +314,7 @@ async fn assert_repeat_requests_preserve_the_accepted_policy(
     address: &TurnAddress,
     accepted_request_id: &str,
 ) -> Result<()> {
-    use lash_core::DeploymentStore as _;
-
-    let store = storage
-        .session_store_factory()
-        .open_existing_store_by_id(&address.session_id)
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("open exact session for repeated-request proof")?
-        .context("repeated-request session disappeared")?;
+    let store = storage.session_store_factory();
     let record_before = store
         .turn_cancel_request(address)
         .await
@@ -394,15 +386,7 @@ async fn assert_late_cancel_is_noop(
     terminal: &TurnTerminal,
     request_id: &str,
 ) -> Result<()> {
-    use lash_core::DeploymentStore as _;
-
-    let store = storage
-        .session_store_factory()
-        .open_existing_store_by_id(&address.session_id)
-        .await
-        .map_err(anyhow::Error::msg)
-        .context("open exact session for late-cancel proof")?
-        .context("late-cancel session disappeared")?;
+    let store = storage.session_store_factory();
     let record_before = store
         .turn_cancel_request(address)
         .await
