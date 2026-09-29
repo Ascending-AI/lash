@@ -1261,4 +1261,26 @@ mod tool_input_tests {
             .collect::<Vec<_>>();
         assert_eq!(ends, [(0, "{\"path\":\"READ"), (1, "{\"q\":\"x\"}")]);
     }
+
+    #[test]
+    fn one_chunk_call_closes_before_its_part() {
+        let mut state = ChatStreamState::default();
+        for event in [
+            serde_json::json!({"choices":[{"delta":{"tool_calls":[{"index":0,"id":"whole","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}),
+            serde_json::json!({"choices":[{"delta":{},"finish_reason":"tool_calls"}]}),
+        ] {
+            OpenAiCompatibleProvider::process_chat_sse_event(&event.to_string(), &mut state)
+                .expect("recorded whole Chat call parses");
+        }
+        let mut events = state.take_block_events();
+        events.extend(
+            state
+                .take_completed_tool_call_parts()
+                .into_iter()
+                .map(LlmStreamEvent::Part),
+        );
+        assert!(
+            matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputDelta { text, .. }, LlmStreamEvent::ToolInputEnd { raw_arguments, .. }, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })] if text == raw_arguments && raw_arguments == "{\"q\":\"x\"}")
+        );
+    }
 }

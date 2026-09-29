@@ -257,6 +257,26 @@ mod tool_input_tests {
         assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == 0 && text == "{\"path\":\"READ")));
         assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.ordinal == 1 && raw_arguments == "{\"q\":\"x\"}")));
     }
+
+    #[test]
+    fn arguments_arriving_whole_at_item_start_are_captured() {
+        let mut state = ResponsesStreamState::default();
+        let start = serde_json::json!({"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_whole","call_id":"whole","name":"lookup","arguments":"{\"q\":\"x\"}"}});
+        process_sse_event("OpenAI", &start.to_string(), &mut state, None)
+            .expect("recorded whole call start parses");
+        let events = state.take_block_events();
+        assert!(
+            matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputDelta { text, .. }] if text == "{\"q\":\"x\"}")
+        );
+        let done = serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_whole","call_id":"whole","name":"lookup","arguments":"{\"q\":\"x\"}"}});
+        let mut parts = Vec::new();
+        process_sse_event("OpenAI", &done.to_string(), &mut state, Some(&mut parts))
+            .expect("recorded whole call end parses");
+        assert!(
+            matches!(&state.take_block_events()[..], [LlmStreamEvent::ToolInputEnd { raw_arguments, .. }] if raw_arguments == "{\"q\":\"x\"}")
+        );
+        assert_eq!(parts.len(), 1);
+    }
 }
 
 pub fn parse_sse_payload(

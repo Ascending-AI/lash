@@ -1409,6 +1409,9 @@ mod tests {
                             json!({ "q": "x" }),
                         )
                     }
+                    Scenario::StreamingToolInputEvents => {
+                        return self.wire_for(Scenario::StreamingToolArgumentMerge);
+                    }
                     Scenario::StreamingToolCallAbortEquivalence => {
                         ProviderWire::body(Value::Null).with_aborted_tool_call_stream(
                             vec![

@@ -2273,6 +2273,9 @@ mod conformance {
                             json!({ "q": "x" }),
                         )
                     }
+                    Scenario::StreamingToolInputEvents => {
+                        return self.wire_for(Scenario::StreamingToolArgumentMerge);
+                    }
                     Scenario::StreamingToolCallAbortEquivalence => {
                         ProviderWire::body(json!({})).with_aborted_tool_call_stream(
                             vec![
@@ -2370,6 +2373,7 @@ mod conformance {
                     scenario,
                     Scenario::StreamingToolCallAbortEquivalence
                         | Scenario::StreamingToolArgumentMerge
+                        | Scenario::StreamingToolInputEvents
                 )
                 .then_some(&mut emitted_parts);
                 shared::process_sse_event(PROVIDER, raw, &mut state, capture_parts)

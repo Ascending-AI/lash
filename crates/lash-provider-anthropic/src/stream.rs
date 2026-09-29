@@ -701,6 +701,34 @@ mod tool_input_tests {
         assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == 0 && text == "{\"path\":\"READ")));
         assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.ordinal == 1 && raw_arguments == "{\"q\":\"x\"}")));
     }
+
+    #[test]
+    fn initial_input_without_deltas_closes_with_the_whole_arguments() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let sender = LlmEventSender::new(move |event| {
+            sink.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push(event);
+        });
+        let mut state = StreamState::default();
+        for event in [
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"whole","name":"lookup","input":{"q":"x"}}}),
+            json!({"type":"content_block_stop","index":0}),
+        ] {
+            AnthropicProvider::process_sse_event(
+                &event.to_string(),
+                &mut state,
+                Some(&sender),
+                false,
+            )
+            .expect("recorded whole Anthropic call parses");
+        }
+        let events = seen.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert!(
+            matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputEnd { raw_arguments, .. }, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })] if raw_arguments == "{\"q\":\"x\"}")
+        );
+    }
 }
 
 #[cfg(test)]

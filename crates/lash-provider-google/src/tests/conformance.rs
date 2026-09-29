@@ -70,6 +70,9 @@ impl ProviderNormalizer for GoogleNormalizer {
                 )
             }
             Scenario::StreamingToolArgumentMerge => return None,
+            Scenario::StreamingToolInputEvents => {
+                return self.wire_for(Scenario::StreamingToolCallAbortEquivalence);
+            }
             Scenario::StreamingToolCallAbortEquivalence => {
                 ProviderWire::body(json!({})).with_aborted_tool_call_stream(
                     vec![json!({

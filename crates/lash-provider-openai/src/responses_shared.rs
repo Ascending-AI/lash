@@ -1358,6 +1358,7 @@ impl ResponsesStreamState {
         let item_id = item.get("id").and_then(|v| v.as_str());
         let owner = self.tool_call_slot(output_index, item_id)?;
         let mut content_received = false;
+        let mut initial_arguments = None;
         if let Some(tool_call) = self.tool_call_mut(owner) {
             if tool_call.item_id.is_empty()
                 && let Some(item_id) = item_id
@@ -1377,10 +1378,19 @@ impl ResponsesStreamState {
             {
                 tool_call.input_json = arguments.to_string();
                 content_received = true;
+                if tool_call.ordinal.is_none() {
+                    initial_arguments = Some(arguments.to_string());
+                }
             }
         }
         self.streamed_item_content_received |= content_received;
         self.start_tool_input(owner);
+        if let Some(text) = initial_arguments
+            && let Some(call) = self.tool_input_identity(owner)
+        {
+            self.block_events
+                .push(LlmStreamEvent::ToolInputDelta { call, text });
+        }
         Some(owner)
     }
 
@@ -1418,9 +1428,22 @@ impl ResponsesStreamState {
         let Some(owner) = self.tool_call_slot(output_index, item_id) else {
             return;
         };
+        self.start_tool_input(owner);
+        let was_empty = self
+            .tool_call_mut(owner)
+            .is_some_and(|call| call.input_json.is_empty());
         self.streamed_item_content_received |= !arguments.is_empty();
         if let Some(tool_call) = self.tool_call_mut(owner) {
             tool_call.input_json = arguments.to_string();
+        }
+        if was_empty
+            && !arguments.is_empty()
+            && let Some(call) = self.tool_input_identity(owner)
+        {
+            self.block_events.push(LlmStreamEvent::ToolInputDelta {
+                call,
+                text: arguments.to_string(),
+            });
         }
         self.end_tool_input(owner);
     }
