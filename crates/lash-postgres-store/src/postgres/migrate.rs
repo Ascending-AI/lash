@@ -379,8 +379,12 @@ async fn read_state(
     } else {
         Vec::new()
     };
-    let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
-    let ddl_version = if applied.is_empty() && ledger_present {
+    let ddl_version = if !ledger_present {
+        // A catalog older than the ledger (component 134) recorded its DDL
+        // revision only in its pre-1.0 stamp, so that is the revision the
+        // planner refuses by name.
+        read_legacy_stamp_version(tx, &installation).await?
+    } else if applied.is_empty() {
         // Hosts may install the published schema.sql directly. Its 1.0
         // compatibility stamp is not the pre-1.0 DDL migration counter.
         let report = verify_schema_shape(&mut *tx).await?;
@@ -388,12 +392,56 @@ async fn read_state(
     } else {
         applied.iter().map(|step| step.to_version).max()
     };
+    // Last: on a catalog that predates the release stamp the read fails,
+    // which aborts the snapshot for any statement after it.
+    let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
     Ok(MigrationState {
         installation: Some(installation),
         ddl_version,
         applied,
         writing_release,
     })
+}
+
+/// The DDL revision a pre-1.0 stamp records: `lash_schema_versions.version`
+/// on a stamp table without `min_reader`, the shape every catalog had before
+/// the 1.0 compatibility stamp (ADR 0115 §1.2). A stamp that carries
+/// `min_reader` is a compatibility stamp, whose version is no DDL revision,
+/// and a catalog with no stamp table has none; both answer `None`.
+async fn read_legacy_stamp_version(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    installation: &Installation,
+) -> Result<Option<i32>, StoreError> {
+    let (stamp_present, compat_stamp): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS (
+                 SELECT 1 FROM pg_catalog.pg_class
+                 WHERE relnamespace = $1 AND relname = 'lash_schema_versions'
+                   AND relkind IN ('r', 'p')),
+             EXISTS (
+                 SELECT 1 FROM pg_catalog.pg_class AS relation
+                 JOIN pg_catalog.pg_attribute AS attribute
+                   ON attribute.attrelid = relation.oid
+                 WHERE relation.relnamespace = $1
+                   AND relation.relname = 'lash_schema_versions'
+                   AND relation.relkind IN ('r', 'p')
+                   AND attribute.attname = 'min_reader'
+                   AND NOT attribute.attisdropped)",
+    )
+    .bind(installation.namespace_oid())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if !stamp_present || compat_stamp {
+        return Ok(None);
+    }
+    sqlx::query_scalar(&format!(
+        "SELECT version FROM {}.lash_schema_versions WHERE component = $1",
+        installation.quoted_namespace()
+    ))
+    .bind(SCHEMA_COMPONENT)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)
 }
 
 /// Turns a read of the database into the ordered steps a run still owes it.
