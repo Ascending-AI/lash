@@ -483,6 +483,19 @@ struct RendezvousShared {
     /// the measurement as untearable as the log.
     started_at: Vec<Instant>,
     answered_at: Vec<Instant>,
+    /// Set once the scenario's deadlock budget expired: the budget, and the
+    /// planned leaves that had not started when it did. Taken in the same
+    /// critical section as the starts, before the waiters are let through, so
+    /// a leaf that starts only because the budget released its siblings is
+    /// still reported as never having started in time.
+    expired: Option<ExpiredBudget>,
+}
+
+/// What the scenario looked like when its deadlock budget expired.
+#[derive(Clone, Debug)]
+struct ExpiredBudget {
+    budget: Duration,
+    never_started: Vec<String>,
 }
 
 /// The rendezvous every leaf of one scenario shares.
@@ -543,6 +556,37 @@ impl Rendezvous {
         self.log.in_flight.fetch_sub(1, Ordering::SeqCst);
     }
 
+    /// Ends the scenario's deadlock budget: records which planned leaves had
+    /// not started, then lets every waiter through so the group drains
+    /// rather than parking its children forever. The first expiry wins.
+    fn expire(&self, budget: Duration) {
+        {
+            let mut shared = self.shared.lock_recover();
+            if shared.expired.is_none() {
+                let never_started = self
+                    .expected
+                    .iter()
+                    .filter(|leaf| !shared.started.contains(leaf))
+                    .cloned()
+                    .collect();
+                shared.expired = Some(ExpiredBudget {
+                    budget,
+                    never_started,
+                });
+            }
+        }
+        self.release();
+    }
+
+    /// How many leaf starts the log holds.
+    fn started_count(&self) -> usize {
+        self.shared.lock_recover().started.len()
+    }
+
+    fn expired(&self) -> Option<ExpiredBudget> {
+        self.shared.lock_recover().expired.clone()
+    }
+
     /// Lets every waiter through, now and from now on.
     fn release(&self) {
         self.released.store(true, Ordering::SeqCst);
@@ -596,23 +640,48 @@ impl Rendezvous {
         self.log.peak_in_flight.load(Ordering::SeqCst)
     }
 
-    /// Every planned leaf that never reported started, in plan order. This is
-    /// the message a serial tier fails with.
+    /// Every planned leaf that never reported started, in plan order — as of
+    /// the budget's expiry, when it expired. This is the message a serial
+    /// tier fails with.
     fn never_started(&self) -> Vec<String> {
-        self.missing(&self.expected)
+        match self.expired() {
+            Some(expired) => expired.never_started,
+            None => self.missing(&self.expected),
+        }
     }
 }
 
 /// The per-scenario state the leaf provider shares with the law.
+///
+/// One per scenario, never one per execution of its turn: a Restate handler
+/// runs the turn again from the top on every replay, and each execution builds
+/// its own runtime, but a group child borrows whichever execution's context is
+/// live when it runs — or the one its group pinned. Leaves routed through
+/// different executions must still meet at one rendezvous, and the model
+/// calls an earlier execution made, which a replay reads from the journal
+/// rather than making again, must still be counted (FIG-4070).
 #[derive(Debug)]
 struct ScenarioState {
     rendezvous: Arc<Rendezvous>,
     /// Which leaves each leaf must wait for. An absent entry means "all of
     /// them"; a present one is the reverse-dependency case.
     dependencies: BTreeMap<String, Vec<String>>,
+    model_calls: AtomicUsize,
 }
 
 impl ScenarioState {
+    fn new(
+        plan: &ToolBatchPlan,
+        schedule: Schedule,
+        dependencies: BTreeMap<String, Vec<String>>,
+    ) -> Self {
+        Self {
+            rendezvous: Arc::new(Rendezvous::new(plan.tools(), schedule.gated)),
+            dependencies,
+            model_calls: AtomicUsize::new(0),
+        }
+    }
+
     fn required_for(&self, leaf: &str) -> Vec<String> {
         self.dependencies
             .get(leaf)
@@ -794,7 +863,6 @@ fn rendezvous_plugin(
 struct ScenarioWorld {
     state: Arc<ScenarioState>,
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    model_calls: Arc<AtomicUsize>,
     effect_host: Arc<dyn crate::EffectHost>,
     /// The store set under test: the session catalog the turn commits to and
     /// the ports the runtime takes beside the effect host.
@@ -875,48 +943,77 @@ async fn run_scenario(
     // controller admitted for the scenario's turn — the host's own in process,
     // a handler-bound one on Restate — and the observations come back over a
     // channel because the attempt owns everything it drives. Each execution
-    // of the attempt (every replay, on Restate) runs the scenario afresh.
+    // of the attempt (every replay, on Restate) builds its runtime afresh,
+    // but every one of them shares the scenario's one state: the leaves of
+    // one group meet at one rendezvous whichever execution routed them.
     let admitted = admit(crate::ExecutionScope::turn(
         &session_id,
         tool_batch_turn_id(&session_id),
     ));
+    let state = Arc::new(ScenarioState::new(plan, schedule, dependencies));
     let (observed_tx, mut observed_rx) = tokio::sync::mpsc::unbounded_channel();
     let producer = producer.clone();
     let plan = plan.clone();
     let stores = Arc::clone(stores);
     let tier = Arc::clone(runner);
-    runner
-        .run_turn(
-            admitted,
-            Arc::new(move |turn_controller| {
-                let tier = Arc::clone(&tier);
-                let session_id = session_id.clone();
-                let effect_host = Arc::clone(&effect_host);
-                let stores = Arc::clone(&stores);
-                let producer = producer.clone();
-                let plan = plan.clone();
-                let dependencies = dependencies.clone();
-                let observed_tx = observed_tx.clone();
-                Box::pin(async move {
-                    let observed = run_scenario_on_session(
-                        session_id,
-                        effect_host,
-                        stores,
-                        Some(&tier),
-                        Some(turn_controller),
-                        &producer,
-                        &plan,
-                        schedule,
-                        dependencies,
-                    )
-                    .await;
-                    let _ = observed_tx.send(observed);
-                    // The observations carry the scenario's outcome.
-                    crate::ConformanceTurnEnd::Settled
-                })
-            }),
-        )
-        .await;
+    let execution_state = Arc::clone(&state);
+    let turn = runner.run_turn(
+        admitted,
+        Arc::new(move |turn_controller| {
+            let tier = Arc::clone(&tier);
+            let session_id = session_id.clone();
+            let effect_host = Arc::clone(&effect_host);
+            let stores = Arc::clone(&stores);
+            let producer = producer.clone();
+            let plan = plan.clone();
+            let state = Arc::clone(&execution_state);
+            let observed_tx = observed_tx.clone();
+            Box::pin(async move {
+                let observed = run_scenario_on_session(
+                    session_id,
+                    effect_host,
+                    stores,
+                    Some(&tier),
+                    Some(turn_controller),
+                    &producer,
+                    &plan,
+                    schedule,
+                    state,
+                )
+                .await;
+                let _ = observed_tx.send(observed);
+                // The observations carry the scenario's outcome.
+                crate::ConformanceTurnEnd::Settled
+            })
+        }),
+    );
+    // The deadlock budget runs here as well as inside the turn: a handler
+    // that suspends while its group waits is not running, so no clock inside
+    // it can expire, and a turn whose members never all start would never
+    // resume to notice. Out here it is a budget without progress: it expires
+    // once a whole budget passes in which no further member started while
+    // some never did. A serial tier cannot start a second member, so it
+    // expires one budget after its first; a tier that starts its members
+    // slowly — one replaying its journal between starts — is slow, never
+    // wrong (FIG-3423). Expiring releases the members, so the group drains,
+    // the turn resumes and ends, and the observations still report the
+    // members that had not started in time.
+    tokio::pin!(turn);
+    let mut started = state.rendezvous.started_count();
+    loop {
+        tokio::select! {
+            () = &mut turn => break,
+            () = tokio::time::sleep(schedule.budget) => {
+                let now = state.rendezvous.started_count();
+                if now == started && !state.rendezvous.never_started().is_empty() {
+                    state.rendezvous.expire(schedule.budget);
+                    (&mut turn).await;
+                    break;
+                }
+                started = now;
+            }
+        }
+    }
     let observed = observed_rx
         .recv()
         .await
@@ -943,13 +1040,9 @@ async fn run_scenario_on_session(
     producer: &ToolBatchProducer,
     plan: &ToolBatchPlan,
     schedule: Schedule,
-    dependencies: BTreeMap<String, Vec<String>>,
+    state: Arc<ScenarioState>,
 ) -> ScenarioObservations {
-    let rendezvous = Arc::new(Rendezvous::new(plan.tools(), schedule.gated));
-    let state = Arc::new(ScenarioState {
-        rendezvous: Arc::clone(&rendezvous),
-        dependencies,
-    });
+    let rendezvous = Arc::clone(&state.rendezvous);
     let mut factories = producer.factories.clone();
     factories.push(rendezvous_plugin(
         plan,
@@ -957,9 +1050,8 @@ async fn run_scenario_on_session(
         Arc::clone(&effect_host),
     ));
     let world = ScenarioWorld {
-        state,
+        state: Arc::clone(&state),
         factories,
-        model_calls: Arc::new(AtomicUsize::new(0)),
         effect_host,
         stores,
         session_id,
@@ -974,13 +1066,21 @@ async fn run_scenario_on_session(
         schedule.budget,
     )
     .await;
+    // A budget that expired, here or from outside the turn, is how the
+    // scenario ended, however the released turn finished afterwards.
+    let end = match rendezvous.expired() {
+        Some(expired) => ScenarioEnd::DeadlockBudgetExpired {
+            budget: expired.budget,
+        },
+        None => end,
+    };
     ScenarioObservations {
         events: rendezvous.events(),
         peak_in_flight: rendezvous.peak_in_flight(),
         never_started: rendezvous.never_started(),
         leaf_window: rendezvous.leaf_window(),
         end,
-        model_calls: world.model_calls.load(Ordering::SeqCst),
+        model_calls: state.model_calls.load(Ordering::SeqCst),
     }
 }
 
@@ -1127,7 +1227,7 @@ async fn drive_turn(
     // only for steps its journal does not hold, so a per-execution count
     // would answer a later step with the first response again.
     let script = Arc::new((producer.script)(plan));
-    let model_calls = Arc::clone(&world.model_calls);
+    let state = Arc::clone(&world.state);
     let model = crate::testing::TestProvider::builder()
         .kind("stub")
         .complete(move |request| {
@@ -1137,9 +1237,9 @@ async fn drive_turn(
                 .filter(|message| matches!(message.role, lash_core::llm::types::LlmRole::Assistant))
                 .count();
             let next = script.get(step).cloned();
-            let model_calls = Arc::clone(&model_calls);
+            let state = Arc::clone(&state);
             async move {
-                model_calls.fetch_add(1, Ordering::SeqCst);
+                state.model_calls.fetch_add(1, Ordering::SeqCst);
                 Ok(next.unwrap_or_else(closing))
             }
         })
@@ -1267,7 +1367,7 @@ async fn drive_turn(
     else {
         // Whatever never overlapped is let through, so the group's children
         // drain rather than park on this scenario forever.
-        world.state.rendezvous.release();
+        world.state.rendezvous.expire(budget);
         return ScenarioEnd::DeadlockBudgetExpired { budget };
     };
     let turn = turn.expect("run the tool-group parallelism conformance turn");
@@ -1374,7 +1474,11 @@ pub async fn measure_tool_batch(
         producer,
         &plan,
         Schedule::SERIAL_SAFE,
-        BTreeMap::new(),
+        Arc::new(ScenarioState::new(
+            &plan,
+            Schedule::SERIAL_SAFE,
+            BTreeMap::new(),
+        )),
     )
     .await;
     let turn = started.elapsed();
