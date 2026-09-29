@@ -116,12 +116,18 @@ fn response(code: &str) -> LlmResponse {
     }
 }
 
-#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core(
     double: &lash_restate_test::RestateTestBackend,
     responses: Vec<LlmResponse>,
 ) -> LashCore {
-    let queue = Arc::new(Mutex::new(VecDeque::from(responses)));
+    rlm_core_with_queue(double, Arc::new(Mutex::new(VecDeque::from(responses))))
+}
+
+#[expect(clippy::expect_used, reason = "test fixture validates its setup")]
+fn rlm_core_with_queue(
+    double: &lash_restate_test::RestateTestBackend,
+    queue: Arc<Mutex<VecDeque<LlmResponse>>>,
+) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
         .kind("artifact-referrers")
         .complete(move |_request| {
@@ -185,10 +191,13 @@ async fn cold_reopen_globals_across_turns() {
         lash_restate_test::backend(0x4031_0001, lash_restate_test::ServerConfig::default())
             .await
             .expect("Restate double");
-    let first_core = rlm_core(
-        &double,
-        vec![response("const saved = async () => 7; finish('bound');")],
-    );
+    // A reopened core may use either provider handle for the same route.
+    // Both handles therefore draw from the two-turn script in call order.
+    let responses = Arc::new(Mutex::new(VecDeque::from(vec![
+        response("const saved = async () => 7; finish('bound');"),
+        response("const run = await processes.start({ definition: saved }); finish(await run);"),
+    ])));
+    let first_core = rlm_core_with_queue(&double, Arc::clone(&responses));
     let first_session = first_core
         .session("artifact-referrers-cold-reopen")
         .open()
@@ -220,17 +229,7 @@ async fn cold_reopen_globals_across_turns() {
     drop(first_session);
     drop(first_core);
 
-    let second_core = rlm_core(
-        &double,
-        vec![
-            response(
-                "const run = await processes.start({ definition: saved }); finish(await run);",
-            ),
-            response(
-                "const run = await processes.start({ definition: saved }); finish(await run);",
-            ),
-        ],
-    );
+    let second_core = rlm_core_with_queue(&double, Arc::clone(&responses));
     serve_processes(&double, &second_core);
     let second_session = second_core
         .session("artifact-referrers-cold-reopen")
@@ -245,6 +244,10 @@ async fn cold_reopen_globals_across_turns() {
     assert!(
         second.is_success(),
         "a global from the first turn survives cold reopen: {second:?}"
+    );
+    assert!(
+        responses.lock_recover().is_empty(),
+        "each of the two turns consumes one scripted response"
     );
     assert_eq!(last_cell_finish(&second), Some(serde_json::json!(7)));
     let after_start = wait_edges(&double, |edges| {
