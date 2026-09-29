@@ -417,6 +417,53 @@ async fn continue_as_carries_only_seeded_definition() {
 
 #[expect(
     clippy::expect_used,
+    reason = "acceptance test validates the frame transition"
+)]
+#[tokio::test]
+async fn first_turn_continue_as_fences_its_initial_frame() {
+    let double =
+        lash_restate_test::backend(0x4031_0004, lash_restate_test::ServerConfig::default())
+            .await
+            .expect("Restate double");
+    let core = rlm_core(
+        &double,
+        vec![
+            response(
+                "const old = async () => 5; await control.continue_as({ task: 'next frame' });",
+            ),
+            response("finish('next frame');"),
+        ],
+    );
+    let session = core
+        .session("artifact-referrers-first-switch")
+        .open()
+        .await
+        .expect("session");
+    let switched = session
+        .send(TurnInput::text("switch on first turn"))
+        .output()
+        .await
+        .expect("switch turn");
+    assert!(switched.is_success(), "first-turn switch: {switched:?}");
+    let frames = &switched.result.state.agent_frames;
+    assert_eq!(frames.len(), 2, "the switch opens a second frame");
+    let first_frame = frames[0].frame_node_id.as_str();
+    let after = wait_edges(&double, |edges| {
+        !edges
+            .iter()
+            .any(|edge| edge.kind == "frame_environment" && edge.id == first_frame)
+    })
+    .await;
+    assert!(
+        !after
+            .iter()
+            .any(|edge| edge.kind == "frame_environment" && edge.id == first_frame),
+        "the first frame has no surviving edge"
+    );
+}
+
+#[expect(
+    clippy::expect_used,
     reason = "acceptance test validates the definition revision edge"
 )]
 #[tokio::test]
@@ -473,6 +520,11 @@ async fn named_definition_survives_uncarried_frame_switch() {
             && !edges
                 .iter()
                 .any(|edge| edge.artifact_ref == module_ref && edge.kind == "frame_environment")
+            && edges
+                .iter()
+                .filter(|edge| edge.artifact_ref == module_ref)
+                .count()
+                == 1
     })
     .await;
     assert_eq!(
