@@ -444,14 +444,10 @@ async fn slow_mid_stream_uses_chunk_timeout_classification() {
     assert!(error.is_retryable());
 }
 
-/// A chat stream that aborts right after a complete tool call has arrived must
-/// still have handed that tool call to the caller — the driver emits completed
-/// tool calls as they land, and the post-stream drain is never reached on the
-/// failure path. This is the driver seam the conformance law cannot reach:
-/// removing the driver's per-event `LlmStreamEvent::Part` emission turns this
-/// test red.
+/// A chat stream cut before the choice finishes has an open argument input,
+/// even when its last delta happens to be valid JSON.
 #[tokio::test]
-async fn aborted_chat_stream_emits_the_completed_tool_call_through_the_driver() {
+async fn aborted_chat_stream_keeps_the_tool_input_open() {
     let events = Arc::new(std::sync::Mutex::new(Vec::new()));
     let transport = AbortingSseTransport::new(vec![
         sse_chunk(CHAT_TOOL_CALL_CHUNK),
@@ -469,14 +465,13 @@ async fn aborted_chat_stream_emits_the_completed_tool_call_through_the_driver() 
         .expect_err("an aborted stream fails the turn");
     assert_eq!(error.kind, ProviderFailureKind::Stream);
 
-    assert_eq!(
-        emitted_tool_calls(&events),
-        vec![(
-            "call_abort".to_string(),
-            "lookup".to_string(),
-            r#"{"q":"x"}"#.to_string()
-        )],
-        "the driver must emit the completed tool call exactly once before the abort"
+    assert!(emitted_tool_calls(&events).is_empty());
+    let events = events.lock_recover();
+    assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { text, .. } if text == r#"{"q":"x"}"#)));
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { .. }))
     );
 
     // The same tool call is also carried on the partial response, so a host that
