@@ -91,6 +91,19 @@ lash_store_sql::statements! {
         /// trip. The text-array bind is the fork; SQLite binds a JSON array
         /// and unpacks it with `json_each`.
         select_bodies_by_hash = "SELECT hash, content FROM blobs WHERE hash = ANY(?1::text[])";
+
+        /// Delete every blob the retained set `?1` does not name, in one
+        /// statement.
+        ///
+        /// The mark/sweep collector's deletion phase. The retained content
+        /// addresses are the bind — the dead set is never materialized — so
+        /// the phase's statement count is independent of how much garbage it
+        /// finds, and `rows_affected` is the deleted count. `ANY` over an
+        /// empty array is false for every row, so a sweep that retained
+        /// nothing still empties the table. It runs under the collector's
+        /// `EXCLUSIVE` table lock, so no checkpoint commit can INSERT behind
+        /// the anti-join.
+        sweep_unretained = "DELETE FROM blobs WHERE NOT (hash = ANY(?1::text[]))";
     }
 }
 

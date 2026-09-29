@@ -125,31 +125,29 @@ impl PostgresStore {
             }
         }
         // Projection edges belong to live head/anchor roots. Sever every dead
-        // root's complete outgoing set before hash-ordered blob deletion: a
-        // component can sort before its root, and its strict FK must never be
-        // weakened to accommodate stale ownership data.
+        // root's complete outgoing set before the blob sweep: a strict
+        // component FK must never be weakened to accommodate stale ownership
+        // data.
         sqlx::query(session_sql().checkpoint_edges.delete_unrooted.sql())
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
-        let all_hashes = sqlx::query_scalar::<_, String>(
-            crate::blobs::blob_sql().shared.select_all_hashes.sql(),
-        )
-        .fetch_all(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let mut deleted_blob_count = 0usize;
-        for hash in &all_hashes {
-            if retained.contains(hash) {
-                continue;
-            }
-            sqlx::query(crate::blobs::blob_sql().shared.delete_by_hash.sql())
-                .bind(hash)
+        // The sweep is one statement whose bind is the retained set, so the
+        // deletion phase's statement count is independent of the dead set's
+        // size and the reported count is the rows PostgreSQL actually
+        // removed. The EXCLUSIVE table lock held since the root read makes
+        // the anti-join exact: no checkpoint commit can INSERT behind it, and
+        // an empty retained set sweeps the whole table.
+        let deleted_blob_count =
+            sqlx::query(crate::blobs::blob_sql().postgres.sweep_unretained.sql())
+                .bind(retained.iter().cloned().collect::<Vec<_>>())
                 .execute(&mut **tx)
                 .await
-                .map_err(store_sqlx_error)?;
-            deleted_blob_count += 1;
-        }
+                .map_err(store_sqlx_error)?
+                .rows_affected();
+        let deleted_blob_count = usize::try_from(deleted_blob_count).map_err(|_| {
+            StoreError::Backend("gc deleted blob count does not fit usize".to_string())
+        })?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(GcReport {
             root_count,

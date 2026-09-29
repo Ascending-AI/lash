@@ -1579,6 +1579,11 @@ fn postgres_statement_name(query: &str) -> &'static str {
             "root-admission-write"
         }
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
+        q if q.starts_with("LOCK TABLE lash_blobs") => "blob-table-lock",
+        q if q.starts_with("SELECT checkpoint_ref FROM lash_sessions") => "checkpoint-roots",
+        q if q.starts_with("SELECT content FROM lash_blobs") => "blob-content-read",
+        q if q.starts_with("DELETE FROM lash_checkpoint_blob_refs") => "checkpoint-edges-sweep",
+        q if q.starts_with("DELETE FROM lash_blobs") => "blob-sweep",
         _ => "unrecognized",
     }
 }
@@ -1767,6 +1772,222 @@ async fn root_admission_and_head_commit_round_trips_are_pinned() {
         commit_statements, expected_commit,
         "head-commit round trips changed",
     );
+}
+
+/// FIG-4191: the blob sweep's deletion phase is the one retained-set
+/// anti-join — not an all-hashes scan followed by one delete per dead body.
+#[test]
+fn blob_sweep_statement_is_one_retained_set_anti_join() {
+    assert_eq!(
+        crate::blobs::blob_sql().postgres.sweep_unretained.sql(),
+        "DELETE FROM lash_blobs WHERE NOT (hash = ANY($1::text[]))"
+    );
+}
+
+/// The statement map `gc_unreachable` must answer for, whatever the dead
+/// set's size: fence, table lock, root read, one manifest read per live root,
+/// the edge sever, the single sweep, commit. A per-dead-body deletion loop
+/// would grow `blob-sweep` past 1, and the all-hashes scan would land as a
+/// `blob-lock` row the pin does not expect.
+fn expected_gc_statements(rooted: bool) -> std::collections::BTreeMap<&'static str, i64> {
+    let mut expected = std::collections::BTreeMap::from([
+        ("begin", 1),
+        ("commit", 1),
+        ("writer-fence", 1),
+        ("blob-table-lock", 1),
+        ("checkpoint-roots", 1),
+        ("checkpoint-edges-sweep", 1),
+        ("blob-sweep", 1),
+    ]);
+    if rooted {
+        expected.insert("blob-content-read", 1);
+    }
+    expected
+}
+
+async fn gc_statement_pin_storage(
+    isolated_database: &crate::testing::IsolatedDatabase,
+) -> PostgresStorage {
+    // One pooled connection, opened before the first measurement and reused
+    // by every statement after it — the same discipline as
+    // `root_admission_and_head_commit_round_trips_are_pinned`, for the same
+    // reason: a pool free to grow may connect inside a measured window and
+    // charge that connection's `after_connect` probes to the operation.
+    let storage = PostgresStorage::connect_with(
+        isolated_database.url(),
+        PostgresStoreConfig {
+            max_connections: 1,
+            min_connections: 1,
+            ..PostgresStoreConfig::default()
+        },
+    )
+    .await
+    .expect("connect gc statement-pin storage");
+    sqlx::query("CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
+        .execute(storage.pool())
+        .await
+        .expect("enable pg_stat_statements for the gc statement pin");
+    storage
+}
+
+async fn reset_gc_statement_stats(storage: &PostgresStorage) {
+    sqlx::query(
+        "SELECT pg_stat_statements_reset(0, (SELECT oid FROM pg_database WHERE datname = current_database()), 0)",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("reset statement statistics before the gc measurement");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_gc_sweep_statement_count_is_dead_set_invariant_when_configured() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres gc statement pin: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = gc_statement_pin_storage(&isolated_database).await;
+
+    // One committed session: one rooted checkpoint manifest plus its
+    // component blobs, all retained.
+    let nonce = uuid::Uuid::new_v4().simple().to_string();
+    let session_id = SessionId::from(format!("gc-sweep-pin:{nonce}"));
+    let store = storage.store();
+    store
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session_id),
+        )
+        .await
+        .expect("admit gc statement-pin session");
+    let state = lash_core_execution::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
+    };
+    store
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await
+        .expect("seed gc statement-pin checkpoint");
+    let live_blob_count = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")
+        .fetch_one(storage.pool())
+        .await
+        .expect("count the seeded checkpoint's blobs");
+
+    // The same rooted fixture against growing dead sets. Seeding stays outside
+    // the measured window; what the pin watches is the sweep itself.
+    for (leg, dead_count) in [0usize, 3, 257].into_iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO lash_blobs (hash, content)
+             SELECT 'dead-' || $1::text || '-' || g, '\\x00'::bytea
+             FROM generate_series(1, $2) AS g",
+        )
+        .bind(leg.to_string())
+        .bind(i64::try_from(dead_count).expect("dead count fits i64"))
+        .execute(storage.pool())
+        .await
+        .expect("seed dead blobs");
+        reset_gc_statement_stats(&storage).await;
+
+        let report = store.gc_unreachable().await.expect("gc sweep");
+        let statements = postgres_statement_calls_by_name(storage.pool()).await;
+        assert_eq!(
+            statements,
+            expected_gc_statements(true),
+            "leg {leg}: gc round trips changed with {dead_count} dead blobs",
+        );
+        assert_eq!(
+            report.root_count, 1,
+            "leg {leg}: the one live session roots the sweep"
+        );
+        assert_eq!(
+            report.deleted_blob_count, dead_count,
+            "leg {leg}: the sweep reports the rows it removed, not the input set"
+        );
+        assert_eq!(
+            report.retained_blob_count,
+            usize::try_from(live_blob_count).expect("live blob count fits usize"),
+            "leg {leg}: every live blob is retained",
+        );
+        let resident = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")
+            .fetch_one(storage.pool())
+            .await
+            .expect("count blobs after the sweep");
+        assert_eq!(
+            resident, live_blob_count,
+            "leg {leg}: only the dead set went"
+        );
+    }
+
+    // The rooted checkpoint still loads whole after the sweeps.
+    store
+        .load_session_window(
+            &session_id,
+            lash_core_execution::store::WindowSelector::Current,
+        )
+        .await
+        .expect("load the pinned session after gc")
+        .expect("the pinned session survived gc");
+
+    // With nothing newly unreachable the next sweep is witnessed emptiness.
+    let second = store.gc_unreachable().await.expect("second gc sweep");
+    assert_eq!(
+        second.deleted_blob_count, 0,
+        "a clean sweep deletes nothing"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_gc_with_no_roots_sweeps_every_blob_when_configured() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres rootless gc: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let isolated_database = crate::testing::IsolatedDatabase::create(&database_url).await;
+    let storage = gc_statement_pin_storage(&isolated_database).await;
+
+    // No session roots anything: an empty retained bind must still empty the
+    // table, because `hash = ANY('{}')` is false for every row.
+    const DEAD: usize = 41;
+    sqlx::query(
+        "INSERT INTO lash_blobs (hash, content)
+         SELECT 'dead-' || g, '\\x00'::bytea FROM generate_series(1, $1) AS g",
+    )
+    .bind(i64::try_from(DEAD).expect("dead count fits i64"))
+    .execute(storage.pool())
+    .await
+    .expect("seed dead blobs with no roots");
+    reset_gc_statement_stats(&storage).await;
+
+    let report = storage
+        .store()
+        .gc_unreachable()
+        .await
+        .expect("gc with no roots");
+    assert_eq!(
+        report,
+        GcReport {
+            root_count: 0,
+            retained_blob_count: 0,
+            deleted_blob_count: DEAD,
+        },
+        "a rootless sweep reclaims the whole table"
+    );
+    let statements = postgres_statement_calls_by_name(storage.pool()).await;
+    assert_eq!(
+        statements,
+        expected_gc_statements(false),
+        "a rootless sweep issues no manifest read and still one deletion",
+    );
+    let resident = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM lash_blobs")
+        .fetch_one(storage.pool())
+        .await
+        .expect("count blobs after the rootless sweep");
+    assert_eq!(resident, 0, "no blob survives a rootless sweep");
 }
 
 /// The process-prune batch delete parks a `Cancelled{SessionDeleted}` event
