@@ -14,7 +14,7 @@ use std::time::Duration;
 use lash_core_execution::{StorePreflight, StoreSchemaOutcome, StoreSchemaVerdict};
 
 use super::{SqliteDatabase, SqliteStorePreflight, verify_schema_at};
-use crate::SqliteStore;
+use crate::{SqliteConnectionPolicy, SqliteStore, StoreOptions};
 
 fn temp_root() -> tempfile::TempDir {
     tempfile::tempdir().expect("create temp dir")
@@ -205,9 +205,22 @@ async fn reading_a_hot_wal_database_leaves_its_bytes_untouched() {
     // rather than described.
     let root = temp_root();
     let path = root.path().join("durable-core.db");
-    let store = SqliteStore::open_file_for_testing(&path)
-        .await
-        .expect("provision the database");
+    // The fixture's own checkpointing is off (FIG-4089): with the default
+    // policy the provisioning commits wake the store's checkpoint worker, whose
+    // PASSIVE checkpoint can land between the before/after reads and rewrite
+    // the main file — a byte change nothing under test caused.
+    let store = SqliteStore::open_file_with_options_for_testing(
+        &path,
+        StoreOptions {
+            connection_policy: SqliteConnectionPolicy {
+                wal_autocheckpoint_pages: 0,
+                ..SqliteConnectionPolicy::default()
+            },
+            ..StoreOptions::default()
+        },
+    )
+    .await
+    .expect("provision the database");
     // Leave the WAL hot: a live writer that has not checkpointed is precisely
     // the state a boot-time probe finds.
     store
