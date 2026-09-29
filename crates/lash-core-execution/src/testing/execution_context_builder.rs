@@ -40,6 +40,8 @@ impl<'run> From<crate::ScopedEffectController<'run>> for TestEffectController<'r
 pub struct TestExecutionPorts<'run> {
     pub effect_host: Arc<dyn crate::EffectHost>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    pub artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
+    pub process_engines: crate::ProcessEngineRegistry,
     pub attachment_store: Arc<dyn crate::AttachmentStore>,
     pub clock: Arc<dyn crate::Clock>,
     /// The controller the host lent one execution, which serves the context's
@@ -74,6 +76,22 @@ impl<'run> TestExecutionPorts<'run> {
         }
     }
 
+    /// Use the module store a fixture publishes through while retaining the
+    /// backend's environment store and cleanup ledger.
+    pub fn with_module_artifact_store(
+        mut self,
+        backend: &crate::Backend,
+        modules: Arc<dyn crate::ModuleArtifactStore>,
+    ) -> Self {
+        self.artifact_ports = Some(crate::runtime::ArtifactReferrerPorts::new(
+            modules,
+            Arc::clone(&self.process_env_store),
+            backend.artifact_cleanup(),
+            Arc::clone(&self.clock),
+        ));
+        self
+    }
+
     /// Ports over a tier's bare host, for a conformance law that proves a
     /// host rather than a backend: the process-exec-env store the tier
     /// supplies beside it, no attachment port (puts are refused), and the
@@ -85,6 +103,8 @@ impl<'run> TestExecutionPorts<'run> {
         Self {
             effect_host,
             process_env_store,
+            artifact_ports: None,
+            process_engines: crate::ProcessEngineRegistry::new(),
             attachment_store: Arc::new(crate::attachments::UnavailableAttachmentStore),
             clock: Arc::new(crate::SystemClock),
             lent_controller: None,
@@ -97,6 +117,8 @@ impl From<&crate::Backend> for TestExecutionPorts<'_> {
         Self {
             effect_host: backend.effect_host(),
             process_env_store: backend.process_env_store(),
+            artifact_ports: Some(crate::runtime::ArtifactReferrerPorts::of_backend(backend)),
+            process_engines: crate::ProcessEngineRegistry::new(),
             attachment_store: backend.attachment_store(),
             clock: backend.clock(),
             lent_controller: None,
@@ -184,6 +206,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
         let TestExecutionPorts {
             effect_host,
             process_env_store,
+            artifact_ports,
+            process_engines,
             attachment_store,
             clock,
             lent_controller,
@@ -192,6 +216,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
             Some(effect_host),
             lent_controller.map(TestEffectController::Lent),
             process_env_store,
+            artifact_ports,
+            process_engines,
             attachment_store,
             clock,
         )
@@ -201,6 +227,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
         effect_host: Option<Arc<dyn crate::EffectHost>>,
         effect_controller: Option<TestEffectController<'run>>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+        artifact_ports: Option<crate::runtime::ArtifactReferrerPorts>,
+        process_engines: crate::ProcessEngineRegistry,
         attachment_store: Arc<dyn crate::AttachmentStore>,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
@@ -212,7 +240,10 @@ impl<'run> TestExecutionContextBuilder<'run> {
             trigger_router: None,
             processes: Arc::new(crate::UnavailableProcessService),
             process_definitions: None,
-            process_engines: crate::ProcessEngineRegistry::default(),
+            process_engines: match artifact_ports {
+                Some(ports) => process_engines.with_artifact_ports(ports),
+                None => process_engines,
+            },
             direct_completions: None,
             process_env_store,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
@@ -251,6 +282,8 @@ impl<'run> TestExecutionContextBuilder<'run> {
             None,
             Some(effect_controller.into()),
             Arc::new(super::UnavailableProcessExecutionEnvStore),
+            None,
+            crate::ProcessEngineRegistry::new(),
             Arc::new(crate::attachments::UnavailableAttachmentStore),
             Arc::new(crate::SystemClock),
         )
