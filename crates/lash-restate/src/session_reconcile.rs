@@ -7,7 +7,7 @@
 //! the deployment can never drain to zero. The schedule therefore lives
 //! on a Tokio interval next to the installed driver — the same shape the
 //! in-process engine uses — carrying the [`ReconcileCursor`] forward and
-//! ending when the driver is dropped. The tick itself stays the
+//! ending when the installation is dropped. The tick itself stays the
 //! engine-neutral [`SessionDriver::reconcile`] pass.
 
 use std::num::NonZeroUsize;
@@ -19,17 +19,23 @@ use lash_core::engine::ReconcileCursor;
 
 /// Tick `driver`'s recovery pass every ten seconds until it is dropped.
 ///
-/// A deployment runs one interval per installed driver: the session work
-/// starts it only when its slot takes a new driver. A failed pass is logged
-/// and retried by the next tick; the cursor only advances on success.
-pub(crate) async fn run(driver: Weak<dyn SessionDriver>) {
+/// A deployment runs one interval per installation: the session work starts
+/// it only when its slot takes a new driver. A failed pass is logged and
+/// retried by the next tick; the cursor only advances on success.
+pub(crate) async fn run(installation: Weak<dyn SessionDriver>, driver: Weak<dyn SessionDriver>) {
     let mut cursor = ReconcileCursor::default();
     let mut interval = tokio::time::interval(Duration::from_secs(10));
     loop {
         interval.tick().await;
+        let Some(installation) = installation.upgrade() else {
+            break;
+        };
         let Some(driver) = driver.upgrade() else {
             break;
         };
+        // The pass may outlive the core. Hold its driver for this pass, but
+        // release the installation so a replacement core can install now.
+        drop(installation);
         match driver
             .reconcile(&cursor, NonZeroUsize::MIN.saturating_add(63))
             .await

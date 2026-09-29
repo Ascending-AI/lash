@@ -12,19 +12,20 @@ struct HeldFirstRequest {
 /// first one on `held` when given.
 fn tagged_provider(
     tag: &'static str,
-    calls: Arc<std::sync::Mutex<Vec<&'static str>>>,
+    calls: Arc<std::sync::Mutex<Vec<(String, &'static str)>>>,
     held: Option<HeldFirstRequest>,
 ) -> ProviderHandle {
     let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
     crate::testing::TestProvider::builder()
         .kind("embed-test")
-        .complete(move |_request| {
+        .complete(move |request| {
             let calls = Arc::clone(&calls);
+            let session_id = request.scope.session_id.to_string();
             let held = held
                 .clone()
                 .filter(|_| first.swap(false, std::sync::atomic::Ordering::SeqCst));
             async move {
-                calls.lock_recover().push(tag);
+                calls.lock_recover().push((session_id, tag));
                 if let Some(held) = held {
                     held.entered.notify_one();
                     held.open.notified().await;
@@ -68,7 +69,12 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
         .await?;
     drop(handle);
     held.entered.notified().await;
+    let v1_install = Arc::downgrade(&core_v1._session_driver);
     drop(core_v1);
+    assert!(
+        v1_install.upgrade().is_none(),
+        "dropping V1 releases its driver installation while its drive runs"
+    );
 
     let core_v2 = explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
@@ -87,7 +93,10 @@ async fn a_core_built_while_a_dropped_cores_drive_is_in_flight_drives_on_its_own
 
     assert_eq!(
         calls.lock_recover().clone(),
-        ["v1", "v2"],
+        [
+            ("first-core-session".to_string(), "v1"),
+            ("second-core-session".to_string(), "v2"),
+        ],
         "V2's session ran on V2's provider while V1's drive was still in flight"
     );
     held.open.notify_one();

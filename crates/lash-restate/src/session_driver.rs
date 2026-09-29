@@ -660,15 +660,19 @@ impl SessionWorkEngine for RestateSessionWork {
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        // One recovery interval per installed driver: a re-install that
-        // keeps the live driver starts none, and the interval of a dropped
-        // driver ends at its next tick.
+        // One recovery interval per installation: a re-install that keeps
+        // the live installation starts none, and its interval ends at the
+        // next tick after the core drops it.
+        let weak_driver = Arc::downgrade(&driver);
         let (installed, new) = self.slot.install_new(driver);
         if !new || !installed.owns_reconciliation() {
             return installed;
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(crate::session_reconcile::run(Arc::downgrade(&installed)));
+            runtime.spawn(crate::session_reconcile::run(
+                Arc::downgrade(&installed),
+                weak_driver,
+            ));
         }
         installed
     }
