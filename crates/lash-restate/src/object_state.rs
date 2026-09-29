@@ -159,6 +159,10 @@ pub(crate) fn is_value_key(key: &str) -> bool {
 /// no record and no other keys is fresh: the handler stamps it at the format
 /// the fleet selects and proceeds. A populated object without one is
 /// `Unstamped`. A refusal is terminal and changes nothing.
+///
+/// The record and the key listing are two reads, and they agree: the
+/// handler holds the object's lock across every attempt, so no other
+/// invocation writes between them, whichever attempt made each.
 pub(crate) async fn admit_exclusive(
     ctx: &ObjectContext<'_>,
     family: &ObjectFamily,
@@ -185,7 +189,8 @@ pub(crate) async fn admit_exclusive(
 /// The `_compat` gate of an exclusive handler that writes nothing: it runs
 /// exclusive only to order its read against the object's writers. The
 /// record must admit this build as a reader, as on a shared handler, and a
-/// fresh object stays unstamped, so the read changes no state.
+/// fresh object stays unstamped, so the read changes no state. Its two
+/// reads agree as [`admit_exclusive`]'s do.
 pub(crate) async fn admit_exclusive_read(
     ctx: &ObjectContext<'_>,
     family: &ObjectFamily,
@@ -202,16 +207,34 @@ pub(crate) async fn admit_exclusive_read(
 /// The `_compat` gate of a shared handler: the record must admit this build
 /// as a reader. A shared handler never writes, so a fresh object stays
 /// unstamped; a populated object without a record is `Unstamped`.
+///
+/// A shared handler holds no lock, so an exclusive writer runs beside it,
+/// and its two state reads are two views: each read is journaled with the
+/// value it saw, and an attempt that replays answers a recorded read from
+/// the attempt that made it and a new read from its own, newer snapshot.
+/// `Unstamped` is therefore decided on the one key listing: value keys
+/// without `_compat` in the same view. Every writer stamps `_compat` before
+/// its first value and keeps it until it clears the whole object, so no view
+/// of a stamped object shows values without the record. The record is read
+/// only once the listing names it; if it is gone by then, a clear emptied
+/// the object in between, and an empty object is admitted.
 pub(crate) async fn admit_shared(
     ctx: &SharedObjectContext<'_>,
     family: &ObjectFamily,
 ) -> Result<(), TerminalError> {
+    let keys = ctx.get_keys().await?;
+    if !keys.iter().any(|key| key == COMPAT_KEY) {
+        return if keys.iter().any(|key| is_value_key(key)) {
+            Err(unstamped(family))
+        } else {
+            Ok(())
+        };
+    }
     match read_compat(ctx.get::<Vec<u8>>(COMPAT_KEY).await?, family)? {
         Some(compat) => {
             check_compat(compat, family, Access::Read).map_err(crate::wire::incompatible)
         }
-        None if ctx.get_keys().await?.is_empty() => Ok(()),
-        None => Err(unstamped(family)),
+        None => Ok(()),
     }
 }
 

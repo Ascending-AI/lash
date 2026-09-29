@@ -13,9 +13,9 @@ use std::sync::Arc;
 
 use crate::ReopenableProcessExecutionEnvStore;
 use lash_core::ProcessExecutionEnvStore;
+use lashlang::ModuleArtifact;
 use lashlang::testing::ast_builders as b;
 use lashlang::testing::conformance::ReopenableLashlangArtifactStore;
-use lashlang::{LashlangArtifacts, ModuleArtifact};
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
@@ -72,42 +72,32 @@ where
     .await;
 }
 
-pub async fn lashlang_artifact_owner_lifecycle<F>(make: F)
+pub async fn lashlang_last_referrer_reclaims_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::owner_lifecycle(make().open.artifacts).await;
+    lashlang::testing::conformance::last_referrer_reclaims_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_failed_registration_reclaims_staging_owner<F>(make: F)
+pub async fn lashlang_abandoned_start_reclaims_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::failed_registration_reclaims_staging_owner(
-        make().open.artifacts,
-    )
-    .await;
+    lashlang::testing::conformance::abandoned_start_reclaims_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_artifact_transfer_is_idempotent<F>(make: F)
+pub async fn lashlang_carry_preserves_module<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::transfer_is_idempotent(make().open.artifacts).await;
+    lashlang::testing::conformance::carry_preserves_module(make().open.artifacts).await;
 }
 
-pub async fn lashlang_artifact_retirement_fences_late_publication<F>(make: F)
+pub async fn lashlang_ended_referrer_fences_late_publication<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    lashlang::testing::conformance::retirement_fences_late_publication(make().open.artifacts).await;
-}
-
-pub async fn lashlang_slow_writer_is_fenced_after_retirement<F>(make: F)
-where
-    F: Fn() -> ReopenableArtifactStore,
-{
-    lashlang::testing::conformance::slow_writer_is_fenced_after_retirement(make().open.artifacts)
+    lashlang::testing::conformance::ended_referrer_fences_late_publication(make().open.artifacts)
         .await;
 }
 
@@ -156,29 +146,24 @@ where
     crate::registration_macro_support::process_environment_namespace(make().open.process_env).await;
 }
 
-pub async fn process_env_owner_lifecycle<F>(make: F)
+pub async fn process_env_last_referrer_reclaims_bytes<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    crate::registration_macro_support::process_env_owner_lifecycle(make().open.process_env).await;
-}
-
-pub async fn failed_registration_reclaims_process_env<F>(make: F)
-where
-    F: Fn() -> ReopenableArtifactStore,
-{
-    crate::registration_macro_support::failed_registration_reclaims_process_env(
+    crate::registration_macro_support::process_env_last_referrer_reclaims_bytes(
         make().open.process_env,
     )
     .await;
 }
 
-pub async fn process_env_transfer_and_fence<F>(make: F)
+pub async fn process_env_carry_precedes_reclamation<F>(make: F)
 where
     F: Fn() -> ReopenableArtifactStore,
 {
-    crate::registration_macro_support::process_env_transfer_and_fence(make().open.process_env)
-        .await;
+    crate::registration_macro_support::process_env_carry_precedes_reclamation(
+        make().open.process_env,
+    )
+    .await;
 }
 
 pub async fn slow_process_env_writer_is_fenced<F>(make: F)
@@ -214,7 +199,7 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make().open;
-    let artifacts = LashlangArtifacts::new(handles.artifacts);
+    let artifacts = handles.artifacts;
     let artifact = sample_module_artifact("delta");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),
@@ -222,24 +207,29 @@ where
     );
     let env_ref = env_spec.stable_ref().expect("stable env ref");
     let env_bytes = env_spec.to_store_bytes().expect("encode env");
-    let owner = lash_core::ArtifactOwner::host("fused-conformance");
+    let referrer = lash_core::ArtifactReferrer::HostPin(lash_core::HostArtifactPin::mint());
+    let claim = lash_core::ReferrerClaim::unguarded(referrer).expect("host pin claim");
 
     artifacts
-        .publish_module_artifact(&owner, &artifact)
+        .publish_module_artifact(
+            &claim,
+            artifact.module_ref().as_str(),
+            &artifact.to_store_bytes().expect("encode module"),
+        )
         .await
         .expect("publish module artifact");
     handles
         .process_env
-        .publish_process_execution_env(&owner, &env_ref, &env_bytes)
+        .publish_process_execution_env(&claim, &env_ref, &env_bytes)
         .await
         .expect("publish process environment");
 
     let module = artifacts
-        .get_module_artifact(artifact.module_ref())
+        .get_module_artifact(artifact.module_ref().as_str())
         .await
         .expect("module artifact isolated from environment writes")
         .expect("module artifact present");
-    assert_eq!(*module, artifact);
+    assert_eq!(module, artifact.to_store_bytes().expect("encode module"));
     assert_eq!(
         handles
             .process_env

@@ -2,6 +2,7 @@
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
+pub mod artifact_cleanup;
 pub mod attachment_manifest;
 mod capture;
 mod capture_memory;
@@ -70,6 +71,7 @@ pub use admission_plan::{
     deferred_wake_records, plan_turn_input_admission, require_admitted_to_root,
     require_open_command, turn_input_state_after_admission,
 };
+pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -165,13 +167,13 @@ pub use root::{
     decide_root_terminal_write, root_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SemanticBoundaryOperation, StoppedPartialCommit, TurnCommitFailureCause, TurnCommitOutcome,
     decode_runtime_commit_receipt, decode_runtime_commit_receipt_for_fleet,
     ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
-    validate_turn_commit_outcome_code,
+    frames_left_by_commit, validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -606,6 +608,7 @@ impl RuntimeCommit {
             drive_fence: _,
             root_terminal,
             park_root,
+            frame_transition,
             config: _,
             execution_config: _,
             current_frame_node_id: _,
@@ -641,7 +644,8 @@ impl RuntimeCommit {
                 && committed_attachment_ids.is_empty()
                 && stopped_partial.is_none()
                 && root_terminal.is_none()
-                && park_root.is_none(),
+                && park_root.is_none()
+                && frame_transition.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -818,6 +822,7 @@ impl RuntimeCommit {
             drive_fence: None,
             root_terminal: None,
             park_root: None,
+            frame_transition: None,
             config,
             execution_config,
             current_frame_node_id,

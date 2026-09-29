@@ -278,7 +278,33 @@ pub struct SessionNodeRecord {
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store. The manifest reports it as an exact-generation fence rather
 /// than a counter, because that is what the check above is.
+#[cfg(not(feature = "synthetic-next"))]
 pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 22;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the node body to 23. Its body
+/// keeps 22's shape, and [`upcast_synthetic_node_body`] is the permanent
+/// history upcaster that lifts a 22 body N wrote.
+#[cfg(feature = "synthetic-next")]
+pub const SESSION_NODE_BODY_SCHEMA_VERSION: u32 = 23;
+
+/// The synthetic N+1's history upcaster: a generation-22 node body is a
+/// generation-23 body under the older stamp.
+#[cfg(feature = "synthetic-next")]
+pub(crate) fn upcast_synthetic_node_body(
+    value: &mut serde_json::Value,
+) -> Result<(), crate::StoreError> {
+    let Some(body) = value.as_object_mut() else {
+        return Err(crate::StoreError::StoredDataCorrupt {
+            record_kind: "graph node body",
+            message: "a node body is not a JSON object".to_owned(),
+        });
+    };
+    body.insert(
+        "schema_version".to_owned(),
+        serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION),
+    );
+    Ok(())
+}
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct StoredSessionNodeBody {

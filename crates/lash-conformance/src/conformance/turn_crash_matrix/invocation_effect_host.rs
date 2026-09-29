@@ -79,6 +79,16 @@ impl crate::AwaitEventResolver for InvocationEffectHost {
 
 #[async_trait::async_trait]
 impl crate::EffectHost for InvocationEffectHost {
+    async fn journal_replay(
+        &self,
+        _journal: &crate::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, crate::RuntimeError> {
+        // This fixture only lends a RuntimeEffectController. It cannot prove
+        // that a root or segment is settled, so the conservative verdict keeps
+        // guarded artifacts until a real EffectHost supplies that proof.
+        Ok(crate::JournalReplay::MayReplay)
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"

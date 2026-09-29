@@ -72,12 +72,10 @@ impl RuntimeErrorCode {
         match self {
             // the attachment policy judges the recorded attachment, so it refuses it again.
             Self::AttachmentSourcePolicyDenied => Terminal,
-            // a permanent retirement fence already closed the owner.
-            Self::ArtifactOwnerRetired => Terminal,
-            // a permanent retirement fence already closed the destination owner.
-            Self::ArtifactDestinationOwnerRetired => Terminal,
-            // neither owner edge exists in durable state; a redrive reads the same state.
-            Self::ArtifactStagingEdgeMissing => Terminal,
+            // a permanent fence already ended the referrer.
+            Self::ArtifactReferrerEnded => Terminal,
+            // the bytes are not stored; a redrive reads the same state.
+            Self::ArtifactMissing => Terminal,
             // a contained panic of the effect body; the same body panics the same way.
             Self::EffectPanicked => Terminal,
             // the effect names no execution scope; wiring, not the attempt.

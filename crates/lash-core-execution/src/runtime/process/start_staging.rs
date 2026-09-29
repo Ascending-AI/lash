@@ -1,5 +1,13 @@
-//! The store half of one process start: stage what the start carries, register
-//! the row, and settle the staging onto the process the registrar returned.
+//! The store half of one process start: stage what the start carries under
+//! the start's referrer, then register the row (ADR 0113 §3.3).
+//!
+//! Staging is an acquisition of `Start(key)`, guarded by `AwaitStart` on the
+//! starter's journal: the guard row is armed before the first edge, so no
+//! staged byte exists without a durable record that will end it. Nothing
+//! here severs or moves an edge. The cleanup executor resolves the guard:
+//! onto the key's retained record once one is registered, or to nothing once
+//! the starter's journal is settled with no record. A terminal refusal before
+//! any process holds the key ends `Start(key)` at once.
 //!
 //! Every engine runs this one sequence. The local executor runs it inline; the
 //! Restate controller runs it inside one journaled step, so a replay of the
@@ -12,18 +20,198 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    ArtifactOwner, ProcessEngine, ProcessEngineRegistry, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessInput, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, SessionId, StoreRealization,
-    artifact_owner_is_permanently_retired, publish_process_execution_env,
-    settle_started_process_engine_artifacts, settle_started_process_execution_env,
+    ProcessEngineRegistry, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    SessionId, StoreRealization, artifact_referrer_ended,
 };
-use crate::{ProcessCommand, RuntimeEffectControllerError, TurnFailureCause};
+use crate::{
+    ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer, ArtifactStoreId,
+    ModuleArtifactStore, ReferrerClaim, RuntimeEffectControllerError, StartKey, TurnFailureCause,
+    runtime::Clock, store::ArtifactCleanupLedger,
+};
+
+/// The artifact stores a referrer acquires through, and the cleanup ledger
+/// its guards arm in (ADR 0113 §2.1, §2.4): what a process start, a trigger
+/// revision and a definition revision need to hold every artifact a
+/// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
+/// name points at, whichever store holds it.
+#[derive(Clone)]
+pub struct ArtifactReferrerPorts {
+    modules: Arc<dyn ModuleArtifactStore>,
+    env: Arc<dyn ProcessExecutionEnvStore>,
+    cleanup: Arc<dyn ArtifactCleanupLedger>,
+    clock: Arc<dyn Clock>,
+}
+
+/// Whether an acquisition added the claim's edges or met its fence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferrerAcquisition {
+    /// The claim's referrer holds every name.
+    Held,
+    /// The claim's referrer has a fence: it ended before this acquisition,
+    /// and holds nothing it did not already hold.
+    Ended,
+}
+
+impl ArtifactReferrerPorts {
+    pub fn new(
+        modules: Arc<dyn ModuleArtifactStore>,
+        env: Arc<dyn ProcessExecutionEnvStore>,
+        cleanup: Arc<dyn ArtifactCleanupLedger>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            modules,
+            env,
+            cleanup,
+            clock,
+        }
+    }
+
+    /// The ports of `backend`'s store set.
+    pub fn of_backend(backend: &crate::Backend) -> Self {
+        Self::new(
+            backend.module_artifacts(),
+            backend.process_env_store(),
+            backend.artifact_cleanup(),
+            backend.clock(),
+        )
+    }
+
+    pub fn modules(&self) -> &Arc<dyn ModuleArtifactStore> {
+        &self.modules
+    }
+
+    pub fn env(&self) -> &Arc<dyn ProcessExecutionEnvStore> {
+        &self.env
+    }
+
+    pub fn cleanup(&self) -> &Arc<dyn ArtifactCleanupLedger> {
+        &self.cleanup
+    }
+
+    /// Add the claim's edge to every name, each in the store that holds it.
+    ///
+    /// Store-set names go first: their own transaction arms the claim's
+    /// guard. Before the first engine-store name, the guard is armed in the
+    /// ledger, since an engine store cannot write it (ADR 0113 §2.2). A fence
+    /// on the claim's referrer stops the acquisition and answers
+    /// [`ReferrerAcquisition::Ended`].
+    ///
+    /// # Errors
+    ///
+    /// A name under an engine `engines` does not have, `ArtifactMissing`, and
+    /// every store failure.
+    pub async fn acquire(
+        &self,
+        engines: &ProcessEngineRegistry,
+        claim: &ReferrerClaim,
+        names: &[ArtifactName],
+    ) -> Result<ReferrerAcquisition, crate::PluginError> {
+        let (engine_names, store_names): (Vec<&ArtifactName>, Vec<&ArtifactName>) = names
+            .iter()
+            .partition(|name| matches!(name.store, ArtifactStoreId::Engine(_)));
+        for name in store_names {
+            let acquired = match &name.store {
+                ArtifactStoreId::LashlangModule => {
+                    self.modules
+                        .acquire_module_artifact(claim, &name.artifact_ref)
+                        .await
+                }
+                ArtifactStoreId::ProcessEnv => {
+                    self.env
+                        .acquire_process_execution_env(
+                            claim,
+                            &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
+                        )
+                        .await
+                }
+                ArtifactStoreId::Engine(_) => continue,
+            };
+            if let Some(ended) = held_or_ended(claim, acquired.map_err(crate::PluginError::from))? {
+                return Ok(ended);
+            }
+        }
+        if engine_names.is_empty() {
+            return Ok(ReferrerAcquisition::Held);
+        }
+        if let Some(guard) = claim.guard_cleanup() {
+            self.arm(&guard).await?;
+        }
+        for name in engine_names {
+            let ArtifactStoreId::Engine(kind) = &name.store else {
+                continue;
+            };
+            let acquired = engines
+                .require(kind)?
+                .acquire_engine_artifact(claim, &name.artifact_ref)
+                .await;
+            if let Some(ended) = held_or_ended(claim, acquired)? {
+                return Ok(ended);
+            }
+        }
+        Ok(ReferrerAcquisition::Held)
+    }
+
+    /// Upsert `cleanup` under ADR 0113 §2.4's rule, due now.
+    ///
+    /// # Errors
+    ///
+    /// The ledger's failure.
+    pub async fn arm(&self, cleanup: &ArtifactCleanup) -> Result<(), crate::PluginError> {
+        self.cleanup
+            .arm_cleanup(cleanup, self.clock.timestamp_ms())
+            .await
+            .map(|_| ())
+            .map_err(|error| crate::PluginError::Session(error.to_string()))
+    }
+
+    /// End `referrer` now: its `Ended` record with no carries and no gate.
+    ///
+    /// # Errors
+    ///
+    /// The ledger's failure.
+    pub async fn end(&self, referrer: ArtifactReferrer) -> Result<(), crate::PluginError> {
+        self.arm(&ArtifactCleanup::ended(referrer, Vec::new(), None))
+            .await
+    }
+
+    /// Make `referrer`'s cleanup due now, after the fact that ends it
+    /// committed elsewhere. A nudge only shortens a guard's wait and decides
+    /// nothing, so a failed one is logged and dropped: the guard still
+    /// resolves on its own cadence.
+    pub async fn nudge(&self, referrer: &ArtifactReferrer) {
+        if let Err(error) = self
+            .cleanup
+            .nudge(referrer, self.clock.timestamp_ms())
+            .await
+        {
+            tracing::warn!(%referrer, %error, "artifact cleanup nudge failed");
+        }
+    }
+}
+
+/// `Some(Ended)` when `acquired` failed on the claim's own fence, `None` when
+/// it held, and the error otherwise.
+fn held_or_ended(
+    claim: &ReferrerClaim,
+    acquired: Result<(), crate::PluginError>,
+) -> Result<Option<ReferrerAcquisition>, crate::PluginError> {
+    match acquired {
+        Ok(()) => Ok(None),
+        Err(error) if artifact_referrer_ended(&error) == Some(claim.referrer()) => {
+            Ok(Some(ReferrerAcquisition::Ended))
+        }
+        Err(error) => Err(error),
+    }
+}
 
 /// The stores one process start writes through.
 pub struct ProcessStartStores<'a> {
     pub registry: &'a dyn ProcessRegistry,
     pub env_store: Option<&'a Arc<dyn ProcessExecutionEnvStore>>,
+    /// The engines a start names artifacts through, and the
+    /// [`ArtifactReferrerPorts`] that hold them.
     pub engines: Option<&'a ProcessEngineRegistry>,
     /// Whether an engine start with no engine registry is refused (a durable
     /// controller) or registered without staging engine artifacts (the local
@@ -31,6 +219,15 @@ pub struct ProcessStartStores<'a> {
     pub engines_required: bool,
     /// Names the executor in a refusal, e.g. "Restate process start".
     pub executor: &'static str,
+    /// The journal of the scope running the start: the authority of the
+    /// start's `AwaitStart` guard (ADR 0113 §3.3).
+    pub starter: &'a lash_sansio::EffectJournalIdentity,
+}
+
+impl ProcessStartStores<'_> {
+    fn ports(&self) -> Option<&ArtifactReferrerPorts> {
+        self.engines.and_then(ProcessEngineRegistry::artifact_ports)
+    }
 }
 
 /// What one process start registered: the result a durable controller
@@ -57,28 +254,18 @@ impl RegisteredProcessStart {
     }
 }
 
-struct StagedEnv {
-    env_ref: ProcessExecutionEnvRef,
-    bytes: Vec<u8>,
-    staged: bool,
-}
-
-struct StagedEngine {
-    engine: Arc<dyn ProcessEngine>,
-    payload: serde_json::Value,
-    staged: bool,
-}
-
-/// Stages, registers and settles one process start.
+/// Stages and registers one process start.
 ///
 /// A start is addressed by its key (ADR 0107); a start with none is refused.
-/// The key is trusted: a start that finds the key's retained process returns
-/// it, adopting this attempt's staging only where it is the retained content.
-/// What this attempt staged and the retained process did not adopt is
-/// released, but only after whatever the retained process names has been
-/// secured under the process's own owner: the staging owner is shared by
-/// every attempt at one key, and an earlier attempt that crashed before
-/// settling left the retained process's content on it.
+/// Everything the start names is staged under `Start(key)` first. A start
+/// whose key is already fenced — an earlier attempt settled it — stages
+/// nothing there and, once the registrar returns the row, acquires its own
+/// content directly under `ProcessRecord(id)` where the row adopts it.
+///
+/// Once the row commits, the start nudges `Start(key)`'s guard, which then
+/// carries the retained row's content onto `ProcessRecord(id)`. A terminal
+/// refusal while no process holds the key upserts `Start(key)`'s `Ended`
+/// record instead: the authoritative abandonment (ADR 0113 §3.3).
 ///
 /// # Errors
 ///
@@ -86,88 +273,97 @@ struct StagedEngine {
 /// start needs, and any store failure.
 pub async fn register_process_start(
     stores: &ProcessStartStores<'_>,
-    mut registration: ProcessRegistration,
+    registration: ProcessRegistration,
     observers: &[SessionId],
     env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
-    if registration.start_key.is_none() {
+    let Some(start_key) = registration.start_key.clone() else {
         return Err(RuntimeEffectControllerError::foreign(
             "process_start_key_missing",
             TurnFailureCause::Outcome,
             "a journaled process start must carry its start key",
         ));
+    };
+    match stage_and_register(stores, &start_key, registration, observers, env_spec).await {
+        Ok(registered) => {
+            if let Some(ports) = stores.ports() {
+                ports.nudge(&ArtifactReferrer::Start(start_key)).await;
+            }
+            Ok(registered)
+        }
+        Err(error) => {
+            if error.is_terminal() {
+                abandon_start(stores, start_key).await?;
+            }
+            Err(error)
+        }
     }
-    let start_effect_id = ProcessCommand::start_effect_id(registration.start_key.as_ref());
-    let staging_owner = ArtifactOwner::process_start(&start_effect_id);
-    let env = stage_env(stores, &staging_owner, &mut registration, env_spec).await?;
-    let engine = stage_engine(stores, &staging_owner, &registration).await?;
+}
+
+/// End `Start(key)` after a terminal refusal, unless a process already holds
+/// the key: then the registered row is the start's outcome, and its guard
+/// carries onto it.
+async fn abandon_start(
+    stores: &ProcessStartStores<'_>,
+    start_key: StartKey,
+) -> Result<(), RuntimeEffectControllerError> {
+    let Some(ports) = stores.ports() else {
+        return Ok(());
+    };
+    if stores
+        .registry
+        .get_process_by_start_key(&start_key)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    ports.end(ArtifactReferrer::Start(start_key)).await?;
+    Ok(())
+}
+
+async fn stage_and_register(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+    mut registration: ProcessRegistration,
+    observers: &[SessionId],
+    env_spec: Option<&ProcessExecutionEnvSpec>,
+) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
+    let claim = ReferrerClaim::guarded(
+        ArtifactReferrer::Start(start_key.clone()),
+        ArtifactCleanupPlan::AwaitStart {
+            starter: stores.starter.clone(),
+        },
+    )
+    .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let env = stage_env(stores, &claim, &mut registration, env_spec).await?;
+    let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
-    let registered = match stores
+    let registered = stores
         .registry
         .register_process_reporting_disposition(registration, observers)
-        .await
-    {
-        Ok(registered) => registered,
-        Err(error) => {
-            // The staging owner is shared by every attempt at the key, so it
-            // is retired only when nothing registered can reference it: a
-            // refusal taken before any process holds the key. A fault leaves
-            // it for the retry, and a content conflict means a retained
-            // process holds the key and may still settle from it.
-            if !error.is_terminal() || crate::is_durable_identity_conflict(&error) {
-                return Err(error.into());
-            }
-            if let Some(env_store) = stores.env_store {
-                env_store
-                    .retire_process_execution_env_owner(&staging_owner)
-                    .await?;
-            }
-            if let Some(engine) = engine.as_ref() {
-                engine.engine.retire_artifact_owner(&staging_owner).await?;
-            }
-            return Err(error.into());
-        }
-    };
+        .await?;
     let disposition = registered.disposition;
     let created = disposition == crate::ProcessRegistrationDisposition::Created;
     let record = registered.record;
-    let process_owner = ArtifactOwner::process(record.id.clone());
-    let adopts_env = created || record.env_ref == submitted_env_ref;
-    let adopts_engine = created || record.input == submitted_input;
-    if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref()) {
-        if adopts_env {
-            settle_started_process_execution_env(
-                env_store.as_ref(),
-                &staging_owner,
-                &process_owner,
-                &env.env_ref,
-                &env.bytes,
-                env.staged,
-            )
-            .await?;
-        } else {
-            secure_retained_env(env_store.as_ref(), &process_owner, &record).await?;
-            env_store
-                .retire_process_execution_env_owner(&staging_owner)
-                .await?;
-        }
+    let process_claim =
+        ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(record.id.clone()))
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    if let (Some(env_store), Some(env)) = (stores.env_store, env.as_ref())
+        && !env.staged
+        && (created || record.env_ref == submitted_env_ref)
+    {
+        acquire_env(env_store.as_ref(), &process_claim, env).await?;
     }
-    if let Some(engine) = engine.as_ref() {
-        if adopts_engine {
-            settle_started_process_engine_artifacts(
-                engine.engine.as_ref(),
-                &staging_owner,
-                &process_owner,
-                &engine.payload,
-                engine.staged,
-            )
+    if let Some(engine) = engine.as_ref()
+        && !engine.staged
+        && (created || record.input == submitted_input)
+    {
+        engine
+            .ports
+            .acquire(engine.engines, &process_claim, &engine.names)
             .await?;
-        } else {
-            secure_retained_engine_artifacts(engine.engine.as_ref(), &process_owner, &record)
-                .await?;
-            engine.engine.retire_artifact_owner(&staging_owner).await?;
-        }
     }
     Ok(RegisteredProcessStart {
         record,
@@ -176,54 +372,29 @@ pub async fn register_process_start(
     })
 }
 
-/// Protects the retained process's own environment under the process owner
-/// before the shared staging owner is retired: an earlier attempt that
-/// registered the process and crashed before settling left it on the staging
-/// owner alone.
-async fn secure_retained_env(
+async fn acquire_env(
     env_store: &dyn ProcessExecutionEnvStore,
-    process_owner: &ArtifactOwner,
-    record: &ProcessRecord,
-) -> Result<(), RuntimeEffectControllerError> {
-    let Some(retained) = record.env_ref.as_ref() else {
-        return Ok(());
+    claim: &ReferrerClaim,
+    env: &StagedEnv,
+) -> Result<bool, RuntimeEffectControllerError> {
+    let acquired = match &env.bytes {
+        Some(bytes) => {
+            env_store
+                .publish_process_execution_env(claim, &env.env_ref, bytes)
+                .await
+        }
+        None => {
+            env_store
+                .acquire_process_execution_env(claim, &env.env_ref)
+                .await
+        }
     };
-    let Some(bytes) = env_store.get_process_execution_env(retained).await? else {
-        return Ok(());
-    };
-    match env_store
-        .publish_process_execution_env(process_owner, retained, &bytes)
-        .await
-    {
-        Ok(()) => Ok(()),
-        // A retired process owner holds nothing to protect any more.
-        Err(error) if artifact_owner_is_permanently_retired(&error) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
-
-/// The engine half of [`secure_retained_env`].
-async fn secure_retained_engine_artifacts(
-    engine: &dyn ProcessEngine,
-    process_owner: &ArtifactOwner,
-    record: &ProcessRecord,
-) -> Result<(), RuntimeEffectControllerError> {
-    let ProcessInput::Engine { kind, payload } = record.input.as_ref() else {
-        return Ok(());
-    };
-    if kind != engine.kind() {
-        return Ok(());
-    }
-    match engine.protect_start_artifacts(process_owner, payload).await {
-        Ok(()) => Ok(()),
-        Err(error) if artifact_owner_is_permanently_retired(&error) => Ok(()),
-        Err(error) => Err(error.into()),
-    }
+    Ok(held_or_ended(claim, acquired.map_err(crate::PluginError::from))?.is_none())
 }
 
 async fn stage_env(
     stores: &ProcessStartStores<'_>,
-    staging_owner: &ArtifactOwner,
+    claim: &ReferrerClaim,
     registration: &mut ProcessRegistration,
     env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<Option<StagedEnv>, RuntimeEffectControllerError> {
@@ -237,67 +408,50 @@ async fn stage_env(
             ),
         )
     };
-    if let Some(env_spec) = env_spec {
-        let env_store = stores.env_store.ok_or_else(|| missing_store("carries"))?;
+    let mut env = if let Some(env_spec) = env_spec {
         let encode_error = |error: serde_json::Error| {
             crate::PluginError::Session(format!(
                 "failed to encode process execution environment: {error}"
             ))
         };
-        let expected_ref = env_spec.stable_ref().map_err(encode_error)?;
+        let env_ref = env_spec.stable_ref().map_err(encode_error)?;
         let bytes = env_spec.to_store_bytes().map_err(encode_error)?;
-        let (env_ref, staged) = match publish_process_execution_env(
-            env_store.as_ref(),
-            staging_owner,
-            env_spec,
-        )
-        .await
-        {
-            Ok(env_ref) => (env_ref, true),
-            Err(error) if artifact_owner_is_permanently_retired(&error) => (expected_ref, false),
-            Err(error) => return Err(error.into()),
-        };
         *registration = registration
             .clone()
             .with_execution_env_ref(Some(env_ref.clone()));
-        return Ok(Some(StagedEnv {
+        StagedEnv {
             env_ref,
-            bytes,
-            staged,
-        }));
-    }
-    let Some(env_ref) = registration.env_ref.clone() else {
+            bytes: Some(bytes),
+            staged: false,
+        }
+    } else if let Some(env_ref) = registration.env_ref.clone() {
+        // An existing or inherited environment is acquired, never borrowed:
+        // the start's own edge is what keeps it alive (ADR 0113 §3.3).
+        StagedEnv {
+            env_ref,
+            bytes: None,
+            staged: false,
+        }
+    } else {
         return Ok(None);
     };
-    let env_store = stores
-        .env_store
-        .ok_or_else(|| missing_store("references"))?;
-    let bytes = env_store
-        .get_process_execution_env(&env_ref)
-        .await?
-        .ok_or_else(|| {
-            crate::PluginError::Session(format!("missing process execution env `{env_ref}`"))
-        })?;
-    let staged = match env_store
-        .publish_process_execution_env(staging_owner, &env_ref, &bytes)
-        .await
-    {
-        Ok(()) => true,
-        Err(error) if artifact_owner_is_permanently_retired(&error) => false,
-        Err(error) => return Err(error.into()),
-    };
-    Ok(Some(StagedEnv {
-        env_ref,
-        bytes,
-        staged,
-    }))
+    let env_store = stores.env_store.ok_or_else(|| {
+        missing_store(if env.bytes.is_some() {
+            "carries"
+        } else {
+            "references"
+        })
+    })?;
+    env.staged = acquire_env(env_store.as_ref(), claim, &env).await?;
+    Ok(Some(env))
 }
 
-async fn stage_engine(
-    stores: &ProcessStartStores<'_>,
-    staging_owner: &ArtifactOwner,
+async fn stage_engine<'a>(
+    stores: &ProcessStartStores<'a>,
+    claim: &ReferrerClaim,
     registration: &ProcessRegistration,
-) -> Result<Option<StagedEngine>, RuntimeEffectControllerError> {
+    env: Option<&StagedEnv>,
+) -> Result<Option<StagedEngine<'a>>, RuntimeEffectControllerError> {
     let ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
         return Ok(None);
     };
@@ -314,15 +468,48 @@ async fn stage_engine(
         }
         return Ok(None);
     };
-    let engine = engines.require(kind)?;
-    let staged = match engine.protect_start_artifacts(staging_owner, payload).await {
-        Ok(()) => true,
-        Err(error) if artifact_owner_is_permanently_retired(&error) => false,
-        Err(error) => return Err(error.into()),
+    let names = engines.require(kind)?.start_artifacts(payload)?;
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let Some(ports) = engines.artifact_ports() else {
+        return Err(RuntimeEffectControllerError::foreign(
+            "process_artifact_ports_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "admitted {} names `{kind}` artifacts but the executor's engine registry has no artifact stores to hold them",
+                stores.executor
+            ),
+        ));
+    };
+    // A start whose environment met `Start(key)`'s fence stages nothing more
+    // under it: the key settled before this attempt.
+    let staged = match env {
+        Some(env) if !env.staged => false,
+        _ => ports.acquire(engines, claim, &names).await? == ReferrerAcquisition::Held,
     };
     Ok(Some(StagedEngine {
-        engine,
-        payload: payload.clone(),
+        engines,
+        ports,
+        names,
         staged,
     }))
+}
+
+struct StagedEnv {
+    env_ref: ProcessExecutionEnvRef,
+    /// The bytes a start that carries its spec publishes; `None` for an
+    /// existing or inherited reference, which is acquired.
+    bytes: Option<Vec<u8>>,
+    /// Whether the start's own referrer holds it: `false` when `Start(key)`
+    /// was already fenced.
+    staged: bool,
+}
+
+struct StagedEngine<'a> {
+    engines: &'a ProcessEngineRegistry,
+    ports: &'a ArtifactReferrerPorts,
+    /// Every artifact the start payload names, in any store.
+    names: Vec<ArtifactName>,
+    staged: bool,
 }

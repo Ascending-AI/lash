@@ -414,6 +414,12 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         if kind == lash_core_execution::store::ObligationKind::Ingress {
             return crate::ingress_obligation::ingress_ledger(&self.inner.process_env_store.conn);
         }
+        if kind == lash_core_execution::store::ObligationKind::ArtifactCleanup {
+            return Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
+                self.inner.process_env_store.conn.clone(),
+                self.inner.process_registry.conn.clone(),
+            ));
+        }
         let conn = if crate::obligation_ledger::in_process_registry(kind) {
             self.inner.process_registry.conn.clone()
         } else {
@@ -421,6 +427,13 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         };
         Arc::new(crate::obligation_ledger::SqliteObligationLedger::new(
             kind, conn,
+        ))
+    }
+
+    fn artifact_cleanup(&self) -> Arc<dyn lash_core_execution::store::ArtifactCleanupLedger> {
+        Arc::new(crate::obligation_ledger::SqliteArtifactCleanupLedger::new(
+            self.inner.process_env_store.conn.clone(),
+            self.inner.process_registry.conn.clone(),
         ))
     }
 

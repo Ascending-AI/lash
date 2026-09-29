@@ -65,30 +65,58 @@ pub struct CompatDescriptor {
 /// stamp records. 1.0 is the clean-slate release, so every component starts
 /// at `[1,1]`.
 pub const DESCRIPTORS: &[CompatDescriptor] = &[
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::POSTGRES,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::POSTGRES,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_CORE,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_CORE,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_REGISTRY,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_REGISTRY,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
+    #[cfg(not(feature = "synthetic-next"))]
     CompatDescriptor {
         component: ComponentId::SQLITE_TRIGGERS,
         reads: VersionRange::exactly(1),
         writes: VersionRange::exactly(1),
     },
+    #[cfg(feature = "synthetic-next")]
+    CompatDescriptor {
+        component: ComponentId::SQLITE_TRIGGERS,
+        reads: VersionRange::between(1, 2),
+        writes: VersionRange::exactly(2),
+    },
     CompatDescriptor {
         component: ComponentId::RESTATE_EFFECT_GROUP_STATE,
-        reads: VersionRange::exactly(1),
-        writes: VersionRange::exactly(1),
+        reads: RESTATE_EFFECT_GROUP_STATE_FORMATS,
+        writes: RESTATE_EFFECT_GROUP_STATE_FORMATS,
     },
     CompatDescriptor {
         component: ComponentId::RESTATE_EFFECT_GROUP_PAYLOAD,
@@ -101,6 +129,15 @@ pub const DESCRIPTORS: &[CompatDescriptor] = &[
         writes: VersionRange::exactly(1),
     },
 ];
+
+/// The effect-group index family formats this build reads and writes.
+#[cfg(not(feature = "synthetic-next"))]
+const RESTATE_EFFECT_GROUP_STATE_FORMATS: VersionRange = VersionRange::exactly(1);
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the effect-group index family
+/// to format 2 and keeps reading and writing format 1.
+#[cfg(feature = "synthetic-next")]
+const RESTATE_EFFECT_GROUP_STATE_FORMATS: VersionRange = VersionRange::between(1, 2);
 
 /// The descriptor this build declares for `component`.
 pub fn descriptor(component: ComponentId) -> Option<&'static CompatDescriptor> {

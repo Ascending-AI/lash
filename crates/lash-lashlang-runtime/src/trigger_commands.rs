@@ -270,8 +270,14 @@ async fn update_trigger(
         .ok_or_else(|| ExecutionHostError::new("trigger update requires `subscription_key`"))?;
     let expected_revision = trigger_expected_revision(&payload)?;
     let prepared = prepare_trigger_draft(artifact_store, &request).await?;
+    // An environment this execution captures is published under its own
+    // execution referrer; the command's journaled effect then holds it, with
+    // the target module, under the revision it commits (ADR 0113 §3.4).
+    let claim = ctx
+        .execution_claim()
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let env_ref = ctx
-        .captured_process_execution_env_ref(&ctx.artifact_owner())
+        .captured_process_execution_env_ref(&claim)
         .await
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let draft = prepared.into_draft(env_ref, ctx.trigger_registration_wake_target())?;

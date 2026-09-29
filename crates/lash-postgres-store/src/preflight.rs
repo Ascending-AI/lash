@@ -176,9 +176,31 @@ impl StorePreflight for PostgresStorePreflight {
             StampRead::Present(stamp) => Some(i64::from(stamp.min_reader)),
             _ => None,
         };
+        #[cfg(feature = "synthetic-next")]
+        let synthetic_expanded = matches!(
+            &stamp,
+            StampRead::Present(stamp) if stamp.version == descriptor.writes.max()
+        );
         let verdict = match compat::admit(descriptor, stamp) {
             Err(refusal) => StoreSchemaVerdict::Refused { refusal },
             Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
+            #[cfg(feature = "synthetic-next")]
+            Ok(CompatAdmission::Native) if synthetic_expanded => {
+                let mut tx = self.pool.begin().await.map_err(crate::store_sqlx_error)?;
+                let findings =
+                    crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?;
+                tx.commit().await.map_err(crate::store_sqlx_error)?;
+                if findings.is_empty() {
+                    StoreSchemaVerdict::Matches
+                } else {
+                    StoreSchemaVerdict::Refused {
+                        refusal: compat::CompatRefusal::ShapeRefused {
+                            component: descriptor.component.as_str().to_owned(),
+                            findings,
+                        },
+                    }
+                }
+            }
             Ok(CompatAdmission::Native) if report.is_conformant() => StoreSchemaVerdict::Matches,
             Ok(CompatAdmission::Native) => StoreSchemaVerdict::Unreadable {
                 reason: report.to_string(),

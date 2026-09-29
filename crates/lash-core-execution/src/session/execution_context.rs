@@ -3,7 +3,9 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
+mod referrers;
 mod trigger_scope;
+pub(crate) use referrers::execution_claim_of;
 use trigger_scope::missing_process_execution_error;
 pub use trigger_scope::resolve_trigger_owner_scope;
 
@@ -633,18 +635,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         let correlation = correlation::process_invocation_of(&self.turn_context)?;
         correlation.authority.attempt_for(&correlation.process_id)
-    }
-
-    /// Returns the exact owner used to stage artifacts produced by this
-    /// replayable execution.
-    pub fn artifact_owner(&self) -> crate::ArtifactOwner {
-        crate::ArtifactOwner::execution(
-            self.dispatch
-                .effect_controller
-                .scoped()
-                .execution_scope()
-                .clone(),
-        )
     }
 
     pub fn session_scope(&self) -> crate::SessionScope {
@@ -1294,12 +1284,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// the journaled process-start command, publishing nothing.
     ///
     /// Publication belongs inside the replayable process effect (FIG-3050).
-    /// Publishing here would stage the artifact under
-    /// [`ArtifactOwner::process_start`](crate::ArtifactOwner::process_start)
+    /// Publishing here would stage the artifact under the start's referrer
     /// *before* the start is journaled, and a replay of the same turn would
-    /// revisit that staging owner after the first attempt's start effect
-    /// transferred the artifact and permanently retired it — the divergence
-    /// FIG-3028 had to absorb with a retirement tolerance at this call site.
+    /// revisit that referrer after the first attempt's start settled and
+    /// fenced it — the divergence FIG-3028 had to absorb with a tolerance at
+    /// this call site.
     /// The spec instead rides
     /// [`ProcessStartOptions::env_spec`](crate::ProcessStartOptions::env_spec)
     /// into the command, and the executor publishes it under the journal.
@@ -1331,21 +1320,21 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// A retired owner fails here. Every caller publishes under a durable owner and then persists
-    /// the reference (trigger registration keeps it in `TriggerSubscriptionDraft::env_ref`), so a
-    /// retirement must surface at publish time rather than hand back a reference to bytes the
-    /// fence already reclaimed. Process starts do not publish at all before their journal: they go
-    /// through [`Self::process_start_execution_env`].
+    /// An ended referrer fails here. Every caller publishes under a durable referrer and then
+    /// persists the reference (trigger registration keeps it in
+    /// `TriggerSubscriptionDraft::env_ref`), so a fence must surface at publish time rather than
+    /// hand back a reference to bytes the cleanup already reclaimed. Process starts do not publish
+    /// at all before their journal: they go through [`Self::process_start_execution_env`].
     pub async fn captured_process_execution_env_ref(
         &self,
-        owner: &crate::ArtifactOwner,
+        claim: &crate::ReferrerClaim,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self.inherited_process_execution_env_ref() {
             return Ok(env_ref);
         }
         crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
-            owner,
+            claim,
             &self.execution_env_spec,
         )
         .await
@@ -1743,6 +1732,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
+        let store = self.revision_referrer_trigger_store(store)?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"

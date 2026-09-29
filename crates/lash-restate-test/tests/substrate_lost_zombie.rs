@@ -94,7 +94,10 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
     .expect("link the process");
     lashlang::LashlangArtifacts::new(restate.lash_backend().module_artifacts())
         .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("substrate-lost-zombie"),
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
             &linked.artifact,
         )
         .await

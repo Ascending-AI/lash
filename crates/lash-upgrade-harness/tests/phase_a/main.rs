@@ -8,42 +8,24 @@
 //! ignored with the lane it waits for, rather than missing: a run that asks
 //! for the ignored tests fails every leg that is not built yet.
 //!
+//! A built leg lives in its own module and is ignored only because it needs
+//! both node builds, PostgreSQL and a live `restate-server`, as the rolling
+//! smoke is: `just phase-a` builds them and runs every built leg.
+//!
 //! The ninth row of §6, `operator_json_contract`, is a single-binary test in
 //! `crates/lashctl/tests/` (lane L6).
 
 use anyhow::{Result, bail};
 
+mod expanded_store_rollback;
+mod negotiated_wire_both_directions;
+mod object_sweep_crash_resume;
+mod skipped_compatibility_release_refused;
+mod support;
+
 /// A leg whose lane has not landed: it fails, never passes empty.
 fn waits_for(lane: &str) -> Result<()> {
     bail!("this Phase A leg waits for {lane}")
-}
-
-/// N+1's migrate expands PostgreSQL and every SQLite database. N restarts,
-/// opens `Expanded`, writes, and N+1 reads N's rows. Raising `min_reader`
-/// makes N refuse `ReaderFloorAbove` on both backends. Each unsafe addition
-/// of §1.4 makes N refuse `ShapeRefused`. A populated store with its stamp
-/// deleted refuses `Unstamped`.
-///
-/// Waits for lane L1 (FIG-4043): the stamps with `min_reader`, admission and
-/// the tolerant shape check, plus the `synthetic-next` expand step in
-/// `crates/lash-postgres-store/src/postgres/migrate.rs` and the SQLite
-/// component bumps in `crates/lash-sqlite-store/src/schema.rs`.
-#[test]
-#[ignore = "waits for lane L1 (FIG-4043): store stamps, admission and the tolerant shape check"]
-fn expanded_store_rollback() -> Result<()> {
-    waits_for("lane L1 (FIG-4043)")
-}
-
-/// A build whose writable range starts above the recorded `F` refuses at
-/// open with `FleetOutsideWritable`, before it takes traffic. So does one
-/// whose component range starts above the stamp.
-///
-/// Waits for lane L1 (FIG-4043): the opens move onto `FleetFormat::admit`
-/// and the component descriptor.
-#[test]
-#[ignore = "waits for lane L1 (FIG-4043): opens admit F and the component stamp"]
-fn skipped_compatibility_release_refused() -> Result<()> {
-    waits_for("lane L1 (FIG-4043)")
 }
 
 /// For every mutation class of §2.2, N pauses a transaction after its fence
@@ -59,37 +41,6 @@ fn skipped_compatibility_release_refused() -> Result<()> {
 #[ignore = "waits for lanes L2 and L3 (FIG-3800 A): the PostgreSQL and SQLite writer fences"]
 fn finalize_races_every_writer() -> Result<()> {
     waits_for("lanes L2 and L3 (FIG-3800 A)")
-}
-
-/// Remote protocol: N+1 to N and N to N+1 select 1, including requests,
-/// replies, errors and streams. A synthetic `[2,2]` peer against `[1,1]`
-/// gets `Unsupported`, with zero effects. Restate: an N caller reaches
-/// N+1's handlers and gets version-1 replies. After a rollback an N+1
-/// caller reaches N's handlers. A disjoint call changes nothing.
-///
-/// Waits for lane L4 (the Restate call envelope) and lane L5 (FIG-3804,
-/// remote negotiation), plus the `synthetic-next` ranges in
-/// `crates/lash-remote-protocol/src/negotiation.rs` and
-/// `crates/lash-restate/src/compat.rs`.
-#[test]
-#[ignore = "waits for lanes L4 and L5 (FIG-3804): the Restate call envelope and remote negotiation"]
-fn negotiated_wire_both_directions() -> Result<()> {
-    waits_for("lanes L4 and L5 (FIG-3804)")
-}
-
-/// Objects and `LashTurn` outcomes written by N and by N+1 before finalize
-/// are all in N's format, and N reads them all. After finalize the
-/// synthetic sweep converts objects and survives a crash mid-sweep.
-/// Preflight lists the objects still at format 1. A kept N handler is
-/// refused typed by `_compat`.
-///
-/// Waits for lane L4: `_compat`, the selected encoder and the versioned
-/// `RootOutcome`, plus the `synthetic-next` effect-group state format in
-/// `crates/lash-restate/src/effect_group/protocol.rs`.
-#[test]
-#[ignore = "waits for lane L4: _compat, the selected encoder and the versioned RootOutcome"]
-fn object_sweep_crash_resume() -> Result<()> {
-    waits_for("lane L4")
 }
 
 /// A foreign-`G` journal dispatches zero effects and parks. Signals that

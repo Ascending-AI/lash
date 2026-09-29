@@ -391,18 +391,6 @@ impl RuntimeHandle {
         }
     }
 
-    /// Retire an execution artifact owner across the runtime's environment and
-    /// process-engine stores after its effect journal is durably unreachable.
-    pub async fn retire_artifact_owner(
-        &self,
-        owner: &crate::ArtifactOwner,
-    ) -> Result<(), crate::PluginError> {
-        self.process_env_store
-            .retire_process_execution_env_owner(owner)
-            .await?;
-        self.process_engines.retire_artifact_owner(owner).await
-    }
-
     pub fn observe(&self) -> Arc<RuntimeObservation> {
         self.observation.load_full()
     }

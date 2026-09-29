@@ -39,6 +39,26 @@ pub(crate) fn process_terminal_resolution(output: crate::ProcessAwaitOutput) -> 
     }
 }
 
+/// The journal a local process start runs under: the scope of the effect
+/// that caused it, or, for a start with no causal effect, the start's own
+/// runtime-operation scope keyed by its start key (ADR 0113 §3.3).
+fn process_start_starter(
+    registration: &crate::ProcessRegistration,
+    execution_context: &crate::ProcessExecutionContext,
+) -> Result<lash_sansio::EffectJournalIdentity, RuntimeEffectControllerError> {
+    let scope = match execution_context
+        .causal_invocation
+        .as_ref()
+        .map(|invocation| &invocation.subject)
+    {
+        Some(crate::RuntimeSubject::Effect { address, .. }) => address.execution_scope.clone(),
+        _ => crate::ExecutionScope::runtime_operation(ProcessCommand::start_effect_id(
+            registration.start_key.as_ref(),
+        )),
+    };
+    Ok(scope.journal_identity()?)
+}
+
 impl ProcessLocalExecution {
     pub async fn execute(
         self,
@@ -59,8 +79,9 @@ impl ProcessLocalExecution {
                 registration,
                 observers,
                 env_spec,
-                execution_context: _,
+                execution_context,
             } => {
+                let starter = process_start_starter(&registration, &execution_context)?;
                 // Registration arms the start obligation in the same
                 // transaction. The process-work substrate executes it. A
                 // runtime start derives its key from its admitted operation,
@@ -73,6 +94,7 @@ impl ProcessLocalExecution {
                         engines: process_engines.as_ref(),
                         engines_required: false,
                         executor: "process start on the local executor",
+                        starter: &starter,
                     },
                     registration,
                     &observers,

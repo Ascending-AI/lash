@@ -184,6 +184,16 @@ pub trait ProcessDefinitionRegistry: Send + Sync {
         &self,
         owner_scope: &crate::TriggerOwnerScope,
     ) -> Result<Vec<ProcessDefinitionRecord>, crate::PluginError>;
+
+    /// The row keyed `definition_id` (the registry's primary key,
+    /// `lash.process-definition:<owner namespace>:<name>`), tombstoned slots
+    /// included, or `None` when no slot has it. The artifact-cleanup guard of
+    /// a definition revision reads it to decide whether the revision is still
+    /// the slot's current resolvable one (ADR 0113 §3.6).
+    async fn definition_state(
+        &self,
+        definition_id: &str,
+    ) -> Result<Option<ProcessDefinitionRecord>, crate::PluginError>;
 }
 
 /// Validate a registration name: registry slots share the trigger
@@ -218,4 +228,139 @@ pub async fn resolve_named_definition(
     Ok(records
         .into_iter()
         .find(|record| record.name == name && record.lifecycle.resolvable()))
+}
+
+/// The registry's primary key of the slot `name` names under `owner_scope`:
+/// `lash.process-definition:<owner namespace>:<name>`, the id a
+/// [`DefinitionRevisionId`](crate::DefinitionRevisionId) carries and
+/// [`ProcessDefinitionRegistry::definition_state`] reads (ADR 0113 §1, §3.6).
+pub fn process_definition_id(owner_scope: &crate::TriggerOwnerScope, name: &str) -> String {
+    format!(
+        "lash.process-definition:{}:{}",
+        owner_scope.namespace(),
+        name.trim()
+    )
+}
+
+/// A [`ProcessDefinitionRegistry`] whose compare-and-swap holds the revision
+/// it writes before it writes (ADR 0113 §3.6).
+///
+/// The revision is `expected_revision + 1`, or 1 for a new slot. Before the
+/// CAS it acquires that `DefinitionRevision` on every artifact the
+/// definition's engine names for it, which arms the revision's
+/// `AwaitDefinitionRevision` guard on the creator's journal: a CAS that loses
+/// or never commits is ended by that guard. After a CAS that replaced a
+/// revision, it nudges the replaced one. It runs inside the CAS's journaled
+/// effect, so a replay that reads the recorded registration acquires nothing.
+/// Every read is the inner registry's.
+pub struct RevisionReferrerDefinitionRegistry {
+    inner: std::sync::Arc<dyn ProcessDefinitionRegistry>,
+    engines: crate::ProcessEngineRegistry,
+    creator: lash_sansio::EffectJournalIdentity,
+}
+
+impl RevisionReferrerDefinitionRegistry {
+    pub fn new(
+        inner: std::sync::Arc<dyn ProcessDefinitionRegistry>,
+        engines: crate::ProcessEngineRegistry,
+        creator: lash_sansio::EffectJournalIdentity,
+    ) -> Self {
+        Self {
+            inner,
+            engines,
+            creator,
+        }
+    }
+
+    fn revision(
+        owner_scope: &crate::TriggerOwnerScope,
+        name: &str,
+        revision: u64,
+    ) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+        crate::DefinitionRevisionId::new(process_definition_id(owner_scope, name), revision)
+            .map(crate::ArtifactReferrer::DefinitionRevision)
+            .map_err(|error| crate::PluginError::Session(error.to_string()))
+    }
+}
+
+#[async_trait::async_trait]
+impl ProcessDefinitionRegistry for RevisionReferrerDefinitionRegistry {
+    async fn register_definition(
+        &self,
+        operation_id: &str,
+        owner_scope: crate::TriggerOwnerScope,
+        name: &str,
+        definition: crate::ProcessDefinitionRef,
+        expectation: Option<&ProcessDefinitionExpectation>,
+    ) -> Result<ProcessDefinitionRegistration, crate::PluginError> {
+        let written = match expectation {
+            Some(expectation) => expectation
+                .expected_revision
+                .checked_add(1)
+                .ok_or_else(|| {
+                    crate::PluginError::Session(
+                        "process definition revision overflowed".to_string(),
+                    )
+                })?,
+            None => 1,
+        };
+        let names = self
+            .engines
+            .require(definition.engine_kind.as_str())?
+            .start_artifacts(definition.definition.as_json())?;
+        let ports = self.engines.artifact_ports();
+        if !names.is_empty() {
+            let Some(ports) = ports else {
+                return Err(crate::PluginError::Session(format!(
+                    "process definition `{name}` names `{}` artifacts but the runtime's engine \
+                     registry has no artifact stores to hold them",
+                    definition.engine_kind
+                )));
+            };
+            let claim = crate::ReferrerClaim::guarded(
+                Self::revision(&owner_scope, name, written)?,
+                crate::ArtifactCleanupPlan::AwaitDefinitionRevision {
+                    creator: self.creator.clone(),
+                },
+            )
+            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+            // A fence means an earlier execution of this same CAS committed
+            // the revision and it has since ended: the registry answers that
+            // execution's registration.
+            ports.acquire(&self.engines, &claim, &names).await?;
+        }
+        let replaced = expectation.map(|expectation| expectation.expected_revision);
+        let registration = self
+            .inner
+            .register_definition(
+                operation_id,
+                owner_scope.clone(),
+                name,
+                definition,
+                expectation,
+            )
+            .await?;
+        if let (ProcessDefinitionRegistration::Admitted(_), Some(replaced), Some(ports)) =
+            (&registration, replaced, ports)
+        {
+            ports
+                .nudge(&Self::revision(&owner_scope, name, replaced)?)
+                .await;
+        }
+        Ok(registration)
+    }
+
+    async fn list_definitions(
+        &self,
+        owner_scope: &crate::TriggerOwnerScope,
+    ) -> Result<Vec<ProcessDefinitionRecord>, crate::PluginError> {
+        self.inner.list_definitions(owner_scope).await
+    }
+
+    async fn definition_state(
+        &self,
+        definition_id: &str,
+    ) -> Result<Option<ProcessDefinitionRecord>, crate::PluginError> {
+        self.inner.definition_state(definition_id).await
+    }
 }

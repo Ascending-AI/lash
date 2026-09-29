@@ -83,7 +83,11 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
         let owner_json = serde_json::to_string(&owner_scope)
             .map_err(|err| PluginError::Session(err.to_string()))?;
         let owner_namespace = owner_scope.namespace();
-        let definition_id = format!("pd:{}:{}", owner_namespace, name.trim());
+        let definition_id = format!(
+            "lash.process-definition:{}:{}",
+            owner_namespace,
+            name.trim()
+        );
         let fingerprint = definition.fingerprint();
         let now_ms = self.clock.timestamp_ms();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
@@ -254,6 +258,21 @@ impl ProcessDefinitionRegistry for PostgresProcessDefinitionRegistry {
             records.push(record);
         }
         Ok(records)
+    }
+
+    async fn definition_state(
+        &self,
+        definition_id: &str,
+    ) -> Result<Option<ProcessDefinitionRecord>, PluginError> {
+        let json: Option<String> = sqlx::query_scalar(
+            "SELECT record_json FROM lash_process_definitions WHERE definition_id = $1",
+        )
+        .bind(definition_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+            .transpose()
     }
 }
 

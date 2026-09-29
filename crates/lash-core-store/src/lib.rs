@@ -19,6 +19,7 @@
 pub use async_trait::async_trait;
 
 pub mod admitted_scope;
+pub mod artifact_referrer;
 pub mod attachments;
 pub mod await_event_identity;
 pub mod build_generation;

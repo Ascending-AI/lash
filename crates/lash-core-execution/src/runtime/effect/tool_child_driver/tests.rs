@@ -1008,47 +1008,38 @@ async fn a_nested_retry_sleep_observes_the_childs_recorded_gate() {
 }
 
 /// A process-execution-env store that fails every read with `error`.
-struct FailingEnvStore(fn() -> crate::PluginError);
+struct FailingEnvStore(fn() -> crate::ArtifactStoreError);
 
 #[async_trait::async_trait]
 impl crate::ProcessExecutionEnvStore for FailingEnvStore {
     async fn publish_process_execution_env(
         &self,
-        _owner: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessExecutionEnvRef,
         _bytes: &[u8],
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         Ok(())
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        _from: &crate::ArtifactOwner,
-        _to: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         Ok(())
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        _owner: &crate::ArtifactOwner,
-        _env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError> {
-        Ok(())
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        _owner: &crate::ArtifactOwner,
-    ) -> Result<(), crate::PluginError> {
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
         Ok(())
     }
 
     async fn get_process_execution_env(
         &self,
         _env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::PluginError> {
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         Err((self.0)())
     }
 }
@@ -1094,7 +1085,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     let timed_out = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::PluginError::Session(
+            crate::ArtifactStoreError::Backend(
                 "pool timed out while waiting for an open connection".into(),
             )
         })),
@@ -1111,29 +1102,35 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
         "a live fault is never the load's record"
     );
 
-    // A carried code keeps its own cause.
-    let parked = settle(
+    // A typed store refusal is the request's outcome: bytes no referrer
+    // holds any more are absent on every redrive, so the load records it.
+    let missing_bytes = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::PluginError::RuntimeEffectController(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::LashlangCellReplayDivergence,
-                "diverged",
-            ))
+            crate::ArtifactStoreError::ArtifactMissing {
+                artifact_ref: "env".into(),
+            }
         })),
     )
     .await;
     assert_eq!(
-        parked.code,
-        crate::RuntimeErrorCode::LashlangCellReplayDivergence
+        missing_bytes.code,
+        crate::RuntimeErrorCode::RuntimeEffectToolChildRequestVersion
     );
-    assert_eq!(parked.turn_failure_cause(), crate::TurnFailureCause::Parked);
-    assert!(!retried(&parked), "a park is the load's recorded outcome");
+    assert!(missing_bytes.message.contains("`env` is not stored"));
+    assert_eq!(
+        missing_bytes.turn_failure_cause(),
+        crate::TurnFailureCause::Outcome
+    );
+    assert!(!retried(&missing_bytes), "a typed refusal is recorded");
 
     // A refusal the store answers with is the request's outcome.
     let invalid = settle(
         &request,
         Arc::new(FailingEnvStore(|| {
-            crate::PluginError::Invoke("invalid process execution environment reference".into())
+            crate::ArtifactStoreError::Decode(
+                "invalid process execution environment reference".into(),
+            )
         })),
     )
     .await;

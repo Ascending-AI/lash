@@ -5,6 +5,98 @@ use crate::session_sql::session_sql;
 use graph_nodes::{insert_graph_nodes_conn, occupied_node_ids_conn};
 use lash_core_execution::FleetFormatStore;
 
+/// Apply a commit's frame transition: carry out of `ended` into the
+/// successor, then end every frame in `left` (the frames the commit leaves,
+/// `ended` among them) gated on the transition's execution.
+fn commit_frame_transition_tx(
+    tx: &rusqlite::Connection,
+    transition: &lash_core_execution::store::FrameTransition,
+    left: &[lash_core_execution::FrameNodeId],
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
+    let source = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
+    let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+    if crate::artifact_store::artifact_fenced_tx(tx, &successor).map_err(sqlite_error)? {
+        return Err(StoreError::ArtifactReferrerEnded {
+            referrer: successor,
+        });
+    }
+    let sql = crate::artifact_store::artifact_sql();
+    for carry in &transition.carries {
+        let namespace = match &carry.store {
+            ArtifactStoreId::LashlangModule => crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
+            ArtifactStoreId::ProcessEnv => crate::artifact_store::PROCESS_ENV_NAMESPACE,
+            ArtifactStoreId::Engine(_) => {
+                return Err(StoreError::Backend(
+                    "a frame transition cannot carry an engine artifact".into(),
+                ));
+            }
+        };
+        let exists: bool = tx
+            .query_row(
+                sql.edges.select_edge_exists.sql(),
+                params![
+                    namespace,
+                    carry.artifact_ref,
+                    source.kind().as_str(),
+                    source.canonical_id()
+                ],
+                |row| row.get(0),
+            )
+            .map_err(sqlite_error)?;
+        if !exists {
+            return Err(StoreError::ArtifactCarryMissing {
+                artifact_ref: carry.artifact_ref.clone(),
+                to: successor,
+            });
+        }
+        crate::conn::cached_execute(
+            tx,
+            sql.edges.insert_edge.sql(),
+            params![
+                namespace,
+                carry.artifact_ref,
+                successor.kind().as_str(),
+                successor.canonical_id()
+            ],
+        )
+        .map_err(sqlite_error)?;
+    }
+    end_frames_tx(
+        tx,
+        transition.ended.session_id(),
+        left,
+        Some(&transition.gate),
+        now_ms,
+    )
+}
+
+/// End each frame in `left`: fence it and upsert its `Ended` cleanup with no
+/// carries, gated on `gate` (ADR 0113 §3.1, Lane G amendment).
+fn end_frames_tx(
+    tx: &rusqlite::Connection,
+    session_id: &SessionId,
+    left: &[lash_core_execution::FrameNodeId],
+    gate: Option<&lash_sansio::EffectJournalIdentity>,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    for frame in left {
+        let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+            lash_core_execution::FrameEnvironmentId::new(session_id.clone(), frame.clone()),
+        );
+        crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now_ms)
+            .map_err(sqlite_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), gate.cloned()),
+            now_ms,
+            "core",
+        )?;
+    }
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
     async fn committed_turn_exists(
@@ -702,6 +794,26 @@ impl SessionCommitStore for Store {
                             });
                         }
                     }
+                    let left = lash_core_execution::store::frames_left_by_commit(
+                        existing.as_ref().and_then(|head| head.current_frame_node_id.as_ref()),
+                        &commit.graph,
+                        meta.current_frame_node_id.as_ref(),
+                    );
+                    if let Some(transition) = &commit.frame_transition {
+                        if transition.ended.session_id() != commit.session_id
+                            || transition.successor.session_id() != commit.session_id
+                            || !left.contains(transition.ended.frame_node_id())
+                            || meta.current_frame_node_id.as_ref()
+                                != Some(transition.successor.frame_node_id())
+                        {
+                            return Err(StoreError::Backend(
+                                "frame transition does not match the committed head".into(),
+                            ));
+                        }
+                        commit_frame_transition_tx(tx, transition, &left, now)?;
+                    } else {
+                        end_frames_tx(tx, &commit.session_id, &left, None, now)?;
+                    }
                     crate::conn::cached_execute(tx,
                         session_sql().head.upsert.sql(),
                         params![
@@ -1020,3 +1132,6 @@ impl Store {
             .map_err(sqlite_error)?
     }
 }
+
+#[cfg(test)]
+mod artifact_frame_transition_tests;

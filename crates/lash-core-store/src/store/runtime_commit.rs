@@ -92,6 +92,51 @@ fn usage_payload_identity_hash(entry: &crate::TokenLedgerEntry) -> String {
     )
 }
 
+/// A committed frame switch's artifact half (ADR 0113 §3.1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FrameTransition {
+    pub ended: crate::artifact_referrer::FrameEnvironmentId,
+    pub successor: crate::artifact_referrer::FrameEnvironmentId,
+    pub carries: Vec<crate::artifact_referrer::ArtifactName>,
+    /// The committing execution: the only one that can still read `ended`.
+    pub gate: lash_sansio::EffectJournalIdentity,
+}
+
+impl FrameTransition {
+    /// The `Ended` cleanup of `ended` this transition upserts: its carries
+    /// are applied inside the commit, so the record carries none.
+    #[must_use]
+    pub fn ended_cleanup(&self) -> crate::artifact_referrer::ArtifactCleanup {
+        crate::artifact_referrer::ArtifactCleanup::ended(
+            crate::artifact_referrer::ArtifactReferrer::FrameEnvironment(self.ended.clone()),
+            Vec::new(),
+            Some(self.gate.clone()),
+        )
+    }
+}
+
+/// Every frame a commit leaves, in the order it left them: the prior head's
+/// frame, then each frame whose open the commit appends, except the frame
+/// the new head holds (ADR 0113 §3.1, Lane G amendment). A store ends all of
+/// them in the commit's transaction, whether or not a [`FrameTransition`]
+/// rides the commit, so no frame outlives the commit that leaves it.
+#[must_use]
+pub fn frames_left_by_commit(
+    prior_head: Option<&crate::FrameNodeId>,
+    graph: &super::GraphAppend,
+    new_head: Option<&crate::FrameNodeId>,
+) -> Vec<crate::FrameNodeId> {
+    prior_head
+        .cloned()
+        .into_iter()
+        .chain(graph.nodes().iter().filter_map(|node| {
+            node.frame_open()
+                .and_then(|_| crate::FrameNodeId::new(node.node_id.as_str().to_owned()).ok())
+        }))
+        .filter(|frame| Some(frame) != new_head)
+        .collect()
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeCommit {
     /// Host policy carried to the shared facade and backend validation seams.
@@ -126,6 +171,16 @@ pub struct RuntimeCommit {
     /// store instruction excluded from the commit's serialized form.
     #[serde(skip)]
     pub park_root: Option<crate::TurnId>,
+    /// The frame this commit ends and the frame it opens (ADR 0113 §3.1):
+    /// present exactly on a commit that switches frames. The backend applies
+    /// it in the commit's own transaction with the head CAS: it checks every
+    /// carried artifact has an edge of `ended`, inserts the successor's edges,
+    /// fences `ended` and upserts its `Ended` cleanup gated on `gate`. A
+    /// store instruction derived from the graph the commit appends, never
+    /// commit content: like the fences, it is excluded from the commit's
+    /// serialized form.
+    #[serde(skip)]
+    pub frame_transition: Option<FrameTransition>,
     pub config: crate::PersistedSessionConfig,
     /// The config the committing root ran under, when it is not the config
     /// the commit writes: a root runs under its recorded execution view and
@@ -1117,6 +1172,14 @@ impl RuntimeCommit {
             .as_ref()
             .or_else(|| self.root_terminal.as_deref().map(|terminal| &terminal.root))
             .or_else(|| self.turn_commit.operation.turn_id())
+    }
+
+    /// This commit, ending `transition.ended` and opening
+    /// `transition.successor` in its own transaction.
+    #[must_use]
+    pub fn with_frame_transition(mut self, transition: FrameTransition) -> Self {
+        self.frame_transition = Some(transition);
+        self
     }
 
     /// Stamp the semantic-boundary replay identity derived from this commit's

@@ -532,6 +532,17 @@ impl LashCore {
         crate::process_admin::Processes { core: self.clone() }
     }
 
+    /// The core's artifact stores, as a host publishes into them under a
+    /// pin it minted (ADR 0113 §2.6).
+    pub fn host_artifacts(&self) -> crate::artifacts::HostArtifacts {
+        crate::artifacts::HostArtifacts::new(
+            self.backend().module_artifacts(),
+            Arc::clone(&self.env.core.durability.process_env_store),
+            self.backend().artifact_cleanup(),
+            Arc::clone(&self.env.core.clock),
+        )
+    }
+
     pub fn completions(&self) -> crate::admin::Completions {
         crate::admin::Completions { core: self.clone() }
     }
@@ -1067,10 +1078,6 @@ impl LashCoreBuilder {
         // The retained-evidence sweep owns deferred scope retirement (ADR
         // 0067): the catalog learns the host whose journal it sweeps.
         store_factory.bind_effect_host(&env.core.control.effect_host);
-        store_factory.bind_artifact_stores(
-            Arc::clone(&env.core.durability.process_env_store),
-            host_process_engines.clone(),
-        );
         let residents = Arc::new(residents::ResidentSessions::default());
         let session_work = backend.session_work();
         let (session_driver, installed_driver) = Self::build_session_driver(

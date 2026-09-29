@@ -3,7 +3,72 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use sqlx::{Connection, PgConnection, PgPool};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::{Connection, Executor, PgConnection, PgPool};
+
+/// A provisioned schema for tests that change DDL or the compatibility stamp.
+/// Its search path keeps those changes away from the shared test database.
+// Shared support is compiled by targets that do not exercise stamp changes.
+#[allow(dead_code)]
+pub struct IsolatedSchema {
+    pub pool: PgPool,
+    name: String,
+    database_url: String,
+}
+
+#[allow(dead_code)]
+impl IsolatedSchema {
+    pub async fn provision(database_url: &str) -> Self {
+        let name = format!("lash_test_{}", uuid::Uuid::new_v4().simple());
+        let mut admin = PgConnection::connect(database_url)
+            .await
+            .expect("connect isolated-schema admin");
+        admin
+            .execute(format!("CREATE SCHEMA {name}").as_str())
+            .await
+            .expect("create isolated schema");
+        admin
+            .execute(format!("SET search_path TO {name}").as_str())
+            .await
+            .expect("select isolated schema");
+        sqlx::raw_sql(lash_postgres_store::PostgresStorage::schema_ddl())
+            .execute(&mut admin)
+            .await
+            .expect("provision isolated schema");
+        admin.close().await.expect("close isolated-schema admin");
+        let search_path = name.clone();
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .after_connect(move |connection, _| {
+                let name = search_path.clone();
+                Box::pin(async move {
+                    connection
+                        .execute(format!("SET search_path TO {name}").as_str())
+                        .await?;
+                    Ok(())
+                })
+            })
+            .connect(database_url)
+            .await
+            .expect("connect isolated pool");
+        Self {
+            pool,
+            name,
+            database_url: database_url.to_owned(),
+        }
+    }
+
+    pub async fn cleanup(self) {
+        self.pool.close().await;
+        let mut admin = PgConnection::connect(&self.database_url)
+            .await
+            .expect("connect isolated-schema cleanup");
+        admin
+            .execute(format!("DROP SCHEMA {} CASCADE", self.name).as_str())
+            .await
+            .expect("drop isolated schema");
+    }
+}
 
 // "LASH_PGT" encoded as a positive i64. Every test process that uses the
 // configured shared database must hold this session-level lock for its entire

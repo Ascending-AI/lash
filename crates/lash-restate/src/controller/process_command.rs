@@ -285,6 +285,15 @@ where
             // step journaled. With none, nothing was started, and the start
             // refuses at its live frontier having acted on nothing (FIG-3779
             // option 3).
+            //
+            // The start stages under `Start(key)`, guarded by the journal of
+            // the scope that runs this step (ADR 0113 §3.3): once Restate
+            // settles it, a start that never registered is ended.
+            let starter = invocation
+                .address
+                .execution_scope
+                .journal_identity()
+                .map_err(RuntimeEffectControllerError::from)?;
             let live = served_only
                 .clone()
                 .map(super::live_frontier::LiveFrontier::new);
@@ -311,6 +320,7 @@ where
                         engines: process_engines.as_ref(),
                         engines_required: true,
                         executor: "Restate process start",
+                        starter: &starter,
                     };
                     match lash_core::runtime::register_process_start(
                         &stores,

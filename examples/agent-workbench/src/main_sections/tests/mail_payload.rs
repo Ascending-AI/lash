@@ -82,12 +82,10 @@ async fn inject_message_scopes_emission_to_requested_session() {
         lash::rlm::LinkedModule::link(module, environment).expect("link mail-listener process");
     // The engine's own stores: the process the trigger starts reads its
     // module and environment from them.
-    let artifact_store = lash::persistence::LashlangArtifacts::of_backend(&double.lash_backend());
-    artifact_store
-        .publish_module_artifact(
-            &lash::process::ArtifactOwner::host("mail-payload-test"),
-            &linked.artifact,
-        )
+    let artifacts = state.core.host_artifacts();
+    let pin = lash::process::HostArtifactPin::mint();
+    artifacts
+        .publish_module(&pin, &linked.artifact)
         .await
         .expect("publish mail-listener module");
     let process_input = lash_lashlang_runtime::LashlangProcessInput {
@@ -102,18 +100,14 @@ async fn inject_message_scopes_emission_to_requested_session() {
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_env_store = double.stores().process_env_store();
     let process_env_spec = lash::process::ProcessExecutionEnvSpec::new(
         Default::default(),
         lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
     );
-    let process_env_ref = lash::process::publish_process_execution_env(
-        process_env_store.as_ref(),
-        &lash::process::ArtifactOwner::host("mail-payload-test"),
-        &process_env_spec,
-    )
-    .await
-    .expect("publish mail-listener process environment");
+    let process_env_ref = artifacts
+        .publish_process_env(&pin, &process_env_spec)
+        .await
+        .expect("publish mail-listener process environment");
 
     let account_summary = state
         .mail_world

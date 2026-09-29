@@ -33,6 +33,28 @@ impl ProcessEngine for SignedEngine {
         unreachable!("resolution never runs the process")
     }
 
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        unreachable!("resolution never starts the process")
+    }
+
     async fn resolve(
         &self,
         reference: &ProcessDefinitionRef,

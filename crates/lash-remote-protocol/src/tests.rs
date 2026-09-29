@@ -321,6 +321,8 @@ fn remote_turn_request_json_round_trips() {
                 },
             ],
             trace_turn_id: Some(TurnId::from("trace")),
+            #[cfg(feature = "synthetic-next")]
+            synthetic_next_note: None,
         },
         protocol_turn_options: Some(RemoteProtocolTurnOptions {
             payload: serde_json::json!({ "answer": "raw" }),

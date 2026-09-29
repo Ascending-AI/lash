@@ -444,15 +444,6 @@ pub trait SessionStoreFactory:
     /// backend is opened; the binding carries no location.
     fn bind_effect_host(&self, _effect_host: &Arc<dyn crate::EffectHost>) {}
 
-    /// Bind the exact artifact stores whose execution-owner cleanup this
-    /// factory resumes from committed scope-retirement evidence.
-    fn bind_artifact_stores(
-        &self,
-        _process_env_store: Arc<dyn ProcessExecutionEnvStore>,
-        _process_engines: ProcessEngineRegistry,
-    ) {
-    }
-
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,

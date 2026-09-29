@@ -31,8 +31,8 @@ pub use control::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CommandJournalGuard,
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildCancelWatch,
-    IndependentEffectWork, ProcessDriveStep, RecordedJournal, RecordedKeyFence, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
+    IndependentEffectWork, JournalReplay, ProcessDriveStep, RecordedJournal, RecordedKeyFence,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeEffectController, ScopeBoundController,
     ScopedEffectController, SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink,
     ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelClosureOwnerBinding,
 };
@@ -1356,12 +1356,7 @@ impl RuntimeEffectLocalRunner for LocalToolAttemptEffectRunner<'_> {
                     self.completion_key,
                 ))
                 .await?;
-                Ok(RuntimeEffectOutcome::ToolAttempt {
-                    launch: Box::new(outcome.launch),
-                    triggers: outcome.triggers,
-                    capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
-                    capture_watermark: outcome.capture_watermark.map(Box::new),
-                })
+                Ok(tool_attempt_outcome(outcome))
             }
             command => Err(RuntimeEffectControllerError::new(
                 crate::RuntimeErrorCode::RuntimeEffectLocalExecutorMismatch,
@@ -1459,12 +1454,17 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
             }
             _ => body.await?,
         };
-        Ok(RuntimeEffectOutcome::ToolAttempt {
-            launch: Box::new(outcome.launch),
-            triggers: outcome.triggers,
-            capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
-            capture_watermark: outcome.capture_watermark.map(Box::new),
-        })
+        Ok(tool_attempt_outcome(outcome))
+    }
+}
+
+/// The recorded outcome of one tool attempt a local runner executed.
+fn tool_attempt_outcome(outcome: crate::ToolAttemptEffectOutcome) -> RuntimeEffectOutcome {
+    RuntimeEffectOutcome::ToolAttempt {
+        launch: Box::new(outcome.launch),
+        triggers: outcome.triggers,
+        capture: (!outcome.capture.is_empty()).then(|| Box::new(outcome.capture)),
+        capture_watermark: outcome.capture_watermark.map(Box::new),
     }
 }
 
@@ -1623,6 +1623,9 @@ pub async fn sleep_with_cancellation(
 
 #[cfg(test)]
 mod served_only_tests;
+
+#[cfg(test)]
+mod unresolved_execution_env_tests;
 
 #[cfg(test)]
 mod task_boundary_tests {

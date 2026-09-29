@@ -21,3 +21,4 @@
 pub mod harness;
 pub mod identity;
 pub mod node;
+pub mod restate_view;

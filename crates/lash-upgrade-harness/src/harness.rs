@@ -10,10 +10,15 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail, ensure};
+use lash_restate::VersionRange;
 use serde::de::DeserializeOwned;
 
 use crate::identity::BuildLabel;
-use crate::node::{ServeReady, StoreSpec, TurnReport};
+use crate::node::objects::{CallReport, SweepLine, TargetKind};
+use crate::node::provider::{self, EffectRecord};
+use crate::node::remote::ClientReport;
+use crate::node::{ProbeReport, RegisterReport, ServeReady, StoreSpec, TurnReport};
+use crate::restate_view::RestateView;
 
 /// The N build's `lash-upgrade-node`.
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
@@ -28,6 +33,9 @@ pub const POSTGRES_URL_ENV: &str = "LASH_POSTGRES_DATABASE_URL";
 
 /// How long a `serve` node has to register its deployment.
 const SERVE_READY: Duration = Duration::from_secs(120);
+
+/// How long a leg waits for a condition it polls before it fails.
+pub const WAIT: Duration = Duration::from_secs(120);
 
 fn required_env(name: &str) -> Result<String> {
     std::env::var(name)
@@ -53,6 +61,120 @@ impl Services {
             admin_url: required_env("RESTATE_ADMIN_URL")?,
             postgres_url: required_env(POSTGRES_URL_ENV)?,
         })
+    }
+
+    /// A fresh database named `name` on the PostgreSQL server, and its URL.
+    /// A leg that moves the fleet epoch owns its database, because `F` is
+    /// one row per database.
+    pub fn fresh_postgres_database(&self, name: &str) -> Result<String> {
+        let database = name.replace('-', "_");
+        ensure!(
+            database
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
+            "`{name}` is not a plain database name"
+        );
+        let url = self.postgres_url.clone();
+        let create = format!("CREATE DATABASE {database}");
+        block_on(async move {
+            use sqlx::Connection as _;
+            let mut connection = sqlx::PgConnection::connect(&url)
+                .await
+                .with_context(|| format!("connect to {url}"))?;
+            sqlx::query(&create)
+                .execute(&mut connection)
+                .await
+                .with_context(|| create.clone())?;
+            connection.close().await.ok();
+            Ok(())
+        })?;
+        let (server, query) = match self.postgres_url.split_once('?') {
+            Some((server, query)) => (server, format!("?{query}")),
+            None => (self.postgres_url.as_str(), String::new()),
+        };
+        let base = server.rsplit_once('/').map_or(server, |(base, _)| base);
+        Ok(format!("{base}/{database}{query}"))
+    }
+}
+
+/// Run `future` to completion on a runtime of its own: the legs are
+/// synchronous, and each Restate or PostgreSQL read is one blocking step.
+pub fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .context("build a runtime")?
+        .block_on(future)
+}
+
+/// Poll `probe` until it answers `Some`, failing after [`WAIT`] with what
+/// the leg was waiting for.
+pub fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Result<Option<T>>) -> Result<T> {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Some(value) = probe()? {
+            return Ok(value);
+        }
+        if Instant::now() > deadline {
+            bail!("timed out after {WAIT:?} waiting for {what}");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// How a `serve` node starts.
+#[derive(Clone, Debug, Default)]
+pub struct ServeOptions {
+    /// The address the endpoint listens on; a fresh loopback port when
+    /// `None`. A node that comes back at a crashed node's address serves
+    /// the invocations pinned to that node's deployment.
+    pub bind: Option<String>,
+    /// Serve without registering the endpoint.
+    pub unregistered: bool,
+}
+
+/// One direct call to a lash handler ([`crate::node::objects`]).
+#[derive(Clone, Debug)]
+pub struct CallSpec<'a> {
+    pub service: &'a str,
+    pub kind: TargetKind,
+    pub key: &'a str,
+    pub handler: &'a str,
+    pub body: serde_json::Value,
+    /// The wire range the call states; the calling build's own when `None`.
+    pub wire: Option<VersionRange>,
+}
+
+impl<'a> CallSpec<'a> {
+    /// A call to an object handler at the calling build's wire range.
+    pub fn object(service: &'a str, key: &'a str, handler: &'a str) -> Self {
+        Self {
+            service,
+            kind: TargetKind::Object,
+            key,
+            handler,
+            body: serde_json::Value::Null,
+            wire: None,
+        }
+    }
+
+    /// A call to a workflow handler at the calling build's wire range.
+    pub fn workflow(service: &'a str, key: &'a str, handler: &'a str) -> Self {
+        Self {
+            kind: TargetKind::Workflow,
+            ..Self::object(service, key, handler)
+        }
+    }
+
+    pub fn body(self, body: serde_json::Value) -> Self {
+        Self { body, ..self }
+    }
+
+    pub fn wire(self, wire: VersionRange) -> Self {
+        Self {
+            wire: Some(wire),
+            ..self
+        }
     }
 }
 
@@ -92,9 +214,60 @@ impl NodeBinary {
         self.label
     }
 
+    /// Open the store in this build's own process without registering a
+    /// deployment. A requested session is read through the backend view.
+    fn probe_report(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
+        let mut command = Command::new(&self.path);
+        command.arg("probe").args(case.store_args());
+        if let Some(session) = session {
+            command.args(["--session", session]);
+        }
+        let output = command
+            .output()
+            .with_context(|| format!("run {} probe", self.label()))?;
+        let report: ProbeReport = report(&self.path, "probe", output)?;
+        ensure!(
+            report.build == self.label,
+            "{} probed as {}",
+            self.label,
+            report.build
+        );
+        Ok(report)
+    }
+
+    /// Open this build's store in its own process and require admission.
+    pub fn probe(&self, case: &Case, session: Option<&str>) -> Result<ProbeReport> {
+        let report = self.probe_report(case, session)?;
+        ensure!(
+            report.refusal.is_none(),
+            "{} refused {}: {:?}",
+            self.label,
+            case.name,
+            report.refusal
+        );
+        Ok(report)
+    }
+
+    /// Open this build's store in its own process and return a typed refusal.
+    pub fn probe_refusal(&self, case: &Case) -> Result<lash_core::compat::CompatRefusal> {
+        let report = self.probe_report(case, None)?;
+        report.refusal.ok_or_else(|| {
+            anyhow!(
+                "{} admitted {} when a compatibility refusal was required",
+                self.label,
+                case.name
+            )
+        })
+    }
+
     /// Serve a deployment of this build over `case`'s store, registered at
     /// a URI of its own. The node serves until the handle stops or drops.
     pub fn serve(&self, case: &Case) -> Result<ServingNode> {
+        self.serve_with(case, &ServeOptions::default())
+    }
+
+    /// [`serve`](Self::serve) as `options` ask.
+    pub fn serve_with(&self, case: &Case, options: &ServeOptions) -> Result<ServingNode> {
         let ready_file = case.scratch.join(format!(
             "ready-{}-{}.json",
             self.label().as_str().replace('+', "p"),
@@ -103,12 +276,24 @@ impl NodeBinary {
         let log_path = ready_file.with_extension("log");
         let log = std::fs::File::create(&log_path)
             .with_context(|| format!("create {}", log_path.display()))?;
-        let child = Command::new(&self.path)
+        let mut command = Command::new(&self.path);
+        command
             .arg("serve")
             .args(case.store_args())
             .args(case.restate_args())
             .arg("--ready-file")
             .arg(&ready_file)
+            .arg("--effects-log")
+            .arg(case.effects_log())
+            .arg("--gate-dir")
+            .arg(case.gate_dir());
+        if let Some(bind) = &options.bind {
+            command.args(["--bind", bind]);
+        }
+        if options.unregistered {
+            command.arg("--no-register");
+        }
+        let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
             .stderr(Stdio::from(log))
@@ -142,6 +327,170 @@ impl NodeBinary {
             .with_context(|| format!("run {} turn", self.label()))?;
         report(&self.path, "turn", output)
     }
+
+    /// Send `message` to `session` as a host of this build, in the
+    /// background: the turn settles while the leg moves deployments.
+    pub fn spawn_turn(&self, case: &Case, session: &str, message: &str) -> Result<PendingTurn> {
+        let child = Command::new(&self.path)
+            .arg("turn")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--session", session, "--message", message])
+            .args(["--timeout-secs", "600"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("spawn {} turn", self.label()))?;
+        Ok(PendingTurn {
+            path: self.path.clone(),
+            child,
+        })
+    }
+
+    /// Register `uri` as this build's deployment, through lash's own
+    /// registration guard.
+    pub fn register(&self, case: &Case, uri: &str) -> Result<RegisterReport> {
+        let output = Command::new(&self.path)
+            .arg("register")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--uri", uri])
+            .output()
+            .with_context(|| format!("run {} register", self.label()))?;
+        report(&self.path, "register", output)
+    }
+
+    /// Call one of lash's own handlers as a caller of this build.
+    pub fn call(&self, case: &Case, spec: &CallSpec<'_>) -> Result<CallReport> {
+        let mut command = Command::new(&self.path);
+        command
+            .arg("call")
+            .args(case.restate_args())
+            .args(["--service", spec.service, "--key", spec.key])
+            .args(["--handler", spec.handler])
+            .args([
+                "--kind",
+                match spec.kind {
+                    TargetKind::Object => "object",
+                    TargetKind::Workflow => "workflow",
+                },
+            ])
+            .arg("--body")
+            .arg(spec.body.to_string());
+        if let Some(wire) = spec.wire {
+            command
+                .arg("--wire")
+                .arg(format!("{}..{}", wire.min(), wire.max()));
+        }
+        let output = command
+            .output()
+            .with_context(|| format!("run {} call", self.label()))?;
+        report(&self.path, "call", output)
+    }
+
+    /// Start this build's synthetic sweep in the background.
+    pub fn spawn_sweep(&self, case: &Case) -> Result<Sweeper> {
+        let mut child = Command::new(&self.path)
+            .arg("sweep")
+            .args(case.restate_args())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .with_context(|| format!("spawn {} sweep", self.label()))?;
+        let lines = std::io::BufReader::new(child.stdout.take().context("the sweep's stdout")?);
+        Ok(Sweeper {
+            child,
+            lines: std::io::BufRead::lines(lines),
+        })
+    }
+
+    /// Run one turn from this build's remote client through `peer`'s remote
+    /// host, offering `offer` (this build's own range when `None`).
+    pub fn remote_client(
+        &self,
+        case: &Case,
+        peer: &NodeBinary,
+        offer: Option<VersionRange>,
+        session: &str,
+        message: &str,
+    ) -> Result<ClientReport> {
+        let mut command = Command::new(&self.path);
+        command
+            .arg("remote-client")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .arg("--effects-log")
+            .arg(case.effects_log())
+            .arg("--gate-dir")
+            .arg(case.gate_dir())
+            .arg("--peer")
+            .arg(&peer.path)
+            .args(["--session", session, "--message", message]);
+        if let Some(offer) = offer {
+            command
+                .arg("--offer")
+                .arg(format!("{}..{}", offer.min(), offer.max()));
+        }
+        let output = command
+            .output()
+            .with_context(|| format!("run {} remote-client", self.label()))?;
+        report(&self.path, "remote-client", output)
+    }
+}
+
+/// A turn a host of one build is waiting on in the background.
+pub struct PendingTurn {
+    path: PathBuf,
+    child: Child,
+}
+
+impl PendingTurn {
+    /// Wait for the host to report the settled turn.
+    pub fn wait(self) -> Result<TurnReport> {
+        let output = self.child.wait_with_output().context("wait for the turn")?;
+        report(&self.path, "turn", output)
+    }
+}
+
+/// A running synthetic sweep, read one object at a time.
+pub struct Sweeper {
+    child: Child,
+    lines: std::io::Lines<std::io::BufReader<std::process::ChildStdout>>,
+}
+
+impl Sweeper {
+    /// The next object the sweep finished, or `None` once it ended.
+    pub fn next_object(&mut self) -> Result<Option<SweepLine>> {
+        match self.lines.next() {
+            Some(line) => {
+                let line = line.context("read the sweep")?;
+                serde_json::from_str(&line)
+                    .map(Some)
+                    .with_context(|| format!("decode a sweep line: {line}"))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Kill the sweep where it stands, as a crash does.
+    pub fn crash(mut self) -> Result<()> {
+        self.child.kill().context("kill the sweep")?;
+        self.child.wait().context("reap the sweep")?;
+        Ok(())
+    }
+
+    /// Read the rest of the sweep and confirm it ended cleanly.
+    pub fn finish(mut self) -> Result<Vec<SweepLine>> {
+        let mut done = Vec::new();
+        while let Some(line) = self.next_object()? {
+            done.push(line);
+        }
+        let status = self.child.wait().context("reap the sweep")?;
+        ensure!(status.success(), "the sweep exited {status}");
+        Ok(done)
+    }
 }
 
 /// The real operator binary, whose JSON output is kept in the test log.
@@ -155,6 +504,19 @@ impl Operator {
         Ok(Self {
             path: PathBuf::from(required_env(name)?),
             postgres_url: services.postgres_url.clone(),
+        })
+    }
+
+    /// The operator binary `name` names, over `case`'s own PostgreSQL
+    /// database.
+    pub fn for_case(case: &Case, name: &str) -> Result<Self> {
+        let postgres_url = case
+            .postgres_url()
+            .ok_or_else(|| anyhow!("{} is not a PostgreSQL case", case.name))?
+            .to_owned();
+        Ok(Self {
+            path: PathBuf::from(required_env(name)?),
+            postgres_url,
         })
     }
 
@@ -230,6 +592,32 @@ impl ServingNode {
     /// What the node registered.
     pub fn ready(&self) -> Option<&ServeReady> {
         self.ready.as_ref()
+    }
+
+    /// The URI the node serves at.
+    pub fn uri(&self) -> Result<&str> {
+        self.ready
+            .as_ref()
+            .map(|ready| ready.uri.as_str())
+            .ok_or_else(|| anyhow!("the node has not registered"))
+    }
+
+    /// The generation the node serves.
+    pub fn generation(&self) -> Result<&str> {
+        self.ready
+            .as_ref()
+            .map(|ready| ready.generation.as_str())
+            .ok_or_else(|| anyhow!("the node has not registered"))
+    }
+
+    /// The `host:port` the node listens on, for a node that comes back in
+    /// its place.
+    pub fn bind(&self) -> Result<String> {
+        let uri = self.uri()?;
+        Ok(uri
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+            .to_owned())
     }
 
     fn await_ready(&mut self, ready_file: &Path) -> Result<ServeReady> {
@@ -319,6 +707,21 @@ impl Case {
         )
     }
 
+    /// A roll over a fresh PostgreSQL database of its own, for a leg that
+    /// moves the fleet epoch.
+    pub fn postgres_database(name: &str, services: &Services, scratch: &Path) -> Result<Self> {
+        let database = format!(
+            "phase_a_{name}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis())
+                .unwrap_or_default()
+        );
+        let url = services.fresh_postgres_database(&database)?;
+        Self::new(name, StoreSpec::Postgres(url), services, scratch)
+    }
+
     /// A roll over a fresh SQLite store directory under `scratch`.
     pub fn sqlite(name: &str, services: &Services, scratch: &Path) -> Result<Self> {
         let dir = scratch.join(name).join("stores");
@@ -327,7 +730,7 @@ impl Case {
 
     fn new(name: &str, store: StoreSpec, services: &Services, scratch: &Path) -> Result<Self> {
         let scratch = scratch.join(name);
-        std::fs::create_dir_all(&scratch)
+        std::fs::create_dir_all(scratch.join("gates"))
             .with_context(|| format!("create {}", scratch.display()))?;
         let token = format!(
             "{}-{}",
@@ -353,6 +756,102 @@ impl Case {
     /// run the session a previous run wrote.
     pub fn session_id(&self, prefix: &str) -> String {
         format!("{prefix}-{}-{}", self.name, self.token)
+    }
+
+    /// A case over the same store whose deployments bind under a namespace
+    /// and authority of their own, so they never take this case's calls.
+    pub fn beside(&self, name: &str) -> Result<Self> {
+        let scratch = self.scratch.join(name);
+        std::fs::create_dir_all(scratch.join("gates"))
+            .with_context(|| format!("create {}", scratch.display()))?;
+        Ok(Self {
+            name: format!("{}-{name}", self.name),
+            store: self.store.clone(),
+            scratch,
+            services: self.services.clone(),
+            authority: format!("{}-{name}", self.authority),
+            namespace: format!("{}-{name}", self.namespace),
+            token: self.token.clone(),
+            ordinal: std::cell::Cell::new(0),
+        })
+    }
+
+    /// The case's PostgreSQL URL, when it is a PostgreSQL case.
+    pub fn postgres_url(&self) -> Option<&str> {
+        match &self.store {
+            StoreSpec::Postgres(url) => Some(url),
+            StoreSpec::Sqlite(_) => None,
+        }
+    }
+
+    /// The Restate server, seen through the case's namespace.
+    pub fn view(&self) -> Result<RestateView> {
+        RestateView::new(&self.services.admin_url, &self.namespace)
+    }
+
+    /// The log every serving node of the case appends its model calls to.
+    pub fn effects_log(&self) -> PathBuf {
+        self.scratch.join("effects.jsonl")
+    }
+
+    /// Every model call a serving node of the case made.
+    pub fn effects(&self) -> Result<Vec<EffectRecord>> {
+        provider::read_effects(&self.effects_log())
+    }
+
+    /// The model calls whose message contains `marker`.
+    pub fn effects_of(&self, marker: &str) -> Result<Vec<EffectRecord>> {
+        Ok(self
+            .effects()?
+            .into_iter()
+            .filter(|effect| effect.message.contains(marker))
+            .collect())
+    }
+
+    /// Where held model calls wait for their release.
+    pub fn gate_dir(&self) -> PathBuf {
+        self.scratch.join("gates")
+    }
+
+    /// Wait until a model call holding at `gate` reached the provider, and
+    /// answer the generation of the node that holds it.
+    pub fn await_gate(&self, gate: &str) -> Result<String> {
+        let reached = provider::reached_file(&self.gate_dir(), gate);
+        wait_for(&format!("a model call to reach gate {gate}"), || {
+            Ok(std::fs::read_to_string(&reached).ok())
+        })
+    }
+
+    /// Release every model call held at `gate`.
+    pub fn release(&self, gate: &str) -> Result<()> {
+        let release = provider::release_file(&self.gate_dir(), gate);
+        std::fs::write(&release, gate).with_context(|| format!("release gate {gate}"))
+    }
+
+    /// Move the case's recorded fleet epoch to `version`: the synthetic
+    /// finalize (ADR 0115 §2). `lashctl finalize` is FIG-3800 B's, after
+    /// 1.0; the row it would move is the one moved here.
+    pub fn finalize_postgres(&self, version: u32) -> Result<()> {
+        let url = self
+            .postgres_url()
+            .ok_or_else(|| anyhow!("{} is not a PostgreSQL case", self.name))?
+            .to_owned();
+        let version = i32::try_from(version).context("an epoch")?;
+        block_on(async move {
+            use sqlx::Connection as _;
+            let mut connection = sqlx::PgConnection::connect(&url)
+                .await
+                .with_context(|| format!("connect to {url}"))?;
+            let moved = sqlx::query("UPDATE lash_fleet_format SET format_version = $1")
+                .bind(version)
+                .execute(&mut connection)
+                .await
+                .context("move the fleet epoch")?
+                .rows_affected();
+            ensure!(moved == 1, "the fleet-format row moved {moved} rows");
+            connection.close().await.ok();
+            Ok(())
+        })
     }
 
     fn next_ordinal(&self) -> u32 {

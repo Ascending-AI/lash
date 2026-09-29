@@ -123,6 +123,32 @@ pub(super) async fn delete_session_from_catalog(
                 .optional()
                 .map_err(sqlite_error)?
                 .unwrap_or((None, None));
+            let head_json: Option<String> = tx
+                .query_row(
+                    session_sql().head.select_head_json.sql(),
+                    params![session_id.as_str()],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(sqlite_error)?;
+            if let Some(head_json) = head_json {
+                let payload: lash_core_execution::store::SessionHeadPayload =
+                    serde_json::from_str(&head_json)
+                        .map_err(|error| stored_data_corrupt("SessionHeadPayload", error))?;
+                if let Some(frame_node_id) = payload.current_frame_node_id {
+                    let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+                        lash_core_execution::FrameEnvironmentId::new(
+                            session_id.clone(),
+                            frame_node_id,
+                        ),
+                    );
+                    crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now_ms)
+                        .map_err(sqlite_error)?;
+                    let cleanup =
+                        lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), None);
+                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")?;
+                }
+            }
             let mut candidates = std::collections::BTreeSet::new();
             if let Some(checkpoint_ref) = checkpoint_ref.as_deref() {
                 candidates.insert(checkpoint_ref.to_string());

@@ -314,6 +314,17 @@ pub trait CodeExecutorPlugin: Send + Sync {
         Ok(ExecutionStateSnapshot::default())
     }
 
+    /// The artifacts a `continue_as` carries into the successor frame
+    /// (ADR 0113 §3.1): every artifact the seed values in `initial_nodes`
+    /// reference. The switching turn's final commit carries them onto the
+    /// successor's frame environment and ends the frame it leaves; an
+    /// executor that binds no artifacts answers none.
+    async fn frame_switch_carries(
+        &self,
+        ctx: ProtocolSessionContext<'_>,
+        initial_nodes: &[crate::SessionAppendNode],
+    ) -> Result<Vec<crate::ArtifactName>, crate::SessionError>;
+
     /// Report whether a dirty execution-state capture *would* succeed, staging
     /// nothing.
     ///

@@ -1220,13 +1220,13 @@ macro_rules! process_prune_reclaim_tests {
     };
 }
 
-/// Register the process-prune start-staging law. The fixture yields
+/// Register the process-prune referrer law. The fixture yields
 /// `(guard, process registry, process-environment store)`.
 #[macro_export]
 macro_rules! process_prune_start_staging_tests {
     ($fixture:block) => {
         $crate::process_prune_start_staging_tests!(@catalogue $fixture; [
-            (process_prune_retires_the_start_staging_owner, "process-prune-start-staging"),
+            (prune_and_late_transfer_fences, "process-prune-referrer-fence"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -1287,19 +1287,17 @@ macro_rules! artifact_store_reopenable_tests {
         $crate::artifact_store_reopenable_tests!(@catalogue $fixture; [
             (lashlang_artifact_store_fresh_instances, "lashlang-artifact-fresh-instances"),
             (lashlang_artifact_store_reports_durable, "lashlang-artifact-durability"),
-            (lashlang_artifact_owner_lifecycle, "lashlang-artifact-owner-lifecycle"),
-            (lashlang_failed_registration_reclaims_staging_owner, "lashlang-artifact-failed-registration"),
-            (lashlang_artifact_transfer_is_idempotent, "lashlang-artifact-transfer"),
-            (lashlang_artifact_retirement_fences_late_publication, "lashlang-artifact-retirement-fence"),
-            (lashlang_slow_writer_is_fenced_after_retirement, "lashlang-artifact-slow-writer"),
+            (lashlang_last_referrer_reclaims_module, "lashlang-artifact-last-referrer"),
+            (lashlang_abandoned_start_reclaims_module, "lashlang-artifact-abandoned-start"),
+            (lashlang_carry_preserves_module, "lashlang-artifact-carry"),
+            (lashlang_ended_referrer_fences_late_publication, "lashlang-artifact-referrer-fence"),
             (lashlang_hostile_module_references_are_rejected, "lashlang-artifact-hostile-reference"),
             (lashlang_alpha_variants_publish_distinct_refs, "lashlang-artifact-alpha-variants"),
             (lashlang_artifact_survives_reopen, "lashlang-artifact-reopen"),
             (process_execution_env_store_fresh_instances, "process-env-fresh-instances"),
             (process_environment_namespace, "process-env-hostile-reference"),
-            (process_env_owner_lifecycle, "process-env-owner-lifecycle"),
-            (failed_registration_reclaims_process_env, "process-env-failed-registration"),
-            (process_env_transfer_and_fence, "process-env-transfer"),
+            (process_env_last_referrer_reclaims_bytes, "process-env-last-referrer"),
+            (process_env_carry_precedes_reclamation, "process-env-carry"),
             (slow_process_env_writer_is_fenced, "process-env-slow-writer"),
             (process_env_survives_reopen, "process-env-reopen"),
             (artifact_store_cross_namespace_isolation, "artifact-store-cross-namespace"),
@@ -1312,6 +1310,30 @@ macro_rules! artifact_store_reopenable_tests {
                 let (_fixture_guard, make) = $fixture;
                 let _ = $label;
                 $crate::fused_artifact_store::$law(make).await;
+            }
+        )*
+    };
+}
+
+/// Register the referrer laws on a fresh fused artifact-store fixture.
+/// The fixture has the same shape as `artifact_store_reopenable_tests!`.
+#[macro_export]
+macro_rules! artifact_referrer_tests {
+    ($fixture:block) => {
+        $crate::artifact_referrer_tests!(@catalogue $fixture; [
+            (publication_racing_frame_end_is_fenced, "artifact-referrer-publication-race"),
+            (host_pins_reclaim_and_fence, "artifact-referrer-host-pins"),
+            (every_referrer_kind_has_one_canonical_id, "artifact-referrer-canonical-id"),
+            (retry_idempotency_after_destination_ends, "artifact-referrer-retry-idempotency"),
+        ]);
+    };
+    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, make) = $fixture;
+                let _ = $label;
+                $crate::$law(make).await;
             }
         )*
     };

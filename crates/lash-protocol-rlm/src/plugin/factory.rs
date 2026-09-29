@@ -282,17 +282,6 @@ impl RlmProtocolPluginFactory {
             environment: &surface.host_environment,
         })
     }
-
-    /// Publish an already compiled module under an explicit lifetime owner.
-    pub async fn publish_lashlang_module(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lash_core::ArtifactStoreError> {
-        self.artifact_store
-            .publish_module_artifact(owner, artifact)
-            .await
-    }
 }
 
 impl PluginFactory for RlmProtocolPluginFactory {

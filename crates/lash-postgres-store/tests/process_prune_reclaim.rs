@@ -10,8 +10,8 @@ use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry, ProcessRetention as _,
-    SessionStoreFactory,
+    ProcessExecutionEnvStore, ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry,
+    ProcessRetention as _, SessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -81,18 +81,17 @@ lash_conformance::process_prune_reclaim_tests!({
 
 lash_conformance::process_prune_start_staging_tests!({
     let Some((database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres process-prune start-staging law: database URL is not set");
+        eprintln!("skipping Postgres prune and late-transfer law: database URL is not set");
         return;
     };
     reset(&storage).await;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let env_store = Arc::new(storage.process_env_store())
-        as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>;
+    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
     (database_lock, registry, env_store)
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured() {
+async fn postgres_process_prune_fence_and_obligation_survive_reopen_when_configured() {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!("skipping Postgres process cleanup recovery: database URL is not set");
         return;
@@ -135,31 +134,36 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
         .expect("prune with cleanup evidence");
     drop(registry);
 
-    let reopened = storage.process_registry();
-    let pending = reopened
-        .pending_process_artifact_cleanup()
-        .await
-        .expect("read cleanup evidence after reopen");
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].process_id, registered.id);
-    assert_eq!(pending[0].env_ref, registered.env_ref);
-    assert_eq!(pending[0].input, registered.input);
-    let acknowledgement = reopened
-        .complete_process_artifact_cleanup(&registered.id)
-        .await
-        .expect("ack cleanup evidence");
-    assert_eq!(
-        acknowledgement,
-        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
-            process_id: registered.id.clone(),
-        }
-    );
+    let referrer = lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id);
+    let fenced: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+         WHERE referrer_kind = $1 AND referrer_id = $2)",
+    )
+    .bind(referrer.kind().as_str())
+    .bind(referrer.canonical_id())
+    .fetch_one(storage.pool())
+    .await
+    .expect("read durable prune fence");
+    assert!(fenced);
+    let id: String = sqlx::query_scalar(
+        "SELECT obligation_id FROM lash_artifact_cleanup_obligations
+         WHERE referrer_kind = $1 AND referrer_id = $2",
+    )
+    .bind(referrer.kind().as_str())
+    .bind(referrer.canonical_id())
+    .fetch_one(storage.pool())
+    .await
+    .expect("read durable cleanup obligation");
+    let cleanup = lash_core_execution::store::ArtifactCleanupLedger::load_cleanup(
+        storage.artifact_cleanup().as_ref(),
+        &lash_core_execution::store::ObligationId::new(id),
+    )
+    .await
+    .expect("load cleanup body")
+    .expect("prune owes a cleanup");
+    assert_eq!(cleanup.referrer, referrer);
     assert!(
-        reopened
-            .pending_process_artifact_cleanup()
-            .await
-            .expect("read acknowledged cleanup")
-            .is_empty()
+        matches!(cleanup.plan, lash_core_execution::ArtifactCleanupPlan::Ended { carries } if carries.is_empty())
     );
 }
 

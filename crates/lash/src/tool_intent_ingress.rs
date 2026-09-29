@@ -1129,16 +1129,37 @@ impl ToolIntentIngress {
             .control
             .effect_host
             .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
+        // The realizing execution's journal holds what it publishes, and the
+        // command's effect holds the revision it commits before it commits
+        // (ADR 0113 §3.4, §3.7).
+        let creator = scoped
+            .execution_scope()
+            .journal_identity()
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?;
+        let store: std::sync::Arc<dyn lash_core::TriggerStore> =
+            std::sync::Arc::new(lash_core::triggers::RevisionReferrerTriggerStore::new(
+                store,
+                self.core.env.core.process_engines.clone(),
+                creator.clone(),
+            ));
         let mut draft = intent.draft;
         if let Some(env_spec) = intent.env_spec.as_ref() {
             // The declaring attempt carries the env spec; publication lands
-            // here under the realizing execution scope's artifact owner — the
-            // same owner the retired host-operation path used (FIG-3116). The
-            // draft's env ref is content-addressed, so the published
+            // here, under the realizing execution's journal referrer (FIG-3116).
+            // The draft's env ref is content-addressed, so the published
             // reference is the one it already names.
+            let claim = lash_core::ReferrerClaim::guarded(
+                lash_core::ArtifactReferrer::Execution(creator),
+                lash_core::ArtifactCleanupPlan::AwaitJournal,
+            )
+            .map_err(|error| {
+                crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+            })?;
             draft.env_ref = lash_core::publish_process_execution_env(
                 self.core.env.core.durability.process_env_store.as_ref(),
-                &lash_core::ArtifactOwner::execution(scoped.execution_scope().clone()),
+                &claim,
                 env_spec,
             )
             .await
@@ -1200,7 +1221,19 @@ impl ToolIntentIngress {
         identity: &lash_core::ToolIntentIdentity,
         intent: lash_core::RegisterProcessDefinitionIntent,
     ) -> crate::Result<lash_core::ProcessDefinitionRegistration> {
-        let registry = self.core.env.core.process_definitions();
+        // The registration holds the revision its CAS writes before the CAS
+        // commits, under this ingress's journal (ADR 0113 §3.6).
+        let creator = self.scope.journal_identity().map_err(|error| {
+            crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
+        })?;
+        let registry: std::sync::Arc<dyn lash_core::ProcessDefinitionRegistry> =
+            std::sync::Arc::new(
+                lash_core::process_registry::RevisionReferrerDefinitionRegistry::new(
+                    self.core.env.core.process_definitions(),
+                    self.core.env.core.process_engines.clone(),
+                    creator,
+                ),
+            );
         let name = intent
             .name
             .as_deref()

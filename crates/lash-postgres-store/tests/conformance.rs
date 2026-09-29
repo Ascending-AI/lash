@@ -102,6 +102,7 @@ use lash_conformance::{
     GraphFactObservation, LineageConformanceHandles, LineageConformanceInjector,
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
+use lash_core_execution::compat::CompatRefusal;
 use lash_core_execution::store::RuntimePersistenceDecorator;
 use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
 use lash_core_execution::{
@@ -125,7 +126,7 @@ mod wake_delivery;
 
 use injectors::{PostgresFenceIntegrityInjector, PostgresLineageConformanceInjector};
 use occurrence_listing::PostgresTriggerOccurrenceRetentionFaultInjector;
-use support::{SharedDatabaseLock, database_url, reset};
+use support::{IsolatedSchema, SharedDatabaseLock, database_url, reset};
 
 struct MultiSessionAdmissionStore {
     inner: Arc<dyn RuntimePersistence>,
@@ -665,6 +666,51 @@ lash_conformance::artifact_store_reopenable_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(
             "skipping Postgres artifact-store conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    let storage = Arc::new(storage);
+    let database_url = database_url().expect("configured Postgres database URL");
+    (database_lock, move || {
+        let storage = Arc::clone(&storage);
+        let database_url = database_url.clone();
+        sync_await(async move {
+            reset(storage.pool()).await;
+            let open_storage = PostgresStorage::connect(&database_url)
+                .await
+                .expect("open first Postgres artifact pool");
+            let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                artifacts: Arc::new(open_storage.lashlang_artifact_store())
+                    as Arc<dyn lash_core::ModuleArtifactStore>,
+                process_env: Arc::new(open_storage.process_env_store())
+                    as Arc<dyn ProcessExecutionEnvStore>,
+            };
+            let reopen_url = database_url.clone();
+            lash_conformance::fused_artifact_store::ReopenableArtifactStore {
+                open,
+                reopen: Arc::new(move || {
+                    let reopen_url = reopen_url.clone();
+                    let reopened = sync_await(async move {
+                        PostgresStorage::connect(&reopen_url)
+                            .await
+                            .expect("construct post-write Postgres artifact pool")
+                    });
+                    lash_conformance::fused_artifact_store::ArtifactStoreHandles {
+                        artifacts: Arc::new(reopened.lashlang_artifact_store())
+                            as Arc<dyn lash_core::ModuleArtifactStore>,
+                        process_env: Arc::new(reopened.process_env_store())
+                            as Arc<dyn ProcessExecutionEnvStore>,
+                    }
+                }),
+            }
+        })
+    })
+});
+
+lash_conformance::artifact_referrer_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres artifact-referrer conformance: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
@@ -1523,32 +1569,27 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     assert_eq!(turn_stamp as u64, NOW_MS);
 }
 
-// Blocker 1: `from_pool` must enforce the same component schema-version gate as
-// `connect`/`connect_with`. Writing the immediately preceding version into
-// `lash_schema_versions` and then constructing over the pool must fail loudly
-// with the mismatch error, so a pre-cutover database can never be adopted.
+// `from_pool` and `connect` must both reject a reader floor above this build.
+// The altered stamp lives in a scratch schema so no failed assertion can affect
+// another conformance case.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some(url) = database_url() else {
         eprintln!("skipping Postgres from_pool gate test: LASH_POSTGRES_DATABASE_URL is not set");
         return;
     };
-    let pool = storage.pool().clone();
+    let scratch = IsolatedSchema::provision(&url).await;
+    let pool = scratch.pool.clone();
     let current_version: i32 = sqlx::query_scalar(
         "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
     )
     .fetch_one(&pool)
     .await
     .expect("read current schema version");
-    // Derive the expected version from the compiled store instead of pinning a
-    // literal, which would only add a second, staler copy of the number that
-    // reds trunk on every schema bump that reaches main before the pin is
-    // advanced. This assertion keeps the real invariant: the live database
-    // must record the version the compiled store expects.
     assert_eq!(current_version, 1, "the 1.0 compatibility stamp changed");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = 'public'
+         WHERE table_schema = current_schema()
            AND table_name = 'lash_usage_deltas'
            AND column_name = 'payload_hash'",
     )
@@ -1558,7 +1599,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     assert_eq!(payload_hash_nullable, "NO");
     let payload_encoding_version_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
-         WHERE table_schema = 'public'
+         WHERE table_schema = current_schema()
            AND table_name = 'lash_usage_deltas'
            AND column_name = 'payload_encoding_version'",
     )
@@ -1593,68 +1634,42 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .expect("raise reader floor");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
-
-    // Restore the correct version BEFORE asserting so a failed assert never leaves
-    // the shared database wedged for other cases.
-    sqlx::query(
-        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
-         WHERE component = 'lash-postgres-store'",
-    )
-    .bind(current_version)
-    .execute(&pool)
-    .await
-    .expect("restore schema version");
-
-    let message = match result {
-        Ok(_) => panic!("from_pool must reject a raised reader floor"),
-        Err(err) => err.to_string(),
-    };
-    assert!(
-        message.contains("reader floor") && message.contains(&newer_version.to_string()),
-        "expected a reader-floor refusal, got: {message}"
-    );
+    scratch.cleanup().await;
+    assert!(matches!(
+        result,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                found: 2,
+                min_reader: 2,
+                ..
+            }
+        })
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
+    let Some(url) = database_url() else {
         eprintln!(
             "skipping Postgres unstamped-schema gate test: LASH_POSTGRES_DATABASE_URL is not set"
         );
         return;
     };
-    let pool = storage.pool().clone();
-    let current_version: i32 = sqlx::query_scalar(
-        "SELECT version FROM lash_schema_versions WHERE component = 'lash-postgres-store'",
-    )
-    .fetch_one(&pool)
-    .await
-    .expect("read current schema version");
+    let scratch = IsolatedSchema::provision(&url).await;
+    let pool = scratch.pool.clone();
     sqlx::query("DELETE FROM lash_schema_versions WHERE component = 'lash-postgres-store'")
         .execute(&pool)
         .await
         .expect("remove component version stamp");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
-
-    sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version, min_reader)
-         VALUES ('lash-postgres-store', $1, $1)
-         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
-    )
-    .bind(current_version)
-    .execute(&pool)
-    .await
-    .expect("restore component version stamp");
-
-    let message = match result {
-        Ok(_) => panic!("from_pool must reject an unstamped existing Lash schema"),
-        Err(err) => err.to_string(),
-    };
-    assert!(
-        message.contains("unstamped") || message.contains("stamp"),
-        "expected an unstamped-schema error, got: {message}"
-    );
+    scratch.cleanup().await;
+    assert!(matches!(
+        result,
+        Err(StoreError::Incompatible {
+            refusal: CompatRefusal::Unstamped { .. }
+        })
+    ));
 }
 
 lash_conformance::process_registry_reopenable_tests!({

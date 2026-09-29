@@ -98,55 +98,6 @@ pub(super) async fn prune_terminal_processes(
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
-    async fn pending_process_artifact_cleanup(
-        &self,
-    ) -> Result<Vec<lash_core_execution::ProcessArtifactCleanup>, lash_core_execution::PluginError>
-    {
-        self.conn
-            .call(|conn| {
-                let mut statement =
-                    conn.prepare_cached(process_sql().cleanup.list_pending.sql())?;
-                statement
-                    .query_map([], |row| row.get::<_, String>(0))?
-                    .map(|row| {
-                        let json = row?;
-                        serde_json::from_str(&json).map_err(|error| {
-                            rusqlite::Error::FromSqlConversionFailure(
-                                0,
-                                rusqlite::types::Type::Text,
-                                Box::new(error),
-                            )
-                        })
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(process_sqlite_error)
-    }
-
-    async fn complete_process_artifact_cleanup(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, lash_core_execution::PluginError>
-    {
-        let process_id = process_id.clone();
-        self.conn
-            .write(move |tx| {
-                let removed = crate::conn::cached_execute(
-                    tx,
-                    process_sql().cleanup.delete_for_process.sql(),
-                    params![process_id.as_str()],
-                )?;
-                Ok(if removed == 1 {
-                    lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_id }
-                } else {
-                    lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_id }
-                })
-            })
-            .await
-            .map_err(process_sqlite_error)
-    }
-
     async fn compact_process_tombstones(
         &self,
         cutoff_epoch_ms: u64,

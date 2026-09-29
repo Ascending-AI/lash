@@ -107,6 +107,7 @@ impl TriggerIntentCutoverReplay for TriggerIntentCutoverReplayImpl {
                 Arc::clone(&self.process_env_store),
             ),
             self.router.clone(),
+            lash_core::ProcessEngineRegistry::new(),
             &SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
             "trigger-intent-cutover-call",
             &intents,
@@ -219,6 +220,16 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
         let registry: Arc<dyn ProcessRegistry> = stores.process_registry();
         let store: Arc<dyn TriggerStore> = stores.trigger_store();
         let env_store = stores.process_env_store();
+        // The registration holds the revision it commits, on its target engine's
+        // artifacts, under the store set's artifact ports (ADR 0113 §3.4).
+        let engines = lash_core::testing::process_engine_fixture().with_artifact_ports(
+            lash_core::ArtifactReferrerPorts::new(
+                lash_core::StoreSet::module_artifacts(&stores),
+                stores.process_env_store(),
+                lash_core::StoreSet::artifact_cleanup(&stores),
+                Arc::new(lash_core::facade_support::SystemClock),
+            ),
+        );
         let env_ref = lash_core::testing::process_execution_env_fixture(env_store.as_ref()).await;
         let mut registration = lash_core::RegisterTriggerIntent {
             session_id: SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
@@ -234,10 +245,10 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
                 "intent.restate.foreign",
                 "source",
                 lash_core::ProcessInput::Engine {
-                    kind: "test-engine".to_string(),
+                    kind: "testing-fixture".to_string(),
                     payload: serde_json::Value::Null,
                 },
-                lash_core::ProcessIdentity::new("test-engine"),
+                lash_core::ProcessIdentity::new("testing-fixture"),
             ),
         };
         if foreign_field == "owner_scope" {
@@ -259,6 +270,7 @@ async fn restate_double_refuses_foreign_register_trigger_authority_before_effect
                 .expect("scope Restate controller"),
             lash_core::testing::effect_backed_process_service(registry, env_store),
             router,
+            engines,
             &SessionId::from(TRIGGER_INTENT_CUTOVER_SESSION),
             "foreign-trigger-call",
             &lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::RegisterTrigger(Box::new(

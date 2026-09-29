@@ -645,6 +645,19 @@ async fn realize_register_process_definition(
     // this call — owns the durable write, so a redrive replays the recorded
     // registration and a group child admits it under its own binding.
     let scoped = context.effect_controller.scoped();
+    // The CAS holds the revision it writes before it writes, under the
+    // intent's journal (ADR 0113 §3.6).
+    let creator = scoped
+        .execution_scope()
+        .journal_identity()
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let registry: Arc<dyn crate::ProcessDefinitionRegistry> = Arc::new(
+        crate::process_registry::RevisionReferrerDefinitionRegistry::new(
+            registry,
+            context.process_engines.clone(),
+            creator,
+        ),
+    );
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
@@ -699,10 +712,10 @@ async fn register_recorded_trigger(
     let mut draft = intent.draft.clone();
     if let Some(env_spec) = intent.env_spec.as_ref() {
         // Publication moved out of the attempt and into realization: the
-        // bytes land under the realizing execution scope's artifact owner,
-        // the same owner the retired host-operation path published under
-        // (FIG-3116). The draft's env ref is content-addressed, so the
-        // published reference is the one the draft already names.
+        // bytes land under the realizing execution's journal referrer (ADR
+        // 0113 §3.4), which holds them until the revision acquires them. The
+        // draft's env ref is content-addressed, so the published reference is
+        // the one the draft already names.
         let env_store = router.process_env_store().ok_or_else(|| {
             crate::PluginError::Session(
                 "process execution env store is unavailable in this runtime".to_string(),
@@ -710,7 +723,7 @@ async fn register_recorded_trigger(
         })?;
         draft.env_ref = crate::publish_process_execution_env(
             env_store.as_ref(),
-            &crate::ArtifactOwner::execution(scoped.execution_scope().clone()),
+            &crate::session::execution_claim_of(scoped.execution_scope())?,
             env_spec,
         )
         .await?;
@@ -727,6 +740,18 @@ async fn register_recorded_trigger(
     .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
+    // The registration holds the revision it commits before it commits,
+    // under the intent's journal (ADR 0113 §3.4).
+    let creator = scoped
+        .execution_scope()
+        .journal_identity()
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let store: Arc<dyn crate::TriggerStore> =
+        Arc::new(crate::triggers::RevisionReferrerTriggerStore::new(
+            router.store(),
+            context.process_engines.clone(),
+            creator,
+        ));
     let outcome = scoped
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
@@ -739,7 +764,7 @@ async fn register_recorded_trigger(
                     }),
                 },
             ),
-            crate::RuntimeEffectLocalExecutor::triggers(router.store()),
+            crate::RuntimeEffectLocalExecutor::triggers(store),
         )
         .await
         .map_err(crate::PluginError::RuntimeEffectController)?

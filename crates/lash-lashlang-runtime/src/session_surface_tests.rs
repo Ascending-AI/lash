@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use lash_core::facade_support::{PluginSessionContext, PluginSpec, PluginSpecFactory};
 use lash_core::{
-    AdmittedProcessIdentity, ArtifactOwner, Lifetime, PluginError, PluginOptions,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, SessionPolicy, TurnBudget,
+    AdmittedProcessIdentity, Lifetime, PluginError, PluginOptions, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessProvenance, ProcessRegistration, ProcessRegistry,
+    SessionPolicy, TurnBudget,
 };
 use lashlang::testing::ast_builders as b;
 
@@ -122,10 +122,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     let linked = lashlang::LinkedModule::link(module_requiring_session_surface(), &environment)
         .expect("module links against the granted surface");
     artifact_store
-        .publish_module_artifact(
-            &ArtifactOwner::host("fig3344-session-surface"),
-            &linked.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &linked.artifact)
         .await
         .expect("module artifact publishes");
 
@@ -158,7 +155,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     };
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
-        &ArtifactOwner::host("fig3344-session-surface-env"),
+        &crate::lib_tests::host_claim(),
         &ProcessExecutionEnvSpec::new(plugin_options, session_policy()),
     )
     .await
@@ -339,7 +336,7 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
     );
     let linked = lashlang::LinkedModule::link(module, &environment).expect("link recovery process");
     artifact_store
-        .publish_module_artifact(&ArtifactOwner::host("fig3463-recovery"), &linked.artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &linked.artifact)
         .await
         .expect("publish recovery process");
     let process_input = LashlangProcessInput {
@@ -359,7 +356,7 @@ async fn fig3463_a_crashed_segment_replays_its_journaled_effect_under_one_attemp
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
-        &ArtifactOwner::host("fig3463-recovery-env"),
+        &crate::lib_tests::host_claim(),
         &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
     )
     .await
@@ -495,7 +492,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     )
     .expect("link failing process calls");
     artifact_store
-        .publish_module_artifact(&ArtifactOwner::host("fig3463-failures"), &linked.artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &linked.artifact)
         .await
         .expect("publish failing processes");
     let harness = crate::lib_tests::double_process_harness().await;
@@ -503,7 +500,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
-        &ArtifactOwner::host("fig3463-failures-env"),
+        &crate::lib_tests::host_claim(),
         &ProcessExecutionEnvSpec::new(PluginOptions::empty(), session_policy()),
     )
     .await

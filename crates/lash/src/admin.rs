@@ -717,14 +717,10 @@ impl SessionAdmin {
         operation_scope: lash_core::ExecutionScope,
     ) -> Result<()> {
         match retire_facade_operation_scope(effect_host, &operation_scope).await {
-            Ok(FacadeScopeRetirement::Retired) => {
-                let owner = lash_core::ArtifactOwner::execution(operation_scope.clone());
-                self.runtime.retire_artifact_owner(&owner).await?;
-                effect_host
-                    .complete_artifact_owner_retirement(&operation_scope)
-                    .await
-                    .map_err(EmbedError::Runtime)?;
-            }
+            // The scope's execution referrer ends when the engine answers
+            // its journal settled; the artifact-cleanup relay severs its
+            // edges then (ADR 0113 §3.7).
+            Ok(FacadeScopeRetirement::Retired) => {}
             Ok(FacadeScopeRetirement::Deferred) => {
                 tracing::debug!(
                     scope = %operation_scope.id(),

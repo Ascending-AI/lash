@@ -151,6 +151,66 @@ pub(crate) async fn expanded_findings(
     Ok(findings)
 }
 
+/// The synthetic next build's native catalog contains precisely its declared
+/// expansion on top of the N shape. A component-2 stamp alone is insufficient.
+#[cfg(feature = "synthetic-next")]
+pub(crate) async fn synthetic_next_findings(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    report: &SchemaReport,
+) -> Result<Vec<String>, crate::StoreError> {
+    let mut findings = expanded_findings(tx, report).await?;
+    let mut column_found = false;
+    for finding in &report.findings {
+        if let SchemaFinding::UnexpectedColumn { table, found } = finding {
+            if table == "lash_sessions"
+                && found.name == "synthetic_next_note"
+                && found.sql_type == "text"
+                && found.nullable
+                && found.value_source == ColumnValueSource::Supplied
+            {
+                column_found = true;
+            } else if found.nullable || found.value_source == ColumnValueSource::Default {
+                findings.push(format!("undeclared synthetic addition: {finding}"));
+            }
+        }
+    }
+    if !column_found {
+        findings.push("missing nullable lash_sessions.synthetic_next_note".to_owned());
+    }
+    let Some(schema) = report.schema.as_deref() else {
+        return Ok(findings);
+    };
+    let (table_found, index_found): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class AS relation
+             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+             WHERE namespace.nspname = $1 AND relation.relname = 'lash_synthetic_next'
+               AND relation.relkind = 'r'
+         ), EXISTS (
+             SELECT 1 FROM pg_catalog.pg_class AS index_relation
+             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = index_relation.relnamespace
+             JOIN pg_catalog.pg_index AS index_row ON index_row.indexrelid = index_relation.oid
+             JOIN pg_catalog.pg_class AS table_relation ON table_relation.oid = index_row.indrelid
+             WHERE namespace.nspname = $1
+               AND index_relation.relname = 'idx_lash_synthetic_next_note'
+               AND table_relation.relname = 'lash_synthetic_next'
+               AND NOT index_row.indisunique
+               AND pg_catalog.pg_get_indexdef(index_relation.oid) LIKE '%(note)'
+         )",
+    )
+    .bind(schema)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(crate::store_sqlx_error)?;
+    if !table_found {
+        findings.push("missing table lash_synthetic_next".to_owned());
+    }
+    if !index_found {
+        findings.push("missing non-unique index idx_lash_synthetic_next_note".to_owned());
+    }
+    Ok(findings)
+}
+
 /// What a [`crate::PostgresStorage`] does when the live schema does not match
 /// the shape this build expects.
 ///

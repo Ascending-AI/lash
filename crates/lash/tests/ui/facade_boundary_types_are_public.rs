@@ -403,6 +403,7 @@ fn persistence_types_are_nameable(
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,
         current_frame_node_id: None,
+        frame_transition: None,
         graph,
         graph_base_leaf_node_id: None,
         checkpoint: Default::default(),

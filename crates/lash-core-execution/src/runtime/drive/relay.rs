@@ -30,6 +30,10 @@ pub enum DeliveryFailure {
     Refused(String),
     /// What the key names cannot be decoded by this build.
     Undecodable(String),
+    /// Not owed yet: a guard whose authority has not ended it (ADR 0113
+    /// §2.5). Settles as `Defer` at `now + policy.max_backoff_ms`. Never
+    /// stalls.
+    NotYet,
 }
 
 /// One kind's retry policy (ADR 0109 §1.4). A host lever (ADR 0014).
@@ -108,6 +112,10 @@ pub enum RelayVerdict {
         due_at_ms: u64,
     },
     Stalled(StallReason),
+    /// Not owed yet: back to due at `due_at_ms` with its attempts reset.
+    Deferred {
+        due_at_ms: u64,
+    },
     /// The engine accepted the ask of a kind whose consumer settles it; the
     /// claim stands until the consumer's transaction settles it or it lapses.
     Requested,
@@ -127,7 +135,9 @@ fn count(pass: &mut RelayPass, verdict: &RelayVerdict) {
         RelayVerdict::Stalled(_) => pass.stalled += 1,
         RelayVerdict::Requested => pass.requested += 1,
         RelayVerdict::ClaimLost => pass.claim_lost += 1,
-        RelayVerdict::NotDue => {}
+        // A deferred guard was claimed and owes nothing yet: `claimed`
+        // counts it, and no outcome does.
+        RelayVerdict::Deferred { .. } | RelayVerdict::NotDue => {}
     }
 }
 
@@ -140,6 +150,9 @@ fn settlement_for(
 ) -> ObligationSettlement {
     match result {
         Ok(()) => ObligationSettlement::Delivered,
+        Err(DeliveryFailure::NotYet) => ObligationSettlement::Defer {
+            due_at_ms: now_ms.saturating_add(policy.max_backoff_ms),
+        },
         Err(DeliveryFailure::Refused(error)) => ObligationSettlement::Stall {
             reason: StallReason::Refused,
             error,
@@ -168,6 +181,7 @@ fn outcome_label(verdict: &RelayVerdict) -> Option<&'static str> {
         RelayVerdict::Delivered => Some("delivered"),
         RelayVerdict::Retried { .. } => Some("retried"),
         RelayVerdict::Stalled(_) => Some("stalled"),
+        RelayVerdict::Deferred { .. } => Some("deferred"),
         RelayVerdict::Requested => Some("requested"),
         RelayVerdict::ClaimLost => Some("claim_lost"),
         RelayVerdict::NotDue => None,
@@ -221,6 +235,9 @@ async fn attempt(
             );
             RelayVerdict::Stalled(*reason)
         }
+        ObligationSettlement::Defer { due_at_ms } => RelayVerdict::Deferred {
+            due_at_ms: *due_at_ms,
+        },
     };
     let verdict = match ledger
         .settle(&claimed.id, &claimed.token, settlement, now_ms)
@@ -571,6 +588,63 @@ mod tests {
                 }
             )],
             "the accepted ask settled nothing; the spent claim stalled"
+        );
+    }
+
+    struct NeverYet(PageLedger);
+
+    #[async_trait::async_trait]
+    impl ObligationRelay for NeverYet {
+        fn ledger(&self) -> &dyn ObligationLedger {
+            &self.0
+        }
+
+        async fn deliver(
+            &self,
+            _id: &ObligationId,
+            _key: &ObligationKey,
+            _attempt: u32,
+        ) -> Result<(), DeliveryFailure> {
+            Err(DeliveryFailure::NotYet)
+        }
+    }
+
+    /// ADR 0113 §2.5: a guard that is not owed yet defers at the maximum
+    /// backoff with its attempts reset, and never stalls however many claims
+    /// it has taken.
+    #[tokio::test]
+    async fn a_delivery_not_owed_yet_defers_at_the_maximum_backoff_and_never_stalls() {
+        let ceiling = RelayPolicy::default().attempt_ceiling.get();
+        let relay = NeverYet(PageLedger {
+            page: Mutex::new(vec![ClaimedObligation {
+                attempts: ceiling + 5,
+                ..claimed("guard", session_delete("s"))
+            }]),
+            settled: Mutex::new(Vec::new()),
+        });
+        let clock = TestClock::new(1_000);
+        let pass = relay_due(&relay, &clock, NonZeroUsize::MIN)
+            .await
+            .expect("a pass over a guard that is not owed yet");
+        assert_eq!(
+            pass,
+            RelayPass {
+                claimed: 1,
+                ..RelayPass::default()
+            }
+        );
+        assert_eq!(
+            *relay
+                .0
+                .settled
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec![(
+                ObligationId::new("guard"),
+                ObligationSettlement::Defer {
+                    due_at_ms: 1_000 + RelayPolicy::default().max_backoff_ms,
+                }
+            )]
         );
     }
 

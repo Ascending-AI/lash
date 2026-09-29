@@ -21,19 +21,12 @@ pub use classification::TurnFailureCause;
 #[non_exhaustive]
 pub enum RuntimeErrorCode {
     AttachmentSourcePolicyDenied,
-    /// An artifact write named an owner a permanent retirement fence has
-    /// already closed. Store implementors return this code instead of
-    /// wording the refusal as prose; the destination-owner form of the same
-    /// fence is [`Self::ArtifactDestinationOwnerRetired`].
-    ArtifactOwnerRetired,
-    /// An artifact transfer named a destination owner a permanent retirement
-    /// fence has already closed. Kept as its own code so the retirement
-    /// target is a fact, not a word that must appear in the message.
-    ArtifactDestinationOwnerRetired,
-    /// An artifact transfer found neither the staging owner's edge nor the
-    /// destination owner's edge. Store implementors return this code so the
-    /// caller that staged the bytes can settle the destination edge itself.
-    ArtifactStagingEdgeMissing,
+    /// An artifact publish or acquire named a referrer that has a fence
+    /// (ADR 0113 §2.7). Store implementors return this code instead of
+    /// wording the refusal as prose; the error carries the referrer.
+    ArtifactReferrerEnded,
+    /// An artifact acquire named bytes that are not stored.
+    ArtifactMissing,
     EffectPanicked,
     MissingExecutionScopeId,
     ExecutionScopeTurnIdMismatch,
@@ -542,9 +535,8 @@ impl RuntimeErrorCode {
     pub fn as_str(&self) -> &str {
         match self {
             Self::AttachmentSourcePolicyDenied => "attachment_source_policy_denied",
-            Self::ArtifactOwnerRetired => "artifact_owner_retired",
-            Self::ArtifactDestinationOwnerRetired => "artifact_destination_owner_retired",
-            Self::ArtifactStagingEdgeMissing => "artifact_staging_edge_missing",
+            Self::ArtifactReferrerEnded => "artifact_referrer_ended",
+            Self::ArtifactMissing => "artifact_missing",
             Self::EffectPanicked => "effect_panicked",
             Self::MissingExecutionScopeId => "missing_execution_scope_id",
             Self::ExecutionScopeTurnIdMismatch => "execution_scope_turn_id_mismatch",
@@ -794,9 +786,8 @@ impl RuntimeErrorCode {
     #[cfg(test)]
     pub(crate) const ALL_FIRST_PARTY: &[Self] = &[
         Self::AttachmentSourcePolicyDenied,
-        Self::ArtifactOwnerRetired,
-        Self::ArtifactDestinationOwnerRetired,
-        Self::ArtifactStagingEdgeMissing,
+        Self::ArtifactReferrerEnded,
+        Self::ArtifactMissing,
         Self::EffectPanicked,
         Self::MissingExecutionScopeId,
         Self::ExecutionScopeTurnIdMismatch,
@@ -976,9 +967,8 @@ impl RuntimeErrorCode {
     pub fn from_wire_code(code: &str) -> Self {
         match code {
             "attachment_source_policy_denied" => Self::AttachmentSourcePolicyDenied,
-            "artifact_owner_retired" => Self::ArtifactOwnerRetired,
-            "artifact_destination_owner_retired" => Self::ArtifactDestinationOwnerRetired,
-            "artifact_staging_edge_missing" => Self::ArtifactStagingEdgeMissing,
+            "artifact_referrer_ended" => Self::ArtifactReferrerEnded,
+            "artifact_missing" => Self::ArtifactMissing,
             "effect_panicked" => Self::EffectPanicked,
             "missing_execution_scope_id" => Self::MissingExecutionScopeId,
             "execution_scope_turn_id_mismatch" => Self::ExecutionScopeTurnIdMismatch,
@@ -1248,7 +1238,28 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
-    SessionDeleted { session_id: SessionId },
+    SessionDeleted {
+        session_id: SessionId,
+    },
+    /// An artifact publish or acquire named a referrer that has a fence
+    /// (ADR 0113 §2.7): the typed half of
+    /// [`RuntimeErrorCode::ArtifactReferrerEnded`].
+    ArtifactReferrerEnded {
+        referrer: Box<crate::artifact_referrer::ArtifactReferrer>,
+    },
+}
+
+impl RuntimeErrorCause {
+    /// The fenced referrer `cause` names, if it is an ended-referrer refusal.
+    #[must_use]
+    pub fn ended_referrer(
+        cause: Option<&Self>,
+    ) -> Option<&crate::artifact_referrer::ArtifactReferrer> {
+        match cause {
+            Some(Self::ArtifactReferrerEnded { referrer }) => Some(referrer),
+            _ => None,
+        }
+    }
 }
 
 /// The session-state generations an admission refused (FIG-3619): the one
@@ -1329,6 +1340,27 @@ impl RuntimeError {
             session_state_version_refusal: None,
             executable_generation_refusal: None,
         }
+    }
+
+    /// The typed refusal of an artifact publish or acquire under a referrer
+    /// that has a fence.
+    #[must_use]
+    pub fn artifact_referrer_ended(referrer: crate::artifact_referrer::ArtifactReferrer) -> Self {
+        let mut error = Self::new(
+            RuntimeErrorCode::ArtifactReferrerEnded,
+            format!("artifact referrer `{referrer}` has ended"),
+        );
+        error.cause = Some(RuntimeErrorCause::ArtifactReferrerEnded {
+            referrer: Box::new(referrer),
+        });
+        error
+    }
+
+    /// The fenced referrer an `ArtifactReferrerEnded` refusal names. `None`
+    /// on any other error.
+    #[must_use]
+    pub fn ended_referrer(&self) -> Option<&crate::artifact_referrer::ArtifactReferrer> {
+        RuntimeErrorCause::ended_referrer(self.cause.as_ref())
     }
 
     /// The refusal of a turn redriven under another executable generation
@@ -1428,6 +1460,7 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&str> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
+            RuntimeErrorCause::ArtifactReferrerEnded { .. } => None,
         }
     }
 
@@ -1564,6 +1597,13 @@ impl RuntimeEffectControllerError {
             journaled: false,
             foreign_cause: None,
         }
+    }
+
+    /// The fenced referrer an `ArtifactReferrerEnded` refusal names. `None`
+    /// on any other error.
+    #[must_use]
+    pub fn ended_referrer(&self) -> Option<&crate::artifact_referrer::ArtifactReferrer> {
+        RuntimeErrorCause::ended_referrer(self.cause.as_ref())
     }
 
     /// Marks a failed, uncommitted host response derivation as safe to execute again.
@@ -1780,6 +1820,11 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
                     session_id: session_id.clone(),
                 })
             }
+            crate::StoreError::ArtifactReferrerEnded { referrer } => {
+                Some(crate::RuntimeErrorCause::ArtifactReferrerEnded {
+                    referrer: Box::new(referrer.clone()),
+                })
+            }
             _ => None,
         };
         let code = match &err {
@@ -1809,6 +1854,10 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             crate::StoreError::RecordEncodingFailed { .. } => {
                 crate::RuntimeErrorCode::RecordEncodingFailed
             }
+            crate::StoreError::ArtifactReferrerEnded { .. } => {
+                crate::RuntimeErrorCode::ArtifactReferrerEnded
+            }
+            crate::StoreError::ArtifactMissing { .. } => crate::RuntimeErrorCode::ArtifactMissing,
             _ => crate::RuntimeErrorCode::RuntimeStore,
         };
         Self {

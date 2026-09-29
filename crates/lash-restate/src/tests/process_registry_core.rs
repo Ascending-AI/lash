@@ -409,7 +409,13 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
             "restate-scalar-replay-tools",
             lash_core::facade_support::PluginSpec::new().with_tool_provider(tools),
         ));
-    let artifact_backend = memory_engine_backend().await;
+    let corpus_clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
+    let mut host = memory_host_config()
+        .await
+        .with_clock(Arc::clone(&corpus_clock));
+    // The cell publishes into the runtime's own stores, the ones its process
+    // starts acquire from (ADR 0113 §3.3).
+    let artifact_backend = host.backend().clone();
     let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
     let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -463,10 +469,6 @@ finish(await handle);
         })
         .build()
         .into_handle();
-    let corpus_clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
-    let mut host = memory_host_config()
-        .await
-        .with_clock(Arc::clone(&corpus_clock));
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider),
     );

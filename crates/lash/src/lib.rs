@@ -40,6 +40,7 @@
 
 /// Administrative facade handles and operations.
 pub mod admin;
+mod artifacts;
 mod core;
 mod durable_session;
 mod error;
@@ -822,6 +823,7 @@ pub mod remote {
 /// Durable process definitions, handles, and events.
 pub mod process {
     pub use crate::admin::SessionProcessAdmin;
+    pub use crate::artifacts::{HostArtifactPin, HostArtifacts};
     pub use crate::process_admin::Processes;
     pub use crate::process_observation::{
         ProcessCursor, ProcessCursorError, ProcessCursorReference, ProcessDurableCompleteness,
@@ -833,7 +835,6 @@ pub mod process {
     pub use lash_core::SessionTurnResult;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
-    pub use lash_core::runtime::publish_process_execution_env;
     /// Process-registry and event types that complete the store and engine signature closure.
     pub use lash_core::runtime::{
         ParentEndPlan, ProcessChange, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
@@ -843,20 +844,19 @@ pub mod process {
         WakeDiscardReason,
     };
     pub use lash_core::{
-        AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, ArtifactOwner,
-        CausalRef, DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
+        AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, Ancestry, CausalRef,
+        DeclaredProcessIdentity, HandleId, InvalidStartKey, Lifetime, LifetimeDecision,
         LifetimePolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NonTerminalProcessPage,
         PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-        ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChangeCursor,
-        ProcessClockRebind, ProcessCompletionAuthority, ProcessContinuationStore,
-        ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionRegistry,
-        ProcessDefinitionResolution, ProcessDefinitionValue, ProcessEffectNodeSummary,
-        ProcessEffectOmissions, ProcessEffectOmittedCounts, ProcessEffectOutcomeClass,
-        ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence,
-        ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-        ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
-        ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+        PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION, ProcessAwaitOutput,
+        ProcessCancelReceipt, ProcessChangeCursor, ProcessClockRebind, ProcessCompletionAuthority,
+        ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+        ProcessDefinitionRegistry, ProcessDefinitionResolution, ProcessDefinitionValue,
+        ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+        ProcessEffectOutcomeClass, ProcessEffectSummary, ProcessEffectSummaryError,
+        ProcessEffectSummaryOccurrence, ProcessEngineKind, ProcessEvent, ProcessEventAppendReceipt,
+        ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
+        ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
         ProcessEventReadOutcome, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
         ProcessExecutionEnvSpec, ProcessExternalRef, ProcessHandleView, ProcessIdentity,
         ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter, ProcessListMode,

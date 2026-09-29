@@ -30,15 +30,105 @@ pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 /// name the group's dispatch was sent under (FIG-3795 S10). It was reset in
 /// place under the pre-1.0 version freeze (FIG-4048), so no upcaster is
 /// registered.
+#[cfg(not(feature = "synthetic-next"))]
 pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the family to format 2. Its
+/// record keeps format 1's shape, so the N-1 upcaster lifts a format-1 body
+/// as it is; the stamp is what moves. Until finalize the fleet's writer pin
+/// holds its writes at format 1, and after it the synthetic `upgrade`
+/// handler rewrites each object.
+#[cfg(feature = "synthetic-next")]
+pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 2;
 
 /// The group index's stored-format table: the family's registered surface
 /// and descriptor, plus the N-1 upcaster hooks (none at the baseline).
 pub(crate) const EFFECT_GROUP_STATE_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "effect group",
     surface: lash_core::surface_format!(EFFECT_GROUP_STATE_FORMAT_VERSION),
-    upcast_n1: &[],
+    upcast_n1: EFFECT_GROUP_STATE_UPCASTS,
 };
+
+#[cfg(not(feature = "synthetic-next"))]
+const EFFECT_GROUP_STATE_UPCASTS: &crate::object_state::UpcastTable = &[];
+
+#[cfg(feature = "synthetic-next")]
+const EFFECT_GROUP_STATE_UPCASTS: &crate::object_state::UpcastTable = &[(1, upcast_format_1)];
+
+/// The synthetic N+1's N-1 upcaster: format 1's record body is format 2's.
+#[cfg(feature = "synthetic-next")]
+fn upcast_format_1(body: serde_json::Value) -> Result<serde_json::Value, TerminalError> {
+    Ok(body)
+}
+
+/// What the synthetic N+1's `upgrade` handler did to one group (ADR 0115
+/// §3.2, §6). JSON is tagged by `upgrade`.
+#[cfg(feature = "synthetic-next")]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "upgrade", rename_all = "snake_case")]
+pub(crate) enum EffectGroupUpgradeResponse {
+    /// The object holds no state: nothing to convert, and nothing written.
+    Absent,
+    /// The fleet still writes format `writes`: finalize has not moved `F`,
+    /// so nothing is rewritten while rollback is still promised.
+    NotFinalized { writes: u32 },
+    /// The object's `_compat` already names the newest format.
+    Current { format: u32 },
+    /// Every value was rewritten at `format` and `_compat` raised to it, in
+    /// this one exclusive invocation.
+    Upgraded { from: u32, format: u32 },
+}
+
+/// The synthetic `upgrade` handler of `EffectGroupIndex` (ADR 0115 §3.2):
+/// once finalize has moved the fleet to write the newest format, rewrite
+/// the group's record at it and raise all three `_compat` fields, so a
+/// leftover N handler is refused by the record. An object already current,
+/// or a fleet not yet finalized, is answered with nothing changed.
+#[cfg(feature = "synthetic-next")]
+pub(super) async fn upgrade(
+    ctx: &ObjectContext<'_>,
+    fleet: lash_core::FleetFormat,
+) -> Result<EffectGroupUpgradeResponse, TerminalError> {
+    use crate::compat::{COMPAT_KEY, ObjectCompat};
+    use restate_sdk::context::{ContextReadState as _, ContextWriteState as _};
+
+    let keys = ctx.get_keys().await?;
+    if keys.is_empty() {
+        return Ok(EffectGroupUpgradeResponse::Absent);
+    }
+    let object = object_state::admit_exclusive(ctx, &EFFECT_GROUP_STATE_FAMILY, fleet).await?;
+    let newest = EFFECT_GROUP_STATE_FORMATS.newest();
+    let writes = fleet.writer_version(EFFECT_GROUP_STATE_FORMATS.surface);
+    if writes != newest {
+        return Ok(EffectGroupUpgradeResponse::NotFinalized { writes });
+    }
+    let Some(Json(compat)) = ctx.get::<Json<ObjectCompat>>(COMPAT_KEY).await? else {
+        return Err(TerminalError::new(format!(
+            "effect group {} was admitted without a `{COMPAT_KEY}` record",
+            ctx.key()
+        )));
+    };
+    if compat == ObjectCompat::fresh(newest) {
+        return Ok(EffectGroupUpgradeResponse::Current { format: newest });
+    }
+    if let Some(unknown) = keys
+        .iter()
+        .find(|key| object_state::is_value_key(key) && *key != INDEX_STATE_KEY)
+    {
+        return Err(TerminalError::new(format!(
+            "effect group {} holds `{unknown}`, which the upgrade does not convert",
+            ctx.key()
+        )));
+    }
+    if let Some(record) = load_index(ctx).await? {
+        super::store_index(ctx, object.writer, record);
+    }
+    ctx.set(COMPAT_KEY, Json(ObjectCompat::fresh(newest)));
+    Ok(EffectGroupUpgradeResponse::Upgraded {
+        from: compat.format,
+        format: newest,
+    })
+}
 
 /// The object family whose `_compat` record every handler admits first
 /// (ADR 0115 §3.2).

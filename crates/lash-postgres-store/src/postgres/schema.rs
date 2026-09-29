@@ -100,6 +100,14 @@ pub(crate) async fn ensure_schema(
     } else {
         lash_core_execution::compat::StampRead::Absent { populated: false }
     };
+    #[cfg(feature = "synthetic-next")]
+    let synthetic_expanded = matches!(
+        &stamp,
+        lash_core_execution::compat::StampRead::Present(stamp)
+            if stamp.version == descriptor.writes.max()
+    );
+    #[cfg(not(feature = "synthetic-next"))]
+    let synthetic_expanded = false;
     let admission = lash_core_execution::compat::admit(descriptor, stamp)
         .map_err(|refusal| StoreError::Incompatible { refusal })?;
     if matches!(
@@ -112,7 +120,18 @@ pub(crate) async fn ensure_schema(
             },
         });
     }
-    if let lash_core_execution::compat::CompatAdmission::Expanded { .. } = admission {
+    if matches!(
+        admission,
+        lash_core_execution::compat::CompatAdmission::Expanded { .. }
+    ) || synthetic_expanded
+    {
+        #[cfg(feature = "synthetic-next")]
+        let findings = if synthetic_expanded {
+            crate::schema_shape::synthetic_next_findings(&mut tx, &report).await?
+        } else {
+            crate::schema_shape::expanded_findings(&mut tx, &report).await?
+        };
+        #[cfg(not(feature = "synthetic-next"))]
         let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
         if !findings.is_empty() {
             record_schema_gate_decision(&report, check, "denied_shape");
@@ -126,6 +145,7 @@ pub(crate) async fn ensure_schema(
     }
     let admitted_as = match (
         report.is_conformant()
+            || synthetic_expanded
             || matches!(
                 admission,
                 lash_core_execution::compat::CompatAdmission::Expanded { .. }

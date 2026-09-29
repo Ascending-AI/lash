@@ -619,23 +619,23 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
     PRIMARY KEY (namespace, artifact_ref)
 );
 
--- Exact owner edges for immutable artifacts. The edge is the liveness fact;
+-- Exact referrer edges for immutable artifacts. The edge is the liveness fact;
 -- no maintained count or last-operation field exists on shared bytes.
-CREATE TABLE IF NOT EXISTS artifact_owners (
+CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    owner_kind   TEXT NOT NULL CONSTRAINT ck_artifact_owners_owner_kind CHECK (owner_kind IN ('host', 'process', 'execution')),
-    owner_id     TEXT NOT NULL,
-    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (length(referrer_id) > 0),
+    PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
 );
 
--- Execution-owner retirement is a permanent publication fence. Host and
--- process releases are ordinary exact-edge severance and never enter here.
-CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
-    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK (owner_kind = 'execution'),
-    owner_id   TEXT NOT NULL,
-    PRIMARY KEY (owner_kind, owner_id)
+-- Every ended referrer has a permanent publication fence.
+CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (length(referrer_id) > 0),
+    ended_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (referrer_kind, referrer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
@@ -683,8 +683,33 @@ CREATE INDEX IF NOT EXISTS idx_process_definitions_registrant
 CREATE INDEX IF NOT EXISTS idx_process_definitions_change
     ON process_definitions(change_seq);
 
-CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
-    ON artifact_owners(owner_kind, owner_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
+    ON artifact_referrer_edges(referrer_kind, referrer_id);
+
+CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
+    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
+    cleanup_json TEXT NOT NULL,
+    obligation_id TEXT NOT NULL,
+    obligation_state TEXT NOT NULL,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    PRIMARY KEY (referrer_kind, referrer_id),
+    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK ((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
+    ON artifact_cleanup_obligations(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
+    ON artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
+    ON artifact_cleanup_obligations(obligation_id)
+    WHERE obligation_state = 'stalled';
+
 
 CREATE TABLE IF NOT EXISTS release_stamp (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_release_stamp_singleton CHECK (singleton = 1),
@@ -1083,7 +1108,11 @@ CREATE TABLE IF NOT EXISTS lash_compat (
 /// recreate it. It also holds the turn capture tables and sealed stopped
 /// partials (ADR 0114, FIG-433, changed in place): a catalog without them
 /// fails its first capture query, so recreate it.
-pub(crate) const SCHEMA_VERSION: i32 = 99;
+const BASE_SCHEMA_VERSION: i32 = 99;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const SCHEMA_VERSION: i32 = BASE_SCHEMA_VERSION + 1;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (
@@ -1331,11 +1360,29 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
-CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
-    process_id       TEXT PRIMARY KEY,
-    cleanup_json     TEXT NOT NULL,
-    FOREIGN KEY (process_id) REFERENCES process_tombstones(process_id) ON DELETE RESTRICT
+CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
+    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
+    cleanup_json TEXT NOT NULL,
+    obligation_id TEXT NOT NULL,
+    obligation_state TEXT NOT NULL,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    PRIMARY KEY (referrer_kind, referrer_id),
+    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK ((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
+    ON artifact_cleanup_obligations(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
+    ON artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
+    ON artifact_cleanup_obligations(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,
@@ -1532,7 +1579,11 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// set together or not at all, and indexed by owner. A held row is never
 /// pruned. A registry written before the change lacks the columns; recreate
 /// it.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
+const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION + 1;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS lash_compat (
@@ -1640,7 +1691,11 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // key registered is bound before the delivery is reported. Existing trigger
 // stores hold precomputed process names, so they are rejected rather than
 // migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 12;
+const BASE_TRIGGER_SCHEMA_VERSION: i32 = 12;
+#[cfg(not(feature = "synthetic-next"))]
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = BASE_TRIGGER_SCHEMA_VERSION;
+#[cfg(feature = "synthetic-next")]
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = BASE_TRIGGER_SCHEMA_VERSION + 1;
 
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
@@ -1720,7 +1775,19 @@ fn apply_versioned_schema_tx_with_writable(
             apply_schema(tx)?;
             crate::compat::provision(tx, database)?;
         }
-        lash_core_execution::compat::CompatAdmission::Native => {}
+        lash_core_execution::compat::CompatAdmission::Native => {
+            #[cfg(feature = "synthetic-next")]
+            {
+                let written_version = lash_core_execution::compat::descriptor(database.component())
+                    .expect("SQLite component has a descriptor")
+                    .writes
+                    .max();
+                tx.execute(
+                    "UPDATE lash_compat SET version = ?1 WHERE singleton = 1 AND version < ?1",
+                    [i64::from(written_version)],
+                )?;
+            }
+        }
         lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
             crate::compat::verify_tolerant(tx, database)?;
         }

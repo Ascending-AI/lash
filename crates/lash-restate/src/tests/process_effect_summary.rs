@@ -59,7 +59,10 @@ pub(super) async fn counting_lashlang_registration() -> ProcessRegistration {
     .expect("link effect-summary process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-effect-summary"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await
@@ -188,7 +191,10 @@ async fn looping_waiting_registration() -> ProcessRegistration {
     .expect("link the looping, waiting process");
     lashlang::LashlangArtifacts::publish_module_artifact(
         &recovery_artifact_store(),
-        &lash_core::ArtifactOwner::host("restate-effect-summary"),
+        &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+            lash_core::HostArtifactPin::mint(),
+        ))
+        .expect("host pin claim"),
         &linked.artifact,
     )
     .await

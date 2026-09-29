@@ -657,6 +657,16 @@ where
     ) -> Result<(), RuntimeError> {
         sink.retain_in_journal(identity, submitted, outcome).await
     }
+
+    /// A handler-scoped controller runs inside one journal and cannot see
+    /// whether another will replay, so it never promises one settled
+    /// (ADR 0113 §2.5); the deployment host answers the cleanup executor.
+    async fn journal_replay(
+        &self,
+        _journal: &lash_sansio::EffectJournalIdentity,
+    ) -> Result<lash_core::JournalReplay, RuntimeError> {
+        Ok(lash_core::JournalReplay::MayReplay)
+    }
 }
 
 impl<'ctx, C> RestateRuntimeEffectController<'ctx, C>

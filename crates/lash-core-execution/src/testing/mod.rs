@@ -73,15 +73,15 @@ fn process_execution_env_fixture_spec() -> crate::ProcessExecutionEnvSpec {
     )
 }
 
-/// Publishes the fixed fixture execution environment into `env_store`, owned
-/// by the fixture's host owner, and returns its reference.
+/// Publishes the fixed fixture execution environment into `env_store`, held
+/// by a fresh host pin the fixture never releases, and returns its reference.
 #[cfg(any(test, feature = "testing"))]
 pub async fn process_execution_env_fixture(
     env_store: &dyn crate::ProcessExecutionEnvStore,
 ) -> crate::ProcessExecutionEnvRef {
     crate::publish_process_execution_env(
         env_store,
-        &crate::ArtifactOwner::host("process-execution-env-fixture"),
+        &host_pin_claim_for_testing(),
         &process_execution_env_fixture_spec(),
     )
     .await
@@ -106,10 +106,20 @@ pub fn process_execution_env_fixture_ref() -> crate::ProcessExecutionEnvRef {
 #[cfg(any(test, feature = "testing"))]
 pub async fn publish_process_execution_env_for_testing(
     env_store: &dyn crate::ProcessExecutionEnvStore,
-    owner: &crate::ArtifactOwner,
+    claim: &crate::ReferrerClaim,
     spec: &crate::ProcessExecutionEnvSpec,
 ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
-    crate::publish_process_execution_env(env_store, owner, spec).await
+    crate::publish_process_execution_env(env_store, claim, spec).await
+}
+
+/// A claim under a freshly minted host pin: an unguarded referrer a fixture
+/// publishes under and never releases.
+#[cfg(any(test, feature = "testing"))]
+pub fn host_pin_claim_for_testing() -> crate::ReferrerClaim {
+    crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+        crate::HostArtifactPin::mint(),
+    ))
+    .expect("a host pin is an unguarded referrer")
 }
 
 /// Engine fixture for trigger-delivery tests that need to exercise the real
@@ -135,6 +145,30 @@ impl crate::ProcessEngine for FixtureProcessEngine {
             ))
             .into(),
         )
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session(format!(
+            "the fixture engine stores no artifact `{artifact_ref}`"
+        )))
     }
 }
 
@@ -810,8 +844,8 @@ impl crate::RuntimeEffectController for UnavailableEffectController {
 }
 
 /// The process-exec-env port of a context with no store: publication and
-/// transfer are refused, release and retirement have nothing to sever, and
-/// reads find nothing.
+/// acquisition are refused, a cleanup has nothing to sever, and reads find
+/// nothing.
 ///
 /// It keeps nothing, so it is not a persistence store: it stands where a test
 /// needs *a* port it never publishes through.
@@ -819,8 +853,10 @@ impl crate::RuntimeEffectController for UnavailableEffectController {
 pub struct UnavailableProcessExecutionEnvStore;
 
 impl UnavailableProcessExecutionEnvStore {
-    fn refused() -> PluginError {
-        PluginError::Session("this context has no process execution environment store".into())
+    fn refused() -> crate::ArtifactStoreError {
+        crate::ArtifactStoreError::Backend(
+            "this context has no process execution environment store".into(),
+        )
     }
 }
 
@@ -828,41 +864,32 @@ impl UnavailableProcessExecutionEnvStore {
 impl crate::ProcessExecutionEnvStore for UnavailableProcessExecutionEnvStore {
     async fn publish_process_execution_env(
         &self,
-        _owner: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &crate::ProcessExecutionEnvRef,
         _bytes: &[u8],
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         Err(Self::refused())
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        _from: &crate::ArtifactOwner,
-        _to: &crate::ArtifactOwner,
+        _claim: &crate::ReferrerClaim,
         _env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         Err(Self::refused())
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        _owner: &crate::ArtifactOwner,
-        _env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<(), PluginError> {
-        Ok(())
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        _owner: &crate::ArtifactOwner,
-    ) -> Result<(), PluginError> {
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
         Ok(())
     }
 
     async fn get_process_execution_env(
         &self,
         _env_ref: &crate::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, PluginError> {
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError> {
         Ok(None)
     }
 }
@@ -1368,6 +1395,7 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
     trigger_router: crate::TriggerRouter,
+    process_engines: crate::ProcessEngineRegistry,
     session_id: &SessionId,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
@@ -1375,7 +1403,7 @@ pub async fn execute_tool_intents_with_services_and_trigger_router(
     execute_tool_intents_with_services_and_hook_and_trigger_router(
         scoped_effect_controller,
         processes,
-        Some(trigger_router),
+        Some((trigger_router, process_engines)),
         session_id,
         tool_call_id,
         intents,
@@ -1409,7 +1437,9 @@ pub async fn execute_tool_intents_with_services_and_hook(
 async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
     scoped_effect_controller: crate::ScopedEffectController<'_>,
     processes: Arc<dyn crate::ProcessService>,
-    trigger_router: Option<crate::TriggerRouter>,
+    // The trigger router, with the engines that hold the revisions its
+    // registrations commit (ADR 0113 §3.4).
+    triggers: Option<(crate::TriggerRouter, crate::ProcessEngineRegistry)>,
     session_id: &SessionId,
     tool_call_id: &str,
     intents: &crate::ToolIntents,
@@ -1424,14 +1454,18 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
         crate::RuntimeAttribution::for_session(session_id),
         format!("tool-intent-drain:{tool_call_id}"),
     );
-    let dispatch = build_atomic_tool_dispatch(
-        TestExecutionContextBuilder::over_controller(scoped_effect_controller)
-            .session_id(session_id)
-            .session_lifecycle(Arc::new(MockSessionManager::default()))
-            .processes(processes)
-            .trigger_router(trigger_router)
-            .dispatch_parent_invocation(parent_invocation),
-    );
+    let builder = TestExecutionContextBuilder::over_controller(scoped_effect_controller)
+        .session_id(session_id)
+        .session_lifecycle(Arc::new(MockSessionManager::default()))
+        .processes(processes)
+        .dispatch_parent_invocation(parent_invocation);
+    let builder = match triggers {
+        Some((router, engines)) => builder
+            .trigger_router(Some(router))
+            .process_engines(engines),
+        None => builder,
+    };
+    let dispatch = build_atomic_tool_dispatch(builder);
     crate::tool_dispatch::execute_final_tool_intents(
         dispatch.as_ref(),
         Some(tool_call_id),

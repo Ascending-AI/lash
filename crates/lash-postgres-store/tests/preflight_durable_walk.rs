@@ -18,8 +18,9 @@
 use lash_core_execution::ProcessIdMint;
 use lash_core_execution::store::SessionCheckpoint;
 use lash_core_execution::{
-    BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,
-    ScanCoverage, StorePreflight,
+    ArtifactReferrer, BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan,
+    DurableSurface, HostArtifactPin, ModuleArtifactStore, ReferrerClaim, ScanCoverage,
+    StorePreflight,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, PostgresStorePreflight};
 use lash_sansio::ProcessId;
@@ -111,11 +112,12 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
     ]))
     .expect("a one-statement module forms an artifact");
-    lashlang::LashlangArtifacts::new(std::sync::Arc::new(storage.lashlang_artifact_store()))
-        .publish_module_artifact(
-            &lash_core_execution::ArtifactOwner::host("postgres-preflight-test"),
-            &artifact,
-        )
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::HostPin(HostArtifactPin::mint()))
+        .expect("host pin is unguarded");
+    let bytes = artifact.to_store_bytes().expect("encode module artifact");
+    storage
+        .lashlang_artifact_store()
+        .publish_module_artifact(&claim, artifact.module_ref().as_str(), &bytes)
         .await
         .expect("persist module artifact");
     drop(storage);

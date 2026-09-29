@@ -27,6 +27,7 @@ lash-sansio = { workspace = true, features = ["schema-validation"] }
 async-trait = { workspace = true }
 futures-util = { workspace = true }
 lash-core = { workspace = true }
+lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-lashlang-runtime = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
@@ -91,6 +92,18 @@ testing = [
 ]
 # Exposes the OpenTelemetry trace sink (`lash::tracing::OtelTraceSink`).
 otel-trace = ["lash-core/otel-trace"]
+# Phase A's synthetic N+1 build (ADR 0115 §6): forwarded to every crate
+# whose constants it moves. Optional backends move only when a host enables
+# them. Only lash-upgrade-harness enables it; no production build does.
+synthetic-next = [
+    "lash-core/synthetic-next",
+    "lash-core-store/synthetic-next",
+    "lash-remote-protocol/synthetic-next",
+    "lash-postgres-store?/synthetic-next",
+    "lash-sqlite-store?/synthetic-next",
+    "lash-restate?/synthetic-next",
+    "lashlang?/synthetic-next",
+]
 
 [dev-dependencies]
 lash-conformance.workspace = true

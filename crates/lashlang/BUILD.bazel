@@ -26,6 +26,7 @@ lash_rust_library(
     ],
     crate_name = "lashlang",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
@@ -51,6 +52,7 @@ lash_rust_unit_test(
     crate_name = "lashlang",
     crate_root = "src/lib.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang", "//crates/lashlang:lashlang__unit_test"),
@@ -69,6 +71,7 @@ lash_rust_binary(
     crate_name = "workflow_schema_generator",
     crate_root = "src/bin/workflow_schema_generator.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "workflow_schema_generator"),
@@ -91,6 +94,7 @@ lash_rust_unit_test(
     crate_name = "workflow_schema_generator",
     crate_root = "src/bin/workflow_schema_generator.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "workflow_schema_generator", "//crates/lashlang:workflow_schema_generator__bin__unit_test"),
@@ -110,6 +114,7 @@ lash_rust_binary(
     crate_name = "function_perf",
     crate_root = "examples/function_perf.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "function_perf"),
@@ -132,6 +137,7 @@ lash_rust_binary(
     crate_name = "perf",
     crate_root = "examples/perf.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "perf"),
@@ -154,6 +160,7 @@ lash_rust_binary(
     crate_name = "profile",
     crate_root = "examples/profile.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "profile"),
@@ -176,6 +183,7 @@ lash_rust_integration_test(
     crate_name = "integration",
     crate_root = "tests/main.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "integration", "//crates/lashlang:integration__test"),
@@ -197,6 +205,7 @@ lash_rust_integration_test(
     crate_name = "dialect_cost",
     crate_root = "tests/dialect_cost.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "dialect_cost", "//crates/lashlang:dialect_cost__test"),
@@ -221,6 +230,7 @@ lash_rust_integration_test(
     crate_name = "append_cost",
     crate_root = "tests/append_cost.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "append_cost", "//crates/lashlang:append_cost__test"),
@@ -243,6 +253,7 @@ lash_rust_integration_test(
     crate_name = "observation_cost",
     crate_root = "tests/observation_cost.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "observation_cost", "//crates/lashlang:observation_cost__test"),
@@ -264,6 +275,7 @@ lash_rust_integration_test(
     crate_name = "diagnostic_locations",
     crate_root = "tests/diagnostic_locations.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "diagnostic_locations", "//crates/lashlang:diagnostic_locations__test"),
@@ -285,6 +297,7 @@ lash_rust_integration_test(
     crate_name = "benchmark_contract",
     crate_root = "tests/benchmark_contract.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "benchmark_contract", "//crates/lashlang:benchmark_contract__test"),
@@ -306,6 +319,7 @@ lash_rust_integration_test(
     crate_name = "stack_budget",
     crate_root = "tests/stack_budget.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "stack_budget", "//crates/lashlang:stack_budget__test"),
@@ -327,6 +341,7 @@ lash_rust_integration_test(
     crate_name = "property",
     crate_root = "tests/property.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "property", "//crates/lashlang:property__test"),
@@ -348,6 +363,7 @@ lash_rust_binary(
     crate_name = "benchmark",
     crate_root = "benches/benchmark.rs",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "benchmark"),
@@ -413,6 +429,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lashlang",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
@@ -435,6 +452,53 @@ lash_rust_feature_library(
     ],
     crate_name = "lashlang",
     declared_features = [
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_c25f2930"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lashlang__fv_355b064c",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lashlang",
+    declared_features = [
+        "synthetic-next",
+        "testing",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
+    extra_compile_data = [],
+    manifest_dir = "crates/lashlang",
+    package_name = "lash-internal-lashlang",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_0cfc76eb", "//crates/lash-core": "//crates/lash-core:lash-core__fv_4ae0a81f", "//crates/lash-core-effect": "//crates/lash-core-effect:lash-core-effect__fv_68423a73", "//crates/lash-core-execution": "//crates/lash-core-execution:lash-core-execution__fv_a9560f19", "//crates/lash-core-ids": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f", "//crates/lash-core-llm": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2", "//crates/lash-core-store": "//crates/lash-core-store:lash-core-store__fv_1d0b4650", "//crates/lash-core-worker": "//crates/lash-core-worker:lash-core-worker__fv_f2c0b2a0", "//crates/lash-lashlang-runtime": "//crates/lash-lashlang-runtime:lash-lashlang-runtime__fv_813d0263", "//crates/lash-postgres-store": "//crates/lash-postgres-store:lash-postgres-store__fv_bfa8fe14", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_6609d678", "//crates/lash-protocol-standard": "//crates/lash-protocol-standard:lash-protocol-standard__fv_ad9a77ff", "//crates/lash-remote-protocol": "//crates/lash-remote-protocol:lash-remote-protocol__fv_02a0c459", "//crates/lash-restate": "//crates/lash-restate:lash-restate__fv_53f4743f", "//crates/lash-tool-support": "//crates/lash-tool-support:lash-tool-support__fv_05e8dcac", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_8cc70062"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_library(
+    name = "lashlang__fv_80bb0010",
+    build_script = None,
+    crate_features = [
+        "synthetic-next",
+    ],
+    crate_name = "lashlang",
+    declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
@@ -457,6 +521,7 @@ lash_rust_feature_library(
     ],
     crate_name = "lashlang",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),
@@ -477,6 +542,7 @@ lash_rust_feature_library(
     crate_features = [],
     crate_name = "lashlang",
     declared_features = [
+        "synthetic-next",
         "testing",
     ],
     exec_properties = sized_exec_properties("lash-internal-lashlang", "lashlang"),

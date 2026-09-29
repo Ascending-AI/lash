@@ -32,6 +32,10 @@ thiserror = { workspace = true }
 [features]
 default = []
 core-conversions = ["dep:lash-core"]
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it; no production
+# build does.
+synthetic-next = []
 
 [[bin]]
 name = "remote_schema_generator"
