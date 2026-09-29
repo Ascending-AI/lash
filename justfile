@@ -369,15 +369,18 @@ e2e-rolling:
   bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
     //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_126f2aa8 \
     //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_4165473b \
-    //crates/lashctl:lashctl
+    //crates/lashctl:lashctl \
+    //crates/lashctl:lashctl__fv_0935a4fe
   cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_126f2aa8 "$artifacts/bin/n+1/lash-upgrade-node"
   cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_4165473b "$artifacts/bin/n/lash-upgrade-node"
   cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
+  cp bazel-bin/crates/lashctl/lashctl__fv_0935a4fe "$artifacts/bin/n+1/lashctl"
   cargo test --locked -p lash-upgrade-harness --test rolling --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
   export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
-  export LASH_UPGRADE_LASHCTL="$artifacts/bin/n/lashctl"
+  export LASH_UPGRADE_LASHCTL_N="$artifacts/bin/n/lashctl"
+  export LASH_UPGRADE_LASHCTL_NEXT="$artifacts/bin/n+1/lashctl"
   export LASH_E2E_ROLLING_ARTIFACT_DIR="$artifacts"
   run=(
     python3 scripts/ci/restate_suite.py serve --name e2e-rolling

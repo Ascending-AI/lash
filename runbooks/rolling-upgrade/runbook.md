@@ -35,12 +35,12 @@ run. The node binaries are:
 `lashctl version --json` reports the operator build's generation and declared
 ranges. The nodes write their build labels and generations to ready files.
 The operator and scripted node builds enable different Lash features, so the
-ready-file generations drive routing and drain calls. A
-synthetic-next `lashctl` variant is being added in FIG-4062.
+ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Bazel targets. `lashctl version`
+reports the CLI build; the fleet generation comes from each node's ready file.
 
 ## What the run does
 
-`just e2e-rolling` builds both binaries into `<artifacts>/bin/n/` and
+`just e2e-rolling` builds both node and operator binaries into `<artifacts>/bin/n/` and
 `<artifacts>/bin/n+1/`. It starts one pinned `restate-server`, plus a pg16
 container unless `LASH_POSTGRES_DATABASE_URL` names a database. Then it runs
 `roll_and_rollback_smoke` in `crates/lash-upgrade-harness/tests/rolling/`.
@@ -72,17 +72,22 @@ set to the PostgreSQL test database. Every command uses the Bazel-built
 `lashctl` binary, prints its JSON envelope in the E2E log, and must exit zero.
 `G_N` and `G_N+1` below are the generations in the nodes' ready files.
 
-| Command line | Place in the PostgreSQL roll | SQLite roll |
-|---|---|---|
-| `lashctl version --json` | after N starts; record the operator build's ranges | nodes identify themselves in ready files; FIG-4062 adds N+1 lashctl |
-| `lashctl migrate --json` | before N starts and again before N+1 starts | migrates on open |
-| `lashctl preflight --json` | before N and N+1 start, and before each return deployment | opens and checks stores on node start |
-| `lashctl drain G_N+1 --json` | start reverse drain before N+1 retires in rollback | no PostgreSQL generation drain |
-| `lashctl drain-status G_N+1 --json` | require drained after N+1 retires | no PostgreSQL generation drain |
-| `lashctl end-drain G_N+1 --json` | clear reverse drain after N+1 retires | no PostgreSQL generation drain |
-| `lashctl drain G_N --json` | start forward drain before N retires in roll | no PostgreSQL generation drain |
-| `lashctl drain-status G_N --json` | require drained after N retires | no PostgreSQL generation drain |
-| `lashctl end-drain G_N --json` | clear forward drain after N retires | no PostgreSQL generation drain |
+| `lashctl` verb | Place in the PostgreSQL roll | SQLite roll | Runs today as |
+|---|---|---|---|
+| `lashctl version` | once per build; record each CLI build's ranges | nodes identify themselves in ready files | `lashctl version --json` |
+| `lashctl migrate` | N before its first start; N+1 before its first start | migrates on open | `lashctl migrate --json` |
+| `lashctl preflight` | before N and N+1 start, and before each return deployment | opens and checks stores on node start | `lashctl preflight --json` |
+| `lashctl drain` | reverse drain before N+1 retires in rollback | no PostgreSQL generation drain | `lashctl drain "$NEW_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N+1 retires | no PostgreSQL generation drain | `lashctl drain-status "$NEW_GENERATION" --json` |
+| `lashctl end-drain` | clear reverse drain after N+1 retires | no PostgreSQL generation drain | `lashctl end-drain "$NEW_GENERATION" --json` |
+| `lashctl drain` | forward drain before N retires in roll | no PostgreSQL generation drain | `lashctl drain "$OLD_GENERATION" --json` |
+| `lashctl drain-status` | require drained after N retires | no PostgreSQL generation drain | `lashctl drain-status "$OLD_GENERATION" --json` |
+| `lashctl end-drain` | clear forward drain after N retires | no PostgreSQL generation drain | `lashctl end-drain "$OLD_GENERATION" --json` |
+
+The N+1 operator binary runs N+1's migrate, preflight, version and drain
+commands. `OLD_GENERATION` and `NEW_GENERATION` are the node ready-file values.
+`lashctl version` describes the CLI build; drain and routing use the node's
+ready-file generation.
 
 SQLite's migration-on-open follows ADR 0106 §5. `lashctl` currently accepts a
 PostgreSQL database URL, so a SQLite `lashctl` invocation would test that

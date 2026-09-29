@@ -19,8 +19,10 @@ use crate::node::{ServeReady, StoreSpec, TurnReport};
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
 /// The N+1 (`synthetic-next`) build's `lash-upgrade-node`.
 pub const NODE_NEXT_ENV: &str = "LASH_UPGRADE_NODE_NEXT";
-/// The Bazel-built operator binary.
-pub const LASHCTL_ENV: &str = "LASH_UPGRADE_LASHCTL";
+/// The Bazel-built N operator binary.
+pub const LASHCTL_N_ENV: &str = "LASH_UPGRADE_LASHCTL_N";
+/// The Bazel-built synthetic-next operator binary.
+pub const LASHCTL_NEXT_ENV: &str = "LASH_UPGRADE_LASHCTL_NEXT";
 /// The PostgreSQL database every PostgreSQL case migrates and serves.
 pub const POSTGRES_URL_ENV: &str = "LASH_POSTGRES_DATABASE_URL";
 
@@ -149,9 +151,9 @@ pub struct Operator {
 }
 
 impl Operator {
-    pub fn from_env(services: &Services) -> Result<Self> {
+    pub fn from_env(services: &Services, name: &str) -> Result<Self> {
         Ok(Self {
-            path: PathBuf::from(required_env(LASHCTL_ENV)?),
+            path: PathBuf::from(required_env(name)?),
             postgres_url: services.postgres_url.clone(),
         })
     }

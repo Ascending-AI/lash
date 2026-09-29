@@ -17,7 +17,9 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, ensure};
-use lash_upgrade_harness::harness::{Case, NodeBinary, NodeBuilds, Operator, Services};
+use lash_upgrade_harness::harness::{
+    Case, LASHCTL_N_ENV, LASHCTL_NEXT_ENV, NodeBinary, NodeBuilds, Operator, Services,
+};
 use lash_upgrade_harness::identity::BuildLabel;
 use lash_upgrade_harness::node::{TurnReport, served_by};
 use serde::Serialize;
@@ -72,7 +74,8 @@ fn turn(
 fn roll(
     steps: &mut Vec<StepRecord>,
     builds: &NodeBuilds,
-    operator: &Operator,
+    operator_n: &Operator,
+    operator_next: &Operator,
     case: &Case,
     postgres: bool,
 ) -> Result<()> {
@@ -81,8 +84,8 @@ fn roll(
 
     // PostgreSQL migrations are operator commands. SQLite migrates on open.
     if postgres {
-        operator.run("migrate", None)?;
-        operator.run("preflight", None)?;
+        operator_n.run("migrate", None)?;
+        operator_n.run("preflight", None)?;
     }
     let n_first = n.serve(case)?;
     let n_generation = n_first
@@ -91,7 +94,7 @@ fn roll(
         .generation
         .clone();
     if postgres {
-        operator.run("version", None)?;
+        operator_n.run("version", None)?;
     }
     turn(
         steps,
@@ -106,10 +109,13 @@ fn roll(
     // depends on Restate's routing between the two deployments, so only the
     // answer is checked.
     if postgres {
-        operator.run("migrate", None)?;
-        operator.run("preflight", None)?;
+        operator_next.run("migrate", None)?;
+        operator_next.run("preflight", None)?;
     }
     let next_first = next.serve(case)?;
+    if postgres {
+        operator_next.run("version", None)?;
+    }
     let next_generation = next_first
         .ready()
         .context("N+1 ready report")?
@@ -121,14 +127,14 @@ fn roll(
 
     // rollback: N+1 retires; N comes back at a URI of its own.
     if postgres {
-        operator.run("drain", Some(&next_generation))?;
+        operator_next.run("drain", Some(&next_generation))?;
     }
     next_first.stop()?;
     if postgres {
-        let status = operator.run("drain-status", Some(&next_generation))?;
+        let status = operator_next.run("drain-status", Some(&next_generation))?;
         ensure!(status["drained"] == true, "N+1 did not drain: {status}");
-        operator.run("end-drain", Some(&next_generation))?;
-        operator.run("preflight", None)?;
+        operator_next.run("end-drain", Some(&next_generation))?;
+        operator_n.run("preflight", None)?;
     }
     n_first.stop()?;
     let n_again = n.serve(case)?;
@@ -143,17 +149,17 @@ fn roll(
 
     // roll: N+1 comes back at a URI of its own, then N retires.
     if postgres {
-        operator.run("preflight", None)?;
+        operator_next.run("preflight", None)?;
     }
     let next_again = next.serve(case)?;
     if postgres {
-        operator.run("drain", Some(&n_generation))?;
+        operator_next.run("drain", Some(&n_generation))?;
     }
     n_again.stop()?;
     if postgres {
-        let status = operator.run("drain-status", Some(&n_generation))?;
+        let status = operator_next.run("drain-status", Some(&n_generation))?;
         ensure!(status["drained"] == true, "N did not drain: {status}");
-        operator.run("end-drain", Some(&n_generation))?;
+        operator_next.run("end-drain", Some(&n_generation))?;
     }
     turn(
         steps,
@@ -172,7 +178,8 @@ fn roll(
 fn roll_and_rollback_smoke() -> Result<()> {
     let services = Services::from_env()?;
     let builds = NodeBuilds::from_env()?;
-    let operator = Operator::from_env(&services)?;
+    let operator_n = Operator::from_env(&services, LASHCTL_N_ENV)?;
+    let operator_next = Operator::from_env(&services, LASHCTL_NEXT_ENV)?;
     ensure!(builds.n.label() == BuildLabel::N && builds.next.label() == BuildLabel::Next);
     let temporary = tempfile::tempdir()?;
     let scratch = std::env::var_os(ARTIFACT_DIR_ENV)
@@ -182,7 +189,8 @@ fn roll_and_rollback_smoke() -> Result<()> {
     let rolled = roll(
         &mut steps,
         &builds,
-        &operator,
+        &operator_n,
+        &operator_next,
         &Case::postgres("postgres", &services, &scratch)?,
         true,
     )
@@ -190,7 +198,8 @@ fn roll_and_rollback_smoke() -> Result<()> {
         roll(
             &mut steps,
             &builds,
-            &operator,
+            &operator_n,
+            &operator_next,
             &Case::sqlite("sqlite", &services, &scratch)?,
             false,
         )
