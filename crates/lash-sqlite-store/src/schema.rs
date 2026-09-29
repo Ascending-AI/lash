@@ -1746,7 +1746,12 @@ fn apply_versioned_schema_tx_with_writable(
             #[cfg(feature = "synthetic-next")]
             {
                 let written_version = lash_core_execution::compat::descriptor(database.component())
-                    .expect("SQLite component has a descriptor")
+                    .ok_or_else(|| {
+                        crate::compat::malformed(
+                            database,
+                            "the build has no descriptor for this database",
+                        )
+                    })?
                     .writes
                     .max();
                 tx.execute(
