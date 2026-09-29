@@ -1429,3 +1429,75 @@ FIG-433 does not use it. The gate watch keeps today's attachment
 - Partials are session rows, not artifacts. ADR 0113's referrer edges and its
   cleanup executor never see them, and a quoted artifact reference keeps no
   bytes alive.
+
+## Lane G amendment
+
+Added 2026-09-29, after lanes R, P, S and H settled. It closes six gaps
+lane R left open. Where it changes a section above, this text rules.
+
+**A checkpoint that closes an interrupted call keeps the base (§3.1).** An
+`Immediate` stop inside a tool batch does not backtrack the batch: the
+batch fills every unsettled call with a cancelled result, and the
+iteration's checkpoint commits those calls, as it did before this record.
+That checkpoint no longer advances the capture base. The driver decides
+where it issues the checkpoint, from recorded facts only: the turn
+honoured its stop, a group wait of the batch lost to the stop, or a call
+of the batch settled `Cancelled` (a tool child that answered its stop
+before its turn resumed). The driver's base counter follows the same
+decision, so a replay counts the same, and the hold ends with that
+checkpoint. The stop's seal then covers the whole iteration: each
+interrupted call is `Running` with every chunk the host received and
+`OutcomeUnknown`, beside the model output that asked for it. A
+`Cancelled` settlement is never captured as a result, because it is the
+stop's own consequence, not a result before the cutoff. A settlement the
+seal already fenced is not a fault. Two consequences follow. The partial
+may quote content the transcript also holds: the call, with the
+synthesized result the transcript keeps, and prose streamed before it in
+that iteration. And if a turn continues after such a checkpoint, because a
+tool cancelled itself, its next checkpoint advances the base and drops the
+held frames. An `AfterStep` stop still seals an empty partial.
+
+**Unstreamed response blocks are captured (§3.1).** When a response
+streamed no text, the driver publishes its text and reasoning blocks from
+the completed response. The model call's writer now captures those blocks
+before its step returns, under the identities the driver publishes them
+with, as blocks with no start frame (the capture opens them). Calls the
+adapter never streamed were already captured this way. If an assistant
+response hook rewrites such a response, the capture holds the text before
+the rewrite; FIG-4063 tracks that.
+
+**A rebuilt tool child writes its turn's capture (§3.2).** A group tool
+child with no live opener runs on a context the deployment builds. That
+context now carries its turn's capture
+(`facade_support::deployment_turn_tool_capture`) over the session's own
+store. It is addressed by the physical turn that the child's recorded
+parent invocation names and by its admitted scope's root. Its writer opens
+like any other: it fences the dead attempt's epoch, retracts what that
+attempt wrote, and marks the turn recovered. A tool attempt publishes its
+progress on the stream of the dispatch it runs under, so a rebuilt child's
+chunks ride its settlement with its other events.
+
+**The machine's error is held too (§4.3).** A turn machine writes its
+`Error` right before a stopped outcome. The driver holds the observer from
+that `Error` once the machine has finished, so the whole terminal
+publishes after the commit and a failed commit publishes none of it.
+
+**The lost-root announcement (§4.4, §5.2).** lash-restate publishes
+nothing. The lost-root pass reports the partials its terminal writes
+sealed on `ParkReconcileReport::sealed_partials`, and the core that runs
+the reconcile tick announces each through its Live Replay publisher. The
+session's open runtime records it as a turn activity, which is how the
+in-process tier publishes turn activities. The activity is the new
+`TurnEvent::StoppedPartialAvailable { summary }`. A stopped turn's own
+terminal publishes the same activity beside the session event, and both
+use one id derived from the partial's turn. The announcement stays best
+effort: a session that is open nowhere in the process is not told, and its
+hosts read the partial by the root. The activity has no remote form yet.
+A remote host gets the partial on `RemoteTurnReport` or through the read.
+`RestateConfig` gains nothing: the core already holds the publisher, and
+the engine only reports.
+
+**A lost root is always recovered (§1.3).** The lost-root write seals with
+`recovered_after_process_loss = true` and `AcknowledgedPrefix` coverage on
+both backends, whatever the turn's own capture row recorded. Before, it
+took both from that row, so a lost root read as complete and unrecovered.
