@@ -96,6 +96,11 @@ mod session_ingress;
 mod session_store_factory;
 mod session_store_factory_enumeration;
 mod session_store_factory_failure_evidence;
+mod turn_commit_outcome;
+pub use turn_commit_outcome::{
+    cancelled as turn_commit_cancelled, completed as turn_commit_completed,
+    failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
+};
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;

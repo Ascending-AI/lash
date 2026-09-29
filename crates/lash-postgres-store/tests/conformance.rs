@@ -1797,6 +1797,18 @@ lash_conformance::session_read_view_tests!({
     )
 });
 
+lash_conformance::turn_commit_outcome_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres turn outcome conformance: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    (
+        database_lock,
+        Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
+    )
+});
+
 lash_conformance::attachment_owner_degraded_tests!({
     let Some((_database_lock, storage)) = storage().await else {
         return;

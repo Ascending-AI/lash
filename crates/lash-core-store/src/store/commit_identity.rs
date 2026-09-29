@@ -1215,6 +1215,8 @@ struct RuntimeCommitIntent<'a> {
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     #[serde(skip_serializing_if = "failure_evidence_is_empty")]
     failure_evidence: &'a [crate::TurnFailureEvidence],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a super::TurnCommitOutcome>,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
     /// Admitted input a commit hands back or drops (FIG-3531, FIG-3927):
@@ -1261,6 +1263,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
             failure_evidence: &commit.failure_evidence,
+            outcome: commit.outcome.as_ref(),
             completed_queue_batches: commit
                 .ingress
                 .iter()

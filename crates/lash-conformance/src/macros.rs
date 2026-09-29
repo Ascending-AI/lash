@@ -1464,6 +1464,27 @@ macro_rules! session_read_view_tests {
     };
 }
 
+#[macro_export]
+macro_rules! turn_commit_outcome_tests {
+    ($fixture:block) => {
+        $crate::turn_commit_outcome_tests!(@laws $fixture; [
+            (turn_commit_completed, completed),
+            (turn_commit_frame_switch, frame_switch),
+            (turn_commit_cancelled, cancelled),
+            (turn_commit_failed, failed),
+        ]);
+    };
+    (@laws $fixture:block; [$(( $law:ident, $name:ident )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_guard, factory) = $fixture;
+                $crate::$law(factory).await;
+            }
+        )*
+    };
+}
+
 /// Register the mid-stream failure-evidence law: it runs a turn, so it needs
 /// a backend with an effect engine.
 ///

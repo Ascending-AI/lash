@@ -108,6 +108,7 @@ mod tests {
                     .map(|delta| delta.identity.clone())
                     .collect(),
                 failure_evidence: commit.failure_evidence.clone(),
+                outcome: commit.outcome.clone(),
                 pending_follow_on: None,
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),

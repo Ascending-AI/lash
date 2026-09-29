@@ -519,6 +519,7 @@ pub(crate) async fn load_state_from_store(
         state: empty_runtime_session_state(session_id, policy.clone()),
         config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
         turn_failure_settlements: Vec::new(),
+        turn_commits: Vec::new(),
     });
     let mut state = loaded.state;
     if state.session_id != session_id {

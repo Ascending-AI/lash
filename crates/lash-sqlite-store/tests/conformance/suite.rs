@@ -33,6 +33,12 @@ use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
+lash_conformance::turn_commit_outcome_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory)
+});
+
 struct MultiSessionAdmissionStore {
     inner: Arc<dyn RuntimePersistence>,
     backend: TestBackend,

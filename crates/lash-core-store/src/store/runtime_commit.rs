@@ -152,6 +152,9 @@ pub struct RuntimeCommit {
     /// Bounded, non-transcript evidence settled with this turn record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
+    /// Terminal already computed by the turn driver. Nonturn operations have no outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TurnCommitOutcome>,
     pub turn_commit: RuntimeTurnCommitStamp,
     /// What this commit does with the rows its root admitted (FIG-3927):
     /// completions, releases and drops, each predicated on the row still
@@ -693,6 +696,96 @@ impl RuntimeUsageDelta {
     }
 }
 
+/// The terminal of a committed physical turn, independent of live observations.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCommitOutcome {
+    Completed,
+    FrameSwitch,
+    Cancelled,
+    Failed(TurnCommitFailureCause),
+}
+
+/// The typed stop cause of a failed turn. Cancellation has its own outcome.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCommitFailureCause {
+    Incomplete,
+    InvalidInput,
+    MaxTurns,
+    ToolFailure,
+    ProviderError,
+    ContextOverflow,
+    PluginAbort,
+    RuntimeError,
+    SubmittedError,
+    ToolError,
+}
+
+impl TurnCommitOutcome {
+    /// Derive the durable label from the terminal produced by the turn driver.
+    pub fn from_terminal(outcome: &lash_sansio::TurnOutcome) -> Self {
+        use lash_sansio::{TurnOutcome, TurnStop};
+        match outcome {
+            TurnOutcome::Finished(_) => Self::Completed,
+            TurnOutcome::AgentFrameSwitch { .. } => Self::FrameSwitch,
+            TurnOutcome::Stopped(stop) => match stop {
+                TurnStop::Cancelled { .. } => Self::Cancelled,
+                TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
+                TurnStop::InvalidInput => Self::Failed(TurnCommitFailureCause::InvalidInput),
+                TurnStop::MaxTurns => Self::Failed(TurnCommitFailureCause::MaxTurns),
+                TurnStop::ToolFailure => Self::Failed(TurnCommitFailureCause::ToolFailure),
+                TurnStop::ProviderError => Self::Failed(TurnCommitFailureCause::ProviderError),
+                TurnStop::ContextOverflow => Self::Failed(TurnCommitFailureCause::ContextOverflow),
+                TurnStop::PluginAbort => Self::Failed(TurnCommitFailureCause::PluginAbort),
+                TurnStop::RuntimeError => Self::Failed(TurnCommitFailureCause::RuntimeError),
+                TurnStop::SubmittedError { .. } => {
+                    Self::Failed(TurnCommitFailureCause::SubmittedError)
+                }
+                TurnStop::ToolError { .. } => Self::Failed(TurnCommitFailureCause::ToolError),
+            },
+        }
+    }
+
+    /// The checked SQL label for each outcome and failed cause.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::FrameSwitch => "frame_switch",
+            Self::Cancelled => "cancelled",
+            Self::Failed(TurnCommitFailureCause::Incomplete) => "failed_incomplete",
+            Self::Failed(TurnCommitFailureCause::InvalidInput) => "failed_invalid_input",
+            Self::Failed(TurnCommitFailureCause::MaxTurns) => "failed_max_turns",
+            Self::Failed(TurnCommitFailureCause::ToolFailure) => "failed_tool_failure",
+            Self::Failed(TurnCommitFailureCause::ProviderError) => "failed_provider_error",
+            Self::Failed(TurnCommitFailureCause::ContextOverflow) => "failed_context_overflow",
+            Self::Failed(TurnCommitFailureCause::PluginAbort) => "failed_plugin_abort",
+            Self::Failed(TurnCommitFailureCause::RuntimeError) => "failed_runtime_error",
+            Self::Failed(TurnCommitFailureCause::SubmittedError) => "failed_submitted_error",
+            Self::Failed(TurnCommitFailureCause::ToolError) => "failed_tool_error",
+        }
+    }
+}
+
+/// Refuse a receipt whose typed terminal disagrees with its indexed SQL label.
+pub fn validate_turn_commit_outcome_code(
+    receipt: &RuntimeCommitReceipt,
+    stored: Option<&str>,
+) -> Result<(), StoreError> {
+    let expected = receipt.outcome.as_ref().map(TurnCommitOutcome::as_str);
+    if expected != stored {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeCommitReceipt",
+            message: format!("outcome column {stored:?} differs from receipt {expected:?}"),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RuntimeCommitReceipt {
     pub schema_version: u32,
@@ -717,6 +810,9 @@ pub struct RuntimeCommitReceipt {
     /// Bounded failure evidence owned by this durable turn settlement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
+    /// Typed terminal recorded in the same transaction as this receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TurnCommitOutcome>,
     /// The follow-on the head owes after this commit (ADR 0101 §3), so a
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1029,6 +1125,66 @@ impl RuntimeCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_outcome_follows_every_terminal_stop_kind() {
+        use lash_sansio::{TurnOutcome, TurnStop};
+        let cases = [
+            (TurnStop::Incomplete, TurnCommitFailureCause::Incomplete),
+            (TurnStop::InvalidInput, TurnCommitFailureCause::InvalidInput),
+            (TurnStop::MaxTurns, TurnCommitFailureCause::MaxTurns),
+            (TurnStop::ToolFailure, TurnCommitFailureCause::ToolFailure),
+            (
+                TurnStop::ProviderError,
+                TurnCommitFailureCause::ProviderError,
+            ),
+            (
+                TurnStop::ContextOverflow,
+                TurnCommitFailureCause::ContextOverflow,
+            ),
+            (TurnStop::PluginAbort, TurnCommitFailureCause::PluginAbort),
+            (TurnStop::RuntimeError, TurnCommitFailureCause::RuntimeError),
+            (
+                TurnStop::SubmittedError {
+                    value: serde_json::Value::Null,
+                },
+                TurnCommitFailureCause::SubmittedError,
+            ),
+            (
+                TurnStop::ToolError {
+                    tool_name: "tool".into(),
+                    value: serde_json::Value::Null,
+                },
+                TurnCommitFailureCause::ToolError,
+            ),
+        ];
+        for (stop, cause) in cases {
+            let stored = TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(stop));
+            assert_eq!(stored, TurnCommitOutcome::Failed(cause));
+            assert!(stored.as_str().starts_with("failed_"));
+            let encoded = serde_json::to_value(&stored).expect("serialize stored outcome");
+            assert!(encoded.get("failed").is_some());
+            assert_eq!(
+                serde_json::from_value::<TurnCommitOutcome>(encoded)
+                    .expect("decode stored outcome"),
+                stored
+            );
+        }
+        assert_eq!(
+            TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: lash_sansio::TurnCancellationEvidence::internal("outcome-test"),
+            })),
+            TurnCommitOutcome::Cancelled,
+        );
+        assert_eq!(
+            TurnCommitOutcome::from_terminal(&TurnOutcome::Finished(
+                lash_sansio::TurnFinish::AssistantMessage {
+                    text: String::new()
+                },
+            )),
+            TurnCommitOutcome::Completed,
+        );
+    }
 
     #[test]
     fn append_identity_cannot_deserialize_half_populated() {

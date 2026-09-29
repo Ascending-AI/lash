@@ -337,9 +337,10 @@ impl SessionCommitStore for PostgresSessionStore {
             if let Some(row) = prior {
                 let hash: String = row.get(0);
                 let result_json: String = row.get(1);
-                let stored_identity: Option<String> = row.get(2);
-                let stored_version: Option<i32> = row.get(3);
-                let stored_requested_node_count: Option<i64> = row.get(4);
+                let stored_outcome: Option<String> = row.get(2);
+                let stored_identity: Option<String> = row.get(3);
+                let stored_version: Option<i32> = row.get(4);
+                let stored_requested_node_count: Option<i64> = row.get(5);
                 // The shared codec owns both unit-shape and integer-range validation.
                 // In particular, a negative PostgreSQL INTEGER cannot become legacy replay.
                 // The ancestor column intentionally stays outside this receipt SELECT.
@@ -357,6 +358,10 @@ impl SessionCommitStore for PostgresSessionStore {
                     planner.operation_key(),
                     &result_json,
                     self.fleet_format,
+                )?;
+                lash_core_execution::store::validate_turn_commit_outcome_code(
+                    &result,
+                    stored_outcome.as_deref(),
                 )?;
                 let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
@@ -837,6 +842,13 @@ impl SessionCommitStore for PostgresSessionStore {
                 .bind(receipt.operation_key)
                 .bind(receipt.turn_commit_hash)
                 .bind(&result_json)
+                .bind(
+                    receipt
+                        .result
+                        .outcome
+                        .as_ref()
+                        .map(|outcome| outcome.as_str()),
+                )
                 .bind(now as i64)
                 .bind(columns.0)
                 .bind(columns.1)
@@ -1129,6 +1141,38 @@ impl PostgresSessionStore {
             checkpoint,
             token_ledger,
             turn_failure_settlements,
+            turn_commits: {
+                let rows = sqlx::query(session_sql().turn_commits.select_all_for_session.sql())
+                    .bind(session_id.as_str())
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+                let mut commits = Vec::new();
+                for row in rows {
+                    let turn_id = row.get::<String, _>("turn_id");
+                    let result_json = row.get::<String, _>("result_json");
+                    let outcome_code = row.get::<Option<String>, _>("outcome_code");
+                    let receipt =
+                        lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                            session_id,
+                            &turn_id,
+                            &result_json,
+                            self.fleet_format,
+                        )?;
+                    lash_core_execution::store::validate_turn_commit_outcome_code(
+                        &receipt,
+                        outcome_code.as_deref(),
+                    )?;
+                    if let Some(outcome) = receipt.outcome {
+                        commits.push(lash_core_execution::store::TurnCommitRecord {
+                            operation_key: turn_id,
+                            outcome,
+                        });
+                    }
+                }
+                commits.sort_by(|left, right| left.operation_key.cmp(&right.operation_key));
+                commits
+            },
         };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Some(read))

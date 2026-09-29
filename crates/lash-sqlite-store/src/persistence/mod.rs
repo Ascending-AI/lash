@@ -60,6 +60,47 @@ fn load_turn_failure_settlements_conn(
     Ok(settlements)
 }
 
+fn load_turn_commits_conn(
+    conn: &rusqlite::Connection,
+    session_id: &SessionId,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<Vec<lash_core_execution::store::TurnCommitRecord>, StoreError> {
+    let mut statement = conn
+        .prepare(session_sql().turn_commits.select_all_for_session.sql())
+        .map_err(sqlite_error)?;
+    let rows = statement
+        .query_map(params![session_id.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(sqlite_error)?;
+    let mut commits = Vec::new();
+    for row in rows {
+        let (turn_id, result_json, outcome_code) = row.map_err(sqlite_error)?;
+        let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            session_id,
+            &turn_id,
+            &result_json,
+            fleet,
+        )?;
+        lash_core_execution::store::validate_turn_commit_outcome_code(
+            &receipt,
+            outcome_code.as_deref(),
+        )?;
+        if let Some(outcome) = receipt.outcome {
+            commits.push(lash_core_execution::store::TurnCommitRecord {
+                operation_key: turn_id,
+                outcome,
+            });
+        }
+    }
+    commits.sort_by(|left, right| left.operation_key.cmp(&right.operation_key));
+    Ok(commits)
+}
+
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,

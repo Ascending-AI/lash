@@ -244,6 +244,7 @@ CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     turn_id TEXT NOT NULL,
     turn_commit_hash TEXT NOT NULL,
     result_json TEXT NOT NULL,
+    outcome_code TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
     committed_at_ms BIGINT NOT NULL,
     request_identity_hash TEXT,
     requested_node_count BIGINT,

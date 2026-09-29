@@ -157,9 +157,10 @@ pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SemanticBoundaryOperation, decode_runtime_commit_receipt,
-    decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
-    ensure_supported_receipt_version_for_fleet,
+    SemanticBoundaryOperation, TurnCommitFailureCause, TurnCommitOutcome,
+    decode_runtime_commit_receipt, decode_runtime_commit_receipt_for_fleet,
+    ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
+    validate_turn_commit_outcome_code,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -448,6 +449,15 @@ pub struct PersistedSessionRead {
     pub token_ledger: Vec<crate::TokenLedgerEntry>,
     /// Failure components loaded from this session's durable turn receipts.
     pub turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
+    /// Committed physical turns and their durable terminal classifications.
+    pub turn_commits: Vec<TurnCommitRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TurnCommitRecord {
+    /// The canonical operation key stored in `runtime_turn_commits.turn_id`.
+    pub operation_key: String,
+    pub outcome: TurnCommitOutcome,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -593,6 +603,7 @@ impl RuntimeCommit {
             checkpoint: _,
             usage_deltas: _,
             failure_evidence,
+            outcome,
             turn_commit: _,
             ingress,
             applied_commands,
@@ -614,6 +625,7 @@ impl RuntimeCommit {
                 && turn_cancel_closure_settlement.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
+                && outcome.is_none()
                 && committed_attachment_ids.is_empty()
                 && root_terminal.is_none()
                 && park_root.is_none(),
@@ -801,6 +813,7 @@ impl RuntimeCommit {
             checkpoint: build_checkpoint_from_persisted_state(state, fleet_format)?,
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
+            outcome: None,
             turn_commit: RuntimeTurnCommitStamp::new(operation),
             ingress: None,
             applied_commands: None,

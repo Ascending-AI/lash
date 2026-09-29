@@ -348,6 +348,7 @@ table lash_release_stamp
 table lash_runtime_turn_commits
   column committed_at_ms bigint not-null
   column identity_encoding_version integer nullable
+  column outcome_code text nullable
   column request_identity_hash text nullable
   column requested_node_count bigint nullable
   column result_json text not-null

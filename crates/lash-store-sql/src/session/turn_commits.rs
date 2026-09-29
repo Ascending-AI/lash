@@ -11,7 +11,7 @@ pub const TABLE: &str = "runtime_turn_commits";
 
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
-    "session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+    "session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version";
 
 /// A settled turn's identity and result, as the failure-evidence and
@@ -35,7 +35,7 @@ crate::statements! {
              )";
 
         /// The receipt session `?1` recorded for operation key `?2`.
-        select_receipt = "SELECT turn_commit_hash, result_json,
+        select_receipt = "SELECT turn_commit_hash, result_json, outcome_code,
                         request_identity_hash, identity_encoding_version,
                         requested_node_count
                  FROM runtime_turn_commits
@@ -54,20 +54,20 @@ crate::statements! {
              ORDER BY committed_at_ms, turn_id";
 
         /// Every receipt session `?1` recorded.
-        select_all_for_session = "SELECT turn_id, result_json FROM runtime_turn_commits WHERE session_id = ?1";
+        select_all_for_session = "SELECT turn_id, result_json, outcome_code FROM runtime_turn_commits WHERE session_id = ?1";
 
         insert = "INSERT INTO runtime_turn_commits (
-                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// The three append-identity columns are `NULL` by construction: a
         /// marker is not an append request, so it has no request hash, no node
         /// count and no identity encoding.
         insert_marker = "INSERT INTO runtime_turn_commits (
-                session_id, turn_id, turn_commit_hash, result_json, committed_at_ms,
+                session_id, turn_id, turn_commit_hash, result_json, outcome_code, committed_at_ms,
                 request_identity_hash, requested_node_count, identity_encoding_version
-             ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, NULL)";
+             ) VALUES (?1, ?2, ?3, ?4, NULL, ?5, NULL, NULL, NULL)";
     }
 }

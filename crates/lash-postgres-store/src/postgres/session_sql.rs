@@ -634,7 +634,7 @@ lash_store_sql::statements! {
                  FROM settled_park AS park
                  CROSS JOIN settled_park_clock AS clock
              )
-             SELECT turn_commit_hash, result_json,
+             SELECT turn_commit_hash, result_json, outcome_code,
                         request_identity_hash, identity_encoding_version,
                         requested_node_count
                  FROM runtime_turn_commits

@@ -638,6 +638,7 @@ impl TurnBoundary {
                 graph,
                 usage_deltas,
                 failure_evidence,
+                crate::store::TurnCommitOutcome::from_terminal(outcome),
                 operation,
                 ingress_settlement,
                 interrupted_turn_input_turn_id,
@@ -677,6 +678,7 @@ impl TurnBoundary {
         mut graph: GraphAppend,
         usage_deltas: &[crate::store::RuntimeUsageDelta],
         failure_evidence: &[crate::TurnFailureEvidence],
+        outcome: crate::store::TurnCommitOutcome,
         operation: crate::OperationId,
         ingress_settlement: TurnIngressSettlement,
         interrupted_turn_input_turn_id: Option<TurnId>,
@@ -719,6 +721,7 @@ impl TurnBoundary {
             )?
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();
+        commit.outcome = Some(outcome);
         commit.adopted_intent_rows = adopted_intent_rows;
         // A cancelled turn's undelivered input follows the cancellation's
         // disposition; every other handed-back row is deferred.

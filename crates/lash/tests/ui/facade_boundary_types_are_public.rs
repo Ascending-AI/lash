@@ -19,9 +19,9 @@ use lash::persistence::{
     RootStore, RootTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
     RuntimeSessionState, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SessionCheckpoint, SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
-    SessionNodeRecord, StoreError, StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary,
-    TurnInputIngress, TurnInputState, VacuumReport, commit_runtime_state_verified,
-    load_persisted_session_state,
+    SessionNodeRecord, StoreError, StoreMaintenance, StoredDriveEpoch, TurnCommitFailureCause,
+    TurnCommitOutcome, TurnCommitRecord, TurnInputCheckpointBoundary, TurnInputIngress,
+    TurnInputState, VacuumReport, commit_runtime_state_verified, load_persisted_session_state,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -106,6 +106,7 @@ impl SessionCommitStore for FacadeStore {
                 .map(|delta| delta.identity.clone())
                 .collect(),
             failure_evidence: commit.failure_evidence.clone(),
+            outcome: commit.outcome.clone(),
             pending_follow_on: None,
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),
@@ -373,6 +374,7 @@ fn persistence_types_are_nameable(
             })
             .collect(),
         failure_evidence: Vec::new(),
+        outcome: None,
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
         applied_commands: None,
@@ -627,6 +629,10 @@ fn leaked_signature_types_are_homed(
 fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 
 fn main() {
+    let _turn_commit_record = TurnCommitRecord {
+        operation_key: String::new(),
+        outcome: TurnCommitOutcome::Failed(TurnCommitFailureCause::ProviderError),
+    };
     assert_store_object(Arc::new(FacadeStore));
     let _ = SessionHeadMeta::assemble(
         &SessionId::from("facade"),

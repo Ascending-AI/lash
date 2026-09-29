@@ -391,6 +391,7 @@ impl SessionCommitStore for Store {
                             String,
                             String,
                             Option<String>,
+                            Option<String>,
                             Option<i64>,
                             Option<i64>,
                         )> = tx
@@ -404,6 +405,7 @@ impl SessionCommitStore for Store {
                                         row.get(2)?,
                                         row.get(3)?,
                                         row.get(4)?,
+                                        row.get(5)?,
                                     ))
                                 },
                             )
@@ -412,6 +414,7 @@ impl SessionCommitStore for Store {
                         if let Some((
                             stored_hash,
                             result_json,
+                            stored_outcome,
                             stored_identity,
                             stored_version,
                             stored_requested_node_count,
@@ -433,6 +436,9 @@ impl SessionCommitStore for Store {
                                     &result_json,
                                     fleet,
                                 )?;
+                            lash_core_execution::store::validate_turn_commit_outcome_code(
+                                &result, stored_outcome.as_deref(),
+                            )?;
                             let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                                 turn_commit_hash: stored_hash,
                                 result,
@@ -757,6 +763,7 @@ impl SessionCommitStore for Store {
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
                                 result_json,
+                                receipt.result.outcome.as_ref().map(|outcome| outcome.as_str()),
                                 now as i64,
                                 identity.0,
                                 identity.1,
@@ -1001,6 +1008,7 @@ impl Store {
                             &session_id,
                             fleet,
                         )?,
+                        turn_commits: load_turn_commits_conn(&tx, &session_id, fleet)?,
                     }))
                 })(
                 );
