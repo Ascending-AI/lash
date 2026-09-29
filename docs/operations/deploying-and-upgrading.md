@@ -8,12 +8,34 @@ defines the compatibility contract.
 ## Choose the deployment shape
 
 **In-process SQLite.** One host owns the store's durable-core,
-process-registry and trigger databases. Back up all three files together and
-stop that host before replacing its binary. Do not treat three separate files
-as one atomic transaction. A partially advanced set must be completed forward
-by a build with the needed migrations; an older build refuses it. The current
-`lashctl` store commands require `LASH_POSTGRES_DATABASE_URL` and do not migrate
-SQLite. SQLite migrates on open after a backup.
+process-registry and trigger databases. Stop that host before replacing its
+binary. Do not treat three separate files as one atomic transaction. The
+current `lashctl` store commands require `LASH_POSTGRES_DATABASE_URL` and do
+not migrate SQLite: SQLite migrates on open, after a backup.
+
+When `SqliteStoreSet::open` finds a database older than the build writes, it
+first needs the store to itself: it checkpoints and closes each database, and
+if another connection still holds one it waits up to the busy timeout and then
+refuses, changing nothing. It then copies all three database files, byte for
+byte and synced, into a new `sqlite-backup-NNNNNN` directory with a
+`manifest.json`, and only then migrates, taking every database exclusively in
+durable-core, process-registry, trigger order and committing in the same
+order. `SqliteStoreSetOptions::migration_backup` sets where the backups go
+(`BesideStore`, which is `migration-backups/` under the store root, or a
+directory of the host's) and how many finished backups of the store to keep
+(`retain`, default 2). A backup that an unfinished migration or restore still
+needs is never removed.
+
+An interrupted migration is finished by the next open: a migration that some
+database already committed is completed forward, and one that nothing
+committed yet starts again from a fresh backup. A migration that fails after
+a database committed restores all three databases from the backup, byte for
+byte, and the open reports the failure; a restore that is interrupted is
+completed by the next open. A partially advanced set that no backup manifest
+explains is completed forward by a build with the needed migrations; an older
+build refuses it. A component opened on its own (`SqliteStore::open`,
+`SqliteTriggerStore::open` and the like) never migrates and refuses an older
+database with `migration_pending`.
 
 **PostgreSQL with Restate workers.** Workers share one PostgreSQL store and a
 Restate namespace. Run `lashctl` with `LASH_POSTGRES_DATABASE_URL` pointing at
@@ -68,6 +90,7 @@ An incompatible store may report a typed refusal:
 | `unstamped` | A populated component lacks its stamp. Stop; use the matching migration or restore a consistent backup. |
 | `malformed_stamp` | The stamp cannot be read or its floor is invalid. Stop and repair or restore the stamp; do not guess its version. |
 | `too_old` | The component predates this build's read range. Upgrade through the intervening release. |
+| `migration_pending` | A SQLite database is older than this build writes and was opened on its own. Open the whole store with `SqliteStoreSet::open`, which backs it up and migrates it. |
 | `reader_floor_above` | A newer release contracted beyond this build. Roll forward; this build cannot read the store. |
 | `shape_refused` | An addition would change how this build writes an expected table. Stop the roll and correct the migration. |
 | `fleet_outside_writable` | The recorded `F` is outside this build's writable range. Below it means a skipped release; above it means the fleet has advanced. Use the intervening or newer build as appropriate. |

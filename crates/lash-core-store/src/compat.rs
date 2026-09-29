@@ -222,6 +222,23 @@ pub enum CompatRefusal {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         writing_release: Option<String>,
     },
+    /// A SQLite database this build reads but has not migrated: its stamp is
+    /// older than the version this build writes. The store's open migrates
+    /// every database together, after a complete backup; a component opened
+    /// on its own never migrates.
+    #[error(
+        "{component} is at version {found}, older than the version {target} this build writes: \
+         it has not been migrated. Open the whole store with this build (`SqliteStoreSet::open`), \
+         which backs up every database and then migrates them together{}",
+        release_suffix(.writing_release)
+    )]
+    MigrationPending {
+        component: String,
+        found: u32,
+        target: u32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        writing_release: Option<String>,
+    },
     #[error(
         "{component} is at version {found} with reader floor {min_reader}, above the newest \
          this build reads ({reads}): a newer release contracted it. Run a build whose range \
@@ -324,6 +341,9 @@ impl CompatRefusal {
                 writing_release, ..
             }
             | Self::TooOld {
+                writing_release, ..
+            }
+            | Self::MigrationPending {
                 writing_release, ..
             }
             | Self::ReaderFloorAbove {

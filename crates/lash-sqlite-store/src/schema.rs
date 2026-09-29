@@ -115,13 +115,17 @@ impl SqliteDatabase {
         self.definition().fragments.iter().copied()
     }
 
-    /// Everything provisioning applies, in order: the schema body followed by
-    /// the shared fragments. Fixtures that shadow one table apply this to
-    /// complete the catalog — every statement is idempotent, so the shadowed
-    /// declaration stands while every other table is created.
-    #[cfg(feature = "testing")]
+    /// Everything provisioning applies, in order: the schema body, the shared
+    /// fragments, then every step of the migration catalog up to this build's
+    /// version ([`crate::migration::provisioning_steps`]), so a database this
+    /// build creates has the shape a migrated one has. Fixtures that shadow
+    /// one table apply this to complete the catalog — every statement is
+    /// idempotent, so the shadowed declaration stands while every other table
+    /// is created.
     pub(crate) fn provisioning_statements(self) -> impl Iterator<Item = &'static str> {
-        std::iter::once(self.schema()).chain(self.fragment_statements())
+        std::iter::once(self.schema())
+            .chain(self.fragments().iter().copied())
+            .chain(crate::migration::provisioning_steps(self))
     }
 }
 
@@ -1708,9 +1712,8 @@ fn apply_versioned_schema_tx_with_writable(
     writable: lash_core_execution::compat::VersionRange,
 ) -> rusqlite::Result<lash_core_execution::FleetFormat> {
     let apply_schema = |conn: &Transaction<'_>| -> rusqlite::Result<()> {
-        conn.execute_batch(database.schema())?;
-        for fragment in database.fragments() {
-            conn.execute_batch(fragment)?;
+        for statements in database.provisioning_statements() {
+            conn.execute_batch(statements)?;
         }
         Ok(())
     };
@@ -1721,22 +1724,7 @@ fn apply_versioned_schema_tx_with_writable(
             crate::compat::provision(tx, database, writable)?;
         }
         lash_core_execution::compat::CompatAdmission::Native => {
-            #[cfg(feature = "synthetic-next")]
-            {
-                let written_version = lash_core_execution::compat::descriptor(database.component())
-                    .ok_or_else(|| {
-                        crate::compat::malformed(
-                            database,
-                            "the build has no descriptor for this database",
-                        )
-                    })?
-                    .writes
-                    .max();
-                tx.execute(
-                    "UPDATE lash_compat SET version = ?1 WHERE singleton = 1 AND version < ?1",
-                    [i64::from(written_version)],
-                )?;
-            }
+            crate::compat::refuse_unmigrated(tx, database)?;
         }
         lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
             crate::compat::verify_tolerant(tx, database)?;

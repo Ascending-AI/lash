@@ -160,6 +160,13 @@ async fn read_compat_verdict(
                         },
                     }
                 }
+                lash_core_execution::compat::CompatAdmission::Native
+                    if stamp.version < crate::migration::target_version(database)? =>
+                {
+                    StoreSchemaVerdict::Migratable {
+                        found: i64::from(stamp.version),
+                    }
+                }
                 _ => StoreSchemaVerdict::Matches,
             };
             Ok((verdict, floor))

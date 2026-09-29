@@ -19,11 +19,13 @@
 //! simplest backend that gives us *atomic multi-statement transactions on a
 //! single file* with durability guarantees we can reason about.
 //!
-//! ## Schema cutover
+//! ## Schema versions
 //!
-//! There is exactly one supported schema (see [`schema::SCHEMA`]). Older
-//! databases must be deleted before opening; schema changes are explicit
-//! reject-and-recreate boundaries.
+//! Each of the three databases carries a compatibility stamp (ADR 0115 §1.2).
+//! A store older than this build is migrated when its [`SqliteStoreSet`]
+//! opens, after a complete backup of all three databases; an interrupted
+//! migration resumes or restores from that backup at the next open (see
+//! [`SqliteMigrationBackup`]).
 //!
 //! ## Catalog contention
 //!
@@ -114,6 +116,7 @@ mod history;
 mod ingress_obligation;
 mod lifecycle;
 mod location;
+mod migration;
 mod obligation_ledger;
 mod pending_turn_inputs;
 mod persistence;
@@ -150,6 +153,7 @@ pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};
+pub use migration::{SqliteBackupLocation, SqliteMigrationBackup};
 
 /// File name of the one durable-core database under a session-store root.
 ///

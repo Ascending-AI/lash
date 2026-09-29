@@ -206,21 +206,25 @@ pub(crate) enum AdvanceStep {
 /// While it holds a database no writer there passes its fence, and a writer
 /// that was already past its fence finishes first under the old row. A crash
 /// between two commits leaves the databases disagreeing, and the next set
-/// open refuses that as `PartiallyAdvanced` ([`check_set`]).
+/// open refuses that as `PartiallyAdvanced` ([`check_set`]) unless the
+/// opening build's migrations complete the set forward
+/// ([`crate::migration`]).
 pub(crate) fn advance_set(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
     rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
 ) -> rusqlite::Result<()> {
-    advance_set_observed(location, busy_timeout, rewrite, |_| {})
+    advance_set_observed(location, busy_timeout, rewrite, |_| Ok(()))
 }
 
-/// [`advance_set`], reporting each lock and commit to `observe` as it happens.
+/// [`advance_set`], reporting each lock and commit to `observe` as it
+/// happens. An error from `observe` stops the advance there: every
+/// transaction not yet committed rolls back, as a crash at that point would.
 pub(crate) fn advance_set_observed(
     location: &SqliteLocation,
     busy_timeout: std::time::Duration,
     mut rewrite: impl FnMut(SqliteDatabase, &Transaction<'_>) -> rusqlite::Result<()>,
-    mut observe: impl FnMut(AdvanceStep),
+    mut observe: impl FnMut(AdvanceStep) -> rusqlite::Result<()>,
 ) -> rusqlite::Result<()> {
     let mut connections = Vec::with_capacity(SqliteDatabase::ALL.len());
     for database in SqliteDatabase::ALL {
@@ -237,14 +241,14 @@ pub(crate) fn advance_set_observed(
             *database,
             connection.transaction_with_behavior(rusqlite::TransactionBehavior::Exclusive)?,
         ));
-        observe(AdvanceStep::Locked(*database));
+        observe(AdvanceStep::Locked(*database))?;
     }
     for (database, tx) in &held {
         rewrite(*database, tx)?;
     }
     for (database, tx) in held {
         tx.commit()?;
-        observe(AdvanceStep::Committed(database));
+        observe(AdvanceStep::Committed(database))?;
     }
     Ok(())
 }
@@ -314,6 +318,29 @@ pub(crate) fn provision(
             FleetFormat::seed(writable).version(),
         ],
     )?;
+    Ok(())
+}
+
+/// Refuse a database this build reads but has not migrated: its stamp is
+/// older than the version the build writes. Only the store's open migrates,
+/// every database together after a complete backup ([`crate::migration`]);
+/// a component's installer never does.
+pub(crate) fn refuse_unmigrated(
+    conn: &Connection,
+    database: SqliteDatabase,
+) -> rusqlite::Result<()> {
+    let Some((stamp, _)) = read(conn, database)? else {
+        return Ok(());
+    };
+    let target = crate::migration::target_version(database)?;
+    if stamp.version < target {
+        return Err(incompatible(CompatRefusal::MigrationPending {
+            component: database.component().as_str().to_owned(),
+            found: stamp.version,
+            target,
+            writing_release: writing_release(conn, database),
+        }));
+    }
     Ok(())
 }
 
@@ -417,9 +444,8 @@ fn signature(conn: &Connection, table: &str, sql: &str) -> rusqlite::Result<Vec<
 /// columns, tables, views and non-unique indexes.
 pub(crate) fn verify_tolerant(conn: &Connection, database: SqliteDatabase) -> rusqlite::Result<()> {
     let baseline = Connection::open_in_memory()?;
-    baseline.execute_batch(database.schema())?;
-    for fragment in database.fragments() {
-        baseline.execute_batch(fragment)?;
+    for statements in database.provisioning_statements() {
+        baseline.execute_batch(statements)?;
     }
     let mut tables = baseline.prepare(
         "SELECT name, sql FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'",

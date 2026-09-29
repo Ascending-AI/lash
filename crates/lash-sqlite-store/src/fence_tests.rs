@@ -328,6 +328,7 @@ async fn sqlite_migration_takes_every_database_exclusively_in_order() {
                     "no database is rewritten before all three are held"
                 );
             }
+            Ok(())
         },
     )
     .expect("migrate the store");

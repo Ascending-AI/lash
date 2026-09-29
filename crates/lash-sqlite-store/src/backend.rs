@@ -31,10 +31,17 @@ pub struct SqliteStoreSetOptions {
     /// unless a test that replays committed bytes needs them deterministic.
     #[doc(hidden)]
     pub process_id_mint: lash_core_execution::ProcessIdMint,
+    /// Where the open-time migration backs the store up before it changes
+    /// it, and how many backups it keeps ([`crate::migration`]).
+    pub migration_backup: crate::SqliteMigrationBackup,
     /// Deterministic transaction faults, installed on every session store the
     /// store set's factory opens.
     #[cfg(feature = "testing")]
     pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
+    /// Observes, pauses, crashes or fails the open-time migration at each of
+    /// its steps.
+    #[cfg(feature = "testing")]
+    pub migration_hook: Option<crate::testing::SqliteMigrationHook>,
 }
 
 impl SqliteStoreSetOptions {
@@ -190,6 +197,21 @@ impl SqliteStoreSet {
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        // A store older than this build is backed up whole and migrated
+        // before any component opens it; a set an interrupted migration left
+        // part way is completed or restored first.
+        #[cfg(feature = "testing")]
+        let probe = crate::migration::Probe::hooked(options.migration_hook.clone());
+        #[cfg(not(feature = "testing"))]
+        let probe = crate::migration::Probe::default();
+        crate::migration::migrate_on_open(
+            &location,
+            &options.migration_backup,
+            options.store.connection_policy.busy_timeout,
+            clock.as_ref(),
+            probe,
+        )
+        .map_err(|error| tokio_rusqlite::Error::Error(crate::sqlite_conversion_error(error)))?;
         crate::compat::check_set(&location).map_err(tokio_rusqlite::Error::Error)?;
         let database = |database| {
             DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())

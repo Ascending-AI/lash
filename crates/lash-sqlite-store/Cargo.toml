@@ -21,7 +21,9 @@ doctest = false
 [features]
 perf-witness = ["lash-core-execution/perf-witness", "rusqlite/trace"]
 testing = ["lash-core-execution/testing"]
-synthetic-next = []
+# Phase A's synthetic successor (ADR 0115 §6): the SQLite components'
+# descriptors move with the migration catalog that reaches them.
+synthetic-next = ["lash-core-store/synthetic-next"]
 
 [lints]
 workspace = true

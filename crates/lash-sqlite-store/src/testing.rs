@@ -9,6 +9,8 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::migration::{SqliteMigrationFault, SqliteMigrationHook, SqliteMigrationStep};
+
 /// Returns the production trigger-subscription listing SQL for conformance assertions.
 ///
 /// The filter no longer builds the statement; it selects one (FIG-3385). The
