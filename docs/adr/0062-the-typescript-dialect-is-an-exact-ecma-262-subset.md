@@ -642,6 +642,15 @@ cannot round-trip is refused with a named diagnostic, never silently
 degraded; a row the law fails today is pinned by the open defect or registered
 deviation that breaks it and fails once that is fixed.
 
+RegExp's `lastIndex` is one raw `Value` in the heap. Snapshots and durable
+fragments carry it as `CanonicalValue`; continuations carry it as `ValueWire`.
+Reads preserve fractions, non-finite numbers, negative zero, strings and
+supported references. RegExp operations derive ToLength when they use the
+property. The execution-index cap does not constrain the raw property, so a
+number such as `1e16` can be captured and restored. Property-held references
+participate in collection, memory charging and fragment mutation tracking;
+unsupported durable values fail through the existing named boundary.
+
 ## Deviation register
 
 These are the only deliberate departures from ECMA-262 for an operation that is

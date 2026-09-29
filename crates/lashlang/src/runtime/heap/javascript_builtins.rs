@@ -918,24 +918,18 @@ impl Heap {
     }
 
     /// The side-table rows keyed by `id` carry references `child_refs` cannot
-    /// see: a built-in's expando record keeps what it stores, and a RegExp's
-    /// raw `lastIndex` override roots the value it holds. They mark only when
+    /// see: a built-in's expando record keeps what it stores. They mark only when
     /// their owner does — an unreachable built-in is swept wholesale, map
     /// entry included, so `===` still cannot flap across a collection.
     pub(crate) fn collect_side_state_refs(&self, id: HeapId, pending: &mut Vec<HeapId>) {
         if let Some(own) = self.builtin_expandos.get(&id) {
             pending.push(*own);
         }
-        if let Some(value) = self.regexp_last_index_overrides.get(&id) {
-            collect_value_refs(value, pending);
-        }
     }
 
     /// Drop the side-table rows whose objects were swept.
     pub(crate) fn sweep_builtin_side_state(&mut self, marked: &BTreeSet<HeapId>) {
         self.list_holes.retain(|id, _| marked.contains(id));
-        self.regexp_last_index_overrides
-            .retain(|id, _| marked.contains(id));
         self.builtin_expandos.retain(|id, _| marked.contains(id));
         self.builtin_deleted.retain(|id, _| marked.contains(id));
         self.builtin_enumerable.retain(|id, _| marked.contains(id));

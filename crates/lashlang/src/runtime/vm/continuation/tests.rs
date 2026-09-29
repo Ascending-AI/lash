@@ -294,23 +294,6 @@ fn continuation_numbers_canonicalize_nan_and_preserve_negative_zero() {
 }
 
 #[test]
-fn continuation_decode_rejects_regexp_last_index_above_maximum_safe_length() {
-    let mut heap = Heap::default();
-    let regexp = heap
-        .allocate_regexp("a+".to_string(), "g".to_string())
-        .expect("RegExp");
-    let mut continuation = empty_continuation(heap);
-    continuation.reference_semantics = true;
-    continuation.operand_stack.push(regexp);
-    let mut wire = serde_json::to_value(&continuation).expect("continuation wire");
-    wire["heap"]["objects"][0]["object"]["last_index"] =
-        serde_json::json!(crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1);
-    let error = serde_json::from_value::<VmContinuation>(wire)
-        .expect_err("out-of-range lastIndex must not decode");
-    assert!(error.to_string().contains("maximum safe length"), "{error}");
-}
-
-#[test]
 fn continuation_decode_rejects_descending_counters_and_dangling_refs() {
     let mut heap = Heap::default();
     heap.allocate(HeapObject::List(Vec::new())).expect("first");
@@ -400,5 +383,46 @@ fn nested_projection_survives_the_continuation_wire() {
         nested.projection_ref(),
         Some(&serde_json::json!({ "kind": "report", "id": 7 })),
         "`projection_ref` must cross the wire unchanged"
+    );
+}
+
+#[test]
+fn regexp_last_index_continuation_rejects_unsupported_durable_projection() {
+    let mut identity = serde_json::json!(0);
+    for _ in 0..66 {
+        identity = serde_json::json!([identity]);
+    }
+    let unsupported = Value::Projected(
+        crate::runtime::ProjectedValue::unavailable_after_restore_with_projection_ref(
+            "unsupported",
+            "number",
+            Some(identity),
+        ),
+    );
+    let mut heap = Heap::default();
+    let regexp = heap
+        .allocate_regexp("a".into(), "g".into())
+        .expect("regexp");
+    let Value::Ref(id) = regexp else {
+        panic!("heap reference")
+    };
+    heap.set_regexp_last_index(id, unsupported)
+        .expect("raw assignment");
+    let mut continuation = empty_continuation(heap);
+    continuation.reference_semantics = true;
+    continuation.operand_stack.push(regexp);
+    let validation = validate_continuation(&continuation)
+        .expect_err("suspension prevalidation refuses unsupported property");
+    assert!(
+        matches!(validation, ContinuationError::UnserializableValue { ref location, variant: "value beyond the snapshot depth limit" } if location.contains("lastIndex")),
+        "{validation}"
+    );
+    let error =
+        serde_json::to_vec(&continuation).expect_err("unsupported property cannot be emitted");
+    assert!(
+        error
+            .to_string()
+            .contains("projection reference beyond the snapshot depth limit"),
+        "{error}"
     );
 }

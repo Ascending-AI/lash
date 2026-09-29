@@ -27,7 +27,7 @@ pub(super) enum CanonicalHeapObject {
     RegExp {
         pattern: String,
         flags: String,
-        last_index: u64,
+        last_index: CanonicalValue,
     },
     RegExpMatch {
         items: Vec<CanonicalValue>,
@@ -119,7 +119,11 @@ impl CanonicalHeapObject {
             HeapObject::RegExp(regexp) => Self::RegExp {
                 pattern: regexp.pattern.clone(),
                 flags: regexp.flags.clone(),
-                last_index: regexp.last_index,
+                last_index: CanonicalValue::from_runtime(
+                    &regexp.last_index,
+                    &format!("{location}.lastIndex"),
+                    0,
+                )?,
             },
             HeapObject::RegExpMatch(result) => Self::RegExpMatch {
                 items: canonical_items(&result.items, &location, 0)?,
@@ -265,15 +269,10 @@ impl CanonicalHeapObject {
                         error.diagnostic_code()
                     ))
                 })?;
-                if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
-                    return Err(SnapshotDecodeError::InvalidEncoding(
-                        "RegExp last_index exceeds JavaScript's maximum safe length".to_string(),
-                    ));
-                }
                 HeapObject::RegExp(RegExpObject {
                     pattern,
                     flags,
-                    last_index,
+                    last_index: last_index.into_runtime()?,
                     compiled_program: None,
                 })
             }

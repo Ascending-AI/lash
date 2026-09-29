@@ -105,7 +105,7 @@ fn exotic_session() -> State {
     let Value::Ref(regexp_id) = regexp else {
         unreachable!("an allocation is a reference")
     };
-    heap.set_regexp_last_index(regexp_id, 3)
+    heap.set_regexp_last_index(regexp_id, Value::Number(3.0))
         .expect("set lastIndex");
     let url = heap
         .allocate_url("https://example.test/path?q=1&r=2", None)
@@ -160,7 +160,11 @@ fn every_typescript_exotic_survives_a_durable_reload() {
     else {
         panic!("the RegExp binding names a RegExp")
     };
-    assert_eq!(regexp.last_index, 3, "lastIndex is durable state");
+    assert_eq!(
+        regexp.last_index,
+        Value::Number(3.0),
+        "lastIndex is durable state"
+    );
     assert_eq!(
         complete(&reloaded).header,
         parts.header,
@@ -702,4 +706,46 @@ fn a_v8_header_is_refused_by_its_version() {
             found: 8,
         }
     );
+}
+
+#[test]
+fn regexp_last_index_rejects_unsupported_durable_projection() {
+    let mut identity = serde_json::json!(0);
+    for _ in 0..66 {
+        identity = serde_json::json!([identity]);
+    }
+    let unsupported = Value::Projected(
+        crate::runtime::ProjectedValue::unavailable_after_restore_with_projection_ref(
+            "unsupported",
+            "number",
+            Some(identity),
+        ),
+    );
+    let mut heap = Heap::default();
+    let regexp = heap
+        .allocate_regexp("a".into(), "g".into())
+        .expect("regexp");
+    let Value::Ref(id) = regexp else {
+        panic!("heap reference")
+    };
+    heap.set_regexp_last_index(id, unsupported)
+        .expect("raw assignment does not coerce");
+    let state = install(vec![("regexp", regexp)], heap);
+    for error in [
+        state
+            .snapshot()
+            .to_canonical_bytes()
+            .expect_err("snapshot refuses unsupported property"),
+        state
+            .durable_parts(
+                &DurableBaseline::default(),
+                lash_core_execution::FleetFormat::current(),
+            )
+            .expect_err("fragment refuses unsupported property"),
+    ] {
+        assert!(
+            matches!(error, ContinuationError::UnserializableValue { ref location, variant: "value beyond the snapshot depth limit" } if location.contains("lastIndex")),
+            "{error}"
+        );
+    }
 }

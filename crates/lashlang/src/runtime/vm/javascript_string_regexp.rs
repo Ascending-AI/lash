@@ -44,7 +44,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if !global {
             return self.exec_regexp(receiver, input);
         }
-        self.heap.set_regexp_last_index(receiver, 0)?;
+        self.heap
+            .set_regexp_last_index(receiver, Value::Number(0.0))?;
         let units = bounded_utf16_input(&self.heap, input)?;
         self.charge_intrinsic_work(units.len());
         let matches = self.regexp_matches(receiver, &units, 0, true, None)?;
@@ -59,7 +60,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 &mut pending_bytes,
             )?;
         }
-        self.heap.set_regexp_last_index(receiver, 0)?;
+        self.heap
+            .set_regexp_last_index(receiver, Value::Number(0.0))?;
         if values.is_empty() {
             Ok(Value::Null)
         } else {
@@ -76,14 +78,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.charge_intrinsic_work(units.len());
         // `search` preserves `lastIndex` — the stored value, not the coerced
         // `exec` view of it.
-        let saved = self
-            .heap
-            .regexp_last_index_value(receiver)?
-            .unwrap_or(Value::Number(0.0));
+        let saved = match self.heap.get(receiver)? {
+            HeapObject::RegExp(regexp) => regexp.last_index.clone(),
+            _ => return Err(js_stdlib_error("RegExp search receiver is not a RegExp")),
+        };
         let sticky =
             matches!(self.heap.get(receiver)?, HeapObject::RegExp(re) if re.flags.contains('y'));
         let found = self.first_regexp_match(receiver, &units, 0, sticky)?;
-        self.heap.set_regexp_last_index_raw(receiver, saved)?;
+        self.heap.set_regexp_last_index(receiver, saved)?;
         Ok(found.map_or(-1, |found| found.range.start as i64))
     }
 

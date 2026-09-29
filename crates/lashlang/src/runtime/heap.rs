@@ -30,8 +30,8 @@ pub use javascript_builtins::is_javascript_builtin_global;
 #[cfg(test)]
 pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
-    DateObject, ErrorKind, ErrorObject, MAX_JAVASCRIPT_LENGTH, MapObject, RegExpMatchObject,
-    RegExpObject, SetObject, canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
+    DateObject, ErrorKind, ErrorObject, MapObject, RegExpMatchObject, RegExpObject, SetObject,
+    canonical_regexp_flags, regexp_source, regexp_string, same_value_zero,
 };
 pub(crate) use partition::DurablePartition;
 pub(crate) use summary::SUMMARY_MAX_CHARS;
@@ -115,8 +115,8 @@ pub(crate) struct Heap {
     pub(crate) guest_coercion: guest_coercion::GuestCoercionReplay,
     /// Guest expando properties written to a built-in object, held as one
     /// record per built-in. In-memory only: a wire round-trip restores the
-    /// built-in without its expandos, the same session-only treatment the
-    /// `lastIndex` override and sparse holes get.
+    /// built-in without its expandos, the same session-only treatment sparse
+    /// holes get.
     builtin_expandos: FxHashMap<HeapId, HeapId>,
     /// Own names deleted off a built-in (`delete eval.length`): tombstones
     /// that hide the static surface so a read falls through to the
@@ -133,16 +133,10 @@ pub(crate) struct Heap {
     /// `undefined`. Not durable: a wire round-trip densifies, the registered
     /// FIG-3700 divergence.
     list_holes: FxHashMap<HeapId, BTreeSet<usize>>,
-    /// `lastIndex` values a guest wrote that the durable `u64` slot cannot
-    /// represent — ECMA stores the raw value and coerces at `exec`. The
-    /// `RegExpObject.last_index` slot keeps the coerced number for the wire;
-    /// this in-memory override wins reads until an assignment replaces it.
-    /// Not durable: a wire round-trip keeps the coerced slot.
-    regexp_last_index_overrides: FxHashMap<HeapId, Value>,
     /// Records `Lash.Arguments` materialized for a call frame — they answer
     /// strict-mode `callee`/`caller` poison and keep `length`/`callee` off
     /// the enumerable surface. In-memory only: a wire round-trip leaves a
-    /// plain record, matching the hole/override treatment.
+    /// plain record, matching the sparse-hole treatment.
     arguments_records: FxHashSet<HeapId>,
 }
 
@@ -184,7 +178,6 @@ impl Default for Heap {
             builtin_expandos: FxHashMap::default(),
             builtin_deleted: FxHashMap::default(),
             list_holes: FxHashMap::default(),
-            regexp_last_index_overrides: FxHashMap::default(),
             arguments_records: FxHashSet::default(),
         }
     }
@@ -1443,7 +1436,6 @@ impl Clone for Heap {
             builtin_expandos: self.builtin_expandos.clone(),
             builtin_deleted: self.builtin_deleted.clone(),
             list_holes: self.list_holes.clone(),
-            regexp_last_index_overrides: self.regexp_last_index_overrides.clone(),
             arguments_records: self.arguments_records.clone(),
         }
     }

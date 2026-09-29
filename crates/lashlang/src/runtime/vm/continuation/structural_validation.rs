@@ -180,11 +180,12 @@ impl<'a> ContinuationValidator<'a> {
         id: HeapId,
         regexp: &RegExpObject,
     ) -> Result<(), ContinuationError> {
-        if regexp.last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
-            return Err(ContinuationError::UnserializableValue {
-                location: format!("heap RegExp {}", id.get()),
-                variant: "lastIndex beyond JavaScript's maximum safe length",
-            });
+        let location = format!("heap RegExp {}.lastIndex", id.get());
+        self.validate_heap_values(std::slice::from_ref(&regexp.last_index), &location)?;
+        if let Value::Projected(projected) = &regexp.last_index {
+            crate::runtime::projected_wire::CanonicalProjectedValue::from_projected(
+                projected, &location, 0,
+            )?;
         }
         Ok(())
     }

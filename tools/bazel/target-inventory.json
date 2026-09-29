@@ -21605,6 +21605,7 @@
       "dependencies": [
         "futures",
         "jsonschema",
+        "lash-internal-core-execution",
         "lash-internal-lashlang",
         "lash-internal-sansio",
         "lash-internal-typescript",

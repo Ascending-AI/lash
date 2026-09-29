@@ -634,7 +634,7 @@ mod continuation_serde {
         RegExp {
             pattern: String,
             flags: String,
-            last_index: u64,
+            last_index: ValueWire,
         },
         RegExpMatch {
             items: Vec<ValueWire>,
@@ -781,7 +781,7 @@ mod continuation_serde {
             HeapObject::RegExp(regexp) => HeapObjectWire::RegExp {
                 pattern: regexp.pattern.clone(),
                 flags: regexp.flags.clone(),
-                last_index: regexp.last_index,
+                last_index: value_to_wire(&regexp.last_index)?,
             },
             HeapObject::RegExpMatch(result) => HeapObjectWire::RegExpMatch {
                 items: result
@@ -871,13 +871,10 @@ mod continuation_serde {
             } => {
                 crate::runtime::validate_typescript_regexp(&pattern, &flags)
                     .map_err(|_| "RegExp pattern or flags violate TypeScript bounds")?;
-                if last_index > crate::runtime::heap::MAX_JAVASCRIPT_LENGTH {
-                    return Err("RegExp last_index exceeds JavaScript's maximum safe length");
-                }
                 HeapObject::RegExp(RegExpObject {
                     pattern,
                     flags,
-                    last_index,
+                    last_index: value_from_wire(last_index)?,
                     compiled_program: None,
                 })
             }

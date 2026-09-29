@@ -263,7 +263,7 @@ fn exotic_kinds_have_deterministic_logical_byte_charges() {
     let regexp = HeapObject::RegExp(RegExpObject {
         pattern: "ab".to_string(),
         flags: "gi".to_string(),
-        last_index: 0,
+        last_index: Value::Number(0.0),
         compiled_program: None,
     });
     let map = HeapObject::Map(MapObject {
@@ -422,4 +422,39 @@ fn a_warm_export_cache_charges_the_same_depth_as_a_cold_walk() {
         heap.export_for_instruction(&over_ceiling),
         Err(RuntimeError::ValueDepthLimitExceeded { .. })
     ));
+}
+
+#[test]
+fn regexp_last_index_charges_raw_values_and_refuses_over_budget_mutations() {
+    let mut heap = Heap::default();
+    let regexp = heap
+        .allocate_regexp("a".into(), "g".into())
+        .expect("regexp");
+    let Value::Ref(id) = regexp else {
+        panic!("heap reference")
+    };
+    let before = heap.live_logical_bytes();
+    let revision = heap.revision(id);
+    heap.logical_byte_limit = before + 10;
+    assert!(matches!(
+        heap.set_regexp_last_index(id, Value::String("x".repeat(100).into())),
+        Err(RuntimeError::MemoryLimitExceeded { .. })
+    ));
+    assert_eq!(heap.live_logical_bytes(), before);
+    assert_eq!(
+        heap.revision(id),
+        revision,
+        "failed writes leave the revision unchanged"
+    );
+    let HeapObject::RegExp(regexp) = heap.get(id).expect("property") else {
+        panic!("RegExp")
+    };
+    assert_eq!(regexp.last_index, Value::Number(0.0));
+    heap.set_regexp_last_index(id, Value::String("x".repeat(16).into()))
+        .expect("fits");
+    assert_eq!(heap.live_logical_bytes(), before + 8);
+    assert_ne!(heap.revision(id), revision);
+    heap.set_regexp_last_index(id, Value::Number(0.0))
+        .expect("replace property");
+    assert_eq!(heap.live_logical_bytes(), before);
 }

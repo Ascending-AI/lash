@@ -119,7 +119,7 @@ pub(crate) struct RegExpProgramCache {
 pub(crate) struct RegExpObject {
     pub(crate) pattern: String,
     pub(crate) flags: String,
-    pub(crate) last_index: u64,
+    pub(crate) last_index: Value,
     pub(crate) compiled_program: Option<Box<RegExpProgramCache>>,
 }
 
@@ -160,7 +160,7 @@ impl Clone for RegExpObject {
         Self {
             pattern: self.pattern.clone(),
             flags: self.flags.clone(),
-            last_index: self.last_index,
+            last_index: self.last_index.clone(),
             // Heap clones are in-process transactional copies. Persistence is
             // controlled by the explicit wire conversion, which omits this.
             compiled_program: self.compiled_program.clone(),
@@ -223,7 +223,7 @@ impl Heap {
         self.allocate_object(HeapObject::RegExp(RegExpObject {
             pattern,
             flags,
-            last_index: 0,
+            last_index: Value::Number(0.0),
             compiled_program: None,
         }))
     }
@@ -391,9 +391,8 @@ impl Heap {
     pub(crate) fn set_regexp_last_index(
         &mut self,
         id: HeapId,
-        last_index: u64,
+        last_index: Value,
     ) -> Result<(), RuntimeError> {
-        self.regexp_last_index_overrides.remove(&id);
         self.update_object(id, |object| {
             let HeapObject::RegExp(regexp) = object else {
                 return false;
@@ -681,75 +680,15 @@ impl Heap {
         }
     }
 
-    /// `lastIndex` as the guest stored it: the raw written value when the
-    /// durable `u64` slot could not represent it, else the coerced slot.
-    pub(crate) fn regexp_last_index_value(
-        &self,
-        id: HeapId,
-    ) -> Result<Option<Value>, RuntimeError> {
-        Ok(match self.get(id)? {
-            HeapObject::RegExp(regexp) => Some(
-                self.regexp_last_index_overrides
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or(Value::Number(regexp.last_index as f64)),
-            ),
-            _ => None,
-        })
-    }
-
-    /// `lastIndex` as `exec` consumes it: the stored value through ToLength —
-    /// non-numeric stores coerce to `0`, matching Node.
     pub(crate) fn regexp_last_index_coerced(&self, id: HeapId) -> Result<u64, RuntimeError> {
         let HeapObject::RegExp(regexp) = self.get(id)? else {
             return Ok(0);
         };
-        let number = match self.regexp_last_index_overrides.get(&id) {
-            Some(value) => self.javascript_to_number(value)?,
-            None => regexp.last_index as f64,
-        };
-        // ToLength: NaN and non-positive numbers become 0; +Infinity and
-        // anything past the safe-integer cap saturate to it.
+        let number = self.javascript_to_number(&regexp.last_index)?;
         if number.is_nan() || number <= 0.0 {
             return Ok(0);
         }
         Ok((number as u64).min(MAX_JAVASCRIPT_LENGTH))
-    }
-
-    /// `re.lastIndex = value` stores the raw value, as ECMA's writable data
-    /// property does; `exec` coerces at use. A nonnegative integer the
-    /// durable slot holds exactly writes through it; anything else rides the
-    /// in-memory override while the slot keeps the value's ToLength floor,
-    /// which is where a restored process resumes from.
-    pub(crate) fn set_regexp_last_index_raw(
-        &mut self,
-        id: HeapId,
-        value: Value,
-    ) -> Result<(), RuntimeError> {
-        let exact = match &value {
-            Value::Number(number)
-                if number.is_finite()
-                    && number.fract() == 0.0
-                    && *number >= 0.0
-                    && *number <= u64::MAX as f64 =>
-            {
-                *number as u64
-            }
-            _ => {
-                // `as` saturates: negative and NaN become 0, +Infinity and
-                // overflow become u64::MAX, fractions truncate — exactly the
-                // ToLength-shaped index a restored process should see.
-                let durable = match &value {
-                    Value::Number(number) => (*number as u64).min(MAX_JAVASCRIPT_LENGTH),
-                    _ => 0,
-                };
-                self.set_regexp_last_index(id, durable)?;
-                self.regexp_last_index_overrides.insert(id, value);
-                return Ok(());
-            }
-        };
-        self.regexp_last_index_overrides.remove(&id);
-        self.set_regexp_last_index(id, exact)
     }
 
     pub(crate) fn replace_javascript_record(

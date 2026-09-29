@@ -739,11 +739,6 @@ pub(crate) fn read_javascript_heap_field(
     id: HeapId,
     field: &Name,
 ) -> Result<Value, RuntimeError> {
-    if field.text.as_ref() == "lastIndex"
-        && let Some(last_index) = heap.regexp_last_index_value(id)?
-    {
-        return Ok(last_index);
-    }
     Ok(match heap.get(id)? {
         HeapObject::Record(record) => {
             // `callee`/`caller` are poisoned accessors on a strict-mode
@@ -765,6 +760,7 @@ pub(crate) fn read_javascript_heap_field(
             Value::Number(values.len() as f64)
         }
         HeapObject::RegExp(regexp) => match field.text.as_ref() {
+            "lastIndex" => regexp.last_index.clone(),
             "source" => Value::String(regexp_source(regexp).into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),
@@ -851,9 +847,7 @@ pub(crate) fn read_javascript_heap_index(
             record.get(&key).cloned().unwrap_or(Value::Undefined)
         }
         HeapObject::RegExp(regexp) => match key.as_str() {
-            "lastIndex" => heap
-                .regexp_last_index_value(id)?
-                .unwrap_or(Value::Number(regexp.last_index as f64)),
+            "lastIndex" => regexp.last_index.clone(),
             "source" => Value::String(regexp_source(regexp).into()),
             "flags" => Value::String(regexp.flags.as_str().into()),
             "global" => Value::Bool(regexp.flags.contains('g')),

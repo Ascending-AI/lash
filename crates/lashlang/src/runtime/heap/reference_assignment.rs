@@ -438,7 +438,7 @@ impl Heap {
             // coerced number; a value it cannot represent rides the in-memory
             // override.
             let imported = self.import_values(vec![value], 1)?.remove(0);
-            return self.set_regexp_last_index_raw(target_id, imported);
+            return self.set_regexp_last_index(target_id, imported);
         }
 
         if self.is_builtin_object(target_id) {

@@ -650,20 +650,22 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let start = if stateful { last_index } else { 0 };
         if start > units.len() {
             if stateful {
-                self.heap.set_regexp_last_index(receiver, 0)?;
+                self.heap
+                    .set_regexp_last_index(receiver, Value::Number(0.0))?;
             }
             return Ok(Value::Null);
         }
         let found = self.first_regexp_match(receiver, &units, start, sticky)?;
         let Some(found) = found else {
             if stateful {
-                self.heap.set_regexp_last_index(receiver, 0)?;
+                self.heap
+                    .set_regexp_last_index(receiver, Value::Number(0.0))?;
             }
             return Ok(Value::Null);
         };
         if stateful {
             self.heap
-                .set_regexp_last_index(receiver, found.range.end as u64)?;
+                .set_regexp_last_index(receiver, Value::Number(found.range.end as f64))?;
         }
         self.allocate_match_result(input, &units, &found)
     }
@@ -1001,7 +1003,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     ));
                 }
                 if global {
-                    self.heap.set_regexp_last_index(*receiver, 0)?;
+                    self.heap
+                        .set_regexp_last_index(*receiver, Value::Number(0.0))?;
                 }
                 let sticky = matches!(self.heap.get(*receiver)?, HeapObject::RegExp(re) if re.flags.contains('y'));
                 let mut matches = if global {
@@ -1017,7 +1020,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     if sticky {
                         self.heap.set_regexp_last_index(
                             *receiver,
-                            found.as_ref().map_or(0, |found| found.range.end as u64),
+                            Value::Number(
+                                found.as_ref().map_or(0.0, |found| found.range.end as f64),
+                            ),
                         )?;
                     }
                     found.into_iter().collect()
@@ -1026,7 +1031,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     matches.truncate(1);
                 }
                 if global {
-                    self.heap.set_regexp_last_index(*receiver, 0)?;
+                    self.heap
+                        .set_regexp_last_index(*receiver, Value::Number(0.0))?;
                 }
                 Ok(matches)
             }

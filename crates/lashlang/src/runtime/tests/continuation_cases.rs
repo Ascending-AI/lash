@@ -792,8 +792,7 @@ async fn segmented_multi_effect_run_preserves_result_and_observable_effects() {
 /// FIG-2865 removed the last program-reachable non-capturable value: the
 /// continuation wire carries `Value::Projected` by identity, and every
 /// remaining `UnserializableValue` refusal guards internal corruption a program
-/// cannot produce (a dangling heap reference, an out-of-bounds frame base, a
-/// `lastIndex` past `MAX_JAVASCRIPT_LENGTH` — the assignment path clamps it).
+/// cannot produce (a dangling heap reference or an out-of-bounds frame base).
 /// Those decode-side refusals are covered by the structural-validation unit
 /// tests. What is still worth pinning here is the other half of the original
 /// assertion: taking a boundary mid-run leaves the VM runnable to completion.

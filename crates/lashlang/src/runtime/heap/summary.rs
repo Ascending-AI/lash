@@ -123,8 +123,10 @@ impl Heap {
             }
             HeapObject::RegExp(regexp) => {
                 out.push_str(&regexp_string(regexp));
-                if regexp.last_index != 0 {
-                    out.push_str(&format!(" (lastIndex {})", regexp.last_index));
+                if regexp.last_index != Value::Number(0.0) {
+                    out.push_str(" (lastIndex ");
+                    self.summarize_into(&regexp.last_index, depth + 1, out);
+                    out.push(')');
                 }
             }
             HeapObject::RegExpMatch(result) => {

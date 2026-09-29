@@ -199,8 +199,8 @@ impl HeapObject {
             Self::BuiltinFunction(_) => 2,
             Self::RegExp(regexp) => (regexp.pattern.len() as u64)
                 .saturating_add(regexp.flags.len() as u64)
-                .saturating_add(VALUE_SLOT_BYTES.saturating_mul(3))
-                .saturating_add(8),
+                .saturating_add(VALUE_SLOT_BYTES.saturating_mul(2))
+                .saturating_add(value_logical_bytes(&regexp.last_index)),
             Self::RegExpMatch(result) => result
                 .items
                 .iter()
@@ -265,10 +265,10 @@ impl HeapObject {
                 length,
                 ..
             } => Box::new(captures.iter().chain(name.iter()).chain(length.iter())),
-            Self::BuiltinFunction(_)
-            | Self::RegExp(_)
-            | Self::Date(_)
-            | Self::UrlSearchParams(_) => Box::new(std::iter::empty()),
+            Self::RegExp(regexp) => Box::new(std::iter::once(&regexp.last_index)),
+            Self::BuiltinFunction(_) | Self::Date(_) | Self::UrlSearchParams(_) => {
+                Box::new(std::iter::empty())
+            }
             Self::RegExpMatch(result) => {
                 Box::new(
                     result

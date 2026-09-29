@@ -1319,7 +1319,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     let Value::Ref(regexp_id) = regexp else {
         unreachable!()
     };
-    heap.set_regexp_last_index(regexp_id, 7)
+    heap.set_regexp_last_index(regexp_id, Value::Number(7.0))
         .expect("set lastIndex");
     let HeapObject::RegExp(regexp_object) = &mut heap
         .entries
@@ -1417,7 +1417,7 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
     else {
         unreachable!()
     };
-    assert_eq!(regexp.last_index, 7);
+    assert_eq!(regexp.last_index, Value::Number(7.0));
     assert!(
         regexp.compiled_program.is_none(),
         "compiled matcher cache must never be serialized"
@@ -1440,44 +1440,12 @@ fn exotic_heap_snapshot_round_trip_preserves_order_aliases_and_durable_fields() 
 }
 
 #[test]
-fn snapshot_decode_rejects_regexp_last_index_above_maximum_safe_length() {
-    let id = HeapId::from_counter(1);
-    let object = HeapObject::RegExp(RegExpObject {
-        pattern: "a+".to_string(),
-        flags: "g".to_string(),
-        last_index: crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1,
-        compiled_program: None,
-    });
-    let mut wire = canonical_heap_with(
-        vec![CanonicalBinding {
-            name: "regexp".to_string(),
-            value: CanonicalValue::Ref { value: id },
-        }],
-        vec![CanonicalHeapEntry {
-            id,
-            object: CanonicalHeapObject::RegExp {
-                pattern: "a+".to_string(),
-                flags: "g".to_string(),
-                last_index: crate::runtime::heap::MAX_JAVASCRIPT_LENGTH + 1,
-            },
-        }],
-        2,
-        1,
-        object.logical_bytes(),
-    );
-    wire.heap.as_mut().expect("heap").reference_semantics = true;
-    let error = Snapshot::from_canonical_bytes(&named_bytes(&wire))
-        .expect_err("out-of-range lastIndex must not decode");
-    assert!(error.to_string().contains("maximum safe length"), "{error}");
-}
-
-#[test]
 fn lashlang_forest_validation_rejects_every_typescript_exotic_kind() {
     for object in [
         HeapObject::RegExp(RegExpObject {
             pattern: String::new(),
             flags: String::new(),
-            last_index: 0,
+            last_index: Value::Number(0.0),
             compiled_program: None,
         }),
         HeapObject::RegExpMatch(crate::runtime::RegExpMatchObject {
