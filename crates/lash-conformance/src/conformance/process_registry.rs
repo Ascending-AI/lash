@@ -13,6 +13,7 @@ mod lifecycle;
 mod observer_transfer;
 mod parent_end;
 mod registration;
+mod trigger_delivery_pins;
 pub use external_ref::external_ref_is_written_compare_and_set_by_segment_ordinal;
 pub use observer_transfer::a_failed_observer_transfer_leaves_no_partial_mutation;
 pub use registration::{
@@ -622,6 +623,14 @@ pub async fn a_turn_scope_ends_through_its_recorded_ledger_row(registry: Arc<dyn
 /// refuses every later start under the hold (ADR 0116 §3.4).
 pub async fn an_abandoned_consumer_hold_fences_registration(registry: Arc<dyn ProcessRegistry>) {
     consumer_holds::an_abandoned_consumer_hold_fences_registration(registry).await;
+}
+
+/// A trigger delivery's pin keeps its row from prune until it is released
+/// (ADR 0021, FIG-4203).
+pub async fn a_trigger_delivery_pin_holds_its_row_until_released(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    trigger_delivery_pins::a_trigger_delivery_pin_holds_its_row_until_released(registry).await;
 }
 
 /// Two scopes whose components render to one stored id under the retired

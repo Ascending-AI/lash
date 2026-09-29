@@ -240,6 +240,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         observers.dedup();
         let wake_session_id = registration.wake_session_id.clone();
         let consumer_hold = registration.consumer_hold.clone();
+        let trigger_delivery_pin = registration.trigger_delivery_pin.clone();
         let start_key = registration.start_key.clone();
         let mut tx = begin_guarded(&self.pool, &self.fence)
             .await
@@ -350,6 +351,16 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
             .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
             .bind(consumer_hold.as_ref().map(|hold| hold.cancels))
+            .bind(
+                trigger_delivery_pin
+                    .as_ref()
+                    .map(|pin| pin.occurrence_id.clone()),
+            )
+            .bind(
+                trigger_delivery_pin
+                    .as_ref()
+                    .map(|pin| pin.subscription_id.clone()),
+            )
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -1182,6 +1193,45 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         })
         .await
         .map_err(plugin_store_error)
+    }
+
+    async fn release_trigger_delivery_pin(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), PluginError> {
+        crate::guarded_tx::guarded(&self.pool, &self.fence, |tx| {
+            Box::pin(async move {
+                sqlx::query(process_sql().process.release_trigger_delivery_pin.sql())
+                    .bind(process_id.as_str())
+                    .execute(tx.as_mut())
+                    .await
+                    .map(drop)
+                    .map_err(store_sqlx_error)
+            })
+        })
+        .await
+        .map_err(plugin_store_error)
+    }
+
+    async fn list_trigger_delivery_pins(
+        &self,
+    ) -> Result<Vec<lash_core_execution::PinnedTriggerDelivery>, PluginError> {
+        let rows: Vec<(String, String, String)> =
+            sqlx::query_as(process_sql().process.list_trigger_delivery_pins.sql())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(plugin_sqlx_error)?;
+        rows.into_iter()
+            .map(|(process_id, occurrence_id, subscription_id)| {
+                Ok(lash_core_execution::PinnedTriggerDelivery {
+                    process_id: crate::stored_process_id(&process_id)?,
+                    pin: lash_core_execution::TriggerDeliveryPin {
+                        occurrence_id,
+                        subscription_id,
+                    },
+                })
+            })
+            .collect()
     }
 
     async fn abandon_consumer_hold(

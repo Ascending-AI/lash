@@ -957,3 +957,47 @@ pub async fn reconcile_pruned_trigger_deliveries(
     )
     .await
 }
+
+/// Release every trigger delivery pin whose delivery no longer needs it (ADR
+/// 0021, FIG-4203), and return how many it released.
+///
+/// The router releases a delivery's pin right after its bind commits. That
+/// release is a second write to a second store, so a crash or a lost receipt
+/// can leave a bound delivery's process pinned, which only keeps it from
+/// being pruned. This pass recovers those releases, and a retention pass
+/// runs it before it surveys what to prune. A pin is released once its
+/// delivery is bound, to any process, or is no longer reserved at all:
+/// either way no recovery will register under its start key again. A pin
+/// whose delivery is still reserved and unbound stays, because that
+/// delivery's recovery must find this process under its start key.
+///
+/// Re-running it is safe: a release is idempotent, and a pin it keeps is
+/// examined again next time.
+pub async fn release_bound_trigger_delivery_pins(
+    registry: &dyn ProcessRegistry,
+    trigger_store: &dyn crate::TriggerStore,
+) -> Result<usize, PluginError> {
+    let mut released = 0;
+    for pinned in registry.list_trigger_delivery_pins().await? {
+        let crate::PinnedTriggerDelivery { process_id, pin } = pinned;
+        let reservation = trigger_store
+            .list_deliveries_by_occurrence_id(&pin.occurrence_id)
+            .await?
+            .into_iter()
+            .find(|reservation| reservation.subscription.subscription_id == pin.subscription_id);
+        let recovery_needs_the_pin =
+            reservation.is_some_and(|reservation| reservation.process_id.is_none());
+        if recovery_needs_the_pin {
+            continue;
+        }
+        registry.release_trigger_delivery_pin(&process_id).await?;
+        tracing::info!(
+            process_id = %process_id,
+            occurrence_id = %pin.occurrence_id,
+            subscription_id = %pin.subscription_id,
+            "released a trigger delivery pin whose release after the bind was lost"
+        );
+        released += 1;
+    }
+    Ok(released)
+}

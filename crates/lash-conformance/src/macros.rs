@@ -368,6 +368,7 @@ macro_rules! process_registry_tests {
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
+                (a_trigger_delivery_pin_holds_its_row_until_released, "trigger-delivery-pin"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),
@@ -950,6 +951,7 @@ macro_rules! process_trigger_retention_tests {
         $crate::process_trigger_retention_tests!(@catalogue $fixture; [
             (process_trigger_retention, "process-trigger-retention"),
             (trigger_delivery_recovery, "trigger-delivery-recovery"),
+            (trigger_delivery_pinned_recovery, "trigger-delivery-pinned-recovery"),
             (trigger_delivery_refusal, "trigger-delivery-refusal"),
         ]);
     };

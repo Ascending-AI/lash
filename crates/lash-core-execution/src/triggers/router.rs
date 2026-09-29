@@ -627,7 +627,7 @@ impl TriggerRouter {
                 ),
                 {
                     let mut executor = crate::RuntimeEffectLocalExecutor::processes(
-                        process_registry,
+                        Arc::clone(&process_registry),
                         Arc::clone(self.process_work.port()),
                     );
                     if let Some((ledger, clock)) = self.process_starts.as_ref() {
@@ -652,7 +652,8 @@ impl TriggerRouter {
                 // it before the delivery is reported, so recovery resumes an
                 // unbound reservation and never starts a second process for a
                 // bound one (ADR 0107). The bind delivers the reservation's
-                // `TriggerDelivery` obligation in the same write.
+                // `TriggerDelivery` obligation in the same write; only then
+                // is the process's pin released.
                 self.store
                     .bind_delivery_process(
                         &occurrence.occurrence_id,
@@ -660,6 +661,7 @@ impl TriggerRouter {
                         &record.id,
                     )
                     .await?;
+                release_trigger_delivery_pin(process_registry.as_ref(), &record.id).await;
                 Ok(record.id)
             }
             other => Err(PluginError::Session(format!(
@@ -682,6 +684,11 @@ impl TriggerRouter {
     /// again rather than doubled — and binds it, which delivers the
     /// obligation. A reservation already bound is bound again to the same
     /// process, which answers at once.
+    ///
+    /// The registration pins its process until the bind commits (FIG-4203),
+    /// so the start key still finds it after a lost bind even once it
+    /// completed and a retention pass ran: a completed child is never started
+    /// a second time. The pin is released once the bind commits.
     ///
     /// # Errors
     ///
@@ -715,6 +722,7 @@ impl TriggerRouter {
             .bind_delivery_process(occurrence_id, subscription_id, &process_id)
             .await
             .map_err(TriggerDeliveryRecoveryError::classified)?;
+        release_trigger_delivery_pin(self.process_work.registry().as_ref(), &process_id).await;
         Ok(process_id)
     }
 
@@ -843,6 +851,10 @@ impl TriggerRouter {
             crate::Lifetime::Detached,
         )
         .with_start_key(Some(trigger_delivery_start_key(reservation)))
+        .with_trigger_delivery_pin(Some(crate::TriggerDeliveryPin {
+            occurrence_id: occurrence.occurrence_id.clone(),
+            subscription_id: subscription.subscription_id.clone(),
+        }))
         .with_admitted_identity(crate::AdmittedProcessIdentity::pinned(
             subscription.target_identity.clone(),
         ))
@@ -894,6 +906,27 @@ impl DeliveryStartRefusal {
         match self {
             Self::Refused(error) | Self::Retryable(error) => error,
         }
+    }
+}
+
+/// Release the pin a delivery's registration wrote on `process_id`, once the
+/// delivery's bind committed (ADR 0021, FIG-4203).
+///
+/// The delivery is bound whatever the release answers, so a failed release
+/// fails nothing: it only keeps the process from being pruned until the
+/// retention pass's
+/// [`release_bound_trigger_delivery_pins`](crate::runtime::release_bound_trigger_delivery_pins)
+/// finds the delivery bound and releases the pin itself.
+async fn release_trigger_delivery_pin(
+    registry: &dyn crate::ProcessRegistry,
+    process_id: &ProcessId,
+) {
+    if let Err(error) = registry.release_trigger_delivery_pin(process_id).await {
+        tracing::warn!(
+            process_id = %process_id,
+            %error,
+            "trigger delivery bound; its pin release failed, and the retention pass releases it"
+        );
     }
 }
 

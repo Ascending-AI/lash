@@ -18,7 +18,8 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
                 lifetime, cancel_requested_at_ms, record_json, consumer_hold_key,
-                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels";
+                consumer_hold_scope_kind, consumer_hold_scope_id, consumer_hold_cancels,
+                trigger_delivery_pin_occurrence_id, trigger_delivery_pin_subscription_id";
 
 /// What the change feed reports for a live row.
 ///
@@ -54,6 +55,21 @@ crate::statements! {
              SET consumer_hold_key = NULL, consumer_hold_scope_kind = NULL,
                  consumer_hold_scope_id = NULL, consumer_hold_cancels = NULL
              WHERE process_id = ?1 AND consumer_hold_key = ?2";
+
+        /// Release the trigger delivery pin `?1` carries (FIG-4203): a no-op
+        /// when the row carries none.
+        release_trigger_delivery_pin = "UPDATE processes
+             SET trigger_delivery_pin_occurrence_id = NULL,
+                 trigger_delivery_pin_subscription_id = NULL
+             WHERE process_id = ?1 AND trigger_delivery_pin_occurrence_id IS NOT NULL";
+
+        /// Every row still pinned by its trigger delivery, in process-id
+        /// order: the worklist the retention pass releases lost pins from.
+        list_trigger_delivery_pins = "SELECT process_id, trigger_delivery_pin_occurrence_id,
+                    trigger_delivery_pin_subscription_id
+             FROM processes
+             WHERE trigger_delivery_pin_occurrence_id IS NOT NULL
+             ORDER BY process_id";
 
         /// The processes held under the consumer hold `?1` whose call owes
         /// them a cancel now that it is abandoned (ADR 0116 §3.4).

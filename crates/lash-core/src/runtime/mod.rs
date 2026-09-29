@@ -312,9 +312,9 @@ pub use process::{
     process_signal_wait_key, process_wake_delivery, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
     reconcile_pruned_trigger_deliveries, reconcile_session_process_observer_intents,
-    require_event_replay, terminal_append_request, terminal_event_type_name, tool_failure_code,
-    validate_generic_process_event_append, validate_process_signal_name, watch_process_registry,
-    watch_process_registry_with_sink,
+    release_bound_trigger_delivery_pins, require_event_replay, terminal_append_request,
+    terminal_event_type_name, tool_failure_code, validate_generic_process_event_append,
+    validate_process_signal_name, watch_process_registry, watch_process_registry_with_sink,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
@@ -322,7 +322,7 @@ pub use process::{
     ProcessEventLogTestSupport, ProcessRegistryTestSupport, TestProcessRegistryWriteExt,
     accepted_process_registration, fail_parent_end_once, refused_process_registrations,
 };
-pub use process::{ConsumerHold, SessionTurnOutcome};
+pub use process::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub use queued_drain_policy::{

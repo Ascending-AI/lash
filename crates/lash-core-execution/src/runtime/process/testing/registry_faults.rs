@@ -57,6 +57,16 @@ struct ReadFaultPlan {
     consumer_release_pause: Option<NonTerminalPagePause>,
     consumer_released_pause: Option<NonTerminalPagePause>,
     start_key_read_pause: Option<NonTerminalPagePause>,
+    trigger_delivery_pin_release_loss: Option<TriggerDeliveryPinReleaseLoss>,
+}
+
+/// Where the next trigger delivery pin release loses its receipt: before it
+/// reaches the wrapped registry, so the pin stays, or once the wrapped
+/// registry committed it. Either way its caller hears a failure.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TriggerDeliveryPinReleaseLoss {
+    BeforeReleasing,
+    AfterReleasing,
 }
 
 /// Where a held registration stops: before it reaches the wrapped registry,
@@ -263,6 +273,13 @@ impl ProcessRegistryFaults {
         let pause = NonTerminalPagePause::new();
         self.faults.lock_recover().consumer_released_pause = Some(pause.clone());
         pause
+    }
+
+    /// Lose the receipt of the next trigger delivery pin release at `point`
+    /// (ADR 0021, FIG-4203): the instant a delivery's bind committed and its
+    /// pin release did not answer.
+    pub fn lose_next_trigger_delivery_pin_release(&self, point: TriggerDeliveryPinReleaseLoss) {
+        self.faults.lock_recover().trigger_delivery_pin_release_loss = Some(point);
     }
 
     /// Hold the next non-terminal-page read until the returned handle resumes it.
@@ -886,6 +903,36 @@ impl super::super::registry_concerns::ProcessRetention for ProcessRegistryFaults
             pause.hold().await;
         }
         released
+    }
+
+    async fn release_trigger_delivery_pin(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), crate::PluginError> {
+        let loss = self
+            .faults
+            .lock_recover()
+            .trigger_delivery_pin_release_loss
+            .take();
+        let lost = || {
+            Err(crate::PluginError::Session(format!(
+                "the trigger delivery pin release of process `{process_id}` lost its receipt"
+            )))
+        };
+        match loss {
+            Some(TriggerDeliveryPinReleaseLoss::BeforeReleasing) => lost(),
+            Some(TriggerDeliveryPinReleaseLoss::AfterReleasing) => {
+                self.inner.release_trigger_delivery_pin(process_id).await?;
+                lost()
+            }
+            None => self.inner.release_trigger_delivery_pin(process_id).await,
+        }
+    }
+
+    async fn list_trigger_delivery_pins(
+        &self,
+    ) -> Result<Vec<crate::PinnedTriggerDelivery>, crate::PluginError> {
+        self.inner.list_trigger_delivery_pins().await
     }
 
     async fn abandon_consumer_hold(

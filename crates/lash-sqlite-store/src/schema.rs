@@ -1146,7 +1146,10 @@ CREATE TABLE IF NOT EXISTS processes (
     consumer_hold_scope_kind TEXT,
     consumer_hold_scope_id TEXT,
     consumer_hold_cancels INTEGER,
+    trigger_delivery_pin_occurrence_id TEXT,
+    trigger_delivery_pin_subscription_id TEXT,
     CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
+    CONSTRAINT ck_processes_trigger_delivery_pin CHECK ((trigger_delivery_pin_occurrence_id IS NULL) = (trigger_delivery_pin_subscription_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK (((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_obligation CHECK (((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)) IS TRUE),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
@@ -1183,6 +1186,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
 CREATE INDEX IF NOT EXISTS idx_processes_consumer_hold_owner
     ON processes(consumer_hold_scope_kind, consumer_hold_scope_id)
     WHERE consumer_hold_key IS NOT NULL;
+-- A row pinned by its trigger delivery until the bind commits (FIG-4203).
+CREATE INDEX IF NOT EXISTS idx_processes_trigger_delivery_pin
+    ON processes(process_id)
+    WHERE trigger_delivery_pin_occurrence_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
@@ -1579,6 +1586,15 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// it. `abandoned_consumer_holds` marks the holds whose call was abandoned,
 /// so a registration under one is refused; a registry written before it
 /// lacks the table until it is next opened, which creates it empty.
+///
+/// Version 44 also carries trigger delivery pins (FIG-4203, changed in place
+/// under the same freeze): `processes` gains
+/// `trigger_delivery_pin_occurrence_id` and
+/// `trigger_delivery_pin_subscription_id`, set together or not at all and
+/// indexed while set. A delivery's registration writes the pin, and the
+/// router releases it once the delivery's bind commits. A pinned row is never
+/// pruned. A registry written before the change lacks the columns; recreate
+/// it.
 const BASE_PROCESS_SCHEMA_VERSION: i32 = 44;
 #[cfg(not(feature = "synthetic-next"))]
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = BASE_PROCESS_SCHEMA_VERSION;

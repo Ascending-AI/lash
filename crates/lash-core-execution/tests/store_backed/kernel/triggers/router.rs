@@ -718,4 +718,296 @@ mod tests {
         drop(scoped_controller);
         handler.close().await.expect("close the emit handler");
     }
+
+    /// The immediate producer path pins its child until the bind commits (ADR
+    /// 0021, FIG-4203): an emit whose bind is lost leaves the child pinned,
+    /// the completed child survives a retention pass, and the recovery binds
+    /// that child and releases the pin. A bound child is then pruned as usual.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_emit_whose_bind_is_lost_pins_its_child_until_recovery_binds_it() {
+        let world = router_world().await;
+        let registry = Arc::clone(&world.registry);
+        let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+        let subscription = register(
+            world.store.as_ref(),
+            "pinned-register",
+            trigger_process_draft(&source_key, "pinned", world.env_ref.clone()),
+        )
+        .await;
+        let failing = Arc::new(BindFailsOnce::new(Arc::clone(&world.store)));
+        let router = TriggerRouter::new(
+            Arc::clone(&failing) as Arc<dyn crate::TriggerStore>,
+            crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
+        )
+        .with_process_artifacts(
+            Arc::clone(&world.process_env_store),
+            crate::testing::process_engine_fixture(),
+        );
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation("trigger-pinned"))
+            .await
+            .expect("open the emit handler");
+        let scoped_controller = handler.scoped();
+
+        let report = router
+            .emit(
+                button_occurrence(source_key, "button-pinned"),
+                &scoped_controller,
+            )
+            .await
+            .expect("emit trigger");
+        assert!(
+            matches!(
+                report.deliveries[0].outcome,
+                TriggerDeliveryEmitOutcome::Failed { .. }
+            ),
+            "the lost bind fails the delivery: {report:?}"
+        );
+        let reservation = world
+            .store
+            .list_deliveries_by_occurrence_id(&report.occurrence_id)
+            .await
+            .expect("list the delivery")
+            .remove(0);
+        assert_eq!(reservation.process_id, None, "the bind was lost");
+        let child = registry
+            .get_process_by_start_key(&trigger_delivery_start_key(&reservation))
+            .await
+            .expect("read the start key")
+            .expect("the emit registered the child");
+        assert_eq!(
+            registry
+                .list_trigger_delivery_pins()
+                .await
+                .expect("list pins"),
+            vec![crate::PinnedTriggerDelivery {
+                process_id: child.id.clone(),
+                pin: crate::TriggerDeliveryPin {
+                    occurrence_id: report.occurrence_id.clone(),
+                    subscription_id: subscription.subscription_id.clone(),
+                },
+            }],
+            "the emit's registration wrote the pin"
+        );
+
+        // The child completes, and a retention pass keeps it.
+        registry
+            .complete_process(
+                &child.id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+                crate::ProcessCompletionAuthority::WorkflowKey {
+                    workflow_key: child.id.to_string(),
+                },
+            )
+            .await
+            .expect("complete the child");
+        assert_eq!(
+            crate::runtime::release_bound_trigger_delivery_pins(
+                registry.as_ref(),
+                world.store.as_ref(),
+            )
+            .await
+            .expect("release bound pins"),
+            0,
+            "an unbound delivery keeps its pin"
+        );
+        let report_prune = registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune");
+        assert_eq!(report_prune.pruned_processes, 0, "the pinned child stays");
+
+        // Recovery binds the child the emit registered and releases the pin.
+        let recovered = router
+            .recover_delivery(&report.occurrence_id, &subscription.subscription_id)
+            .await
+            .expect("recover the delivery");
+        assert_eq!(recovered, child.id);
+        assert_eq!(
+            registry
+                .list_trigger_delivery_pins()
+                .await
+                .expect("list pins"),
+            Vec::new(),
+            "the bind released the pin"
+        );
+        let report_prune = registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune");
+        assert_eq!(
+            report_prune.pruned_processes, 1,
+            "the bound child is pruned"
+        );
+        drop(scoped_controller);
+        handler.close().await.expect("close the emit handler");
+    }
+
+    /// A trigger store whose first delivery bind fails as a lost write would:
+    /// the registration before it landed, the bind did not.
+    struct BindFailsOnce {
+        inner: Arc<dyn crate::TriggerStore>,
+        failed: std::sync::atomic::AtomicBool,
+    }
+
+    impl BindFailsOnce {
+        fn new(inner: Arc<dyn crate::TriggerStore>) -> Self {
+            Self {
+                inner,
+                failed: std::sync::atomic::AtomicBool::new(false),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::TriggerStore for BindFailsOnce {
+        async fn execute_command(
+            &self,
+            operation_id: &str,
+            command: TriggerCommand,
+        ) -> Result<crate::TriggerEffectResult, crate::PluginError> {
+            self.inner.execute_command(operation_id, command).await
+        }
+
+        async fn list_subscriptions(
+            &self,
+            filter: crate::TriggerSubscriptionFilter,
+        ) -> Result<Vec<TriggerSubscriptionRecord>, crate::PluginError> {
+            self.inner.list_subscriptions(filter).await
+        }
+
+        async fn delete_session_subscriptions(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<usize, crate::PluginError> {
+            self.inner.delete_session_subscriptions(session_id).await
+        }
+
+        async fn ingest_occurrence(
+            &self,
+            request: TriggerOccurrenceRequest,
+        ) -> Result<crate::TriggerIngressReceipt, crate::PluginError> {
+            self.inner.ingest_occurrence(request).await
+        }
+
+        async fn list_occurrences(
+            &self,
+            filter: crate::TriggerOccurrenceFilter,
+        ) -> Result<Vec<crate::TriggerOccurrenceRecord>, crate::PluginError> {
+            self.inner.list_occurrences(filter).await
+        }
+
+        async fn list_deliveries_by_occurrence_id(
+            &self,
+            occurrence_id: &str,
+        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
+            self.inner
+                .list_deliveries_by_occurrence_id(occurrence_id)
+                .await
+        }
+
+        async fn list_deliveries_by_subscription_id(
+            &self,
+            subscription_id: &str,
+        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
+            self.inner
+                .list_deliveries_by_subscription_id(subscription_id)
+                .await
+        }
+
+        async fn list_deliveries_by_process_id(
+            &self,
+            process_id: &crate::ProcessId,
+        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
+            self.inner.list_deliveries_by_process_id(process_id).await
+        }
+
+        async fn list_deliveries(
+            &self,
+        ) -> Result<Vec<TriggerDeliveryReservation>, crate::PluginError> {
+            self.inner.list_deliveries().await
+        }
+
+        async fn bind_delivery_process(
+            &self,
+            occurrence_id: &str,
+            subscription_id: &str,
+            process_id: &crate::ProcessId,
+        ) -> Result<(), crate::PluginError> {
+            if !self.failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return Err(crate::PluginError::Session(
+                    "the delivery's bind was lost".to_string(),
+                ));
+            }
+            self.inner
+                .bind_delivery_process(occurrence_id, subscription_id, process_id)
+                .await
+        }
+
+        async fn list_delivery_process_ids(
+            &self,
+        ) -> Result<Vec<crate::ProcessId>, crate::PluginError> {
+            self.inner.list_delivery_process_ids().await
+        }
+
+        async fn list_delivery_retention_candidates(
+            &self,
+        ) -> Result<Vec<crate::TriggerDeliveryRetentionCandidate>, crate::PluginError> {
+            self.inner.list_delivery_retention_candidates().await
+        }
+
+        async fn list_session_owner_ids_for_retention(
+            &self,
+        ) -> Result<Vec<SessionId>, crate::PluginError> {
+            self.inner.list_session_owner_ids_for_retention().await
+        }
+
+        async fn reconcile_trigger_retention(
+            &self,
+            candidates: &[crate::TriggerDeliveryRetentionCandidate],
+            deleted_session_ids: &[SessionId],
+        ) -> Result<crate::TriggerRetentionReconciliationReport, crate::PluginError> {
+            self.inner
+                .reconcile_trigger_retention(candidates, deleted_session_ids)
+                .await
+        }
+
+        async fn delete_delivery_retention_candidates(
+            &self,
+            candidates: &[crate::TriggerDeliveryRetentionCandidate],
+        ) -> Result<usize, crate::PluginError> {
+            self.inner
+                .delete_delivery_retention_candidates(candidates)
+                .await
+        }
+
+        async fn reclaim_trigger_occurrences(
+            &self,
+            cutoff_epoch_ms: u64,
+        ) -> crate::TriggerOccurrenceReclamationResult {
+            self.inner
+                .reclaim_trigger_occurrences(cutoff_epoch_ms)
+                .await
+        }
+
+        async fn prune_mutation_receipts(
+            &self,
+            cutoff_epoch_ms: u64,
+        ) -> Result<usize, crate::PluginError> {
+            self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
+        }
+
+        async fn prune_non_fired_occurrences(
+            &self,
+            cutoff_epoch_ms: u64,
+        ) -> Result<usize, crate::PluginError> {
+            self.inner
+                .prune_non_fired_occurrences(cutoff_epoch_ms)
+                .await
+        }
+    }
 }

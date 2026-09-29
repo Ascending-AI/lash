@@ -21,6 +21,9 @@ pub struct ProcessTriggerRetentionHandles {
     pub sessions: Arc<dyn crate::DeploymentStore>,
     /// The trigger store's `TriggerDelivery` obligation ledger (ADR 0109).
     pub deliveries: Arc<dyn crate::ObligationLedger>,
+    /// The process registry's `ProcessStart` obligation ledger (ADR 0109):
+    /// what delivers a registered start to the engine that runs it.
+    pub process_starts: Arc<dyn crate::ObligationLedger>,
     /// The environments a delivery's process names (ADR 0113 §3.3).
     pub process_env: Arc<dyn crate::ProcessExecutionEnvStore>,
 }
@@ -60,6 +63,29 @@ where
     Fut: Future<Output = ProcessTriggerRetentionHandles>,
 {
     a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process(make().await).await;
+}
+
+/// The bind-crash window of [`trigger_delivery_recovery`] once the child has
+/// run (ADR 0021, FIG-4203): the child completes and a retention pass runs
+/// before the bind recovers, and the delivery still starts exactly one
+/// process. Repeated with the pin's release losing its receipt, before and
+/// after the release landed.
+pub async fn trigger_delivery_pinned_recovery<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    a_completed_child_whose_bind_was_lost_is_bound_not_started_again(make().await, None).await;
+    a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
+        make().await,
+        Some(crate::testing::TriggerDeliveryPinReleaseLoss::BeforeReleasing),
+    )
+    .await;
+    a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
+        make().await,
+        Some(crate::testing::TriggerDeliveryPinReleaseLoss::AfterReleasing),
+    )
+    .await;
 }
 
 /// A reserved non-engine target cannot start through the runtime router. Its
@@ -1213,6 +1239,385 @@ async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_proc
             .expect("count stalled deliveries"),
         0
     );
+}
+
+/// A completed child whose bind was lost is bound, never started again (ADR
+/// 0021, FIG-4203).
+///
+/// The delivery's first attempt registers its child and the child runs: it
+/// records its one effect and completes. The bind is lost. A retention pass
+/// then runs with a cutoff past the child's completion and no projector, the
+/// most destructive prune there is. The child's registration pinned it until
+/// the bind commits, so the prune keeps it, and the recovery that follows
+/// finds it under the delivery's start key and binds it: the effect ran
+/// once.
+///
+/// `lost_release` repeats the law with the pin's release losing its receipt
+/// after the recovery's bind: before the release landed, so the pin stays
+/// until the next retention pass releases it, or after. Either way the next
+/// retention pass prunes the bound child, and nothing starts it again.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_completed_child_whose_bind_was_lost_is_bound_not_started_again(
+    handles: ProcessTriggerRetentionHandles,
+    lost_release: Option<crate::testing::TriggerDeliveryPinReleaseLoss>,
+) {
+    const SESSION: &str = "delivery-pin-session";
+    const SOURCE: &str = "delivery-pin-source";
+    let session_id = SessionId::from(SESSION);
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let env_ref = spec.stable_ref().expect("stable env ref");
+    handles
+        .process_env
+        .publish_process_execution_env(
+            &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
+            &env_ref,
+            &spec.to_store_bytes().expect("encode env"),
+        )
+        .await
+        .expect("publish the subscription's environment");
+    // No wake target: a wake still owed would keep the completed child from
+    // being pruned on its own, and the law is about the pin.
+    handles
+        .triggers
+        .execute_command(
+            "delivery-pin-register",
+            TriggerCommand::Register {
+                owner_scope: owner(&session_id),
+                actor: actor(&session_id),
+                draft: TriggerSubscriptionDraft {
+                    env_ref,
+                    wake_target: None,
+                    ..draft(&session_id, "delivery-pin-key", SOURCE)
+                },
+            },
+        )
+        .await
+        .expect("register trigger call")
+        .expect("register trigger succeeds");
+    let ingress = handles
+        .triggers
+        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+            "ui.button.pressed",
+            SOURCE,
+            serde_json::json!({ "button": "Blue" }),
+            "delivery-pin-occurrence",
+        ))
+        .await
+        .expect("ingest occurrence");
+    assert_eq!(ingress.reservations.len(), 1, "one subscription matches");
+    let reserved = ingress.reservations[0].clone();
+    let occurrence_id = reserved.occurrence.occurrence_id.clone();
+    let start_key = lash_core::facade_support::trigger_delivery_start_key(&reserved);
+
+    // A restarted deployment's clock, past every due instant the stores armed.
+    let clock = Arc::new(crate::testing::TestClock::new(4_000_000_000_000));
+    let faults = crate::testing::ProcessRegistryFaults::new(Arc::clone(&handles.registry));
+    let watched = crate::facade_support::watch_process_registry(Arc::new(faults.clone()));
+    let engine = Arc::new(EffectRecordingEngine::new(
+        Arc::clone(&handles.registry),
+        crate::NoProcessWork::new(&watched),
+    ));
+    let process_work = crate::ProcessWorkWiring::new(
+        watched,
+        Arc::clone(&engine) as Arc<dyn crate::ProcessWorkSubstrate>,
+    );
+    let relay_over = |triggers: Arc<dyn TriggerStore>| {
+        lash_core::runtime::trigger_delivery::TriggerDeliveryRelay::new(
+            Arc::clone(&handles.deliveries),
+            lash_core::facade_support::TriggerRouter::new(triggers, process_work.clone())
+                .with_process_artifacts(
+                    Arc::clone(&handles.process_env),
+                    crate::ProcessEngineRegistry::new().with_registration(
+                        crate::ProcessEngineRegistration::accepting(Arc::new(TriggerTargetEngine)),
+                    ),
+                )
+                .with_process_starts(
+                    Arc::clone(&handles.process_starts),
+                    Arc::clone(&clock) as Arc<dyn crate::Clock>,
+                ),
+        )
+    };
+    let page = std::num::NonZeroUsize::new(16).expect("a nonzero page");
+    let bound_process = || async {
+        handles
+            .triggers
+            .list_deliveries_by_occurrence_id(&occurrence_id)
+            .await
+            .expect("list the delivery")
+            .into_iter()
+            .map(|delivery| delivery.process_id)
+            .collect::<Vec<_>>()
+    };
+    let pinned = || async {
+        handles
+            .registry
+            .list_trigger_delivery_pins()
+            .await
+            .expect("list trigger delivery pins")
+            .into_iter()
+            .map(|pinned| pinned.process_id)
+            .collect::<Vec<_>>()
+    };
+    // The retention pass a host runs: release the pins whose delivery no
+    // longer needs them, prune every retired row the registry lets go, then
+    // reclaim the deliveries of pruned processes.
+    let retention_pass = || async {
+        let released = lash_core::facade_support::release_bound_trigger_delivery_pins(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+        )
+        .await
+        .expect("release bound trigger delivery pins");
+        let report = handles
+            .registry
+            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune terminal processes");
+        crate::reconcile_pruned_trigger_deliveries(
+            handles.registry.as_ref(),
+            handles.triggers.as_ref(),
+            Some(handles.sessions.as_ref()),
+        )
+        .await
+        .expect("reconcile pruned trigger deliveries");
+        (released, report.pruned_processes)
+    };
+
+    // 1. The first attempt registers and starts the child; its bind is lost.
+    let crashing = Arc::new(BindCrashesOnce::new(Arc::clone(&handles.triggers)));
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&crashing) as Arc<dyn TriggerStore>),
+        clock.as_ref(),
+        page,
+    )
+    .await
+    .expect("the crashing relay's due pass");
+    assert_eq!(
+        (pass.claimed, pass.retried, pass.stalled),
+        (1, 1, 0),
+        "the lost bind leaves the delivery owed: {pass:?}"
+    );
+    let child = handles
+        .registry
+        .get_process_by_start_key(&start_key)
+        .await
+        .expect("read the start key")
+        .expect("the first attempt registered the child");
+    assert_eq!(bound_process().await, vec![None], "the bind was lost");
+
+    // 2. The child ran: it recorded its one effect and completed.
+    assert_eq!(engine.effects(), vec![child.id.clone()]);
+    assert!(
+        handles
+            .registry
+            .get_process(&child.id)
+            .await
+            .expect("read the child")
+            .expect("the child is retained")
+            .status
+            .is_terminal(),
+        "the child completed before the bind recovered"
+    );
+    assert_eq!(
+        pinned().await,
+        vec![child.id.clone()],
+        "the pin holds the child"
+    );
+
+    // 3. The most destructive retention pass keeps the pinned child.
+    assert_eq!(
+        retention_pass().await,
+        (0, 0),
+        "an unbound delivery keeps its pin, and a pinned child is not pruned"
+    );
+    assert_eq!(
+        handles
+            .registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .map(|record| record.id),
+        Some(child.id.clone()),
+        "the start key still leads to the completed child"
+    );
+
+    // 4. The recovery binds the child the first attempt registered.
+    if let Some(point) = lost_release {
+        faults.lose_next_trigger_delivery_pin_release(point);
+    }
+    clock.advance(3_600_000);
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&handles.triggers)),
+        clock.as_ref(),
+        page,
+    )
+    .await
+    .expect("the restarted relay's due pass");
+    assert_eq!(
+        (pass.claimed, pass.retried, pass.stalled),
+        (1, 0, 0),
+        "the restart retakes the owed delivery and binds it: {pass:?}"
+    );
+    assert_eq!(
+        bound_process().await,
+        vec![Some(child.id.clone())],
+        "the delivery is bound to the child the first attempt registered"
+    );
+    assert_eq!(
+        engine.effects(),
+        vec![child.id.clone()],
+        "the occurrence's effect ran once"
+    );
+    let still_pinned = match lost_release {
+        Some(crate::testing::TriggerDeliveryPinReleaseLoss::BeforeReleasing) => {
+            vec![child.id.clone()]
+        }
+        Some(crate::testing::TriggerDeliveryPinReleaseLoss::AfterReleasing) | None => Vec::new(),
+    };
+    assert_eq!(
+        pinned().await,
+        still_pinned,
+        "the bind released the pin unless its release never landed"
+    );
+
+    // The next retention pass releases a pin the release left behind, then
+    // prunes the bound child and reclaims its delivery.
+    let released = usize::from(!still_pinned.is_empty());
+    assert_eq!(
+        retention_pass().await,
+        (released, 1),
+        "the bound child's pin is gone and the child is pruned"
+    );
+    assert_eq!(pinned().await, Vec::<ProcessId>::new());
+    let pruned = handles.registry.get_process(&child.id).await;
+    assert!(
+        matches!(
+            pruned,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "the bound child was pruned: {pruned:?}"
+    );
+    assert_eq!(
+        bound_process().await,
+        Vec::<Option<ProcessId>>::new(),
+        "the pruned child's delivery was reclaimed"
+    );
+
+    // Nothing is owed and nothing ran again.
+    clock.advance(3_600_000);
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&handles.triggers)),
+        clock.as_ref(),
+        page,
+    )
+    .await
+    .expect("a later due pass");
+    assert_eq!(pass.claimed, 0, "a bound delivery owes nothing: {pass:?}");
+    assert_eq!(engine.effects(), vec![child.id]);
+    assert_eq!(
+        handles
+            .deliveries
+            .count_stalled()
+            .await
+            .expect("count stalled deliveries"),
+        0
+    );
+}
+
+/// The engine a delivery's start is delivered to, as a workflow substrate
+/// keyed by process id: it runs the delivery's target, which records one
+/// durable effect, and completes the process under its workflow key. A
+/// repeated send for a process it already ran coalesces, as a workflow
+/// engine's does, so every recorded effect is a distinct process's run.
+struct EffectRecordingEngine {
+    registry: Arc<dyn ProcessRegistry>,
+    waits: crate::NoProcessWork,
+    effects: std::sync::Mutex<Vec<ProcessId>>,
+}
+
+impl EffectRecordingEngine {
+    fn new(registry: Arc<dyn ProcessRegistry>, waits: crate::NoProcessWork) -> Self {
+        Self {
+            registry,
+            waits,
+            effects: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// The processes whose run recorded the effect, in run order.
+    fn effects(&self) -> Vec<ProcessId> {
+        self.effects
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::ProcessWorkSubstrate for EffectRecordingEngine {
+    async fn deliver_process_start(
+        &self,
+        record: &crate::ProcessRecord,
+    ) -> Result<(), crate::PluginError> {
+        {
+            let mut effects = self
+                .effects
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if effects.contains(&record.id) {
+                return Ok(());
+            }
+            effects.push(record.id.clone());
+        }
+        self.registry
+            .complete_process(
+                &record.id,
+                ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::json!({ "effects": 1 }),
+                )),
+                ProcessCompletionAuthority::WorkflowKey {
+                    workflow_key: record.id.to_string(),
+                },
+            )
+            .await
+            .map(drop)
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
+        self.waits.await_process_terminal(process_id).await
+    }
+
+    async fn deliver_cancel(
+        &self,
+        process_id: &ProcessId,
+        request: &crate::CancelRequest,
+        key: &str,
+    ) -> Result<(), crate::PluginError> {
+        self.waits.deliver_cancel(process_id, request, key).await
+    }
+
+    async fn publish_process_terminal(
+        &self,
+        process_id: &ProcessId,
+        output: &ProcessAwaitOutput,
+        key: &str,
+    ) -> Result<(), crate::PluginError> {
+        self.waits
+            .publish_process_terminal(process_id, output, key)
+            .await
+    }
 }
 
 /// The `test` engine the law's subscription targets: it names no artifacts,

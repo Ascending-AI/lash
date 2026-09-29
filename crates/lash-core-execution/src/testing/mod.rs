@@ -42,6 +42,7 @@ mod trigger_context;
 pub use crate::runtime::effect::{EffectLayer, LayeredEffectHost};
 pub use crate::runtime::process::{
     NonTerminalPagePause, NonTerminalPageRead, ProcessRegistryFaults, RegistrationHoldPoint,
+    TriggerDeliveryPinReleaseLoss,
 };
 pub use execution_context_builder::*;
 #[cfg(any(test, feature = "testing"))]

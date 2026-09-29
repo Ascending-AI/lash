@@ -957,6 +957,22 @@ pub trait ProcessRetention: Send + Sync {
         key: &str,
     ) -> Result<(), PluginError>;
 
+    /// Releases the trigger delivery pin `process_id` carries (ADR 0021,
+    /// FIG-4203): the delivery bound the process, so its start key no longer
+    /// has to lead recovery back to it. A pinned row is never pruned;
+    /// releasing a pin the row does not carry, or one already released,
+    /// changes nothing, so every retry may repeat it.
+    async fn release_trigger_delivery_pin(&self, process_id: &ProcessId)
+    -> Result<(), PluginError>;
+
+    /// Every row that still carries a trigger delivery pin, in process-id
+    /// order: the worklist
+    /// [`release_bound_trigger_delivery_pins`](crate::runtime::release_bound_trigger_delivery_pins)
+    /// recovers lost releases from.
+    async fn list_trigger_delivery_pins(
+        &self,
+    ) -> Result<Vec<crate::PinnedTriggerDelivery>, PluginError>;
+
     /// Marks the consumer hold `key`, owned by `owner`, abandoned and returns
     /// the processes it holds whose call owes them a cancel (ADR 0116 §3.4):
     /// what the opener that cancelled the call must cancel. One transaction

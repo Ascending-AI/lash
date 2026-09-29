@@ -594,8 +594,10 @@ impl RestateProcessIngressRunner {
             provenance: record.provenance.clone(),
             env_ref: record.env_ref.clone(),
             wake_session_id: None,
-            // The hold lives on the registry row, not in the workflow input.
+            // The hold and the pin live on the registry row, not in the
+            // workflow input.
             consumer_hold: None,
+            trigger_delivery_pin: None,
         };
         let execution_context = ProcessExecutionContext::default();
         let invocation_id = self

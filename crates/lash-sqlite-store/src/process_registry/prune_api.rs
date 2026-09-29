@@ -173,6 +173,56 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 
+    async fn release_trigger_delivery_pin(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        let process_id = process_id.to_string();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome(
+                    crate::conn::cached_execute(
+                        tx,
+                        process_sql().process.release_trigger_delivery_pin.sql(),
+                        params![process_id],
+                    )
+                    .map(|_| ())
+                    .map_err(process_sqlite_error),
+                ))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
+    async fn list_trigger_delivery_pins(
+        &self,
+    ) -> Result<Vec<lash_core_execution::PinnedTriggerDelivery>, lash_core_execution::PluginError>
+    {
+        self.conn
+            .call(|conn| {
+                Ok((|| {
+                    let mut statement = conn
+                        .prepare_cached(process_sql().process.list_trigger_delivery_pins.sql())
+                        .map_err(process_sqlite_error)?;
+                    let rows = statement
+                        .query_map([], |row| {
+                            Ok(lash_core_execution::PinnedTriggerDelivery {
+                                process_id: crate::row_process_id(row, 0)?,
+                                pin: lash_core_execution::TriggerDeliveryPin {
+                                    occurrence_id: row.get(1)?,
+                                    subscription_id: row.get(2)?,
+                                },
+                            })
+                        })
+                        .map_err(process_sqlite_error)?;
+                    rows.collect::<Result<Vec<_>, _>>()
+                        .map_err(process_sqlite_error)
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn abandon_consumer_hold(
         &self,
         key: &str,

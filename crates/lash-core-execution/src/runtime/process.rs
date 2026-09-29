@@ -82,7 +82,7 @@ pub use model::{
     load_process_execution_env, mint_process_id, process_child_session_id,
     process_runtime_session_ids, publish_process_execution_env,
 };
-pub use model::{ConsumerHold, SessionTurnOutcome};
+pub use model::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub use observation::{
     ObservedProcess, ObservedProcessEvent, ObservedProcessEventLite, ObservedProcessEventPage,
     ObservedProcessEventReadOutcome, ObservedWorkItem, ObservedWorkItemState, ProcessWorkObserver,
@@ -113,6 +113,7 @@ pub use registry::{
     WAKE_ENQUEUING_STALE_AFTER_MS, WakeDelivery, WakeDeliveryBlockedGroup,
     WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryLifecycle, WakeDeliveryReport,
     WakeDeliveryState, WakeDiscardReason, reconcile_pruned_trigger_deliveries,
+    release_bound_trigger_delivery_pins,
 };
 pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};

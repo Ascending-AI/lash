@@ -182,10 +182,27 @@ insert arms the row due in the reservation's own transaction. The bind that
 records the delivery's process delivers the obligation in the same write,
 whatever state the obligation was in. The emit's own start and bind are the
 producer's immediate attempt. The relay's due pass is the recovery. It reads
-the reservation the store holds, starts the process its start key names
-(registration is idempotent by that key, so a registration that landed
-before a second crash is found again rather than doubled), and binds it. The
-relay never ingests the occurrence again. Re-emitting is not a recovery path.
+the reservation the store holds, starts the process its start key names, and
+binds it. The relay never ingests the occurrence again. Re-emitting is not a
+recovery path.
+
+Registration is idempotent by the start key only while the registry retains
+the process the key minted (ADR 0107). Between a delivery's registration and
+its bind, the start key is the only way back to the process, and a child can
+complete and be pruned in that window: recovery would then register a second
+process under the same key and run the occurrence twice. So the delivery's
+registration pins its process (FIG-4203). The registry writes the pin, which
+names the delivery's occurrence and subscription, in the registration's own
+transaction, and prune never removes a pinned row. Both the producer's
+attempt and the recovery release the pin only after the bind commits. A
+registration that landed before a second crash is therefore found again
+under its key, however long ago it completed, rather than doubled. The
+release is a second write to a second store, so it can be lost. A lost
+release only keeps a bound process from being pruned, and each retention
+pass recovers it: before it prunes, it releases every pin whose delivery is
+bound or no longer reserved. Every other start keeps ADR 0107's retained-only
+idempotency: after a prune, its key mints a new process.
+
 A delivery that can never start as reserved stalls `refused` rather than
 retrying: its payload or source fails the captured contract, its route was
 revoked, its target is no engine process, or its registration was refused

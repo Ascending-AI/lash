@@ -349,6 +349,7 @@ pub mod facade_support {
     pub use crate::runtime::reconcile_pruned_trigger_deliveries;
     pub use crate::runtime::refuse_unhonored_group_membership;
     pub use crate::runtime::registry_transitions;
+    pub use crate::runtime::release_bound_trigger_delivery_pins;
     pub use crate::runtime::turn_control_binding_id_for_scope;
     pub use crate::runtime::{ProcessChangeHub, ProcessChangeSubscription};
     pub use lash_core_store::protocol_turn_options::facade_ops::ProtocolTurnOptionsFacadeOps;
@@ -840,7 +841,7 @@ pub(crate) use runtime::{
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, require_event_replay,
 };
-pub use runtime::{ConsumerHold, SessionTurnOutcome};
+pub use runtime::{ConsumerHold, PinnedTriggerDelivery, SessionTurnOutcome, TriggerDeliveryPin};
 pub(crate) use session::Session;
 pub use session::{
     ExecRequest, PluginOptionsUnaccepted, RuntimeExecutionContext, SessionConfigRefusal,

@@ -1743,6 +1743,8 @@ lash_conformance::process_trigger_retention_tests!({
                     as Arc<dyn lash_core_execution::DeploymentStore>,
                 deliveries: storage
                     .obligation_ledger(lash_core_execution::store::ObligationKind::TriggerDelivery),
+                process_starts: storage
+                    .obligation_ledger(lash_core_execution::store::ObligationKind::ProcessStart),
                 process_env: Arc::new(storage.process_env_store())
                     as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
             }

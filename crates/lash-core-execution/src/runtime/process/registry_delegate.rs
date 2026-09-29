@@ -738,6 +738,19 @@ macro_rules! delegate_process_retention {
                 self.$inner.release_consumer_hold(process_id, key).await
             }
 
+            async fn release_trigger_delivery_pin(
+                &self,
+                process_id: &$crate::ProcessId,
+            ) -> Result<(), $crate::PluginError> {
+                self.$inner.release_trigger_delivery_pin(process_id).await
+            }
+
+            async fn list_trigger_delivery_pins(
+                &self,
+            ) -> Result<Vec<$crate::PinnedTriggerDelivery>, $crate::PluginError> {
+                self.$inner.list_trigger_delivery_pins().await
+            }
+
             async fn abandon_consumer_hold(
                 &self,
                 key: &str,

@@ -748,6 +748,12 @@ impl Processes {
     /// retired rows, a nonempty set containing only running and waiting
     /// statuses cannot match and is refused. This includes the running
     /// default selected by an otherwise unspecified filter.
+    ///
+    /// A process a trigger delivery registered stays pinned until the
+    /// delivery's bind commits, so a completed child whose bind was lost is
+    /// never pruned and started again (ADR 0021, FIG-4203). The pass first
+    /// releases the pins of deliveries that are bound or no longer reserved,
+    /// recovering any release lost after its bind, then prunes.
     pub async fn prune(
         &self,
         cutoff_epoch_ms: u64,
@@ -756,6 +762,21 @@ impl Processes {
     ) -> Result<lash_core::ProcessPruneReport> {
         let registry = self.registry();
         Self::prune_selection(filter)?;
+        let trigger_store = self.core.env.core.trigger_store();
+        if let Err(err) = lash_core::facade_support::release_bound_trigger_delivery_pins(
+            registry.as_ref(),
+            trigger_store.as_ref(),
+        )
+        .await
+        {
+            tracing::warn!(
+                failure_stage = "release_bound_trigger_delivery_pins",
+                cutoff_epoch_ms,
+                error = %err,
+                "process retention failed"
+            );
+            return Err(err.into());
+        }
         // Survey exactly the rows the registry's prune will delete, with the
         // registry's own eligibility predicate (retired status, cutoff,
         // projection watermark, no pending wake delivery, no parent-end
@@ -821,7 +842,6 @@ impl Processes {
                 return Err(err.into());
             }
         };
-        let trigger_store = self.core.env.core.trigger_store();
         let retention = match lash_core::facade_support::reconcile_pruned_trigger_deliveries(
             registry.as_ref(),
             trigger_store.as_ref(),

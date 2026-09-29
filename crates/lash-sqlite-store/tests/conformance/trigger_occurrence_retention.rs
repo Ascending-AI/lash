@@ -60,6 +60,10 @@ lash_conformance::process_trigger_retention_tests!({
                     &*backend,
                     lash_core_execution::store::ObligationKind::TriggerDelivery,
                 ),
+                process_starts: lash_core_execution::StoreSet::obligation_ledger(
+                    &*backend,
+                    lash_core_execution::store::ObligationKind::ProcessStart,
+                ),
                 process_env: lash_core_execution::StoreSet::process_env_store(&*backend),
             }
         }

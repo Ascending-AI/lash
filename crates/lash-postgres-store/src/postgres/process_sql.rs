@@ -154,9 +154,10 @@ lash_store_sql::statements! {
                 change_seq, status,
                 lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
                 record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
-                consumer_hold_cancels
+                consumer_hold_cancels, trigger_delivery_pin_occurrence_id,
+                trigger_delivery_pin_subscription_id
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -251,13 +252,14 @@ lash_store_sql::statements! {
          LIMIT ?2";
 
         /// Prune candidates: retired rows older than `?1`, at or below change
-        /// sequence `?2`, with no wake still owed. The survey half, which
-        /// locks nothing.
+        /// sequence `?2`, with no wake still owed, no consumer hold and no
+        /// trigger delivery pin. The survey half, which locks nothing.
         list_prunable_terminal = "SELECT record_json FROM processes
          WHERE {{retired_process_status(status)}}
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
+           AND trigger_delivery_pin_occurrence_id IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM process_wake_deliveries AS delivery
                WHERE delivery.process_id = processes.process_id
@@ -276,6 +278,7 @@ lash_store_sql::statements! {
            AND updated_at_ms < ?1
            AND (?2::BIGINT IS NULL OR change_seq <= ?2)
            AND consumer_hold_key IS NULL
+           AND trigger_delivery_pin_occurrence_id IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM process_wake_deliveries AS delivery
                WHERE delivery.process_id = processes.process_id
