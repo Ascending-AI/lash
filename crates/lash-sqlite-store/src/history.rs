@@ -309,7 +309,23 @@ impl SessionHistoryStore for SqliteStore {
     ) -> Result<bool, StoreError> {
         let session = session_id.clone();
         let node = node_id.clone();
-        self.read_connection().read(move|conn|Ok((||{live(conn,&session)?;conn.query_row("SELECT EXISTS(SELECT 1 FROM session_head AS head JOIN graph_nodes AS leaf ON leaf.node_id=head.leaf_node_id JOIN graph_nodes AS node ON node.node_id=?2 WHERE head.session_id=?1 AND leaf.tombstoned=0 AND node.tombstoned=0 AND node.generation<=leaf.generation AND (node.session_id=?1 OR EXISTS(SELECT 1 FROM fork_lineage AS lineage WHERE lineage.session_id=?1 AND lineage.ancestor_session_id=node.session_id AND node.generation<=lineage.fork_generation)))",params![session.as_str(),node.as_str()],|row|row.get::<_,bool>(0)).map_err(sqlite_error)})())).await.map_err(sqlite_error)?
+        self.read_connection()
+            .read(move |conn| {
+                Ok((|| {
+                    live(conn, &session)?;
+                    conn.query_row(
+                        session_sql::session_sql()
+                            .graph_sqlite
+                            .exists_active_ancestor
+                            .sql(),
+                        params![session.as_str(), node.as_str()],
+                        |row| row.get::<_, bool>(0),
+                    )
+                    .map_err(sqlite_error)
+                })())
+            })
+            .await
+            .map_err(sqlite_error)?
     }
     async fn load_usage_totals(
         &self,

@@ -383,6 +383,24 @@ lash_store_sql::statements! {
                                        )
                                    )";
 
+        /// Whether `?2` is readable on `?1`'s current path. The head leaf
+        /// supplies the generation ceiling in the same read statement.
+        exists_active_ancestor = "SELECT EXISTS (
+                SELECT 1 FROM session_head AS head
+                JOIN graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
+                JOIN graph_nodes AS node ON node.node_id = ?2
+                WHERE head.session_id = ?1
+                  AND leaf.tombstoned = 0
+                  AND node.tombstoned = 0
+                  AND node.generation <= leaf.generation
+                  AND (node.session_id = ?1 OR EXISTS (
+                      SELECT 1 FROM fork_lineage AS lineage
+                      WHERE lineage.session_id = ?1
+                        AND lineage.ancestor_session_id = node.session_id
+                        AND node.generation <= lineage.fork_generation
+                  ))
+            )";
+
         /// The parent of `?1` when `?1` itself is unreachable: no live child,
         /// no head pointing at it, no anchor holding it.
         select_retirable_parent = "SELECT node.parent_node_id
