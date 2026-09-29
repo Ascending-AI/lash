@@ -412,13 +412,6 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
-    async fn drive_independent_effect_work<'work>(
-        &self,
-        work: Vec<crate::IndependentEffectWork<'work>>,
-    ) {
-        self.inner.drive_independent_effect_work(work).await;
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

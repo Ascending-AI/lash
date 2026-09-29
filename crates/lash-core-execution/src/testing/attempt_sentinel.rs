@@ -275,13 +275,6 @@ impl RuntimeEffectController for AttemptAtomicitySentinel<'_> {
         self.inner.record_process_drive_step(name, step).await
     }
 
-    async fn drive_independent_effect_work<'work>(
-        &self,
-        work: Vec<crate::IndependentEffectWork<'work>>,
-    ) {
-        self.inner.drive_independent_effect_work(work).await;
-    }
-
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
