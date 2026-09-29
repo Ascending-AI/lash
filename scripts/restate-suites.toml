@@ -109,3 +109,11 @@ filters = ["tests::root_control_witnesses::live_"]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 1
 timeout_seconds = 240
+
+[suites.session-driver]
+label = "//crates/lash-restate-test:session_driver__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_drive_continuation_crash_redrives_one_successor"]
+endpoints = ["CW"]
+shards = 1
+timeout_seconds = 240

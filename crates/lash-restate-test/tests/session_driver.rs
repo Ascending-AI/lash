@@ -15,6 +15,7 @@
     clippy::expect_used,
     reason = "test assertions; a failed unwrap is the test failure"
 )]
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
@@ -32,7 +33,8 @@ use lash_core::{
 use lash_restate::{Call, Reply, RestateSessionDriveRequest, RestateTurnDriveRequest};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
-    CrashPoint, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
+    CrashPoint, CrashRule, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig,
+    TURN_DRIVER_SERVICE,
 };
 
 // ---------------------------------------------------------------------------
@@ -1006,4 +1008,248 @@ async fn a_drive_crashed_at_any_journal_point_of_either_handler_consumes_each_it
         }
     }
     println!("session drive crash matrix: {cases} journal points");
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ContinuationCut {
+    BeforeSend,
+    AfterSend,
+    LastRootSettlement,
+}
+
+impl ContinuationCut {
+    const ALL: [Self; 3] = [Self::BeforeSend, Self::AfterSend, Self::LastRootSettlement];
+
+    fn rule(self, session: &SessionId) -> CrashRule {
+        match self {
+            Self::BeforeSend => CrashRule::new(CrashPoint::BeforeFrame {
+                ty: MessageType::OneWayCallCommand,
+            })
+            .service(SESSION_DRIVER_SERVICE)
+            .handler("drive")
+            .key(session.as_str()),
+            Self::AfterSend => CrashRule::new(CrashPoint::BeforeFrame {
+                ty: MessageType::OutputCommand,
+            })
+            .service(SESSION_DRIVER_SERVICE)
+            .handler("drive")
+            .key(session.as_str()),
+            Self::LastRootSettlement => CrashRule::new(CrashPoint::BeforeFrame {
+                ty: MessageType::OutputCommand,
+            })
+            .service(TURN_DRIVER_SERVICE)
+            .handler("run")
+            .key(lash_restate::turn_workflow_key(
+                session,
+                &TurnId::from("item-63"),
+            )),
+        }
+    }
+}
+
+fn schedule_continuation_case(
+    backend: &lash_core::Backend,
+    driver: &ScriptedDriver,
+    session: &SessionId,
+) -> (DriveRequestId, DriveRequestId) {
+    for index in 0..65 {
+        driver.accept(session, &format!("item-{index}"));
+    }
+    let initial = DriveRequest {
+        session: session.clone(),
+        request: request("bounded-crash"),
+        build_generation: backend.build_generation().clone(),
+    };
+    let successor = lash_core::engine::drive_continuation_request(&initial);
+    backend
+        .session_work()
+        .schedule_drive(session, initial.request.clone());
+    (initial.request, successor)
+}
+
+fn assert_continuation_case(
+    first: &DriveOutcome,
+    next: &DriveOutcome,
+    driver: &ScriptedDriver,
+    session: &SessionId,
+) {
+    assert_eq!(
+        committed_roots(first),
+        (0..64)
+            .map(|index| format!("item-{index}"))
+            .collect::<Vec<_>>()
+    );
+    assert!(matches!(first.stop, DriveStop::Yielded { .. }));
+    assert_eq!(committed_roots(next), ["item-64"]);
+    assert_eq!(next.stop, DriveStop::Idle);
+    assert_eq!(
+        driver.ledger(session).consumed,
+        (0..65)
+            .map(|index| format!("item-{index}"))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn drive_continuation_crash_redrives_one_successor() {
+    for replay in [false, true] {
+        for cut in ContinuationCut::ALL {
+            let backend =
+                lash_restate_test::backend(0x4145, ServerConfig::default().always_replay(replay))
+                    .await
+                    .expect("build the backend");
+            let driver = Arc::new(ScriptedDriver::default());
+            let installed = backend
+                .lash_backend()
+                .session_work()
+                .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+            let session = SessionId::from("drive-continuation-crash");
+            backend.server().crash_on(cut.rule(&session));
+            let (initial, successor) =
+                schedule_continuation_case(&backend.lash_backend(), &driver, &session);
+            let first = tokio::time::timeout(
+                Duration::from_secs(60),
+                backend.attach_drive(&session, initial),
+            )
+            .await
+            .expect("predecessor finishes")
+            .expect("predecessor outcome");
+            assert!(
+                matches!(first.stop, DriveStop::Yielded { .. }),
+                "the bounded drive yielded before its successor"
+            );
+            let next = tokio::time::timeout(
+                Duration::from_secs(60),
+                backend.attach_drive(&session, successor),
+            )
+            .await
+            .expect("successor finishes")
+            .expect("successor outcome");
+            assert_continuation_case(&first, &next, &driver, &session);
+            settle(&backend).await;
+            assert_eq!(
+                backend.server().stats().crashes,
+                1,
+                "{cut:?}, replay={replay}"
+            );
+            assert_eq!(
+                backend
+                    .server()
+                    .invocations()
+                    .iter()
+                    .filter(|invocation| invocation.target
+                        == format!("{SESSION_DRIVER_SERVICE}/{session}/drive"))
+                    .count(),
+                2,
+                "one predecessor and one successor: {cut:?}, replay={replay}"
+            );
+            assert_eq!(turn_invocations(&backend, "run"), 65);
+            no_drive_failed(&backend);
+            drop(installed);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the session-driver Restate suite runs it"]
+async fn live_restate_drive_continuation_crash_redrives_one_successor() {
+    use lash_restate_test::live::{LiveConfig, LiveRestateBackend};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    for cut in ContinuationCut::ALL {
+        let tag = format!(
+            "continuation-{:?}-{}",
+            cut,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        );
+        let env = |name| std::env::var(name).expect("the live suite's endpoint environment");
+        let backend = LiveRestateBackend::start(LiveConfig {
+            ingress_url: env("RESTATE_INGRESS_URL"),
+            admin_url: env("RESTATE_ADMIN_URL"),
+            endpoint_bind: env("CW_BIND").parse().expect("endpoint bind"),
+            endpoint_url: env("CW_URL"),
+            run_tag: tag.clone(),
+            namespace: lash_restate::RestateNamespace::default(),
+        })
+        .await
+        .expect("start the live backend");
+        let driver = Arc::new(ScriptedDriver::default());
+        let installed = backend
+            .lash_backend()
+            .session_work()
+            .install_session_driver(Arc::clone(&driver) as Arc<dyn SessionDriver>);
+        let crashes = Arc::new(AtomicUsize::new(0));
+        let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+        let counted = Arc::clone(&crashes);
+        assert!(backend.on_crash(Arc::new(move |_| {
+            counted.fetch_add(1, Ordering::SeqCst);
+            sender.send(()).expect("restart listener");
+        })));
+        let restart = {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                while receiver.recv().await.is_some() {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    backend.start_serving().await.expect("restart the endpoint");
+                }
+            })
+        };
+        let session = SessionId::from(tag);
+        backend.crash_on(cut.rule(&session));
+        let (initial, successor) =
+            schedule_continuation_case(&backend.lash_backend(), &driver, &session);
+        let first = tokio::time::timeout(
+            Duration::from_secs(60),
+            backend.attach_drive(&session, initial),
+        )
+        .await
+        .expect("predecessor finishes")
+        .expect("predecessor outcome");
+        assert!(
+            matches!(first.stop, DriveStop::Yielded { .. }),
+            "the bounded drive yielded before its successor"
+        );
+        let next = tokio::time::timeout(
+            Duration::from_secs(60),
+            backend.attach_drive(&session, successor),
+        )
+        .await
+        .expect("successor finishes")
+        .expect("successor outcome");
+        assert_continuation_case(&first, &next, &driver, &session);
+        backend
+            .settle(Duration::from_secs(20), Duration::from_millis(100))
+            .await;
+        assert_eq!(crashes.load(Ordering::SeqCst), 1, "{cut:?}");
+        let invocations = backend.invocations().await.expect("read invocations");
+        assert_eq!(
+            invocations
+                .iter()
+                .filter(|invocation| invocation.target
+                    == format!("{SESSION_DRIVER_SERVICE}/{session}/drive"))
+                .count(),
+            2,
+            "one predecessor and one successor: {cut:?}"
+        );
+        let roots: Vec<_> = invocations
+            .iter()
+            .filter(|invocation| {
+                invocation.target.starts_with(&format!(
+                    "{TURN_DRIVER_SERVICE}/{}",
+                    lash_restate::turn_workflow_key(&session, &TurnId::from(""))
+                )) && invocation.target.ends_with("/run")
+            })
+            .collect();
+        assert_eq!(roots.len(), 65, "one invocation per root: {cut:?}");
+        assert!(
+            roots
+                .iter()
+                .all(|invocation| invocation.status == "completed")
+        );
+        restart.abort();
+        backend.finish().await;
+        drop(installed);
+    }
 }

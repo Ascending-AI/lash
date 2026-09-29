@@ -212,6 +212,7 @@ pub struct LiveRestateBackend {
 
 struct Inner {
     config: LiveConfig,
+    segment_effect_budget: Option<u64>,
     restate: Arc<RestateEngine>,
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     clock: Arc<LiveClock>,
@@ -286,6 +287,55 @@ impl LiveRestateBackend {
             .await
             .map_err(|error| LiveError::Stores(error.to_string()))?,
         );
+        Self::start_over(
+            config,
+            segment_effect_budget,
+            stores,
+            clock,
+            lash_core::engine::BuildGeneration::for_test("t0"),
+            true,
+        )
+        .await
+    }
+
+    /// Replace the deployment with a new engine and endpoint over its durable
+    /// stores. Worker slots, handlers, watches and caches are constructed anew.
+    /// The caller must install a new process worker and session driver. Test
+    /// handler jobs are host oracles and deliberately do not survive.
+    pub async fn rebuild(&self) -> Result<Self, LiveError> {
+        self.rebuild_on_generation(self.lash_backend().build_generation().clone())
+            .await
+    }
+
+    /// Reconstruct the deployment on another build generation, keeping its
+    /// stores and the server's retained journals for generation-fence laws.
+    /// A changed generation deliberately replaces the binary behind the
+    /// pinned deployment without registering it: deployment admission normally
+    /// refuses that swap, while these laws exercise the journal sentinel.
+    pub async fn rebuild_on_generation(
+        &self,
+        build_generation: lash_core::engine::BuildGeneration,
+    ) -> Result<Self, LiveError> {
+        self.stop_serving(true);
+        Self::start_over(
+            self.inner.config.clone(),
+            self.inner.segment_effect_budget,
+            Arc::clone(&self.inner.stores),
+            Arc::clone(&self.inner.clock),
+            build_generation.clone(),
+            build_generation == *self.lash_backend().build_generation(),
+        )
+        .await
+    }
+
+    async fn start_over(
+        config: LiveConfig,
+        segment_effect_budget: Option<u64>,
+        stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+        clock: Arc<LiveClock>,
+        build_generation: lash_core::engine::BuildGeneration,
+        register: bool,
+    ) -> Result<Self, LiveError> {
         let connection = RestateConnection::new(config.ingress_url.clone());
         let admin_connection = RestateConnection::new(config.admin_url.clone());
         let authority = RestateAuthorityId::new(format!("lash-live-{}", config.run_tag))
@@ -296,12 +346,19 @@ impl LiveRestateBackend {
                 connection.clone(),
                 admin_connection.clone(),
                 authority.clone(),
-                lash_core::engine::BuildGeneration::for_test("t0"),
+                build_generation,
             )
             .with_namespace(config.namespace.clone()),
         ));
         let processes = RestateProcessWorkerSlot::new();
-        let jobs = Arc::new(ParkedJobs::with_prefix(format!("{}-", config.run_tag)));
+        let job_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let jobs = Arc::new(ParkedJobs::with_prefix(format!(
+            "{}-{job_epoch:x}-",
+            config.run_tag
+        )));
         let serving = RestateProcessServing::from(processes.clone());
         let serving = match segment_effect_budget {
             Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
@@ -332,6 +389,7 @@ impl LiveRestateBackend {
         let backend = Self {
             inner: Arc::new(Inner {
                 config,
+                segment_effect_budget,
                 restate,
                 stores,
                 clock,
@@ -343,7 +401,9 @@ impl LiveRestateBackend {
             }),
         };
         backend.start_serving().await?;
-        backend.register().await?;
+        if register {
+            backend.register().await?;
+        }
         Ok(backend)
     }
 
@@ -419,6 +479,23 @@ impl LiveRestateBackend {
     /// The ingress client over the live server.
     pub fn ingress(&self) -> RestateIngressClient {
         RestateIngressClient::new(self.inner.connection.clone())
+    }
+
+    /// Attach to one drive invocation, without following its continuation.
+    #[expect(
+        clippy::result_large_err,
+        reason = "matches the ingress client's error API"
+    )]
+    pub async fn attach_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: lash_core::engine::DriveRequestId,
+    ) -> Result<lash_core::engine::DriveOutcome, lash_restate::RestateHttpError> {
+        self.inner
+            .restate
+            .session_work_engine()
+            .attach_drive(session, request)
+            .await
     }
 
     /// Serve process segments with `worker`.

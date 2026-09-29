@@ -114,6 +114,10 @@ impl Engine {
             None => LiveRestateBackend::start(config).await,
         }
         .expect("start the live backend");
+        Self::on_live_backend(backend)
+    }
+
+    fn on_live_backend(backend: LiveRestateBackend) -> Self {
         // A crash kills the deployment where it stands: its endpoint stops
         // serving and the server retries every attempt it ran there. A host
         // comes back after a short outage, and the retries replay into it.
@@ -464,6 +468,14 @@ async fn publish_process_input(engine: &Engine) -> lash_lashlang_runtime::Lashla
         )],
         Vec::new(),
     );
+    publish_program(engine, program, lashlang::LashlangAbilities::default()).await
+}
+
+async fn publish_program(
+    engine: &Engine,
+    program: lashlang::Program,
+    abilities: lashlang::LashlangAbilities,
+) -> lash_lashlang_runtime::LashlangProcessInput {
     let contract = tool_definition().contract();
     let mut catalog = lashlang::LashlangHostCatalog::new();
     catalog
@@ -480,7 +492,7 @@ async fn publish_process_input(engine: &Engine) -> lash_lashlang_runtime::Lashla
         .expect("link the counted tool");
     let linked = lashlang::LinkedModule::link(
         program,
-        lashlang::LashlangHostEnvironment::new(catalog, lashlang::LashlangAbilities::default()),
+        lashlang::LashlangHostEnvironment::new(catalog, abilities),
     )
     .expect("link the process");
     lashlang::LashlangArtifacts::new(engine.lash_backend().module_artifacts())
@@ -1090,3 +1102,6 @@ async fn live_restate_a_crash_between_a_trigger_reservation_and_its_start_recove
     a_reserved_delivery_crash_recovers_one_bound_process(Engine::live("delivery", None).await)
         .await;
 }
+
+#[path = "crash_windows/recovery.rs"]
+mod recovery;

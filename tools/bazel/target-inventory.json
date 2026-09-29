@@ -20822,6 +20822,7 @@
         "http-body-util",
         "hyper",
         "hyper-util",
+        "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-core-worker",
         "lash-internal-http-transport",

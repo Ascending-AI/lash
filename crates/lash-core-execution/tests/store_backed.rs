@@ -29,3 +29,6 @@ mod kernel;
 
 #[path = "store_backed/kernel_door.rs"]
 mod kernel_door;
+
+#[path = "store_backed/backend.rs"]
+mod backend;
