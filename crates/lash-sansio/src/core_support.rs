@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::append_vec::AppendVec;
 use crate::llm::types::LlmToolSpec;
 use crate::{
     AttachmentId, AttachmentTypeMetadata, BaseRenderCache, ConversationRecord, MediaType, Message,
@@ -193,11 +194,11 @@ impl MessageCoreSupport for ConversationRecord {
 pub trait MessageSequenceCoreSupport {
     fn preserved_extension_delta<'a>(&self, next: &'a MessageSequence) -> Option<&'a [Message]>;
     fn from_owned(messages: Vec<Message>) -> Self;
-    fn from_base(base: Arc<Vec<Message>>) -> Self;
-    fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self;
+    fn from_base(base: AppendVec<Message>) -> Self;
+    fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self;
     fn with_base_render_cache(self, cache: Arc<BaseRenderCache>) -> Self;
     fn as_slice(&self) -> &[Message];
-    fn shared(&self) -> Arc<Vec<Message>>;
+    fn shared(&self) -> AppendVec<Message>;
     fn extend(&mut self, messages: Vec<Message>);
 }
 
@@ -210,11 +211,11 @@ impl MessageSequenceCoreSupport for MessageSequence {
         MessageSequence::from_owned(messages)
     }
 
-    fn from_base(base: Arc<Vec<Message>>) -> Self {
+    fn from_base(base: AppendVec<Message>) -> Self {
         MessageSequence::from_base(base)
     }
 
-    fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self {
+    fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
         MessageSequence::from_base_and_delta(base, delta)
     }
 
@@ -226,7 +227,7 @@ impl MessageSequenceCoreSupport for MessageSequence {
         MessageSequence::as_slice(self)
     }
 
-    fn shared(&self) -> Arc<Vec<Message>> {
+    fn shared(&self) -> AppendVec<Message> {
         MessageSequence::shared(self)
     }
 

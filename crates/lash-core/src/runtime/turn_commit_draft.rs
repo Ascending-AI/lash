@@ -387,7 +387,7 @@ impl TurnCommitDraft {
         &self.state
     }
 
-    pub(super) fn active_events(&self) -> Arc<Vec<SessionHistoryRecord>> {
+    pub(super) fn active_events(&self) -> lash_sansio::AppendVec<SessionHistoryRecord> {
         self.graph.read_model().active_events
     }
 
@@ -560,11 +560,17 @@ mod tests {
             "draft-shared-base",
         );
         let base = draft.graph.read_model();
-        assert!(Arc::ptr_eq(&model.messages, &base.messages));
-        assert!(Arc::ptr_eq(&model.active_events, &base.active_events));
+        assert!(lash_sansio::AppendVec::ptr_eq(
+            &model.messages,
+            &base.messages
+        ));
+        assert!(lash_sansio::AppendVec::ptr_eq(
+            &model.active_events,
+            &base.active_events
+        ));
 
         let next = MessageSequence::from_base_and_delta(
-            Arc::clone(&model.messages),
+            model.messages.clone(),
             vec![text_message("turn", "this turn")],
         );
         let delta = draft

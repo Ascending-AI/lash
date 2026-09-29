@@ -886,8 +886,11 @@ fn the_state_and_its_read_views_share_one_projection() {
 
     let model = state.read_model();
     let again = state.read_model();
-    assert!(std::sync::Arc::ptr_eq(&model.messages, &again.messages));
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(lash_sansio::AppendVec::ptr_eq(
+        &model.messages,
+        &again.messages
+    ));
+    assert!(lash_sansio::AppendVec::ptr_eq(
         &model.active_events,
         &again.active_events
     ));
@@ -911,9 +914,12 @@ fn the_state_and_its_read_views_share_one_projection() {
 
     state.append_active_conversation_messages(&[projection_text("m2")]);
     let folded = state.read_model();
-    assert!(!std::sync::Arc::ptr_eq(&model.messages, &folded.messages));
+    assert!(!lash_sansio::AppendVec::ptr_eq(
+        &model.messages,
+        &folded.messages
+    ));
     assert_eq!(folded.messages.len(), 2);
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(lash_sansio::AppendVec::ptr_eq(
         &folded.messages,
         &state.read_model().messages
     ));

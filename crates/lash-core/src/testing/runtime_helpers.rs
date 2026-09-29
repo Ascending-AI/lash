@@ -179,7 +179,7 @@ impl ReadModelStateMut for RuntimeSessionState {
 }
 
 pub fn active_conversation_messages(state: &impl ReadModelState) -> Vec<Message> {
-    state.read_model().messages.as_ref().clone()
+    state.read_model().messages.to_vec()
 }
 
 pub fn append_message(state: &mut impl ReadModelStateMut, message: Message) {

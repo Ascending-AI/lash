@@ -168,7 +168,7 @@ fn the_machine_folds_expanded_slots_before_emitting_or_handing_back() {
     let mut machine = TurnMachine::new(
         test_config(Arc::clone(&driver) as Arc<dyn ProtocolDriverHandle>),
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -225,7 +225,7 @@ fn a_checkpoint_restores_the_step_with_its_expansion() {
     let mut machine = TurnMachine::new(
         test_config(Arc::clone(&driver)),
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);

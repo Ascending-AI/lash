@@ -207,6 +207,25 @@ pub enum SessionHistoryRecord<PE = ()> {
     Protocol(PE),
 }
 
+/// Whether `existing` and `value` are the same history record, for
+/// [`crate::AppendVec::push_adopting`]: a read state that appends a record
+/// another holder of its buffer already appended adopts that slot.
+pub fn same_history_record(
+    existing: &SessionHistoryRecord<ProtocolEvent>,
+    value: &SessionHistoryRecord<ProtocolEvent>,
+) -> bool {
+    match (existing, value) {
+        (
+            SessionHistoryRecord::Conversation(existing),
+            SessionHistoryRecord::Conversation(value),
+        ) => message::message_content_equal(existing, value),
+        (SessionHistoryRecord::Protocol(existing), SessionHistoryRecord::Protocol(value)) => {
+            existing == value
+        }
+        _ => false,
+    }
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct ConversationRecord {
     pub id: String,

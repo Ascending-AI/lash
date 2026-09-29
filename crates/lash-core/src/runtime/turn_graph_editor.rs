@@ -1,5 +1,6 @@
 use crate::NodeId;
 use lash_sansio::core_support::*;
+use lash_sansio::{AppendVec, same_history_record};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -14,7 +15,7 @@ use crate::{BaseRenderCache, Message, MessageSequence, SessionGraph, SessionNode
 #[derive(Debug)]
 pub(super) struct TurnGraphEditor {
     base_graph: Arc<SessionGraph>,
-    active_events: Arc<Vec<SessionHistoryRecord>>,
+    active_events: AppendVec<SessionHistoryRecord>,
     active_messages: MessageSequence,
     current_frame_node_id: Option<crate::FrameNodeId>,
     append_builder: crate::session_graph::SessionGraphAppendBuilder,
@@ -22,7 +23,7 @@ pub(super) struct TurnGraphEditor {
     append_builder_minted_node_ids: HashSet<NodeId>,
     appended_nodes: Vec<SessionNodeRecord>,
     appended_node_indices: HashMap<NodeId, usize>,
-    committed_node_ids: HashSet<NodeId>,
+    committed_node_ids: lash_core_store::PersistedNodeIds,
     clock: Arc<dyn crate::Clock>,
     projection_diagnostics: Vec<ReadProjectionDiagnostic>,
 }
@@ -41,7 +42,7 @@ impl TurnGraphEditor {
         current_frame_node_id: Option<crate::FrameNodeId>,
         draft_namespace: &str,
         clock: Arc<dyn crate::Clock>,
-        persisted_node_ids: HashSet<NodeId>,
+        persisted_node_ids: lash_core_store::PersistedNodeIds,
     ) -> Self {
         let append_builder = base_graph.append_builder_in_namespace(draft_namespace);
         let pre_turn_append_leaf = append_builder.leaf_node_id().cloned();
@@ -72,7 +73,7 @@ impl TurnGraphEditor {
 
     pub(super) fn read_model(&self) -> SessionReadModel {
         SessionReadModel {
-            active_events: Arc::clone(&self.active_events),
+            active_events: self.active_events.clone(),
             messages: self.active_messages.shared(),
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
         }
@@ -98,8 +99,10 @@ impl TurnGraphEditor {
         let nodes = self
             .append_builder
             .append_events_at(events, self.clock.timestamp_rfc3339());
-        Arc::make_mut(&mut self.active_events)
-            .extend(nodes.iter().filter_map(|node| node.event().cloned()));
+        self.active_events.extend_adopting(
+            nodes.iter().filter_map(|node| node.event().cloned()),
+            same_history_record,
+        );
         self.active_messages
             .extend(nodes.iter().filter_map(|node| node.message()).collect());
         self.record_append_builder_nodes(nodes);
@@ -169,8 +172,10 @@ impl TurnGraphEditor {
         let nodes = self
             .append_builder
             .append_messages_at(appendable_messages.clone(), self.clock.timestamp_rfc3339());
-        Arc::make_mut(&mut self.active_events)
-            .extend(nodes.iter().filter_map(|node| node.event().cloned()));
+        self.active_events.extend_adopting(
+            nodes.iter().filter_map(|node| node.event().cloned()),
+            same_history_record,
+        );
         self.record_append_builder_nodes(nodes);
         self.active_messages.extend(appendable_messages);
     }
@@ -189,8 +194,10 @@ impl TurnGraphEditor {
         let nodes = builder.append_drafts_at(drafts, self.clock.timestamp_rfc3339());
         self.append_builder
             .set_leaf_node_id(builder.leaf_node_id().cloned());
-        Arc::make_mut(&mut self.active_events)
-            .extend(nodes.iter().filter_map(|node| node.event().cloned()));
+        self.active_events.extend_adopting(
+            nodes.iter().filter_map(|node| node.event().cloned()),
+            same_history_record,
+        );
         let node_ids = nodes
             .iter()
             .map(|node| node.node_id.clone())
@@ -239,7 +246,7 @@ impl TurnGraphEditor {
 
         // Keep the turn-facing read state projected without allowing that
         // projection's synthetic tail to select the durable commit parent.
-        self.active_events = Arc::new(projection.active_events);
+        self.active_events = AppendVec::from(projection.active_events);
         self.active_messages = MessageSequence::from_owned(projection.active_messages);
     }
 
@@ -273,7 +280,7 @@ impl TurnGraphEditor {
         self.committed_node_ids.extend(node_ids);
     }
 
-    pub(super) fn take_persisted_node_ids(&mut self) -> HashSet<NodeId> {
+    pub(super) fn take_persisted_node_ids(&mut self) -> lash_core_store::PersistedNodeIds {
         std::mem::take(&mut self.committed_node_ids)
     }
 
@@ -397,7 +404,7 @@ mod tests {
             None,
             "turn-graph-editor-test",
             Arc::new(crate::SystemClock),
-            HashSet::new(),
+            Default::default(),
         )
     }
 
@@ -456,14 +463,14 @@ mod tests {
         graph.append_active_read_delta(&[message("history", "committed")]);
         let graph = Arc::new(graph);
         let base_read_model = graph.read_model();
-        let base = Arc::clone(&base_read_model.messages);
+        let base = base_read_model.messages.clone();
         let editor = TurnGraphEditor::new(
             graph,
             base_read_model,
             None,
             "turn-graph-editor-witness-test",
             Arc::new(crate::SystemClock),
-            HashSet::new(),
+            Default::default(),
         );
 
         let next = MessageSequence::from_base_and_delta(base, vec![message("turn", "new")]);

@@ -161,11 +161,11 @@ fn rejected_graph_appends_leave_nodes_leaf_and_cached_reads_unchanged() {
         before_graph
     );
     let after_read = graph.read_model();
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(lash_sansio::AppendVec::ptr_eq(
         &before_read.active_events,
         &after_read.active_events
     ));
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(lash_sansio::AppendVec::ptr_eq(
         &before_read.messages,
         &after_read.messages
     ));
@@ -865,10 +865,13 @@ fn the_frame_read_model_is_shared_by_identity_until_an_append() {
     let first = graph.read_model();
     let second = graph.read_model();
     assert!(
-        Arc::ptr_eq(&first.messages, &second.messages),
+        lash_sansio::AppendVec::ptr_eq(&first.messages, &second.messages),
         "repeated reads share the projected messages by identity"
     );
-    assert!(Arc::ptr_eq(&first.active_events, &second.active_events));
+    assert!(lash_sansio::AppendVec::ptr_eq(
+        &first.active_events,
+        &second.active_events
+    ));
     assert!(Arc::ptr_eq(
         &first.prompt_render_cache,
         &second.prompt_render_cache
@@ -877,13 +880,13 @@ fn the_frame_read_model_is_shared_by_identity_until_an_append() {
     graph.append_message(text_message("m2", MessageRole::User, "second"));
     let after_append = graph.read_model();
     assert!(
-        !Arc::ptr_eq(&first.messages, &after_append.messages),
+        !lash_sansio::AppendVec::ptr_eq(&first.messages, &after_append.messages),
         "an append to the active path folds into a new projection"
     );
     assert_eq!(after_append.messages.len(), 2);
     let again = graph.read_model();
     assert!(
-        Arc::ptr_eq(&after_append.messages, &again.messages),
+        lash_sansio::AppendVec::ptr_eq(&after_append.messages, &again.messages),
         "an append folds once"
     );
 }
@@ -1325,14 +1328,20 @@ fn event_only_appends_preserve_the_message_vec_and_render_cache() {
     graph.append_protocol_event(protocol_event());
     let after = graph.read_model();
 
-    assert!(Arc::ptr_eq(&before.messages, &after.messages));
+    assert!(lash_sansio::AppendVec::ptr_eq(
+        &before.messages,
+        &after.messages
+    ));
     assert!(Arc::ptr_eq(
         &before.prompt_render_cache,
         &after.prompt_render_cache
     ));
     assert_eq!(after.messages.len(), 1);
     assert_eq!(after.active_events.len(), before.active_events.len() + 1);
-    assert!(!Arc::ptr_eq(&before.active_events, &after.active_events));
+    assert!(!lash_sansio::AppendVec::ptr_eq(
+        &before.active_events,
+        &after.active_events
+    ));
 }
 
 #[test]
@@ -1346,7 +1355,10 @@ fn held_readers_isolate_folded_pending_tails() {
     let latest = graph.read_model();
 
     assert_eq!(latest.active_events.len(), held.active_events.len() + 1);
-    assert!(!Arc::ptr_eq(&held.active_events, &latest.active_events));
+    assert!(!lash_sansio::AppendVec::ptr_eq(
+        &held.active_events,
+        &latest.active_events
+    ));
 
     graph.append_message(text_message("m2", MessageRole::Assistant, "reply"));
     let with_message = graph.read_model();
@@ -1537,4 +1549,149 @@ mod window_anchor {
             Err(crate::StoreError::InvalidGraphLeaf { .. })
         ));
     }
+}
+
+/// FIG-4059/FIG-4060: a turn's commit appends to the resident graph, derives
+/// its drafts' ids and realizes their timestamps; readers hold what the
+/// commit published (the live replay holds one per commit). Every held
+/// reader keeps exactly what it saw, the frame's messages and nodes stay in a
+/// bounded set of shared buffers however many readers are held, and the
+/// commit's rewrites keep the cache instead of rebuilding it.
+#[test]
+fn held_readers_of_every_commit_share_the_frame_and_keep_what_they_saw() {
+    const TURNS: usize = 200;
+    let mut graph = SessionGraph::default();
+    let session = SessionId::from("session");
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-a",
+        crate::AgentFrameReason::initial(),
+    );
+    let mut held = Vec::new();
+    for turn in 0..TURNS {
+        let draft = graph.append_message(text_message(
+            &format!("m{turn}"),
+            MessageRole::User,
+            &format!("turn {turn}"),
+        ));
+        let derived = NodeId::from(format!("derived-{turn}"));
+        let warm = graph.read_model();
+        graph.remap_node_ids(&session, &[(draft, derived.clone())]);
+        graph.apply_realized_node_timestamps(&[RealizedNodeTimestamp {
+            node_id: derived.clone(),
+            timestamp: format!("2026-09-29T00:00:{:02}Z", turn % 60),
+        }]);
+        let read = graph.read_model();
+        assert!(
+            lash_sansio::AppendVec::ptr_eq(&warm.messages, &read.messages)
+                && Arc::ptr_eq(&warm.prompt_render_cache, &read.prompt_render_cache),
+            "deriving ids and realizing timestamps keeps the warm cache"
+        );
+        assert_eq!(
+            graph
+                .find_node(derived.as_str())
+                .map(|node| node.node_id.clone()),
+            Some(derived)
+        );
+        held.push((read, graph.clone()));
+    }
+
+    for (turn, (read, snapshot)) in held.iter().enumerate() {
+        assert_eq!(read.messages.len(), turn + 1);
+        assert_eq!(read.messages[turn].id, format!("m{turn}"));
+        let leaf = snapshot.leaf_node_id.clone().expect("leaf");
+        assert_eq!(leaf.as_str(), format!("derived-{turn}"));
+        let leaf_node = snapshot.find_node(leaf.as_str()).expect("leaf node");
+        assert_eq!(
+            leaf_node.timestamp,
+            format!("2026-09-29T00:00:{:02}Z", turn % 60)
+        );
+    }
+    let message_buffers = held
+        .iter()
+        .map(|(read, _)| read.messages.as_ptr())
+        .collect::<HashSet<_>>();
+    let node_buffers = held
+        .iter()
+        .map(|(_, snapshot)| snapshot.nodes.as_ptr())
+        .collect::<HashSet<_>>();
+    assert!(
+        message_buffers.len() <= 10,
+        "{} message buffers for {TURNS} held readers",
+        message_buffers.len()
+    );
+    assert!(
+        node_buffers.len() <= 10,
+        "{} node buffers for {TURNS} held readers",
+        node_buffers.len()
+    );
+
+    // A reader held before a commit rewrites its tail keeps the draft.
+    let draft = graph.append_message(text_message("late", MessageRole::User, "late"));
+    let before_commit = graph.clone();
+    graph.remap_node_ids(&session, &[(draft.clone(), NodeId::from("derived-late"))]);
+    assert_eq!(before_commit.leaf_node_id.as_ref(), Some(&draft));
+    assert!(before_commit.find_node(draft.as_str()).is_some());
+    assert!(graph.find_node(draft.as_str()).is_none());
+    assert!(graph.find_node("derived-late").is_some());
+
+    // A frame change starts a new projection; readers of the old frame keep
+    // theirs.
+    let last_of_a = graph.read_model();
+    open_test_frame(
+        &mut graph,
+        &session,
+        "frame-b",
+        crate::AgentFrameReason::continue_as(),
+    );
+    graph.append_message(text_message("b0", MessageRole::User, "b"));
+    let first_of_b = graph.read_model();
+    assert_eq!(first_of_b.messages.len(), 1);
+    assert_eq!(first_of_b.messages[0].id, "b0");
+    assert_eq!(last_of_a.messages.len(), TURNS + 1);
+    assert_eq!(held[0].0.messages.len(), 1);
+    assert_eq!(held[0].0.messages[0].id, "m0");
+}
+
+/// The render cache a fold makes extends the previous render instead of
+/// re-rendering the frame, and gives exactly the render of the whole frame.
+#[test]
+fn an_extended_render_cache_equals_a_fresh_render_of_the_frame() {
+    const TURNS: usize = 64;
+    let mut graph = SessionGraph::default();
+    let mut renders = Vec::new();
+    for turn in 0..TURNS {
+        graph.append_message(text_message(
+            &format!("u{turn}"),
+            MessageRole::User,
+            &format!("question {turn}"),
+        ));
+        graph.append_message(text_message(
+            &format!("a{turn}"),
+            MessageRole::Assistant,
+            &format!("answer {turn}"),
+        ));
+        let read = graph.read_model();
+        let rendered = read
+            .prompt_render_cache
+            .rendered(read.messages.as_slice())
+            .clone();
+        assert_eq!(
+            rendered.as_slice(),
+            lash_sansio::session_model::render_prompt(read.messages.as_slice())
+                .messages
+                .as_slice()
+        );
+        renders.push(rendered);
+    }
+    let buffers = renders
+        .iter()
+        .map(|rendered| rendered.as_ptr())
+        .collect::<HashSet<_>>();
+    assert!(
+        buffers.len() <= 8,
+        "{} render buffers for {TURNS} turns: each render extends the last",
+        buffers.len()
+    );
 }

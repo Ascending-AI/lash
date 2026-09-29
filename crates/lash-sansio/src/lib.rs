@@ -1,3 +1,4 @@
+pub mod append_vec;
 pub mod attachment;
 pub mod causal;
 mod compat;
@@ -75,6 +76,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// not carry.
 pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v24";
 
+pub use append_vec::AppendVec;
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,
     InvalidMediaType, MediaType,
@@ -134,7 +136,7 @@ pub use session::{
     ExecResponse, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord, Observation,
     OmittedToolCalls, TextProjectionMetadata,
 };
-pub use session_model::message::{MessageOrigin, TurnOutputSource};
+pub use session_model::message::{MessageOrigin, TurnOutputSource, same_message};
 pub use session_model::{
     AcceptedInjectedTurnInput, BaseRenderCache, ConversationRecord, ErrorEnvelope, FailureCode,
     HostNamespace, InvalidNamespace, MAIN_AGENT_INTRO, Message, MessageRole, MessageSequence,
@@ -144,7 +146,8 @@ pub use session_model::{
     SessionAppendNode, SessionHistoryRecord, SessionStreamEvent, StreamMessageKind, TokenUsage,
     TokenUsageOverflow, TurnBudget, TurnCancelMode, TurnCancelUndeliveredInputPolicy,
     TurnCancellationEvidence, TurnFailureCode, TurnFailureKind, TurnFinish, TurnOutcome, TurnStop,
-    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers, shared_parts,
+    default_prompt_template, messages_are_prompt_resume_safe, resolve_prompt_layers,
+    same_history_record, shared_parts,
 };
 pub use standard_batch::BatchResultRow;
 pub use tool_call_id::{

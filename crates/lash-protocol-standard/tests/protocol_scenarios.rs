@@ -204,7 +204,7 @@ impl StandardProtocolScenario {
         let mut machine = TurnMachine::new(
             config,
             vec![user_message(self.user_message)],
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let mut observed = StandardProtocolRun::default();

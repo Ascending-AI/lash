@@ -81,7 +81,7 @@ where
     .expect("seeded checkpoint state");
     let mut ordinary_turn_projection = state.to_snapshot();
     ordinary_turn_projection.turn_index += 1;
-    state.apply_snapshot(&ordinary_turn_projection);
+    state.adopt_snapshot(ordinary_turn_projection.clone());
     let second_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
     let carried = second_commit
         .checkpoint

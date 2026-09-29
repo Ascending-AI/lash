@@ -55,7 +55,7 @@ fn machine(max_turns: Option<usize>) -> TurnMachine {
             parts: vec![Part::text("m0.p0".to_string(), "drive".to_string(), None)].into(),
             origin: None,
         }],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     )
 }
@@ -189,7 +189,7 @@ fn machine_with(driver: StandardDriver) -> TurnMachine {
             parts: vec![Part::text("m0.p0".to_string(), "drive".to_string(), None)].into(),
             origin: None,
         }],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     )
 }

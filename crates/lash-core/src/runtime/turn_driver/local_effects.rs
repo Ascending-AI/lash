@@ -6,7 +6,7 @@ struct LocalTurnEffectRunner {
     driver: RuntimeTurnDriver<'static>,
     protocol_iteration: usize,
     messages: crate::MessageSequence,
-    active_events: Arc<Vec<crate::SessionHistoryRecord>>,
+    active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     event_tx: TurnObserver,
 }
 

@@ -231,7 +231,7 @@ impl TurnBoundary {
         self.draft_ref()
             .read_view(policy, turn_index, protocol_turn_options, messages)
     }
-    pub(super) fn active_events(&self) -> Arc<Vec<SessionHistoryRecord>> {
+    pub(super) fn active_events(&self) -> lash_sansio::AppendVec<SessionHistoryRecord> {
         self.draft_ref().active_events()
     }
     pub(super) fn message_sequence(&self) -> MessageSequence {
@@ -415,9 +415,17 @@ impl TurnBoundary {
         };
         let captured_execution_state = !agent_frame_switch_materializes
             && !matches!(execution_state_update, ExecutionStateUpdate::Clean);
+        // The returned state moves into the commit; a successful commit
+        // hands the committed state back below, and a failed one abandons
+        // the turn.
+        let returned_graph = std::mem::take(&mut returned_turn.state.session_graph);
+        let returned_state = crate::SessionSnapshot {
+            session_graph: returned_graph,
+            ..returned_turn.state.clone()
+        };
         let commit_result = self
             .final_commit_with_snapshots(FinalCommitInput {
-                returned_state: &returned_turn.state,
+                returned_state,
                 tool_calls: &returned_turn.tool_calls,
                 omitted: returned_turn.omitted.as_ref(),
                 plugins: plugins.as_deref(),
@@ -578,7 +586,7 @@ impl TurnBoundary {
         let turn_id = crate::TurnId::from(self.operation_scope.id());
         let terminal_message_id = format!("m_turn_{turn_id}_assistant");
         let state = self.final_state_mut();
-        state.apply_snapshot(returned_state);
+        state.adopt_snapshot(returned_state);
         // The follow-on the head owes after this commit: written by a frame
         // switch, cleared by the follow-on's own terminal commit (ADR 0101
         // §3). A store-less session keeps the same fact resident.

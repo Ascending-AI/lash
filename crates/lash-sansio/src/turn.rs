@@ -21,7 +21,7 @@ pub struct SansIoTurnInput<M: TurnProtocol = UnitTurnProtocol> {
     /// so it can reclassify a zero-output `OutputLimit` as `ContextOverflow`.
     pub max_context_tokens: Option<usize>,
     pub messages: MessageSequence,
-    pub events: Arc<Vec<crate::SessionHistoryRecord<M::Event>>>,
+    pub events: crate::AppendVec<crate::SessionHistoryRecord<M::Event>>,
     pub turn_causes: Vec<crate::TurnCause>,
     pub protocol_run_offset: usize,
     pub turn_driver_preamble: Arc<TurnDriverPreamble<M>>,
@@ -194,7 +194,7 @@ mod tests {
             model: "gpt-5".to_string(),
             max_context_tokens: None,
             messages: crate::MessageSequence::default(),
-            events: Arc::new(Vec::new()),
+            events: crate::AppendVec::new(),
             turn_causes: Vec::new(),
             protocol_run_offset: 2,
             turn_driver_preamble,

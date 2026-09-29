@@ -108,7 +108,7 @@ impl SessionGraph {
             });
         }
         Self::from_shared_anchored_nodes(
-            nodes.into_iter().map(Arc::new).collect(),
+            nodes.into_iter().map(Arc::new).collect::<Vec<_>>(),
             Some(leaf_node_id),
             Some(anchor),
         )

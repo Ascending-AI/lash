@@ -1749,7 +1749,7 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     };
     state.ensure_agent_frame_initialized();
     let leaf_node_id = state.session_graph.leaf_node_id.clone();
-    let mut nodes = state.session_graph.nodes.clone();
+    let mut nodes = state.session_graph.nodes.to_vec();
     let frame = nodes
         .iter_mut()
         .find(|node| Some(node.node_id.as_str()) == state.current_frame_node_id.as_deref())

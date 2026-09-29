@@ -10,6 +10,7 @@ use crate::session_graph_integrity::{
 use crate::session_model::{ConversationRecord, ProtocolEvent, SessionHistoryRecord};
 use crate::{BaseRenderCache, ClockWallTime, Message, TokenUsage};
 use facade_ops::{SessionGraphFacadeOps, SessionNodeProjection};
+use lash_sansio::AppendVec;
 use lash_sansio::core_support::MessageCoreSupport;
 
 #[derive(
@@ -130,20 +131,31 @@ pub fn frame_node_id(session_id: &SessionId, frame_key: &str) -> crate::FrameNod
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SessionGraphData {
-    /// Resident node records, shared behind `Arc` so a graph-level COW after a
-    /// snapshot copies N pointers rather than N records. Records are immutable
-    /// once appended; the few writers (`remap_node_ids`,
-    /// `apply_realized_node_timestamps`, test fixtures) go through
-    /// `Arc::make_mut` so a held snapshot never observes an edit. `Arc<T>`
-    /// serializes as `T`, so the durable shape is unchanged.
+    /// Resident node records, each shared behind `Arc`, in a sequence whose
+    /// snapshots share one buffer: a graph-level COW after a snapshot copies
+    /// nothing, and an append writes past every snapshot in place. Records
+    /// are immutable once another snapshot has seen them; the few writers
+    /// (`remap_node_ids`, `apply_realized_node_timestamps`, test fixtures)
+    /// replace them through [`AppendVec::replace_from`] or
+    /// [`AppendVec::make_mut`], so a held snapshot never observes an edit.
+    /// Both serialize as a plain sequence of records, so the durable shape
+    /// is unchanged.
     #[serde(default)]
-    pub nodes: Vec<Arc<SessionNodeRecord>>,
+    pub nodes: AppendVec<Arc<SessionNodeRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaf_node_id: Option<NodeId>,
     /// Where a store-read window starts (ADR 0112 §5). `None` for a graph
     /// built in memory with no store, whose root has no parent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<WindowAnchor>,
+}
+
+impl SessionGraphData {
+    /// The record at `index`, mutable: copied out of every snapshot that
+    /// shares it, so a held snapshot never observes the edit.
+    pub fn node_mut(&mut self, index: usize) -> &mut SessionNodeRecord {
+        Arc::make_mut(&mut self.nodes.make_mut()[index])
+    }
 }
 
 pub use crate::session_graph_window::WindowAnchor;
@@ -556,8 +568,8 @@ pub(crate) struct ActiveReadPrefix<'a> {
 
 #[derive(Clone, Debug)]
 pub struct SessionReadModel {
-    pub active_events: Arc<Vec<SessionHistoryRecord>>,
-    pub messages: Arc<Vec<Message>>,
+    pub active_events: AppendVec<SessionHistoryRecord>,
+    pub messages: AppendVec<Message>,
     pub prompt_render_cache: Arc<BaseRenderCache>,
 }
 
@@ -893,7 +905,10 @@ impl SessionGraph {
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<NodeId>,
     ) -> Result<Self, crate::StoreError> {
-        Self::from_shared_nodes(nodes.into_iter().map(Arc::new).collect(), leaf_node_id)
+        Self::from_shared_nodes(
+            nodes.into_iter().map(Arc::new).collect::<Vec<_>>(),
+            leaf_node_id,
+        )
     }
 
     /// [`Self::from_nodes`] for callers that already hold shared records, so a
@@ -901,14 +916,14 @@ impl SessionGraph {
     /// view, a filtered read projection) shares the same immutable records
     /// instead of cloning them. Validation is identical.
     pub fn from_shared_nodes(
-        nodes: Vec<Arc<SessionNodeRecord>>,
+        nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
         leaf_node_id: Option<NodeId>,
     ) -> Result<Self, crate::StoreError> {
         Self::from_shared_anchored_nodes(nodes, leaf_node_id, None)
     }
 
     pub(crate) fn from_shared_anchored_nodes(
-        nodes: Vec<Arc<SessionNodeRecord>>,
+        nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
         leaf_node_id: Option<NodeId>,
         anchor: Option<WindowAnchor>,
     ) -> Result<Self, crate::StoreError> {
@@ -926,26 +941,29 @@ impl SessionGraph {
         nodes: Vec<SessionNodeRecord>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
-        Self::from_shared_validated_nodes(nodes.into_iter().map(Arc::new).collect(), leaf_node_id)
+        Self::from_shared_validated_nodes(
+            nodes.into_iter().map(Arc::new).collect::<Vec<_>>(),
+            leaf_node_id,
+        )
     }
 
     /// [`Self::from_validated_nodes`] for callers that already hold shared
     /// records — the same restricted-use contract applies.
     pub(crate) fn from_shared_validated_nodes(
-        nodes: Vec<Arc<SessionNodeRecord>>,
+        nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
         Self::from_shared_validated_parts(nodes, leaf_node_id, None)
     }
 
     fn from_shared_validated_parts(
-        nodes: Vec<Arc<SessionNodeRecord>>,
+        nodes: impl Into<AppendVec<Arc<SessionNodeRecord>>>,
         leaf_node_id: Option<NodeId>,
         anchor: Option<WindowAnchor>,
     ) -> Self {
         Self {
             inner: Arc::new(SessionGraphData {
-                nodes,
+                nodes: nodes.into(),
                 leaf_node_id,
                 anchor,
             }),
@@ -1059,26 +1077,30 @@ impl SessionGraph {
         if mapping.is_empty() {
             return;
         }
-        // Only the mapped records are unshared and rewritten; the rest of the
-        // resident vector stays pointer-identical to every snapshot. The
+        // Only the mapped records are rewritten; the rest of the resident
+        // sequence stays pointer-identical to every snapshot. The
         // parent-rewrite pass scans every resident node: nothing enforces
         // parent-before-child order in a loaded graph, so a child can sit
-        // ahead of a mapped parent anywhere in the vector. The scan reads
-        // ids only — `Arc::make_mut` still unshares just the records whose
-        // parent actually moves.
+        // ahead of a mapped parent anywhere in the sequence. The scan reads
+        // ids only; just the records whose id or parent moves are replaced.
         let positions = self.resident_node_indices(mapping.iter().map(|(draft, _)| draft.as_str()));
         let derived_by_id = mapping
             .iter()
             .map(|(draft, derived)| (draft, derived))
             .collect::<HashMap<_, _>>();
-        let data = self.data_mut();
-        for ((_, derived), position) in mapping.iter().zip(positions) {
+        let mut edits = std::collections::BTreeMap::<usize, SessionNodeRecord>::new();
+        let mut renamed = Vec::new();
+        for ((draft, derived), position) in mapping.iter().zip(positions) {
             let Some(index) = position else {
                 continue;
             };
-            Arc::make_mut(&mut data.nodes[index]).node_id = derived.clone();
+            edits
+                .entry(index)
+                .or_insert_with(|| self.nodes[index].as_ref().clone())
+                .node_id = derived.clone();
+            renamed.push((draft.clone(), derived.clone(), index));
         }
-        for node in &mut data.nodes {
+        for (index, node) in self.nodes.iter().enumerate() {
             let Some(mapped_parent) = node
                 .parent_node_id
                 .as_ref()
@@ -1086,32 +1108,56 @@ impl SessionGraph {
             else {
                 continue;
             };
-            Arc::make_mut(node).parent_node_id = Some(mapped_parent);
+            edits
+                .entry(index)
+                .or_insert_with(|| node.as_ref().clone())
+                .parent_node_id = Some(mapped_parent);
         }
-        if let Some(leaf) = data.leaf_node_id.as_mut()
-            && let Some(derived) = derived_by_id.get(leaf)
+        let leaf = self
+            .leaf_node_id
+            .as_ref()
+            .and_then(|leaf| derived_by_id.get(leaf).map(|derived| (*derived).clone()));
+        // Positions and payloads are unchanged, so the cache stays valid
+        // once its id index follows the renames.
+        self.detach_initialized_cache_for_append();
+        if let Some(cache_lock) = Arc::get_mut(&mut self.cache)
+            && let Some(cache) = cache_lock.get_mut()
         {
-            *leaf = (*derived).clone();
+            for (draft, derived, index) in renamed {
+                cache.by_id.rename(&draft, derived, index);
+            }
+        } else {
+            self.invalidate_cache();
+        }
+        let data = Arc::make_mut(&mut self.inner);
+        replace_node_records(&mut data.nodes, edits);
+        if let Some(leaf) = leaf {
+            data.leaf_node_id = Some(leaf);
         }
     }
 
     /// Applies store-realized timestamps to the nodes a commit receipt names.
     ///
-    /// Only the realized records are unshared and rewritten; every other
-    /// resident record stays pointer-identical to every snapshot.
+    /// Only the realized records are replaced; every other resident record
+    /// stays pointer-identical to every snapshot. A timestamp is not part of
+    /// anything the cache indexes or projects, so the cache stays.
     pub fn apply_realized_node_timestamps(&mut self, realized: &[RealizedNodeTimestamp]) {
         if realized.is_empty() {
             return;
         }
         let positions =
             self.resident_node_indices(realized.iter().map(|node| node.node_id.as_str()));
-        let data = self.data_mut();
+        let mut edits = std::collections::BTreeMap::<usize, SessionNodeRecord>::new();
         for (realized, position) in realized.iter().zip(positions) {
             let Some(index) = position else {
                 continue;
             };
-            Arc::make_mut(&mut data.nodes[index]).timestamp = realized.timestamp.clone();
+            edits
+                .entry(index)
+                .or_insert_with(|| self.nodes[index].as_ref().clone())
+                .timestamp = realized.timestamp.clone();
         }
+        replace_node_records(&mut Arc::make_mut(&mut self.inner).nodes, edits);
     }
 
     fn reserve_append_capacity(&mut self, additional_nodes: usize, additional_messages: usize) {
@@ -1248,8 +1294,8 @@ impl SessionGraph {
     /// window base or a later pending `FrameOpen`) to the leaf. A graph with
     /// no `FrameOpen` on its active path projects the whole path.
     ///
-    /// Two calls with no append between them hand out the same `Arc`s
-    /// (ADR 0112 §9).
+    /// Two calls with no append between them hand out the same shared
+    /// sequences (ADR 0112 §9).
     pub fn read_model(&self) -> SessionReadModel {
         self.cache().active_read_model()
     }
@@ -1507,8 +1553,12 @@ impl SessionGraph {
         );
         let data = self.data_mut();
         data.leaf_node_id = replacement.leaf_node_id;
-        data.nodes
-            .extend(replacement.new_tail_nodes.into_iter().map(Arc::new));
+        // A read projection: its tail is a copy of its own, so it never
+        // takes the tip of the resident graph's buffer from the graph that
+        // commits there.
+        let mut nodes = data.nodes.to_vec();
+        nodes.extend(replacement.new_tail_nodes.into_iter().map(Arc::new));
+        data.nodes = AppendVec::from(nodes);
     }
 
     pub fn from_active_read_state(messages: &[Message]) -> Self {
@@ -1672,6 +1722,26 @@ fn push_active_read_node(
     {
         active_messages.push(message);
     }
+}
+
+/// Replaces the records at `edits`' positions, from the first of them on:
+/// in place when no snapshot has seen that tail (the records a commit just
+/// appended), on a copy otherwise.
+fn replace_node_records(
+    nodes: &mut AppendVec<Arc<SessionNodeRecord>>,
+    mut edits: std::collections::BTreeMap<usize, SessionNodeRecord>,
+) {
+    let Some(start) = edits.keys().next().copied() else {
+        return;
+    };
+    let tail = (start..nodes.len())
+        .map(|index| {
+            edits
+                .remove(&index)
+                .map_or_else(|| Arc::clone(&nodes[index]), Arc::new)
+        })
+        .collect::<Vec<_>>();
+    nodes.replace_from(start, tail);
 }
 
 #[cfg(test)]

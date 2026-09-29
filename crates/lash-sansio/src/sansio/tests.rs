@@ -170,7 +170,7 @@ fn turn_checkpoint_stamps_current_generation() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let checkpoint = machine.checkpoint();
@@ -183,7 +183,7 @@ fn turn_checkpoint_restore_refuses_every_non_current_version() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint json");
@@ -234,7 +234,7 @@ fn current_checkpoint_decoder_refuses_unknown_fields_as_incompatible_format() {
     let machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let mut encoded = serde_json::to_value(machine.checkpoint()).expect("checkpoint JSON");
@@ -288,7 +288,7 @@ fn checkpoint_roundtrips_report_tool_calls_before_accounting() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -624,7 +624,7 @@ fn machine_at_protocol_iteration(
     let machine = TurnMachine::new(
         config,
         vec![user_message("keep running")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         protocol_run_offset,
     );
     let mut checkpoint = machine.checkpoint();
@@ -642,7 +642,7 @@ fn bounded_turn_stops_before_the_provider_and_effect_at_iteration_n() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("run one cell")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
 
@@ -815,7 +815,7 @@ fn sansio_simultaneous_turn_and_no_progress_exhaustion_preempts_conversation_fee
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("run one attempt")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
 
@@ -948,7 +948,7 @@ fn progress_emits_only_new_event_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![initial.clone()],
-        Arc::new(vec![conversation_event(initial)]),
+        crate::AppendVec::from(vec![conversation_event(initial)]),
         0,
     );
 
@@ -975,7 +975,7 @@ fn progress_without_new_events_emits_empty_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
 
@@ -997,7 +997,7 @@ fn done_carries_unreported_final_delta() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         Vec::new(),
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     machine.append_event(conversation_event(text_message(
@@ -1035,7 +1035,7 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
         .into(),
         origin: None,
     }];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let (_, request) = find_llm_call(&effects).expect("llm call");
@@ -1059,7 +1059,7 @@ fn llm_request_includes_image_prompt_parts_for_attached_images() {
 fn driver_can_finish_via_checkpoint() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1092,8 +1092,12 @@ fn driver_can_finish_via_checkpoint() {
 #[test]
 fn checkpoint_before_llm_completion_reissues_same_logical_llm_call() {
     let config = test_config(Arc::new(ProseDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
 
     let effects = drain_effects(&mut machine);
     let (llm_id, request) = find_llm_call(&effects).expect("llm call");
@@ -1112,8 +1116,12 @@ fn checkpoint_before_llm_completion_reissues_same_logical_llm_call() {
 #[test]
 fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
     let config = test_config(Arc::new(ProseDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1151,7 +1159,7 @@ fn checkpoint_after_llm_result_replays_checkpoint_without_second_llm() {
 fn output_limit_stops_as_incomplete_without_assistant_message() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1204,7 +1212,7 @@ fn zero_output_limit_with_a_full_prompt_refines_to_context_overflow() {
     let mut config = test_config(Arc::new(ProseDriver));
     config.max_context_tokens = Some(100);
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1252,7 +1260,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
     let mut config = test_config(Arc::new(ProseDriver));
     config.max_context_tokens = Some(100);
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1306,7 +1314,7 @@ fn provider_prompt_subtotal_overflow_fails_the_turn_at_ingress() {
 fn context_overflow_response_stops_as_its_own_outcome() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1354,7 +1362,7 @@ fn context_overflow_response_stops_as_its_own_outcome() {
 fn context_overflow_llm_error_stops_as_its_own_outcome() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1395,8 +1403,12 @@ fn context_overflow_llm_error_stops_as_its_own_outcome() {
 fn provider_error_is_live_but_absent_from_the_turn_checkpoint() {
     const SECRET: &str = "api_key= secret Authorization: Basic abc";
     let config = test_config(Arc::new(ProseDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
     machine.handle_response(Response::LlmComplete {
@@ -1438,7 +1450,7 @@ fn non_overflow_llm_errors_still_stop_as_provider_error() {
     ] {
         let config = test_config(Arc::new(ProseDriver));
         let msgs = vec![user_message("hello")];
-        let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+        let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
         let effects = drain_effects(&mut machine);
         let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1483,7 +1495,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
     ] {
         let config = test_config(Arc::new(ProseDriver));
         let msgs = vec![user_message("hello")];
-        let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+        let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
         let effects = drain_effects(&mut machine);
         let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1514,7 +1526,7 @@ fn content_filter_and_provider_error_still_stop_as_provider_error() {
 fn checkpoint_messages_resume_prepare_protocol_iteration() {
     let config = test_config(Arc::new(ProseDriver));
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
@@ -1578,7 +1590,7 @@ fn checkpoint_preserves_parallel_tool_batch_before_any_result() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
 
@@ -1633,7 +1645,7 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
 
@@ -1710,7 +1722,7 @@ fn checkpoint_after_mixed_tool_batch_results_replays_model_feedback_once() {
 fn exec_driver_state_round_trip() {
     let config = test_config(Arc::new(ExecDriver));
     let msgs = vec![user_message("run code")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, crate::AppendVec::new(), 0);
 
     let effects = drain_effects(&mut machine);
     let (exec_id, code) = find_exec_call(&effects).expect("exec call");
@@ -1743,8 +1755,12 @@ fn exec_driver_state_round_trip() {
 #[test]
 fn checkpoint_round_trips_waiting_exec_driver_state() {
     let config = test_config(Arc::new(ExecDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     let (exec_id, _) = find_exec_call(&effects).expect("exec call");
 
@@ -1779,8 +1795,12 @@ fn checkpoint_round_trips_waiting_exec_driver_state() {
 #[test]
 fn checkpoint_redelivers_waiting_llm_from_state_only() {
     let config = test_config(Arc::new(ProseDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     assert!(find_llm_call(&effects).is_some());
 
@@ -1843,8 +1863,12 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
 
     let mut config = test_config(Arc::new(ProseDriver));
     config.sync_execution_environment = true;
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     assert_pinned(
         &mut machine,
@@ -1856,7 +1880,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(SyncThenAdvanceDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1889,7 +1913,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ToolBatchDriver)),
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1916,7 +1940,7 @@ fn turn_checkpoint_pins_the_waiting_state_encoding() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ExecDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1940,7 +1964,7 @@ fn outstanding_effect_follows_the_emits_and_progress_queued_before_it() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1979,7 +2003,7 @@ fn response_of_the_wrong_kind_leaves_the_waiting_work_in_place() {
     let mut machine = TurnMachine::new(
         test_config(Arc::new(ProseDriver)),
         vec![user_message("hello")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -2003,8 +2027,12 @@ fn response_of_the_wrong_kind_leaves_the_waiting_work_in_place() {
 #[test]
 fn stale_response_does_not_cancel_checkpoint_redelivery() {
     let config = test_config(Arc::new(ProseDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call").0;
 
@@ -2031,7 +2059,7 @@ fn checkpoint_redelivers_waiting_tool_batch_from_state_only() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("use tools")],
-        Arc::new(Vec::new()),
+        crate::AppendVec::new(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -2072,8 +2100,12 @@ fn checkpoint_redelivers_waiting_tool_batch_from_state_only() {
 #[test]
 fn checkpoint_redelivers_waiting_exec_from_state_only() {
     let config = test_config(Arc::new(ExecDriver));
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
     let effects = drain_effects(&mut machine);
     assert!(find_exec_call(&effects).is_some());
 
@@ -2102,8 +2134,12 @@ fn initial_execution_environment_sync_installs_the_synced_environment() {
     let mut config = test_config(Arc::new(ProseDriver));
     config.sync_execution_environment = true;
     config.system_prompt = Arc::from("live prompt");
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
 
     let effects = drain_effects(&mut machine);
     let sync_id = find_execution_environment_sync(&effects).expect("execution environment sync");
@@ -2127,8 +2163,12 @@ fn iteration_execution_environment_sync_can_refresh_prompt_and_tools() {
     let mut config = test_config(Arc::new(SyncThenAdvanceDriver));
     config.sync_execution_environment = true;
     config.system_prompt = Arc::from("initial prompt");
-    let mut machine =
-        TurnMachine::new(config, vec![user_message("hello")], Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(
+        config,
+        vec![user_message("hello")],
+        crate::AppendVec::new(),
+        0,
+    );
 
     let effects = drain_effects(&mut machine);
     let initial_sync_id =

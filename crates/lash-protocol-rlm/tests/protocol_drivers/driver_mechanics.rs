@@ -16,7 +16,7 @@ fn malformed_rlm_turn_options_fail_before_llm() {
         })),
     );
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
 
     let effects = drain_effects(&mut machine);
 
@@ -34,7 +34,7 @@ fn null_rlm_turn_options_fail_before_llm() {
         lash_core::ProtocolTurnOptions::from_payload(serde_json::Value::Null),
     );
     let msgs = vec![user_message("hello")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
 
     let effects = drain_effects(&mut machine);
 
@@ -51,7 +51,7 @@ fn opaque_reasoning_only_response_stops_as_empty_provider_response() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -101,7 +101,7 @@ fn native_tool_call_preserves_the_offending_llm_response_event_and_repairs() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -175,7 +175,7 @@ fn provider_stop_evidence_does_not_reconstruct_an_unclosed_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -224,7 +224,7 @@ fn natural_stop_without_applied_boundary_does_not_close_or_execute_a_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -263,7 +263,7 @@ fn buffered_response_discards_trailing_content_after_the_first_complete_cell() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -301,7 +301,7 @@ fn buffered_response_executes_only_first_of_two_complete_cells_without_retry() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -343,7 +343,7 @@ fn illustrative_prose_with_an_unclosed_cell_retries_without_execution() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("how do you run code?")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -377,7 +377,7 @@ fn natural_end_turn_with_a_partial_program_retries_without_execution() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("swap the file")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -410,12 +410,8 @@ fn natural_end_turn_with_a_partial_program_retries_without_execution() {
 fn output_limit_unclosed_cell_retries_with_shorten_block_diagnostic() {
     let mut config = test_config();
     config.generation.output_token_cap = std::num::NonZeroUsize::new(4096);
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("respond")],
-        Arc::new(Vec::new()),
-        0,
-    );
+    let mut machine =
+        TurnMachine::new(config, vec![user_message("respond")], Default::default(), 0);
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
     let text = "<typescript>\nprint \"too long\"";
@@ -465,7 +461,7 @@ fn multiple_cells_execute_only_the_first_without_emitting_raw_markup() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -510,7 +506,7 @@ fn output_limit_prose_retries_with_the_request_cap() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("explain at length")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -559,7 +555,7 @@ fn output_limit_retry_emits_the_guarded_projection_with_no_empty_parts() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("answer me")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -627,7 +623,7 @@ fn output_limit_prose_cut_at_a_close_tag_mention_retries() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("what closes a cell?")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -669,7 +665,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
         let mut machine = TurnMachine::new(
             test_config(),
             vec![user_message("respond")],
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let effects = drain_effects(&mut machine);
@@ -709,7 +705,7 @@ fn terminal_provider_paths_emit_only_visible_prose() {
 fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
     let effects = drain_effects(&mut machine);
     assert!(find_llm_call(&effects).is_some());
 
@@ -755,7 +751,7 @@ fn rlm_driver_state_with_wrong_plugin_id_fails_loudly() {
 fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
     let config = test_config();
     let msgs = vec![user_message("run some code")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
@@ -884,7 +880,7 @@ fn user_stop_is_terminal_without_feedback_or_model_reinvocation_live_and_replay(
                 let mut machine = TurnMachine::new(
                     config,
                     vec![user_message("run until I stop")],
-                    Arc::new(Vec::new()),
+                    Default::default(),
                     0,
                 );
 
@@ -1000,7 +996,7 @@ fn host_failure_without_cancellation_evidence_retries_without_fabricating_cancel
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("run until stopped")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1067,7 +1063,7 @@ fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() 
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("use restored state")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1123,7 +1119,7 @@ fn degraded_projection_bindings_are_announced_on_the_existing_diagnostic_path() 
 fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes() {
     let config = test_config();
     let msgs = vec![user_message("run fanout tools")];
-    let mut machine = TurnMachine::new(config, msgs, Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(config, msgs, Default::default(), 0);
 
     let effects = drain_effects(&mut machine);
     let llm_id = *find_llm_call(&effects).expect("llm call");
@@ -1389,7 +1385,7 @@ fn a_reply_that_never_yields_a_cell_stops_at_the_no_progress_budget() {
     let mut machine = TurnMachine::new(
         config_with_no_progress_budget(4),
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
 
@@ -1421,7 +1417,7 @@ fn a_cell_that_only_ever_raises_stops_at_the_no_progress_budget() {
     let mut machine = TurnMachine::new(
         config_with_no_progress_budget(5),
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
 
@@ -1456,7 +1452,7 @@ fn an_error_free_execution_resets_the_no_progress_count() {
     let mut machine = TurnMachine::new(
         config_with_no_progress_budget(3),
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let unclosed = "<typescript>\nfinish \"ok\"";
@@ -1559,7 +1555,7 @@ fn an_unbounded_no_progress_budget_keeps_re_asking() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let unclosed = "<typescript>\nfinish \"ok\"";
@@ -1597,7 +1593,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
     let mut first = TurnMachine::new(
         config_with_no_progress_budget(3),
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let stalled = drive_stalling_turn(&mut first, "<typescript>\nfinish \"ok\"", None, 32);
@@ -1614,7 +1610,7 @@ fn a_no_progress_stop_does_not_spend_the_next_turns_budget() {
     let mut second = TurnMachine::new(
         config,
         vec![user_message("try again")],
-        Arc::new(carried),
+        lash_sansio::AppendVec::from(carried),
         0,
     );
     let stalled = drive_stalling_turn(&mut second, "<typescript>\nfinish \"ok\"", None, 32);
@@ -1638,7 +1634,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
         let mut machine = TurnMachine::new(
             config,
             vec![user_message("just talk to me")],
-            Arc::new(carried.clone()),
+            lash_sansio::AppendVec::from(carried.clone()),
             0,
         );
         let mut effects = drain_effects(&mut machine);
@@ -1680,7 +1676,7 @@ fn prose_only_turns_do_not_accumulate_into_the_next_turns_count() {
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("now run something")],
-        Arc::new(carried),
+        lash_sansio::AppendVec::from(carried),
         0,
     );
     let mut effects = drain_effects(&mut machine);
@@ -1754,7 +1750,7 @@ fn a_one_line_cell_executes() {
         let mut machine = TurnMachine::new(
             test_config(),
             vec![user_message("respond")],
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let effects = drain_effects(&mut machine);
@@ -1787,7 +1783,7 @@ fn a_one_line_tag_mention_still_finishes_as_prose() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("respond")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1832,7 +1828,7 @@ fn a_natural_turn_answering_about_the_tags_is_not_corrected() {
     let mut machine = TurnMachine::new(
         test_config(),
         vec![user_message("what are the tags?")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let effects = drain_effects(&mut machine);
@@ -1873,12 +1869,8 @@ fn a_malformed_fence_is_answered_by_naming_the_rule() {
         );
         let mut config = test_config();
         config.termination = finish_required_options();
-        let mut machine = TurnMachine::new(
-            config,
-            vec![user_message("respond")],
-            Arc::new(Vec::new()),
-            0,
-        );
+        let mut machine =
+            TurnMachine::new(config, vec![user_message("respond")], Default::default(), 0);
         let effects = drain_effects(&mut machine);
         let llm_id = *find_llm_call(&effects).expect("llm call");
         machine.handle_response(Response::LlmComplete {
@@ -1945,7 +1937,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
     let mut machine = TurnMachine::new(
         config_with_no_progress_budget(6),
         vec![user_message("do the thing")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
 
@@ -2014,12 +2006,7 @@ fn identical_replies_are_fingerprinted_and_run_to_the_hosts_budget() {
 fn a_repair_iteration_carries_no_accumulation_from_the_failed_one() {
     let mut config = test_config_with_termination(RlmTermination::FinishRequired { schema: None });
     config.turn_budget = lash_core::TurnBudget::bounded(8);
-    let mut machine = TurnMachine::new(
-        config,
-        vec![user_message("run it")],
-        Arc::new(Vec::new()),
-        0,
-    );
+    let mut machine = TurnMachine::new(config, vec![user_message("run it")], Default::default(), 0);
 
     let run_cell = |machine: &mut TurnMachine, code: &str, result: lash_sansio::ExecResponse| {
         let mut effects = drain_effects(machine);
@@ -2183,7 +2170,7 @@ fn drive_rlm_to_second_llm_request(
     let mut machine = TurnMachine::new(
         config,
         vec![user_message("bind a value, then continue")],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
 

@@ -654,7 +654,7 @@ fn checkpoint_machine(
             turn_index + 1
         ),
     ));
-    TurnMachine::new(config, messages, Arc::new(Vec::new()), turn_index)
+    TurnMachine::new(config, messages, Default::default(), turn_index)
 }
 
 fn checkpoint_tool_calls(protocol_iteration: usize) -> Vec<PendingToolCall> {

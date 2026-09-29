@@ -1,6 +1,7 @@
 use crate::ProcessId;
 use crate::ToolCallId;
 use crate::TurnId;
+use crate::append_vec::AppendVec;
 use crate::llm::types::{
     AttachmentSource, LlmContentBlock, LlmMessage, LlmRole, ProviderReasoningReplay,
     ProviderReplayMeta, ResponseTextMeta,
@@ -73,6 +74,13 @@ impl<'a> From<&'a super::ConversationRecord> for MessageContentRef<'a> {
             origin: origin.as_ref(),
         }
     }
+}
+
+/// Whether `existing` and `value` are the same message, for
+/// [`AppendVec::push_adopting`]: a sequence that appends a message another
+/// holder of its buffer already appended adopts that slot.
+pub fn same_message(existing: &Message, value: &Message) -> bool {
+    message_content_equal(existing, value)
 }
 
 /// This is the predicate the active-read projection asks of every message it
@@ -977,19 +985,75 @@ impl RenderedPrompt {
 /// (typically the `SessionGraphCache`'s projected messages) so the
 /// chat projector's `render_prompt` walk happens once per turn instead
 /// of once per LLM iteration.
-pub type BaseRenderCache = OnceLock<RenderedPrompt>;
+///
+/// A cache made for a base that extends an earlier one
+/// ([`Self::extending`]) renders only the appended messages onto the earlier
+/// cache's render, sharing its buffer: a turn renders its own messages, not
+/// the frame, and every retained read model shares one rendered prefix
+/// (FIG-4059).
+#[derive(Debug, Default)]
+pub struct BaseRenderCache {
+    rendered: OnceLock<AppendVec<LlmMessage>>,
+    /// The cache of the base this one's base extends, with that base's
+    /// length. Taken by the first render, so a chain of caches never
+    /// outlives it.
+    extends: std::sync::Mutex<Option<(Arc<BaseRenderCache>, usize)>>,
+}
+
+impl BaseRenderCache {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A cache for a base whose first `prefix_len` messages are the base
+    /// `previous` renders.
+    #[must_use]
+    pub fn extending(previous: Arc<BaseRenderCache>, prefix_len: usize) -> Self {
+        Self {
+            rendered: OnceLock::new(),
+            extends: std::sync::Mutex::new(Some((previous, prefix_len))),
+        }
+    }
+
+    /// The render of `base`, the messages this cache was made for.
+    pub fn rendered(&self, base: &[Message]) -> &AppendVec<LlmMessage> {
+        self.rendered.get_or_init(|| {
+            let extends = self
+                .extends
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take();
+            let prefix = extends.and_then(|(previous, prefix_len)| {
+                let rendered = previous.rendered.get()?.clone();
+                (prefix_len <= base.len()).then_some((rendered, prefix_len))
+            });
+            match prefix {
+                Some((mut rendered, prefix_len)) => {
+                    append_structured_prompt_after(&mut rendered, base, prefix_len);
+                    rendered
+                }
+                None => {
+                    let mut rendered = AppendVec::new();
+                    append_structured_prompt_after(&mut rendered, base, 0);
+                    rendered
+                }
+            }
+        })
+    }
+}
 
 /// How a `MessageSequence` stores its messages.
 ///
-/// `Layered` is the base/delta rope: a session-wide `base` shared by `Arc`
-/// plus the messages this iteration appended. `Owned` is a flat list the
+/// `Layered` is the base/delta rope: a session-wide `base` shared as an
+/// [`AppendVec`] plus the messages this iteration appended. `Owned` is a flat list the
 /// sequence holds outright — the shape every sequence settles into after
 /// `make_mut`/`replace`, and the only shape a deserialized sequence can
 /// have. Layered-with-owned is not representable.
 #[derive(Debug)]
 enum SequenceMode {
     Layered {
-        base: Arc<Vec<Message>>,
+        base: AppendVec<Message>,
         delta: Vec<Message>,
     },
     Owned(Vec<Message>),
@@ -998,7 +1062,7 @@ enum SequenceMode {
 #[derive(Debug)]
 pub struct MessageSequence {
     mode: SequenceMode,
-    materialized: OnceLock<Arc<Vec<Message>>>,
+    materialized: OnceLock<AppendVec<Message>>,
     base_rendered: Option<Arc<BaseRenderCache>>,
 }
 
@@ -1006,7 +1070,7 @@ impl Clone for MessageSequence {
     fn clone(&self) -> Self {
         let mode = match &self.mode {
             SequenceMode::Layered { base, delta } => SequenceMode::Layered {
-                base: Arc::clone(base),
+                base: base.clone(),
                 delta: delta.clone(),
             },
             SequenceMode::Owned(owned) => SequenceMode::Owned(owned.clone()),
@@ -1067,7 +1131,7 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn from_base(base: Arc<Vec<Message>>) -> Self {
+    pub(crate) fn from_base(base: AppendVec<Message>) -> Self {
         Self {
             mode: SequenceMode::Layered {
                 base,
@@ -1078,7 +1142,7 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn from_base_and_delta(base: Arc<Vec<Message>>, delta: Vec<Message>) -> Self {
+    pub(crate) fn from_base_and_delta(base: AppendVec<Message>, delta: Vec<Message>) -> Self {
         Self {
             mode: SequenceMode::Layered { base, delta },
             materialized: OnceLock::new(),
@@ -1106,8 +1170,8 @@ impl MessageSequence {
     /// this sequence without rewriting any of its prefix.
     ///
     /// The agreement is *witnessed by construction* rather than computed: a
-    /// base/delta rope whose `base` is the same allocation as this sequence's
-    /// `base` shares that prefix by identity, so deciding is a pointer
+    /// base/delta rope whose `base` is the same view of the same buffer as
+    /// this sequence's `base` shares that prefix by identity, so deciding is a pointer
     /// comparison plus a walk of the (turn-sized) delta — never a walk of the
     /// session's history.
     ///
@@ -1130,7 +1194,7 @@ impl MessageSequence {
         else {
             return None;
         };
-        if !Arc::ptr_eq(self_base, next_base) {
+        if !AppendVec::ptr_eq(self_base, next_base) {
             return None;
         }
         let tail = next_delta.get(self_delta.len()..)?;
@@ -1151,17 +1215,20 @@ impl MessageSequence {
     }
 
     /// The flattened message list as a shared allocation. `Owned` wraps its
-    /// list once; `Layered` reuses `base` when the delta is empty and joins
-    /// base and delta otherwise.
-    fn materialize(&self) -> &Arc<Vec<Message>> {
+    /// list once; `Layered` reuses `base` when the delta is empty and
+    /// otherwise appends the delta to `base`'s buffer, adopting messages
+    /// another holder of that buffer already appended, so the join costs
+    /// the delta, not the frame.
+    fn materialize(&self) -> &AppendVec<Message> {
         match &self.mode {
-            SequenceMode::Owned(owned) => self.materialized.get_or_init(|| Arc::new(owned.clone())),
+            SequenceMode::Owned(owned) => self
+                .materialized
+                .get_or_init(|| AppendVec::from(owned.clone())),
             SequenceMode::Layered { base, delta } if delta.is_empty() => base,
             SequenceMode::Layered { base, delta } => self.materialized.get_or_init(|| {
-                let mut combined = Vec::with_capacity(base.len() + delta.len());
-                combined.extend(base.iter().cloned());
-                combined.extend(delta.iter().cloned());
-                Arc::new(combined)
+                let mut combined = base.clone();
+                combined.extend_adopting(delta.iter().cloned(), same_message);
+                combined
             }),
         }
     }
@@ -1173,8 +1240,8 @@ impl MessageSequence {
         }
     }
 
-    pub(crate) fn shared(&self) -> Arc<Vec<Message>> {
-        Arc::clone(self.materialize())
+    pub(crate) fn shared(&self) -> AppendVec<Message> {
+        self.materialize().clone()
     }
 
     pub fn make_mut(&mut self) -> &mut Vec<Message> {
@@ -1195,10 +1262,7 @@ impl MessageSequence {
     fn materialize_owned(&self) -> Vec<Message> {
         match &self.mode {
             SequenceMode::Owned(owned) => owned.clone(),
-            SequenceMode::Layered { base, delta } if delta.is_empty() => {
-                Arc::unwrap_or_clone(Arc::clone(base))
-            }
-            SequenceMode::Layered { .. } => Arc::unwrap_or_clone(Arc::clone(self.materialize())),
+            SequenceMode::Layered { .. } => self.materialize().to_vec(),
         }
     }
 
@@ -1234,7 +1298,9 @@ impl MessageSequence {
             return render_prompt(delta.as_slice());
         }
         let mut rendered = match &self.base_rendered {
-            Some(cache) => cache.get_or_init(|| render_prompt(base.as_slice())).clone(),
+            Some(cache) => RenderedPrompt {
+                messages: cache.rendered(base.as_slice()).to_vec(),
+            },
             None => render_prompt(base.as_slice()),
         };
         if !delta.is_empty() {
@@ -1419,90 +1485,141 @@ fn append_structured_prompt(rendered: &mut RenderedPrompt, msgs: &[Message]) {
         .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
         .collect::<std::collections::HashMap<_, _>>();
     for msg in msgs {
-        let mut blocks: Vec<LlmContentBlock> = Vec::new();
-        for part in msg.parts.iter() {
-            match part.kind() {
-                PartKind::Reasoning => {
-                    let Some(meta) = part.reasoning_meta() else {
-                        continue;
+        if let Some(projected) = render_structured_message(msg, |call_id| {
+            provider_call_ids
+                .get(call_id)
+                .map(|provider_call_id| (*provider_call_id).to_string())
+        }) {
+            rendered.messages.push(projected);
+        }
+    }
+}
+
+/// Renders `msgs[start..]` onto `rendered`, the render of `msgs[..start]`.
+///
+/// The same render [`render_prompt`] gives `msgs`, because a message renders
+/// on its own except for a tool result's provider correlation, and a call
+/// precedes its result: a result finds its call among the rendered
+/// messages first, and only then in the prefix, walking back.
+fn append_structured_prompt_after(
+    rendered: &mut AppendVec<LlmMessage>,
+    msgs: &[Message],
+    start: usize,
+) {
+    let appended = &msgs[start..];
+    let provider_call_ids = appended
+        .iter()
+        .flat_map(|msg| msg.parts.iter())
+        .filter_map(|part| Some((part.call_id()?, part.provider_call_id()?)))
+        .collect::<std::collections::HashMap<_, _>>();
+    let prefix = &msgs[..start];
+    for msg in appended {
+        if let Some(projected) = render_structured_message(msg, |call_id| {
+            provider_call_ids
+                .get(call_id)
+                .copied()
+                .or_else(|| {
+                    prefix.iter().rev().find_map(|earlier| {
+                        earlier.parts.iter().rev().find_map(|part| {
+                            (part.call_id() == Some(call_id))
+                                .then(|| part.provider_call_id())
+                                .flatten()
+                        })
+                    })
+                })
+                .map(str::to_string)
+        }) {
+            rendered.push(projected);
+        }
+    }
+}
+
+/// One message's render, `None` when it has no block to send.
+/// `provider_call_id` answers the provider correlation of the call a tool
+/// result pairs with.
+fn render_structured_message(
+    msg: &Message,
+    provider_call_id: impl Fn(&ToolCallId) -> Option<String>,
+) -> Option<LlmMessage> {
+    let mut blocks: Vec<LlmContentBlock> = Vec::new();
+    for part in msg.parts.iter() {
+        match part.kind() {
+            PartKind::Reasoning => {
+                let Some(meta) = part.reasoning_meta() else {
+                    continue;
+                };
+                if meta.is_empty() {
+                    continue;
+                }
+                blocks.push(LlmContentBlock::Reasoning {
+                    text: part.content().to_string(),
+                    replay: Some(meta.clone()),
+                });
+            }
+            PartKind::ToolCall => {
+                let call_id = part.provider_call_id().unwrap_or_default().to_string();
+                let tool_name = part.tool_name().unwrap_or_default().to_string();
+                blocks.push(LlmContentBlock::ToolCall {
+                    call_id,
+                    tool_name,
+                    input_json: part.content().to_string(),
+                    replay: part.tool_replay().cloned(),
+                });
+            }
+            PartKind::ToolResult => {
+                // A result whose call the window no longer holds has no
+                // provider correlation to answer with; it is not
+                // resume-safe (`messages_are_prompt_resume_safe`) and is
+                // left out rather than answered under an invented id.
+                let Some(call_id) = part.call_id().and_then(&provider_call_id) else {
+                    continue;
+                };
+                blocks.push(LlmContentBlock::ToolResult {
+                    call_id,
+                    content: part.tool_result_content().unwrap_or_default().to_vec(),
+                    tool_name: part.tool_name().map(str::to_string),
+                });
+            }
+            _ => {
+                if let Some(attachment) = attachment_from_part(part)
+                    && matches!(msg.role, MessageRole::User)
+                {
+                    blocks.push(LlmContentBlock::Attachment {
+                        source: Box::new(attachment),
+                    });
+                    continue;
+                }
+
+                let mut text = render_part_for_chat(msg.role, part);
+                if text.trim().is_empty() {
+                    continue;
+                }
+
+                if matches!(msg.role, MessageRole::System | MessageRole::Event) {
+                    text = if matches!(msg.role, MessageRole::Event) {
+                        format!("Runtime event:\n{text}")
+                    } else {
+                        format!("Runtime note:\n{text}")
                     };
-                    if meta.is_empty() {
-                        continue;
-                    }
-                    blocks.push(LlmContentBlock::Reasoning {
-                        text: part.content().to_string(),
-                        replay: Some(meta.clone()),
-                    });
                 }
-                PartKind::ToolCall => {
-                    let call_id = part.provider_call_id().unwrap_or_default().to_string();
-                    let tool_name = part.tool_name().unwrap_or_default().to_string();
-                    blocks.push(LlmContentBlock::ToolCall {
-                        call_id,
-                        tool_name,
-                        input_json: part.content().to_string(),
-                        replay: part.tool_replay().cloned(),
-                    });
-                }
-                PartKind::ToolResult => {
-                    // A result whose call the window no longer holds has no
-                    // provider correlation to answer with; it is not
-                    // resume-safe (`messages_are_prompt_resume_safe`) and is
-                    // left out rather than answered under an invented id.
-                    let Some(call_id) = part
-                        .call_id()
-                        .and_then(|call_id| provider_call_ids.get(call_id))
-                    else {
-                        continue;
-                    };
-                    let call_id = (*call_id).to_string();
-                    blocks.push(LlmContentBlock::ToolResult {
-                        call_id,
-                        content: part.tool_result_content().unwrap_or_default().to_vec(),
-                        tool_name: part.tool_name().map(str::to_string),
-                    });
-                }
-                _ => {
-                    if let Some(attachment) = attachment_from_part(part)
-                        && matches!(msg.role, MessageRole::User)
-                    {
-                        blocks.push(LlmContentBlock::Attachment {
-                            source: Box::new(attachment),
-                        });
-                        continue;
-                    }
 
-                    let mut text = render_part_for_chat(msg.role, part);
-                    if text.trim().is_empty() {
-                        continue;
-                    }
-
-                    if matches!(msg.role, MessageRole::System | MessageRole::Event) {
-                        text = if matches!(msg.role, MessageRole::Event) {
-                            format!("Runtime event:\n{text}")
-                        } else {
-                            format!("Runtime note:\n{text}")
-                        };
-                    }
-
-                    blocks.push(LlmContentBlock::Text {
-                        text: text.into(),
-                        response_meta: part.response_meta().cloned(),
-                        cache_breakpoint: false,
-                    });
-                }
+                blocks.push(LlmContentBlock::Text {
+                    text: text.into(),
+                    response_meta: part.response_meta().cloned(),
+                    cache_breakpoint: false,
+                });
             }
         }
-        if blocks.is_empty() {
-            continue;
-        }
-        let mut projected = LlmMessage::new(llm_role_for_message(msg.role), blocks);
-        projected.starts_user_segment = matches!(
-            (msg.role, msg.origin.as_ref()),
-            (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
-        );
-        rendered.messages.push(projected);
     }
+    if blocks.is_empty() {
+        return None;
+    }
+    let mut projected = LlmMessage::new(llm_role_for_message(msg.role), blocks);
+    projected.starts_user_segment = matches!(
+        (msg.role, msg.origin.as_ref()),
+        (MessageRole::User, Some(MessageOrigin::TurnInput { .. }))
+    );
+    Some(projected)
 }
 
 fn llm_role_for_message(role: MessageRole) -> LlmRole {

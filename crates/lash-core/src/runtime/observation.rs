@@ -749,13 +749,9 @@ fn authority_fingerprint(
     // graph bodies are immutable durable history, and every production
     // mutation moves the leaf, the node count, or another covered field, so
     // serializing the node bodies per publish would re-pay an O(graph) cost
-    // for no added signal. `persisted_node_ids` is folded into an
-    // order-independent digest for the same reason.
-    let persisted_nodes_digest = state.persisted_node_ids.iter().fold(0u64, |digest, id| {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        std::hash::Hash::hash(id.as_str(), &mut hasher);
-        digest.wrapping_add(std::hash::Hasher::finish(&hasher))
-    });
+    // for no added signal. `persisted_node_ids` contributes the
+    // order-independent digest it keeps in step with its writes.
+    let persisted_nodes_digest = state.persisted_node_ids.digest();
     serde_json::to_vec(&(
         &state.session_id,
         &state.policy,

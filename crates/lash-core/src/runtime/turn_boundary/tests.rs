@@ -305,7 +305,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
     let returned_state = pipeline.export_state_for_assembly();
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -464,7 +464,7 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         .expect("current frame")
         .to_string();
     let leaf_node_id = state.session_graph.leaf_node_id.clone();
-    let mut nodes = state.session_graph.nodes.clone();
+    let mut nodes = state.session_graph.nodes.to_vec();
     let previous = nodes
         .iter_mut()
         .find(|node| node.node_id == previous_frame_node_id_value)
@@ -654,7 +654,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     let returned_state = pipeline.export_state_for_assembly();
     let error = pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -721,7 +721,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     let returned_state = next_turn.export_state_for_assembly();
     next_turn
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -826,7 +826,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
     let returned_state = pipeline.export_state_for_assembly();
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -936,7 +936,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
     let returned_state = pipeline.export_state_for_assembly();
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -1018,7 +1018,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
     let returned_state = pipeline.export_state_for_assembly();
     let error = pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             tool_calls: &[],
             omitted: None,
             plugins: None,
@@ -1123,7 +1123,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
 
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Replace(
                 crate::plugin::ExecutionStateSnapshot::from_root(Some(b"runtime".to_vec().into())),
@@ -1191,7 +1191,7 @@ async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
         let returned_state = pipeline.export_state_for_assembly();
         let error = pipeline
             .final_commit_with_snapshots(FinalCommitInput {
-                returned_state: &returned_state,
+                returned_state: returned_state.clone(),
                 plugins: None,
                 execution_state_update: ExecutionStateUpdate::Clean,
                 agent_frame_switch_materializes: false,
@@ -1250,7 +1250,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
 
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
+            returned_state: returned_state.clone(),
             plugins: None,
             execution_state_update: ExecutionStateUpdate::Clean,
             agent_frame_switch_materializes: false,

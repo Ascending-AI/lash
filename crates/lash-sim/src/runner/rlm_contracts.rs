@@ -581,7 +581,7 @@ pub(super) fn run_rlm_protocol_contract(
     let mut machine = lash_core::TurnMachine::new(
         config,
         vec![contract_user_message(user_message)],
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let mut observed = RlmContractObserved::default();

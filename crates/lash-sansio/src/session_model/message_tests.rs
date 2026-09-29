@@ -77,8 +77,8 @@ fn witness_message(id: &str, text: &str) -> Message {
 
 #[test]
 fn a_shared_base_witnesses_the_preserved_prefix_and_names_the_delta() {
-    let base = Arc::new(vec![witness_message("m0", "one")]);
-    let current = MessageSequence::from_base(Arc::clone(&base));
+    let base = AppendVec::from(vec![witness_message("m0", "one")]);
+    let current = MessageSequence::from_base(base.clone());
     let mut next = MessageSequence::from_base(base);
     next.push(witness_message("m1", "two"));
 
@@ -93,16 +93,16 @@ fn a_shared_base_witnesses_the_preserved_prefix_and_names_the_delta() {
 
 #[test]
 fn an_equal_but_separately_built_base_does_not_witness() {
-    let current = MessageSequence::from_base(Arc::new(vec![witness_message("m0", "one")]));
-    let next = MessageSequence::from_base(Arc::new(vec![witness_message("m0", "one")]));
+    let current = MessageSequence::from_base(AppendVec::from(vec![witness_message("m0", "one")]));
+    let next = MessageSequence::from_base(AppendVec::from(vec![witness_message("m0", "one")]));
 
     assert!(current.preserved_extension_delta(&next).is_none());
 }
 
 #[test]
 fn a_rebuilt_owned_sequence_drops_the_witness() {
-    let base = Arc::new(vec![witness_message("m0", "one")]);
-    let current = MessageSequence::from_base(Arc::clone(&base));
+    let base = AppendVec::from(vec![witness_message("m0", "one")]);
+    let current = MessageSequence::from_base(base.clone());
     let mut rewritten = MessageSequence::from_base(base);
     rewritten.replace(vec![witness_message("m0", "rewritten")]);
 
@@ -111,11 +111,11 @@ fn a_rebuilt_owned_sequence_drops_the_witness() {
 
 #[test]
 fn a_diverged_delta_does_not_witness_and_a_shorter_one_does_not_either() {
-    let base = Arc::new(vec![witness_message("m0", "one")]);
-    let mut current = MessageSequence::from_base(Arc::clone(&base));
+    let base = AppendVec::from(vec![witness_message("m0", "one")]);
+    let mut current = MessageSequence::from_base(base.clone());
     current.push(witness_message("m1", "two"));
 
-    let mut diverged = MessageSequence::from_base(Arc::clone(&base));
+    let mut diverged = MessageSequence::from_base(base.clone());
     diverged.push(witness_message("m1", "changed"));
     assert!(current.preserved_extension_delta(&diverged).is_none());
 
@@ -672,7 +672,7 @@ fn message_sequence_serializes_as_flat_message_array() {
     // Build via base+delta so the materialization path is exercised, not
     // just the trivial owned case.
     let sequence = MessageSequence::from_base_and_delta(
-        Arc::new(vec![msgs[0].clone()]),
+        AppendVec::from(vec![msgs[0].clone()]),
         vec![msgs[1].clone()],
     );
 

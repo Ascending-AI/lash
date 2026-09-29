@@ -582,7 +582,7 @@ impl LashRuntime {
                 &assembled.outcome,
                 &trace_turn_id,
             )?;
-            self.state.apply_snapshot(&assembled.state);
+            self.state.adopt_snapshot(assembled.state.clone());
             self.state.pending_follow_on = pending_follow_on.map(Box::new);
             let observation_revision =
                 crate::runtime::observation::observation_revision(&self.state);

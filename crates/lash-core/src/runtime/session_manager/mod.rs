@@ -55,7 +55,7 @@ enum CurrentSnapshot {
     /// projection for in-turn readers.
     ReadModel {
         meta: RuntimeSessionState,
-        messages: Arc<Vec<Message>>,
+        messages: lash_sansio::AppendVec<Message>,
         graph_appends: TurnGraphAppendDraft,
     },
 }

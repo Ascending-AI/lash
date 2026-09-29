@@ -6,6 +6,7 @@ use crate::session_graph::{SessionGraph, SessionNodePayload, SessionNodeRecord, 
 use crate::session_graph_integrity::{ancestry_indices, graph_node_indices};
 use crate::session_model::SessionHistoryRecord;
 use crate::{BaseRenderCache, Message, NodeId};
+use lash_sansio::{AppendVec, same_history_record, same_message};
 
 /// Bound on the shared-base append delta. While `base` is shared, inserts
 /// accumulate in `appended` and every builder creation or cache detach
@@ -19,13 +20,14 @@ const APPENDED_FOLD_BOUND: usize = 256;
 /// append copies the `Arc` rather than N ids. Whenever the base map is
 /// privately held, inserts — and any accumulated delta — fold straight
 /// into it, keeping `appended` empty. While the base is shared, inserts
-/// accumulate in `appended` (consulted first on lookup) and the fold bound
-/// rebuilds a private base rather than letting the delta — and therefore
-/// every index clone — grow to the whole resident set.
+/// and removals accumulate in `appended` (consulted first on lookup; `None`
+/// removes a base id) and the fold bound rebuilds a private base rather
+/// than letting the delta — and therefore every index clone — grow to the
+/// whole resident set.
 #[derive(Clone, Debug)]
 pub(crate) struct NodeIdIndex {
     base: Arc<HashMap<NodeId, usize>>,
-    appended: HashMap<NodeId, usize>,
+    appended: HashMap<NodeId, Option<usize>>,
 }
 
 impl NodeIdIndex {
@@ -37,23 +39,33 @@ impl NodeIdIndex {
     }
 
     pub(crate) fn get(&self, node_id: &str) -> Option<usize> {
-        self.appended
-            .get(node_id)
-            .or_else(|| self.base.get(node_id))
-            .copied()
+        match self.appended.get(node_id) {
+            Some(index) => *index,
+            None => self.base.get(node_id).copied(),
+        }
     }
 
     fn insert(&mut self, node_id: NodeId, index: usize) {
+        self.write(node_id, Some(index));
+    }
+
+    /// A node's id changed in place (a commit derives its drafts' ids).
+    pub(crate) fn rename(&mut self, from: &NodeId, to: NodeId, index: usize) {
+        self.write(from.clone(), None);
+        self.write(to, Some(index));
+    }
+
+    fn write(&mut self, node_id: NodeId, index: Option<usize>) {
         if let Some(base) = Arc::get_mut(&mut self.base) {
-            base.extend(self.appended.drain());
-            base.insert(node_id, index);
+            fold_into(base, self.appended.drain());
+            fold_into(base, [(node_id, index)]);
             return;
         }
         self.appended.insert(node_id, index);
         if self.appended.len() >= APPENDED_FOLD_BOUND {
             let mut folded = (*self.base).clone();
             folded.reserve(self.appended.len());
-            folded.extend(self.appended.drain());
+            fold_into(&mut folded, self.appended.drain());
             self.base = Arc::new(folded);
         }
     }
@@ -63,17 +75,36 @@ impl NodeIdIndex {
     }
 }
 
-/// The read model of the current frame: materialized `Arc<Vec>`s readers
-/// hold, plus the owned tail appended nodes push into.
+fn fold_into(
+    base: &mut HashMap<NodeId, usize>,
+    delta: impl IntoIterator<Item = (NodeId, Option<usize>)>,
+) {
+    for (node_id, index) in delta {
+        match index {
+            Some(index) => {
+                base.insert(node_id, index);
+            }
+            None => {
+                base.remove(&node_id);
+            }
+        }
+    }
+}
+
+/// The read model of the current frame: the shared sequences readers hold,
+/// plus the owned tail appended nodes push into.
 ///
-/// Appends never clone the shared vecs — the next read folds the tail into
-/// fresh materialized vecs once, so a turn pays the read-model copy at read
-/// time, not per append. `prompt_render_cache` is replaced on materialize,
-/// keeping its `Arc` identity in step with the vec identity as before.
+/// The next read folds the tail onto the shared sequences in place: a
+/// reader's snapshot is a prefix of the same buffer, so neither an append
+/// nor a held reader copies the frame (FIG-4060), and every retained read
+/// model shares one frame's worth of messages (FIG-4059).
+/// `prompt_render_cache` is replaced when messages fold, keeping its `Arc`
+/// identity in step with the message sequence, and extends the previous
+/// cache's render instead of re-rendering the frame.
 #[derive(Clone, Debug)]
 struct ActiveReadModel {
-    active_events: Arc<Vec<SessionHistoryRecord>>,
-    active_messages: Arc<Vec<Message>>,
+    active_events: AppendVec<SessionHistoryRecord>,
+    active_messages: AppendVec<Message>,
     prompt_render_cache: Arc<BaseRenderCache>,
     pending_events: Vec<SessionHistoryRecord>,
     pending_messages: Vec<Message>,
@@ -82,14 +113,15 @@ struct ActiveReadModel {
 #[derive(Debug)]
 pub(crate) struct SessionGraphCache {
     pub(crate) by_id: NodeIdIndex,
-    pub(crate) active_path_indices: Vec<usize>,
+    pub(crate) active_path_indices: AppendVec<usize>,
     /// The one memoized projection, of the active path from its last
     /// `FrameOpen` (ADR 0112 §9).
     ///
     /// Identity is the point, not only the saved work: the turn projection
-    /// decides prefix agreement by comparing the `Arc` a read model handed
-    /// out (`TurnGraphEditor::message_delta_if_current_preserved`), so every
-    /// reader of one resident graph shares these `Arc`s.
+    /// decides prefix agreement by comparing the shared sequence a read
+    /// model handed out (`TurnGraphEditor::message_delta_if_current_preserved`,
+    /// [`lash_sansio::AppendVec::ptr_eq`]), so every reader of one resident
+    /// graph shares these sequences.
     ///
     /// Behind a mutex because `read_model` materializes through `&self`
     /// while `append_node` pushes through `&mut self`.
@@ -120,10 +152,10 @@ impl SessionGraphCache {
 
         let mut cache = Self {
             by_id: NodeIdIndex::from_resident(by_id),
-            active_path_indices,
+            active_path_indices: AppendVec::from(active_path_indices),
             active_read: StdMutex::new(ActiveReadModel {
-                active_events: Arc::new(Vec::new()),
-                active_messages: Arc::new(Vec::new()),
+                active_events: AppendVec::new(),
+                active_messages: AppendVec::new(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),
@@ -162,8 +194,8 @@ impl SessionGraphCache {
             .active_read
             .get_mut()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = ActiveReadModel {
-            active_events: Arc::new(active_events),
-            active_messages: Arc::new(active_messages),
+            active_events: AppendVec::from(active_events),
+            active_messages: AppendVec::from(active_messages),
             prompt_render_cache: Arc::new(BaseRenderCache::new()),
             pending_events: Vec::new(),
             pending_messages: Vec::new(),
@@ -173,24 +205,31 @@ impl SessionGraphCache {
     /// The current frame's read model, materializing pending appends once.
     ///
     /// Each pending tail folds independently: an event-only append neither
-    /// copies nor replaces the message vec or the render cache built on it,
-    /// and `Arc::make_mut` extends the existing allocation in place whenever
-    /// no reader still holds the vec.
+    /// replaces the message sequence nor the render cache built on it. A
+    /// fold appends to the shared sequences, adopting what another holder
+    /// of their buffers (a turn's read state) already appended.
     pub(crate) fn active_read_model(&self) -> SessionReadModel {
         let read = &mut *self
             .active_read
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if !read.pending_events.is_empty() {
-            Arc::make_mut(&mut read.active_events).append(&mut read.pending_events);
+            let pending = std::mem::take(&mut read.pending_events);
+            read.active_events
+                .extend_adopting(pending, same_history_record);
         }
         if !read.pending_messages.is_empty() {
-            Arc::make_mut(&mut read.active_messages).append(&mut read.pending_messages);
-            read.prompt_render_cache = Arc::new(BaseRenderCache::new());
+            let prefix_len = read.active_messages.len();
+            let pending = std::mem::take(&mut read.pending_messages);
+            read.active_messages.extend_adopting(pending, same_message);
+            read.prompt_render_cache = Arc::new(BaseRenderCache::extending(
+                Arc::clone(&read.prompt_render_cache),
+                prefix_len,
+            ));
         }
         SessionReadModel {
-            active_events: Arc::clone(&read.active_events),
-            messages: Arc::clone(&read.active_messages),
+            active_events: read.active_events.clone(),
+            messages: read.active_messages.clone(),
             prompt_render_cache: Arc::clone(&read.prompt_render_cache),
         }
     }
@@ -215,8 +254,8 @@ impl SessionGraphCache {
             // A pending `FrameOpen` moves the projection's start to the new
             // frame before its commit (ADR 0112 §9).
             *read = ActiveReadModel {
-                active_events: Arc::new(Vec::new()),
-                active_messages: Arc::new(Vec::new()),
+                active_events: AppendVec::new(),
+                active_messages: AppendVec::new(),
                 prompt_render_cache: Arc::new(BaseRenderCache::new()),
                 pending_events: Vec::new(),
                 pending_messages: Vec::new(),

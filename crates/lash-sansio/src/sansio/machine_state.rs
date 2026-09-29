@@ -217,7 +217,7 @@ pub struct TurnMachine<M: TurnProtocol = UnitTurnProtocol> {
     pub(super) next_effect_id: u64,
     pub(super) next_synthetic_message_id: u64,
     pub(super) messages: MessageSequence,
-    pub(super) events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
+    pub(super) events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
     pub(super) turn_causes: Vec<TurnCause>,
     pub(super) progress_event_cursor: usize,
     pub(super) protocol_iteration: usize,

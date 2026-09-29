@@ -4,7 +4,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn new(
         config: TurnMachineConfig<M>,
         messages: Vec<Message>,
-        events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
+        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
         Self::new_shared(
@@ -18,7 +18,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn new_shared(
         config: TurnMachineConfig<M>,
         messages: MessageSequence,
-        events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
+        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
     ) -> Self {
         Self::new_shared_with_turn_causes(config, messages, events, protocol_run_offset, Vec::new())
@@ -27,7 +27,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub fn new_shared_with_turn_causes(
         config: TurnMachineConfig<M>,
         messages: MessageSequence,
-        events: Arc<Vec<SessionHistoryRecord<M::Event>>>,
+        events: crate::AppendVec<SessionHistoryRecord<M::Event>>,
         protocol_run_offset: usize,
         turn_causes: Vec<TurnCause>,
     ) -> Self {
@@ -74,12 +74,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
         matches!(self.state, MachineState::Finished)
     }
 
-    pub fn messages(&self) -> Arc<Vec<Message>> {
+    pub fn messages(&self) -> crate::AppendVec<Message> {
         self.messages.shared()
     }
 
-    pub fn events(&self) -> Arc<Vec<SessionHistoryRecord<M::Event>>> {
-        Arc::clone(&self.events)
+    pub fn events(&self) -> crate::AppendVec<SessionHistoryRecord<M::Event>> {
+        self.events.clone()
     }
 
     pub fn message_sequence(&self) -> MessageSequence {
@@ -122,7 +122,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
             messages: self.messages.iter().cloned().collect(),
-            events: self.events.as_ref().clone(),
+            events: self.events.to_vec(),
             turn_causes: self.turn_causes.clone(),
             progress_event_cursor: self.progress_event_cursor,
             protocol_iteration: self.protocol_iteration,
@@ -153,7 +153,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             next_effect_id: checkpoint.next_effect_id,
             next_synthetic_message_id: checkpoint.next_synthetic_message_id,
             messages: MessageSequence::from_owned(checkpoint.messages),
-            events: Arc::new(checkpoint.events),
+            events: crate::AppendVec::from(checkpoint.events),
             turn_causes: checkpoint.turn_causes,
             progress_event_cursor: checkpoint.progress_event_cursor,
             protocol_iteration: checkpoint.protocol_iteration,
@@ -333,12 +333,12 @@ impl<M: TurnProtocol> TurnMachine<M> {
     pub(super) fn append_event(&mut self, event: SessionHistoryRecord<M::Event>) {
         match event {
             SessionHistoryRecord::Conversation(record) => {
-                Arc::make_mut(&mut self.events)
+                self.events
                     .push(SessionHistoryRecord::Conversation(record.clone()));
                 self.messages.push(record.to_message());
             }
             SessionHistoryRecord::Protocol(protocol_event) => {
-                Arc::make_mut(&mut self.events)
+                self.events
                     .push(SessionHistoryRecord::Protocol(protocol_event));
             }
         }

@@ -13,7 +13,7 @@ impl SessionReadView {
         meta: SessionReadMeta,
         base_graph: Arc<crate::SessionGraph>,
         messages: crate::MessageSequence,
-        active_events: Arc<Vec<crate::SessionHistoryRecord>>,
+        active_events: lash_sansio::AppendVec<crate::SessionHistoryRecord>,
     ) -> Self {
         Self(Arc::new(SessionReadState {
             meta,

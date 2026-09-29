@@ -5,7 +5,9 @@ use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 use super::ExecutionStateUpdate;
 
 pub(super) struct FinalCommitInput<'a> {
-    pub(super) returned_state: &'a crate::SessionSnapshot,
+    /// The turn's returned state, owned: the final state adopts its graph
+    /// without a second holder, so the commit rewrites its drafts in place.
+    pub(super) returned_state: crate::SessionSnapshot,
     pub(super) tool_calls: &'a [ToolCallRecord],
     pub(super) omitted: Option<&'a OmittedToolCalls>,
     pub(super) plugins: Option<&'a PluginSession>,

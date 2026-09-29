@@ -198,7 +198,7 @@ fn run(
     let mut machine = TurnMachine::new(
         config(native, termination.clone()),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -351,7 +351,7 @@ fn assert_driver_stops_before_queued_provider_response(
     let mut provider_script = VecDeque::from([allowed_response, queued_response]);
     let mut turn_config = config(native, RlmTermination::Natural);
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
-    let mut machine = TurnMachine::new(turn_config, Vec::new(), Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
     let mut pending = drain(&mut machine);
     let mut observed = Vec::new();
     loop {
@@ -495,7 +495,7 @@ fn assert_simultaneous_turn_and_no_progress_exhaustion_prefers_silent_turn_stop(
     let mut turn_config = config(native, RlmTermination::FinishRequired { schema: None });
     turn_config.turn_budget = lash_core::TurnBudget::bounded(1);
     turn_config.no_progress_budget = lash_core::NoProgressBudget::bounded(1);
-    let mut machine = TurnMachine::new(turn_config, Vec::new(), Arc::new(Vec::new()), 0);
+    let mut machine = TurnMachine::new(turn_config, Vec::new(), Default::default(), 0);
 
     let initial = drain(&mut machine);
     let effects = reply(
@@ -598,7 +598,7 @@ fn native_rejects_malformed_calls_without_execution() {
         let mut machine = TurnMachine::new(
             config(true, RlmTermination::Natural),
             Vec::new(),
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let initial = drain(&mut machine);
@@ -631,7 +631,7 @@ fn native_reasoning_only_is_provider_error() {
     let mut machine = TurnMachine::new(
         config(true, RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -726,7 +726,7 @@ fn multiple_calls_spend_one_stall_attempt_and_answer_every_id() {
     let mut machine = TurnMachine::new(
         config(true, RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let mut effects = drain(&mut machine);
@@ -801,7 +801,7 @@ fn output_limit_prose_repairs_on_both_plugins() {
         let mut machine = TurnMachine::new(
             config(native, RlmTermination::Natural),
             Vec::new(),
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let initial = drain(&mut machine);
@@ -866,7 +866,7 @@ fn output_limit_calls_repair_without_execution_until_stall_budget() {
         let mut machine = TurnMachine::new(
             config(true, RlmTermination::Natural),
             Vec::new(),
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let mut effects = drain(&mut machine);
@@ -966,7 +966,7 @@ fn cell_channel_tool_call_on_a_tool_less_request_repairs_then_stops_on_budget() 
     let mut machine = TurnMachine::new(
         config(false, RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let mut effects = drain(&mut machine);
@@ -1094,7 +1094,7 @@ fn cell_channel_tool_call_repair_lets_the_next_cell_finish() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -1172,7 +1172,7 @@ fn configured_prompt_is_instructions_on_both_channels() {
         ] {
             let mut config = config(native, RlmTermination::Natural);
             config.system_prompt = Arc::from(prompt);
-            let mut machine = TurnMachine::new(config, Vec::new(), Arc::new(Vec::new()), 0);
+            let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
             let effects = drain(&mut machine);
             let request = effects
                 .iter()
@@ -1198,7 +1198,7 @@ fn multipart_response_preserves_executable_cell() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -1227,7 +1227,7 @@ fn commentary_only_cell_still_executes() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -1253,7 +1253,7 @@ fn no_cell_multipart_response_finishes_with_final_answer_prose() {
     let mut machine = TurnMachine::new(
         typescript_cell_config(RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);
@@ -1317,7 +1317,7 @@ fn markdown_fenced_finish_requests_an_explicit_no_execution_repair() {
             config.protocol_driver = Arc::new(crate::protocol::RlmDriver::with_dialect(
                 Arc::clone(&dialect),
             ));
-            let mut machine = TurnMachine::new(config, Vec::new(), Arc::new(Vec::new()), 0);
+            let mut machine = TurnMachine::new(config, Vec::new(), Default::default(), 0);
             let initial = drain(&mut machine);
             let effects = reply(
                 &mut machine,
@@ -1380,7 +1380,7 @@ fn native_reasoning_does_not_move_the_stall_reply_fingerprint() {
         let mut machine = TurnMachine::new(
             config(true, RlmTermination::Natural),
             Vec::new(),
-            Arc::new(Vec::new()),
+            Default::default(),
             0,
         );
         let initial = drain(&mut machine);
@@ -1427,7 +1427,7 @@ fn native_extraction_diagnostic_matches_the_shared_shape() {
     let mut machine = TurnMachine::new(
         config(true, RlmTermination::Natural),
         Vec::new(),
-        Arc::new(Vec::new()),
+        Default::default(),
         0,
     );
     let initial = drain(&mut machine);

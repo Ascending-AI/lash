@@ -67,7 +67,7 @@ fn intent_fixture() -> RuntimeCommit {
     };
     state.ensure_agent_frame_initialized();
     let graph_data = state.session_graph.data_mut();
-    std::sync::Arc::make_mut(&mut graph_data.nodes[0]).timestamp =
+    std::sync::Arc::make_mut(&mut graph_data.nodes.make_mut()[0]).timestamp =
         "2026-07-26T10:00:00Z".to_string();
     let operation = OperationId::turn("golden-session", "turn-42", "final");
     let node_id =

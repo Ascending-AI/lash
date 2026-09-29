@@ -688,7 +688,7 @@ pub struct RuntimeSessionState {
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
     #[serde(skip)]
-    pub persisted_node_ids: std::collections::HashSet<crate::NodeId>,
+    pub persisted_node_ids: crate::PersistedNodeIds,
     /// Runtime-only marker set by a `PreservePersisted` open (FIG-3353): the
     /// loaded tool-state snapshot is durable truth and is never restamped from
     /// the live registry. Skipped on serialize — it is a per-open claim, not
@@ -716,7 +716,7 @@ impl RuntimeSessionState {
             checkpoint_ref: None,
             head_revision: 0,
             config_revision: 0,
-            persisted_node_ids: std::collections::HashSet::new(),
+            persisted_node_ids: crate::PersistedNodeIds::default(),
             preserve_tool_state_snapshot: false,
         }
     }
@@ -758,7 +758,7 @@ impl RuntimeSessionState {
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
             config_revision: 0,
-            persisted_node_ids: std::collections::HashSet::new(),
+            persisted_node_ids: crate::PersistedNodeIds::default(),
             preserve_tool_state_snapshot: false,
         };
         state.ensure_agent_frame_initialized();
@@ -794,20 +794,21 @@ impl RuntimeSessionState {
 
     /// Updates protocol-visible snapshot state while retaining the resident complete checkpoint
     /// component set. `SessionSnapshot` is only a well-known-key projection and therefore cannot
-    /// replace the authoritative runtime-only component listing.
-    pub fn apply_snapshot(&mut self, snapshot: &SessionSnapshot) {
-        self.session_id = snapshot.session_id.clone();
-        self.policy = snapshot.policy.clone();
-        self.session_graph = snapshot.session_graph.clone();
+    /// replace the authoritative runtime-only component listing. By value, so the graph has no
+    /// second holder and a commit rewrites what it just appended in place (FIG-4060).
+    pub fn adopt_snapshot(&mut self, snapshot: SessionSnapshot) {
+        self.session_id = snapshot.session_id;
+        self.policy = snapshot.policy;
+        self.session_graph = snapshot.session_graph;
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
-        self.current_frame_node_id = snapshot.current_frame_node_id.clone();
+        self.current_frame_node_id = snapshot.current_frame_node_id;
         self.ensure_agent_frame_initialized();
         self.turn_index = snapshot.turn_index;
-        self.token_usage = snapshot.token_usage.clone();
-        self.last_prompt_usage = snapshot.last_prompt_usage.clone();
-        self.protocol_turn_options = snapshot.protocol_turn_options.clone();
-        self.usage = snapshot.usage.clone();
-        self.checkpoint_ref = snapshot.checkpoint_ref.clone();
+        self.token_usage = snapshot.token_usage;
+        self.last_prompt_usage = snapshot.last_prompt_usage;
+        self.protocol_turn_options = snapshot.protocol_turn_options;
+        self.usage = snapshot.usage;
+        self.checkpoint_ref = snapshot.checkpoint_ref;
     }
 
     /// The per-source report over the session's usage totals, for protocol and administration
@@ -1227,7 +1228,7 @@ impl RuntimeSessionState {
             return;
         };
         let settled = settled.clone();
-        let record = std::sync::Arc::make_mut(&mut self.session_graph.data_mut().nodes[position]);
+        let record = self.session_graph.data_mut().node_mut(position);
         if let crate::SessionNodePayload::FrameOpen {
             protocol_turn_options,
             ..
@@ -1279,7 +1280,7 @@ impl RuntimeSessionState {
         }) else {
             return;
         };
-        let record = std::sync::Arc::make_mut(&mut self.session_graph.data_mut().nodes[position]);
+        let record = self.session_graph.data_mut().node_mut(position);
         if let crate::SessionNodePayload::FrameOpen {
             assignment,
             protocol_turn_options,
