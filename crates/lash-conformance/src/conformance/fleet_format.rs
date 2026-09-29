@@ -85,12 +85,15 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
     let after_reopen = deployment
         .preflight()
         .await
-        .expect("preflight after reopen")
-        .fleet_format;
+        .expect("preflight after reopen");
     assert_eq!(
-        after_reopen, recorded,
+        after_reopen.fleet_format, recorded,
         "reopening under the same build leaves the fleet-format row untouched"
     );
+    let writing_release = after_reopen
+        .release
+        .release()
+        .expect("the installed and opened deployment records its writing release");
 
     // A build whose writable range does not contain the recorded generation
     // refuses the open with the typed routing error (ADR 0106 §7): a worker
@@ -108,12 +111,27 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
     let error = refused.expect_err("a build whose range excludes the row refuses the open");
     assert!(
         matches!(
-            error,
+            &error,
             StoreError::Incompatible {
-                refusal: lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded, writable, writing_release: None }
-            } if recorded == next_generation && writable == lash_core::compat::VersionRange::exactly(lash_core::FLEET_FORMAT_VERSION)
+                refusal: lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded, writable, writing_release: refused_release }
+            } if *recorded == next_generation
+                && *writable == lash_core::compat::VersionRange::exactly(lash_core::FLEET_FORMAT_VERSION)
+                && refused_release.as_deref() == Some(writing_release)
         ),
         "an out-of-range fleet format must surface the typed refusal: {error}"
+    );
+    let after_refusal = deployment
+        .preflight()
+        .await
+        .expect("preflight after refused open");
+    assert_eq!(
+        after_refusal.fleet_format,
+        FleetFormatState::Recorded(FleetFormat::from_version(next_generation)),
+        "a refused open preserves the recorded fleet format"
+    );
+    assert_eq!(
+        after_refusal.release, after_reopen.release,
+        "a refused open preserves the writing release and its timestamp"
     );
 
     // The build that can still write it preserves the row: the reopen reads

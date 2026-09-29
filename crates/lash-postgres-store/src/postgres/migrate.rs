@@ -650,7 +650,7 @@ async fn apply_synthetic_expand(
     let version: i32 =
         sqlx::query_scalar("SELECT version FROM lash_schema_versions WHERE component = $1")
             .bind(SCHEMA_COMPONENT)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
     let descriptor =
@@ -675,13 +675,13 @@ async fn apply_synthetic_expand(
     }
     let started_at_ms = server_clock_ms(&mut tx).await?;
     sqlx::raw_sql(SYNTHETIC_NEXT_EXPAND_DDL)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     sqlx::query("UPDATE lash_schema_versions SET version = $1 WHERE component = $2")
         .bind(next)
         .bind(SCHEMA_COMPONENT)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     let migration = "synthetic-next-expand";

@@ -109,10 +109,11 @@ async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration()
                 CompatRefusal::ShapeRefused {
                     component,
                     findings,
-                    writing_release: None,
+                    writing_release,
                 },
         } => {
             assert_eq!(component, "sqlite-core");
+            assert_eq!(writing_release.as_deref(), Some(env!("CARGO_PKG_VERSION")));
             assert!(
                 findings
                     .iter()

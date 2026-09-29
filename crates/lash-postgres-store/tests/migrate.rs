@@ -305,8 +305,9 @@ async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
         matches!(
             &refused,
             lash_core_execution::StoreError::Incompatible {
-                refusal: lash_core_execution::compat::CompatRefusal::FleetUnrecorded { component, writing_release: None }
+                refusal: lash_core_execution::compat::CompatRefusal::FleetUnrecorded { component, writing_release }
             } if component == "postgres"
+                && writing_release.as_deref() == Some(env!("CARGO_PKG_VERSION"))
         ),
         "the refusal is typed: {refused}"
     );
