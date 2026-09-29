@@ -41,7 +41,10 @@ impl MarkerParts {
                 .with_session_id(&self.session_id)
                 .with_policy(policy)
                 .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-                .with_store(Arc::clone(&self.store))
+                .with_store(crate::conformance::helpers::session_view(
+                    &self.store,
+                    self.session_id.clone(),
+                ))
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )

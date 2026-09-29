@@ -34,10 +34,10 @@ where
             crate::SessionRelation::Root,
         );
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("create explicit conformance session store");
-        super::bind_conformance_session(&store, &session_id).await;
+        super::admit_conformance_session(store.store(), &session_id).await;
     }
     factory
 }

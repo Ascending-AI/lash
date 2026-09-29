@@ -56,7 +56,10 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
             .with_session_id(&parts.session_id)
             .with_policy(policy)
             .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .build(),
     )
     .await
@@ -156,7 +159,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         );
     }
     let before = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the session head")
         .map_or(0, |head| head.head_revision);
@@ -248,7 +251,7 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
         .expect("read the pending inputs");
     assert!(pending.is_empty(), "nothing stays queued: {pending:?}");
     let head = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the head")
         .expect("both roots committed");

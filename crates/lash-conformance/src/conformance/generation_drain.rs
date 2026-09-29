@@ -4,6 +4,7 @@
 //! its drive stamped `admitted_generation` (FIG-3795 S9) — and the composed
 //! drain status cannot report drained while one stands.
 
+use crate::conformance::DeploymentViewExt as _;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 
@@ -59,7 +60,7 @@ impl AdmittedRoot {
         let store = fixture
             .stores
             .session_store_factory()
-            .create_store(&crate::SessionStoreCreateRequest {
+            .admit_view(&crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -95,7 +96,7 @@ impl AdmittedRoot {
             ),
         };
         let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
-            &store,
+            store.store(),
             &session_id,
             &format!("{}-{name}", fixture.prefix),
         )
@@ -123,7 +124,7 @@ impl AdmittedRoot {
         Self {
             session_id,
             root: TurnId::from(name),
-            store,
+            store: Arc::clone(store.store()),
             lease,
             admission,
         }

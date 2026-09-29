@@ -46,10 +46,10 @@ async fn session_graph_append_tolerates_an_advanced_head(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create advanced-head session store");
-    let mut runtime = append_conformance_runtime(&store, &request).await;
+    let mut runtime = append_conformance_runtime(store.store(), &request).await;
 
     // The base a derive-then-append caller reads and derives from.
     let observed_base = Box::pin(append_conformance_plugin_node(
@@ -98,10 +98,10 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create service advanced-head session store");
-    let mut runtime = append_conformance_runtime(&store, &request).await;
+    let mut runtime = append_conformance_runtime(store.store(), &request).await;
     let observed_base = Box::pin(append_conformance_plugin_node(
         &mut runtime,
         "observe-base",
@@ -149,7 +149,8 @@ async fn session_graph_append_rejects_an_abandoned_branch(
     factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let scenario = Box::pin(abandoned_branch_scenario(factory, "append-abandoned")).await;
-    let mut runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
+    let mut runtime =
+        append_conformance_runtime(scenario.branch.store(), &scenario.branch_request).await;
     let before = read_conformance_session(&scenario.branch).await;
 
     let result = Box::pin(runtime.append_session_nodes(derived_append_request(
@@ -182,7 +183,8 @@ async fn session_graph_service_append_rejects_an_abandoned_branch(
         "service-append-abandoned",
     ))
     .await;
-    let runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
+    let runtime =
+        append_conformance_runtime(scenario.branch.store(), &scenario.branch_request).await;
     let service = runtime
         .session_graph_service()
         .expect("session graph service");
@@ -211,7 +213,7 @@ async fn session_graph_service_append_rejects_an_abandoned_branch(
 /// there, and let the descendants of that node belong to the old line only.
 struct AbandonedBranchScenario {
     branch_request: crate::SessionStoreCreateRequest,
-    branch: Arc<dyn crate::RuntimeStore>,
+    branch: crate::store::SessionStore,
     abandoned_base: String,
 }
 
@@ -229,10 +231,10 @@ async fn abandoned_branch_scenario(
         crate::SessionRelation::Root,
     );
     let source = factory
-        .create_store(&source_request)
+        .admit_view(&source_request)
         .await
         .expect("create abandoned-branch source store");
-    let mut source_runtime = append_conformance_runtime(&source, &source_request).await;
+    let mut source_runtime = append_conformance_runtime(source.store(), &source_request).await;
     let fork_point = Box::pin(append_conformance_plugin_node(
         &mut source_runtime,
         "fork-point",
@@ -240,7 +242,7 @@ async fn abandoned_branch_scenario(
     ))
     .await;
     factory
-        .pin(&fork_point)
+        .pin(&crate::NodeId::from(fork_point.as_str()))
         .await
         .expect("retain the rewind target");
     // The base the caller read and derived from, on the line that is about to
@@ -260,7 +262,7 @@ async fn abandoned_branch_scenario(
         policy: source_request.policy.clone(),
     };
     factory
-        .fork_at(&branch_request)
+        .fork_session(&branch_request)
         .await
         .expect("create the rewound session at the retained node");
     let branch_open_request = crate::SessionStoreCreateRequest {
@@ -271,28 +273,26 @@ async fn abandoned_branch_scenario(
         policy: branch_request.policy.clone(),
     };
     let branch = factory
-        .open_existing_store(&branch_open_request)
+        .live_view_for(&branch_open_request)
         .await
         .expect("open the rewound session")
         .expect("the rewound session exists");
 
     assert!(
-        source
-            .load_node(&abandoned_base)
+        crate::conformance::helpers::node_readable(&source, &abandoned_base)
             .await
-            .expect("load the abandoned base from shared history")
-            .is_some(),
+            .expect("load the abandoned base from shared history"),
         "the abandoned base must still exist in shared history: the fence is \
          about active-path membership, not about node existence"
     );
     let branch_read = read_conformance_session(&branch).await;
     assert_eq!(
-        branch_read.graph.leaf_node_id.as_deref(),
+        branch_read.window.leaf_node_id.as_deref(),
         Some(fork_point.as_str()),
         "the rewound session executes from the retained node"
     );
     assert!(
-        !branch_read.graph.active_path_contains(&abandoned_base),
+        !branch_read.window.active_path_contains(&abandoned_base),
         "the rewound session must have abandoned the base's branch"
     );
 
@@ -308,7 +308,7 @@ async fn abandoned_branch_scenario(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn assert_appended_onto_current_leaf(
-    store: &Arc<dyn crate::RuntimeStore>,
+    store: &crate::store::SessionStore,
     result: crate::AppendSessionNodesOutcome,
     observed_base: &str,
     advanced_leaf: &str,
@@ -333,7 +333,7 @@ async fn assert_appended_onto_current_leaf(
 
     let read = read_conformance_session(store).await;
     let node = read
-        .graph
+        .window
         .find_node(&appended)
         .expect("the appended node is durable");
     assert_eq!(
@@ -343,13 +343,13 @@ async fn assert_appended_onto_current_leaf(
          ancestor it required"
     );
     assert_eq!(
-        read.graph.leaf_node_id.as_deref(),
+        read.window.leaf_node_id.as_deref(),
         Some(appended.as_str()),
         "{entry_point}: the durable leaf must be the appended node"
     );
 
     let path = read
-        .graph
+        .window
         .active_path_nodes()
         .iter()
         .map(|node| node.node_id.clone())
@@ -371,7 +371,7 @@ async fn assert_appended_onto_current_leaf(
         path.len() - 1,
         "{entry_point}: the appended node must be the tip: {path:?}"
     );
-    for window in read.graph.active_path_nodes().windows(2) {
+    for window in read.window.active_path_nodes().windows(2) {
         assert_eq!(
             window[1].parent_node_id.as_deref(),
             Some(window[0].node_id.as_str()),
@@ -382,10 +382,10 @@ async fn assert_appended_onto_current_leaf(
 }
 
 async fn assert_stale_branch_changed_nothing(
-    store: &Arc<dyn crate::RuntimeStore>,
+    store: &crate::store::SessionStore,
     result: crate::AppendSessionNodesOutcome,
     abandoned_base: &str,
-    before: crate::store::PersistedSessionRead,
+    before: crate::store::SessionWindowRead,
     entry_point: &str,
 ) {
     let crate::AppendSessionNodesOutcome::StaleBranch { required_node_id } = result else {
@@ -402,18 +402,18 @@ async fn assert_stale_branch_changed_nothing(
         "{entry_point}: a refused append must not move the head revision"
     );
     assert_eq!(
-        after.graph.leaf_node_id, before.graph.leaf_node_id,
+        after.window.leaf_node_id, before.window.leaf_node_id,
         "{entry_point}: a refused append must not move the leaf"
     );
     assert_eq!(
         after
-            .graph
+            .window
             .nodes
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>(),
         before
-            .graph
+            .window
             .nodes
             .iter()
             .map(|node| node.node_id.clone())
@@ -434,7 +434,7 @@ async fn append_conformance_runtime(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> crate::LashRuntime {
-    let state = crate::store::load_persisted_session_state(store.as_ref())
+    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
         .await
         .expect("load session state for the append conformance runtime")
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -460,7 +460,7 @@ async fn append_conformance_runtime(
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(store),
+        crate::conformance::helpers::session_view(store, request.session_id.clone()),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -479,11 +479,12 @@ async fn append_conformance_runtime(
 /// usage to the shared ledger and that the next natural commit persists it.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
+/// `store` is a catalog with the root session `root` admitted.
 pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimeStore>) {
     Box::pin(
         lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
             crate::StoreLawBackend::new().into_backend(),
-            store,
+            crate::conformance::helpers::session_view(&store, "root"),
         ),
     )
     .await;
@@ -503,7 +504,7 @@ pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
 {
     lash_core::testing::conformance_support::append_usage_cancellation_exactly_once_conformance(
         crate::StoreLawBackend::new().into_backend(),
-        store,
+        crate::conformance::helpers::session_view(&store, "root"),
         arm_and_wait,
     )
     .await;
@@ -621,17 +622,18 @@ async fn append_conformance_plugin_node(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn advance_durable_head_behind_the_runtime(store: &Arc<dyn crate::RuntimeStore>) -> String {
-    let mut state = crate::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load state for the concurrent writer")
-        .expect("the session is already durable");
+async fn advance_durable_head_behind_the_runtime(store: &crate::store::SessionStore) -> String {
+    let mut state =
+        crate::conformance::helpers::load_window_state(store.store(), store.session_id())
+            .await
+            .expect("load state for the concurrent writer")
+            .expect("the session is already durable");
     append_conformance_event_node(
         &mut state,
         "advanced-head",
         "content the derivation never read",
     );
-    commit_conformance_state(store, &mut state)
+    commit_conformance_state(store.store(), &mut state)
         .await
         .expect("advance the durable head behind the runtime");
     state
@@ -661,10 +663,10 @@ fn derived_append_request(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn read_conformance_session(
-    store: &Arc<dyn crate::RuntimeStore>,
-) -> crate::store::PersistedSessionRead {
+    store: &crate::store::SessionStore,
+) -> crate::store::SessionWindowRead {
     store
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect("read the durable session")
         .expect("the durable session exists")

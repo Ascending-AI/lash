@@ -88,7 +88,7 @@ async fn commit_switch(
         .commit_runtime_state(terminal_commit(&state, SWITCHING_TURN, Some(owed.clone())))
         .await
         .expect("the switch commit writes its follow-on");
-    (loaded_conformance_state(store).await, owed)
+    (loaded_conformance_state(store, &session()).await, owed)
 }
 
 #[expect(
@@ -102,7 +102,7 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
     assert_eq!(state.pending_follow_on.as_deref(), Some(&owed));
     assert_eq!(
         store
-            .load_session_head_meta()
+            .load_session_head_meta(&SessionId::from("follow-on"))
             .await
             .expect("load head meta")
             .expect("head")
@@ -119,7 +119,9 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
         .expect("the follow-on's terminal commit clears its fact");
     assert_eq!(receipt.pending_follow_on, None);
     assert_eq!(
-        loaded_conformance_state(&store).await.pending_follow_on,
+        loaded_conformance_state(&store, &session())
+            .await
+            .pending_follow_on,
         None
     );
 }
@@ -257,7 +259,9 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
         .await
         .expect("a side write carrying the fact unchanged commits");
     assert_eq!(
-        loaded_conformance_state(&store).await.pending_follow_on,
+        loaded_conformance_state(&store, &session())
+            .await
+            .pending_follow_on,
         Some(Box::new(owed)),
         "the refused writes changed nothing"
     );
@@ -281,7 +285,10 @@ pub async fn pending_follow_on_frame_is_current_on_every_head_write(store: Arc<d
     assert!(matches!(error, StoreError::FollowOnFrameNotCurrent { .. }));
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("follow-on"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after refused switch")
             .is_none(),
@@ -306,7 +313,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
             .expect("a recovering drive raises the count");
         assert_eq!(raised.attempts, expected);
         let head = store
-            .load_session_head_meta()
+            .load_session_head_meta(&SessionId::from("follow-on"))
             .await
             .expect("load head meta")
             .expect("head");
@@ -332,7 +339,7 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     );
 
     // The raised count is part of the fact: a side write must carry it.
-    let mut stale = loaded_conformance_state(&store).await;
+    let mut stale = loaded_conformance_state(&store, &session()).await;
     stale.pending_follow_on = Some(Box::new(owed.clone()));
     assert!(matches!(
         store

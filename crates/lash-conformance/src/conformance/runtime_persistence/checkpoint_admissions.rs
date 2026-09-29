@@ -23,7 +23,7 @@ where
 {
     let open = make();
     let open_identity = Arc::downgrade(&open);
-    bind_conformance_session(&open, &SessionId::from("checkpoint-component-refs")).await;
+    admit_conformance_session(&open, &SessionId::from("checkpoint-component-refs")).await;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-component-refs"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -67,15 +67,18 @@ where
         "checkpoint-component reopen factory reused the writer handle"
     );
     let reopen_identity = Arc::downgrade(&reopen);
-    bind_conformance_session(&reopen, &SessionId::from("checkpoint-component-refs")).await;
+    admit_conformance_session(&reopen, &SessionId::from("checkpoint-component-refs")).await;
 
     // Exercise the production hydration and ordinary commit boundary. No test
     // code re-inserts arbitrary keys: the runtime-owned complete set must carry
     // them as unchanged refs.
-    state = crate::store::load_persisted_session_state(reopen.as_ref())
-        .await
-        .expect("hydrate resident checkpoint component set")
-        .expect("seeded checkpoint state");
+    state = crate::conformance::helpers::load_window_state(
+        &reopen,
+        &SessionId::from("checkpoint-component-refs"),
+    )
+    .await
+    .expect("hydrate resident checkpoint component set")
+    .expect("seeded checkpoint state");
     let mut ordinary_turn_projection = state.to_snapshot();
     ordinary_turn_projection.turn_index += 1;
     state.apply_snapshot(&ordinary_turn_projection);
@@ -114,10 +117,13 @@ where
         second.manifest.components.contains_key("arbitrary/deleted"),
         "ordinary commits must retain every unknown component"
     );
-    state = crate::store::load_persisted_session_state(reopen.as_ref())
-        .await
-        .expect("hydrate state after ordinary complete-set commit")
-        .expect("ordinary complete-set checkpoint state");
+    state = crate::conformance::helpers::load_window_state(
+        &reopen,
+        &SessionId::from("checkpoint-component-refs"),
+    )
+    .await
+    .expect("hydrate state after ordinary complete-set commit")
+    .expect("ordinary complete-set checkpoint state");
 
     // Explicit owner mutation still uses absence from the complete listing as
     // deletion. The arbitrary store-law mutations remain direct because the
@@ -159,9 +165,12 @@ where
             && !std::sync::Weak::ptr_eq(&reopen_identity, &Arc::downgrade(&cold_reopen)),
         "checkpoint-component cold reader reused a writer handle"
     );
-    bind_conformance_session(&cold_reopen, &SessionId::from("checkpoint-component-refs")).await;
+    admit_conformance_session(&cold_reopen, &SessionId::from("checkpoint-component-refs")).await;
     let read = cold_reopen
-        .load_session()
+        .load_session_window(
+            &SessionId::from("checkpoint-component-refs"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("cold-load refs-only checkpoint")
         .expect("refs-only checkpoint session");
@@ -198,10 +207,13 @@ where
         "known component deletion must survive cold hydration"
     );
 
-    state = crate::store::load_persisted_session_state(cold_reopen.as_ref())
-        .await
-        .expect("reload current state before rejection laws")
-        .expect("current checkpoint state before rejection laws");
+    state = crate::conformance::helpers::load_window_state(
+        &cold_reopen,
+        &SessionId::from("checkpoint-component-refs"),
+    )
+    .await
+    .expect("reload current state before rejection laws")
+    .expect("current checkpoint state before rejection laws");
     let mut unknown = RuntimeCommit::persisted_state_for_test(&state, &[]);
     unknown.checkpoint.components.insert(
         "arbitrary/unknown-ref".to_string(),
@@ -441,7 +453,10 @@ pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
         "applications must follow monotonic turn-commit order and must not double-count a replay"
     );
 
-    store.vacuum().await.expect("vacuum application tombstone");
+    store
+        .vacuum(&SessionId::from(session_id))
+        .await
+        .expect("vacuum application tombstone");
     assert_eq!(
         store
             .list_turn_input_applications(&SessionId::from(session_id))

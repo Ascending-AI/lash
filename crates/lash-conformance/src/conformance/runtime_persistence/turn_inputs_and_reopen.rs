@@ -127,7 +127,7 @@ pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
             .is_empty()
     );
     let vacuum = store
-        .vacuum()
+        .vacuum(&SessionId::from("root"))
         .await
         .expect("vacuum pending input tombstones");
     assert_eq!(vacuum.removed_node_count, 0);
@@ -659,7 +659,7 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
             && **row == lash_core::store::IngressRowId::Input(input.input_id.clone())
     ));
     let vacuum = store
-        .vacuum()
+        .vacuum(&session_id)
         .await
         .expect("vacuum cancelled accepted input");
     assert_eq!(vacuum.removed_node_count, 0);

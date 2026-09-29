@@ -48,7 +48,7 @@ async fn durable_ingress(store: &Arc<dyn RuntimeStore>, session: &SessionId) -> 
             .expect("read the unfinished root")
             .map(|unfinished| unfinished.root),
         head_revision: store
-            .load_session_head_meta()
+            .load_session_head_meta(session)
             .await
             .expect("load the head")
             .map_or(0, |meta| meta.head_revision),

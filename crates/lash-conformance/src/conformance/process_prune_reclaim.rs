@@ -9,6 +9,7 @@
 //! tell a physically reclaimed row from a merely hidden one. A reclaiming prune
 //! or delete leaves nothing for that vacuum to remove.
 
+use super::DeploymentViewExt as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
@@ -204,7 +205,7 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     prune_completed_process(registry.as_ref(), &process_id).await;
 
     let report = owner_store
-        .vacuum()
+        .vacuum(&SessionId::from(OWNER_SESSION_ID))
         .await
         .expect("vacuum the deleted owner's stale handle");
     assert_eq!(
@@ -247,7 +248,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     prune_completed_process(registry.as_ref(), &process_id).await;
     assert!(
         factory
-            .session_was_deleted(&process_session_id)
+            .is_deleted(&process_session_id)
             .await
             .expect("probe the deleted set after the prune"),
         "the prune must record {process_session_id} in the deleted set"
@@ -262,7 +263,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
         .expect("delete the fork child session");
 
     let report = process_store
-        .vacuum()
+        .vacuum(&process_session_id)
         .await
         .expect("vacuum the pruned process session's stale handle");
     assert_eq!(
@@ -278,7 +279,7 @@ async fn create_store(
     policy: &crate::SessionPolicy,
 ) -> Arc<dyn crate::RuntimeStore> {
     factory
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_session(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
@@ -286,7 +287,8 @@ async fn create_store(
             policy: policy.clone(),
         })
         .await
-        .unwrap_or_else(|error| panic!("create store {session_id}: {error}"))
+        .unwrap_or_else(|error| panic!("admit session {session_id}: {error}"));
+    Arc::clone(factory) as Arc<dyn crate::RuntimeStore>
 }
 
 #[expect(
@@ -329,7 +331,7 @@ async fn fork_and_advance(
     policy: &crate::SessionPolicy,
 ) {
     factory
-        .fork_at(&crate::ForkSessionRequest {
+        .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(child_session_id.to_string()),
             node_id: node_id.to_string().into(),
@@ -339,20 +341,16 @@ async fn fork_and_advance(
         .await
         .expect("fork at a live tip");
     let child = factory
-        .open_existing_store(&crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(child_session_id.to_string()),
-            relation: crate::SessionRelation::Root,
-            policy: policy.clone(),
-        })
+        .live_view(child_session_id)
         .await
-        .expect("open the forked child")
+        .expect("look up the forked child")
         .expect("the forked child exists");
-    let mut state = crate::store::load_persisted_session_state(child.as_ref())
-        .await
-        .expect("load the forked child's state")
-        .expect("the forked child has state");
+    let mut state =
+        crate::store::load_session_window_state(&child, crate::store::WindowSelector::Current)
+            .await
+            .map(|loaded| loaded.map(|loaded| loaded.state))
+            .expect("load the forked child's state")
+            .expect("the forked child has state");
     let parent_node_id = state.session_graph.leaf_node_id.clone();
     state
         .session_graph

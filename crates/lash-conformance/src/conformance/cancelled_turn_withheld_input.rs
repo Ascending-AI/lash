@@ -60,7 +60,9 @@ struct StopAfterTerminalClaim {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 

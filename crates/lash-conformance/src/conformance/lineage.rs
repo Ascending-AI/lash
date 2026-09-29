@@ -2,10 +2,14 @@ use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
+use super::helpers::node_readable;
+use crate::store::{HistoryAnchor, HistoryBudget, SessionStore, WindowSelector};
 use crate::{
-    DeploymentStore, ForkSessionRequest, RuntimeCommit, RuntimeSessionState, RuntimeStore,
-    SessionRelation, SessionStoreCreateRequest, StoreError,
+    DeploymentStore, ForkSessionRequest, RuntimeCommit, RuntimeSessionState, SessionRelation,
+    SessionStoreCreateRequest, StoreError,
 };
+
+use super::DeploymentViewExt as _;
 
 pub use lash_core::testing::lineage::*;
 
@@ -36,7 +40,7 @@ async fn assert_plan_matches_edge_walk(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn assert_readability_equals_edge_reachability(
-    store: &Arc<dyn RuntimeStore>,
+    store: &SessionStore,
     injector: &Arc<dyn LineageConformanceInjector>,
     session_id: &SessionId,
 ) {
@@ -59,16 +63,32 @@ async fn assert_readability_equals_edge_reachability(
             fact.node_id
         );
         assert_eq!(
-            store
-                .load_node(&fact.node_id)
+            node_readable(store, &fact.node_id)
                 .await
-                .expect("load node while checking lineage equivalence")
-                .is_some(),
+                .expect("page one node while checking lineage equivalence"),
             edge_ids.contains(fact.node_id.as_str()),
-            "load_node readability iff edge-reachable for node `{}`",
+            "one-node page readability iff edge-reachable for node `{}`",
             fact.node_id
         );
     }
+}
+
+/// The node ids of the view's current window, oldest first.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn window_node_ids(store: &SessionStore) -> Vec<lash_core::NodeId> {
+    store
+        .load_session_window(WindowSelector::Current)
+        .await
+        .expect("load the lineage window")
+        .expect("the lineage session has a head")
+        .window
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect()
 }
 
 fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
@@ -89,11 +109,11 @@ async fn seed(
     factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     plugins: usize,
-) -> (Arc<dyn RuntimeStore>, Vec<lash_core::NodeId>) {
+) -> (SessionStore, Vec<lash_core::NodeId>) {
     let store = factory
-        .create_store(&request(session_id))
+        .admit_view(&request(session_id))
         .await
-        .expect("create lineage conformance store");
+        .expect("admit lineage conformance session");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -109,19 +129,8 @@ async fn seed(
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("seed lineage conformance graph");
-    let read = store
-        .load_session()
-        .await
-        .expect("load seeded lineage graph")
-        .expect("seeded lineage graph exists");
-    (
-        store,
-        read.graph
-            .nodes
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect(),
-    )
+    let nodes = window_node_ids(&store).await;
+    (store, nodes)
 }
 
 #[expect(
@@ -132,9 +141,9 @@ async fn fork(
     factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     node_id: &str,
-) -> Arc<dyn RuntimeStore> {
+) -> SessionStore {
     factory
-        .fork_at(&ForkSessionRequest {
+        .fork_session(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             node_id: node_id.to_string().into(),
@@ -144,9 +153,9 @@ async fn fork(
         .await
         .expect("create lineage conformance fork");
     factory
-        .open_existing_store(&request(session_id))
+        .live_view(session_id)
         .await
-        .expect("open lineage conformance fork")
+        .expect("look up lineage conformance fork")
         .expect("lineage conformance fork exists")
 }
 
@@ -154,9 +163,10 @@ async fn fork(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn append(store: &Arc<dyn RuntimeStore>, count: usize) -> Vec<lash_core::NodeId> {
-    let mut state = crate::store::load_persisted_session_state(store.as_ref())
+async fn append(store: &SessionStore, count: usize) -> Vec<lash_core::NodeId> {
+    let mut state = crate::store::load_session_window_state(store, WindowSelector::Current)
         .await
+        .map(|loaded| loaded.map(|loaded| loaded.state))
         .expect("load lineage append state")
         .expect("lineage append state exists");
     for ordinal in 0..count {
@@ -169,16 +179,7 @@ async fn append(store: &Arc<dyn RuntimeStore>, count: usize) -> Vec<lash_core::N
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("commit lineage append");
-    store
-        .load_session()
-        .await
-        .expect("load appended lineage graph")
-        .expect("appended lineage graph exists")
-        .graph
-        .nodes
-        .iter()
-        .map(|node| node.node_id.clone())
-        .collect()
+    window_node_ids(store).await
 }
 
 #[expect(
@@ -200,35 +201,27 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     let deep = fork(&factory, &SessionId::from("lineage-c"), &leaf).await;
 
     assert!(
-        deep.load_node(&source_nodes[0])
+        node_readable(&deep, &source_nodes[0])
             .await
             .expect("read A0")
-            .is_some()
     );
     assert!(
-        deep.load_node(&source_nodes[1])
+        node_readable(&deep, &source_nodes[1])
             .await
             .expect("read A1")
-            .is_some()
     );
     assert!(
-        deep.load_node(&source_nodes[2])
+        !node_readable(&deep, &source_nodes[2])
             .await
             .expect("deny A2")
-            .is_none()
     );
-    assert!(
-        deep.load_node(&leaf)
-            .await
-            .expect("read B ceiling")
-            .is_some()
-    );
+    assert!(node_readable(&deep, &leaf).await.expect("read B ceiling"));
     let deep_graph = deep
-        .load_session()
+        .load_session_window(WindowSelector::Current)
         .await
-        .expect("load distinct-ceiling graph")
+        .expect("load distinct-ceiling window")
         .expect("distinct-ceiling session exists")
-        .graph;
+        .window;
     let expected_deep_nodes = [
         source_nodes[0].as_str(),
         source_nodes[1].as_str(),
@@ -247,35 +240,32 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
 
     let source_after = append(&source, 1).await;
     assert!(
-        deep.load_node(source_after.last().expect("source post-fork node"))
+        !node_readable(&deep, source_after.last().expect("source post-fork node"))
             .await
             .expect("deny source append after fork")
-            .is_none()
     );
     let branch_after = append(&branch, 1).await;
     assert!(
-        deep.load_node(branch_after.last().expect("branch post-fork node"))
+        !node_readable(&deep, branch_after.last().expect("branch post-fork node"))
             .await
             .expect("deny branch append after deep fork")
-            .is_none()
     );
 
     let (_unrelated, unrelated_nodes) =
         seed(&factory, &SessionId::from("lineage-unrelated"), 0).await;
     assert!(
-        deep.load_node(&unrelated_nodes[0])
+        !node_readable(&deep, &unrelated_nodes[0])
             .await
             .expect("deny unrelated node")
-            .is_none()
     );
 
     let zero = fork(&factory, &SessionId::from("lineage-zero"), &source_nodes[1]).await;
     let zero_leaf = zero
-        .load_session()
+        .load_session_window(WindowSelector::Current)
         .await
         .expect("load zero-node fork")
         .expect("zero-node fork exists")
-        .graph
+        .window
         .leaf_node_id
         .clone()
         .expect("zero-node fork leaf");
@@ -302,16 +292,14 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
             .clone();
     }
     let terminal = factory
-        .open_existing_store(&request(&SessionId::from("lineage-chain-11")))
+        .live_view(&SessionId::from("lineage-chain-11"))
         .await
-        .expect("open terminal fork chain")
+        .expect("look up terminal fork chain")
         .expect("terminal fork chain exists");
     assert!(
-        terminal
-            .load_node(&source_nodes[0])
+        node_readable(&terminal, &source_nodes[0])
             .await
             .expect("read through deep fork chain")
-            .is_some()
     );
 
     for session_id in ["lineage-a", "lineage-b", "lineage-c"] {
@@ -337,10 +325,9 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         .force_lineage(&SessionId::from("lineage-c"), &unrelated_nodes[0])
         .await;
     assert!(
-        deep.load_node(&unrelated_nodes[0])
+        !node_readable(&deep, &unrelated_nodes[0])
             .await
-            .expect("false lineage accelerator is not authority")
-            .is_none(),
+            .expect("false lineage accelerator is not authority"),
         "lineage-readable must imply edge-reachable"
     );
 
@@ -383,11 +370,11 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
     )
     .await;
     let recovered_graph = recovered
-        .load_session()
+        .load_session_window(WindowSelector::Current)
         .await
         .expect("load fork after owner deletion")
         .expect("fork after owner deletion exists")
-        .graph;
+        .window;
     assert_eq!(
         recovered_graph
             .nodes
@@ -398,12 +385,23 @@ pub async fn fork_lineage_conformance(handles: LineageConformanceHandles) {
         "a surviving lineage carrier must preserve ancestors whose owner session was deleted"
     );
 
+    // A page walks the pinned leaf's ancestry and checks every parent edge,
+    // so a retired row in the middle of it is a gap (ADR 0112 §6).
     injector.tombstone_node(&source_nodes[1]).await;
     let corruption = deep
-        .load_node(&source_nodes[0])
+        .load_ancestors(
+            HistoryAnchor::Head,
+            HistoryBudget {
+                max_nodes: std::num::NonZeroU32::MAX,
+                max_bytes: std::num::NonZeroU64::MAX,
+            },
+        )
         .await
         .expect_err("an intermediate tombstone must be corruption");
-    assert!(matches!(corruption, StoreError::StoredDataCorrupt { .. }));
+    assert!(
+        matches!(corruption, StoreError::StoredDataCorrupt { .. }),
+        "an intermediate tombstone is a gap in the ancestry: {corruption:?}"
+    );
 }
 
 /// Pin a non-root-owned node, delete its owner with no descendant carrier, and
@@ -440,11 +438,11 @@ pub async fn fork_lineage_no_carrier_law(handles: LineageConformanceHandles) {
     )
     .await;
     let graph = recovered
-        .load_session()
+        .load_session_window(WindowSelector::Current)
         .await
         .expect("load no-carrier fork")
         .expect("no-carrier fork exists")
-        .graph;
+        .window;
     assert_eq!(
         graph
             .nodes

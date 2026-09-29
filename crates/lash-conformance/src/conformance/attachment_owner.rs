@@ -42,14 +42,14 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     let request = session_request(&SessionId::from(SESSION_ID));
     let store_a = backend
         .session_store_factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create attachment owner session store");
     let facade_a = Arc::new(crate::SessionAttachmentStore::new_with_clock(
         Arc::clone(&backend.attachment_store),
         Arc::new(
             lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
-                &store_a,
+                store_a.store(),
             )),
         ),
         SESSION_ID,
@@ -136,7 +136,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
 
     let store_b = backend
         .session_store_factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen owner store")
         .expect("owner store exists");
@@ -165,13 +165,14 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     assert_typed_outcome(&replay_typed, &typed_id);
 
     let stamped_commit = final_turn_commit(
-        &store_b,
+        store_b.store(),
         &SessionId::from(SESSION_ID),
         &TurnId::from(TURN_ID),
         vec![typed_id.clone()],
     )
     .await;
-    let first_result = commit_with_lease(&store_b, stamped_commit.clone(), "first-commit").await;
+    let first_result =
+        commit_with_lease(store_b.store(), stamped_commit.clone(), "first-commit").await;
     let duplicate = store_b
         .commit_runtime_state(stamped_commit)
         .await
@@ -179,6 +180,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
     assert_eq!(duplicate.head_revision, first_result.head_revision);
     assert!(
         store_b
+            .store()
             .list_uncommitted(u64::MAX)
             .await
             .expect("list committed owner rows")
@@ -202,7 +204,7 @@ pub async fn attachment_owner_cold_replay(mut backend: AttachmentOwnerColdReplay
         Arc::clone(&backend.attachment_store),
         Arc::new(
             lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
-                &store_b,
+                store_b.store(),
             )),
         ),
         SESSION_ID,
@@ -365,13 +367,15 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
     let request = session_request(&SessionId::from(SESSION_ID));
     let store = backend
         .session_store_factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create superseded session");
     let facade = Arc::new(crate::SessionAttachmentStore::new_with_clock(
         Arc::clone(&backend.attachment_store),
         Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(&store)),
+            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                store.store(),
+            )),
         ),
         SESSION_ID,
         Arc::clone(&backend.clock),
@@ -386,9 +390,9 @@ async fn superseded_turn_leg(backend: &AttachmentOwnerColdReplayBackend) {
         .expect("put superseded attachment");
     (backend.advance_clock)(1_000);
     commit_with_lease(
-        &store,
+        store.store(),
         final_turn_commit(
-            &store,
+            store.store(),
             &SessionId::from(SESSION_ID),
             &TurnId::from("later-turn"),
             Vec::new(),
@@ -436,13 +440,15 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
         .expect("register process attachment owner");
     let store = backend
         .session_store_factory
-        .create_store(&session_request(&SessionId::from(SESSION_ID)))
+        .admit_view(&session_request(&SessionId::from(SESSION_ID)))
         .await
         .expect("create process attachment store");
     let facade = Arc::new(crate::SessionAttachmentStore::new_with_clock(
         Arc::clone(&backend.attachment_store),
         Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(&store)),
+            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                store.store(),
+            )),
         ),
         SESSION_ID,
         Arc::clone(&backend.clock),
@@ -541,7 +547,7 @@ async fn final_turn_commit(
     adopted_attachment_ids: Vec<crate::AttachmentId>,
 ) -> crate::RuntimeCommit {
     store
-        .load_session_meta()
+        .load_session_meta(session_id)
         .await
         .expect("load commit session metadata")
         .expect("commit session metadata exists");
@@ -645,13 +651,13 @@ pub async fn attachment_owner_degraded_proof(
     use crate::store::MaintenanceReport;
     assert!(!factory.can_prove_process_owner_death());
     let request = session_request(&SessionId::from("degraded-process-owner"));
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let reference = backend
         .put(b"degraded-proof".to_vec(), attachment_meta("degraded"))
         .await
         .expect("put blob");
     crate::conformance::helpers::record_completed_attachment_write(
-        &store,
+        store.store(),
         crate::AttachmentIntent {
             attachment_id: reference.id.clone(),
             session_id: request.session_id,

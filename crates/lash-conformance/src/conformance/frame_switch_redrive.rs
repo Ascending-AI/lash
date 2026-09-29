@@ -116,7 +116,10 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
                     .chain([parts.tool])
                     .collect(),
             )
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .build(),
     )
     .await
@@ -222,7 +225,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         .await
         .expect("accept the root's input");
     let before = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the session head")
         .map_or(0, |head| head.head_revision);
@@ -282,7 +285,7 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
         "the switch tool ran once and its result is read back"
     );
     let committed = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the committed head")
         .expect("the root committed");

@@ -105,19 +105,19 @@ impl crate::EffectEngine for HostOverStores {
     }
 }
 
-/// A fresh root session store on `stores`' session catalog: where a law's
-/// runtime commits, on the substrate under test.
+/// `stores`' session catalog with `session_id` admitted as a fresh root:
+/// where a law's runtime commits, on the substrate under test.
 #[expect(
     clippy::expect_used,
-    reason = "conformance-law fixture: a fresh catalog creates a fresh session"
+    reason = "conformance-law fixture: a fresh catalog admits a fresh session"
 )]
 pub(crate) async fn law_session_store(
     stores: &dyn crate::StoreSet,
     session_id: &crate::SessionId,
 ) -> Arc<dyn crate::RuntimeStore> {
-    stores
-        .session_store_factory()
-        .create_store(&crate::SessionStoreCreateRequest {
+    let deployment = stores.session_store_factory();
+    deployment
+        .admit_session(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
@@ -125,7 +125,8 @@ pub(crate) async fn law_session_store(
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         })
         .await
-        .expect("create the law's session store on the backend under test")
+        .expect("admit the law's session on the backend under test");
+    deployment
 }
 
 /// A backend over `stores` whose effects journal on `effect_host`, for an

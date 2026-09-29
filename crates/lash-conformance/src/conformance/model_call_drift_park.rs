@@ -90,7 +90,10 @@ async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::
                     }))
                     .collect(),
             )
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )

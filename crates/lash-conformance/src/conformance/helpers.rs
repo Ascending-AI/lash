@@ -114,9 +114,173 @@ pub struct ReopenableTriggerStore {
 /// resident leaf. Pair with [`commit_conformance_state`] to advance a session's
 /// durable head from outside any runtime.
 pub(crate) use lash_core::testing::store_fixtures::{
-    append_conformance_event_node, bind_conformance_session, commit_conformance_state,
+    admit_conformance_session, append_conformance_event_node, commit_conformance_state,
     durable_turn_address, durable_turn_scope,
 };
+
+/// `session_id`'s view of `store` (ADR 0112 §3): what a law's runtime is
+/// built over, and how a law reads one session's state.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: every law names a valid session id"
+)]
+pub(crate) fn session_view(
+    store: &Arc<dyn RuntimeStore>,
+    session_id: impl Into<crate::SessionId>,
+) -> crate::store::SessionStore {
+    crate::store::SessionStore::new(Arc::clone(store), session_id.into())
+        .expect("conformance session ids are valid")
+}
+
+/// The live head's window of `session_id`: its current frame, the read every
+/// runtime load adopts (ADR 0112 §5).
+pub(crate) async fn load_current_window(
+    store: &dyn RuntimeStore,
+    session_id: &crate::SessionId,
+) -> Result<Option<crate::store::SessionWindowRead>, crate::StoreError> {
+    store
+        .load_session_window(session_id, crate::store::WindowSelector::Current)
+        .await
+}
+
+/// A runtime store a law holds either behind an `Arc` or borrowed.
+pub(crate) trait AsRuntimeStore: Send + Sync {
+    fn runtime_store(&self) -> &dyn RuntimeStore;
+}
+
+impl AsRuntimeStore for Arc<dyn RuntimeStore> {
+    fn runtime_store(&self) -> &dyn RuntimeStore {
+        self.as_ref()
+    }
+}
+
+impl<'a> AsRuntimeStore for dyn RuntimeStore + 'a {
+    fn runtime_store(&self) -> &dyn RuntimeStore {
+        self
+    }
+}
+
+/// `session_id`'s current frame adopted as runtime state, the load every
+/// runtime open performs (ADR 0112 §9): the state-version check, a `Current`
+/// window read, and adoption. `Ok(None)` means no head row.
+pub(crate) async fn load_window_state(
+    store: &(impl AsRuntimeStore + ?Sized),
+    session_id: &crate::SessionId,
+) -> Result<Option<crate::RuntimeSessionState>, crate::StoreError> {
+    let store = store.runtime_store();
+    store.read_session_state_version(session_id).await?;
+    let Some(read) = load_current_window(store, session_id).await? else {
+        return Ok(None);
+    };
+    if read.session_id != *session_id {
+        return Err(crate::StoreError::StoredDataCorrupt {
+            record_kind: "SessionWindowRead",
+            message: format!(
+                "a window read for session `{session_id}` names session `{}`",
+                read.session_id
+            ),
+        });
+    }
+    crate::store::window_state(read, store.fleet_format()).map(|loaded| Some(loaded.state))
+}
+
+/// Every stored usage row of `session_id`, in `seq` order, paged through
+/// [`SessionHistoryStore::load_usage_ledger_page`](crate::store::SessionHistoryStore::load_usage_ledger_page).
+pub(crate) async fn load_usage_ledger(
+    store: &dyn RuntimeStore,
+    session_id: &crate::SessionId,
+) -> Result<Vec<crate::TokenLedgerEntry>, crate::StoreError> {
+    const PAGE: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(63);
+    let mut entries = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store
+            .load_usage_ledger_page(session_id, after.as_ref(), PAGE)
+            .await?;
+        entries.extend(page.rows.into_iter().map(|row| row.entry));
+        match page.next {
+            Some(next) => after = Some(next),
+            None => return Ok(entries),
+        }
+    }
+}
+
+/// Every failure settlement of `session_id`, in `(committed_at_ms, turn_id)`
+/// order, paged through
+/// [`SessionHistoryStore::load_failure_evidence_page`](crate::store::SessionHistoryStore::load_failure_evidence_page).
+pub(crate) async fn load_failure_evidence(
+    store: &dyn RuntimeStore,
+    session_id: &crate::SessionId,
+) -> Result<Vec<crate::TurnFailureSettlement>, crate::StoreError> {
+    const PAGE: std::num::NonZeroU32 = std::num::NonZeroU32::MIN.saturating_add(15);
+    let mut settlements = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store
+            .load_failure_evidence_page(session_id, after.as_ref(), PAGE)
+            .await?;
+        settlements.extend(page.settlements);
+        match page.next {
+            Some(next) => after = Some(next),
+            None => return Ok(settlements),
+        }
+    }
+}
+
+/// Whether a view whose session may have been deleted still reads
+/// `node_id`. Every history read of a deleted session answers
+/// [`crate::StoreError::SessionDeleted`] (ADR 0112 §6), which reads nothing.
+pub(crate) async fn node_readable_through_deleted(
+    store: &crate::store::SessionStore,
+    node_id: &str,
+) -> Result<bool, crate::StoreError> {
+    match node_readable(store, node_id).await {
+        Err(crate::StoreError::SessionDeleted { .. }) => Ok(false),
+        other => other,
+    }
+}
+
+/// One stored node of `session_id`: the one-node page that replaces
+/// `load_node` (ADR 0112 §6). A node the session cannot read is the typed
+/// [`crate::StoreError::HistoryAnchorUnavailable`], never `Ok(None)`.
+pub(crate) async fn load_one_node(
+    store: &dyn RuntimeStore,
+    session_id: &crate::SessionId,
+    node_id: &str,
+) -> Result<crate::SessionNodeRecord, crate::StoreError> {
+    let page = store
+        .load_ancestors(
+            session_id,
+            crate::store::HistoryAnchor::Node(crate::NodeId::from(node_id)),
+            crate::store::HistoryBudget {
+                max_nodes: std::num::NonZeroU32::MIN,
+                max_bytes: std::num::NonZeroU64::MAX,
+            },
+        )
+        .await?;
+    let mut nodes = page.nodes.into_iter();
+    match (nodes.next(), nodes.next()) {
+        (Some(node), None) if node.record.node_id.as_str() == node_id => Ok(node.record),
+        (first, _) => Err(crate::StoreError::Backend(format!(
+            "a one-node page anchored at `{node_id}` returned {:?}",
+            first.map(|node| node.record.node_id)
+        ))),
+    }
+}
+
+/// Whether the view's session can read `node_id`: a one-node page anchored at
+/// it (ADR 0112 §6). An unreadable node is the typed
+/// [`crate::StoreError::HistoryAnchorUnavailable`]; any other error is returned.
+pub(crate) async fn node_readable(
+    store: &crate::store::SessionStore,
+    node_id: &str,
+) -> Result<bool, crate::StoreError> {
+    match load_one_node(store.store().as_ref(), store.session_id(), node_id).await {
+        Ok(_) => Ok(true),
+        Err(crate::StoreError::HistoryAnchorUnavailable { .. }) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
 
 /// Queued turn work carrying `text`: one process wake of `process` at
 /// `sequence`. A process wake is the one turn-work payload; a frame handoff is

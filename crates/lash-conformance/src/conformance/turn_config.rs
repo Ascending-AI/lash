@@ -49,7 +49,10 @@ async fn build_runtime(parts: ConfigParts) -> crate::LashRuntime {
                     .chain(parts.tools)
                     .collect(),
             )
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
@@ -262,7 +265,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_ep
     command_second_model(&runner, &parts).await;
     runner.run_turn(admitted, redrive).await;
     let committed = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the head after the model change")
         .expect("root A's commit and the model change are durable");
@@ -296,7 +299,7 @@ pub async fn a_committed_root_redriven_after_a_model_change_refuses_its_stale_ep
         "the stale redrive does not park as a replay divergence"
     );
     let head = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the head after the redrive")
         .expect("the head is durable");
@@ -506,7 +509,7 @@ pub async fn an_input_sent_after_a_config_command_runs_on_the_new_model(
     );
     let head = parts
         .store
-        .load_session_head_meta()
+        .load_session_head_meta(&parts.session_id)
         .await
         .expect("read the head")
         .expect("the session committed");
@@ -703,7 +706,7 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
     assert!(
         !served
             .store
-            .committed_turn_exists(&root)
+            .committed_turn_exists(&served.session_id, &root)
             .await
             .expect("read the root's commit"),
         "the aborted root recorded no outcome"
@@ -730,7 +733,7 @@ pub async fn an_unbindable_route_retries_and_never_fails_the_turn(
     assert!(
         served
             .store
-            .committed_turn_exists(&root)
+            .committed_turn_exists(&served.session_id, &root)
             .await
             .expect("read the root's commit"),
         "the redrive committed the root"
@@ -907,7 +910,7 @@ pub async fn a_route_refused_at_apply_leaves_the_route_unchanged(
         "the refused command settles and is not retried: {settled:?}"
     );
     let head = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the head")
         .expect("the drain committed the session's head");

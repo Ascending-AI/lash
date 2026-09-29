@@ -11,230 +11,90 @@ pub async fn reopen_mint_identity(probe: ReopenableRuntimePersistence) {
     .await;
 }
 
-pub(super) fn assert_two_session_resolution_errors(
-    full: StoreError,
-    head: StoreError,
-    expected: &str,
-) {
-    match (full, head) {
-        (
-            StoreError::SessionResolutionAmbiguous {
-                session_count: full_count,
-            },
-            StoreError::SessionResolutionAmbiguous {
-                session_count: head_count,
-            },
-        ) => {
-            assert_eq!(
-                full_count, 2,
-                "{expected}: full read session candidate count: expected 2, got {full_count}"
-            );
-            assert_eq!(
-                head_count, 2,
-                "{expected}: head read session candidate count: expected 2, got {head_count}"
-            );
-        }
-        (full, head) => panic!(
-            "{expected}: full and head reads returned different typed errors: full={full:?}, head={head:?}"
-        ),
-    }
-}
-
-/// Whether a session candidate has only been durably admitted or also has a
-/// committed runtime head.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum UnboundSessionAdmissionState {
-    AdmittedOnly,
-    Committed,
-}
-
-impl UnboundSessionAdmissionState {
-    fn label(self) -> &'static str {
-        match self {
-            Self::AdmittedOnly => "admitted-only",
-            Self::Committed => "committed",
-        }
-    }
-}
-
-/// One isolated durable substrate used by the unbound-session resolution law.
-#[derive(Clone)]
-pub struct UnboundSessionResolutionHandles {
-    pub backend_name: &'static str,
-    pub factory: Arc<dyn crate::DeploymentStore>,
-    pub open_unbound: Arc<dyn Fn() -> Arc<dyn RuntimeStore> + Send + Sync>,
-}
-
-/// Prove that an unbound session-metadata lookup refuses to choose between
-/// multiple durable session candidates.
+/// Every session read names its session (ADR 0112 §1), so a catalog holding
+/// several sessions answers each one's head and window reads for that session
+/// alone, and the two projections agree: across `{absent, admitted-only,
+/// committed}` sessions of one catalog, `load_session_head_meta` and a
+/// `Current` window read agree on presence, id, revision, leaf and checkpoint.
 ///
-/// The backend fixture must contain more than one session before constructing
-/// `load`. SQLite reaches this seam through its unbound store handle;
-/// PostgreSQL exercises the matching backend-support lookup directly because
-/// its runtime-persistence handles are always session-bound.
-pub async fn unbound_session_meta_refuses_ambiguous_resolution(
-    backend_name: &str,
-    load: impl std::future::Future<Output = Result<Option<SessionMeta>, crate::StoreError>>,
-) {
-    assert_eq!(
-        load.await.unwrap_or_else(|error| panic!(
-            "{backend_name}: load unbound session metadata: {error}"
-        )),
-        None,
-        "{backend_name} must refuse to choose one session metadata row when multiple rows match"
-    );
-}
-
-/// Prove that an unbound handle resolves the same session for both shared
-/// session-read projections across the full durable candidate matrix:
-/// `{0, 1, 2} sessions x {admitted-only, committed}`.
-///
-/// `make_axis` must return a fresh, initially empty durable substrate for each
-/// admission state. Every `open_unbound` call must return a newly opened,
-/// unbound handle over that axis's shared substrate. This law is instantiated
-/// by SQLite. Neither the in-memory nor the PostgreSQL backend has a global
-/// unbound multi-session handle — a PostgreSQL session store is constructed
-/// with its session id — so none of these six cells is instantiated there.
-pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFuture>(
-    make_axis: MakeAxis,
-) where
-    MakeAxis: Fn(UnboundSessionAdmissionState) -> MakeAxisFuture,
-    MakeAxisFuture: std::future::Future<Output = UnboundSessionResolutionHandles>,
-{
-    #[derive(Debug, PartialEq, Eq)]
-    enum ReadResolution {
-        Absent,
-        Present,
-        Indeterminate,
-    }
-
-    async fn assert_reads_agree(
-        handles: &UnboundSessionResolutionHandles,
-        expected: &str,
-    ) -> ReadResolution {
-        let head = (handles.open_unbound)().load_session_head_meta().await;
-        let full = (handles.open_unbound)().load_session().await;
-        match (full, head) {
-            (Ok(None), Ok(None)) => ReadResolution::Absent,
-            (Ok(Some(full)), Ok(Some(head))) => {
-                assert_eq!(head.session_id, full.session_id, "{expected}: session id");
+/// This replaces the unbound-handle resolution laws: a store no longer infers
+/// a sole session, so there is no ambiguity to refuse.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn head_and_window_reads_agree_for_each_named_session(store: Arc<dyn RuntimeStore>) {
+    async fn assert_reads_agree(store: &dyn RuntimeStore, session_id: &SessionId) -> Option<u64> {
+        let head = store
+            .load_session_head_meta(session_id)
+            .await
+            .expect("read the named head");
+        let window = store
+            .load_session_window(session_id, crate::store::WindowSelector::Current)
+            .await
+            .expect("read the named window");
+        match (window, head) {
+            (None, None) => None,
+            (Some(window), Some(head)) => {
                 assert_eq!(
-                    head.head_revision, full.head_revision,
-                    "{expected}: head revision"
+                    head.session_id, *session_id,
+                    "{session_id}: head session id"
                 );
                 assert_eq!(
-                    head.leaf_node_id, full.graph.leaf_node_id,
-                    "{expected}: leaf node id"
+                    window.session_id, *session_id,
+                    "{session_id}: window session id"
                 );
                 assert_eq!(
-                    head.checkpoint_ref, full.checkpoint_ref,
-                    "{expected}: checkpoint reference"
+                    head.head_revision, window.head_revision,
+                    "{session_id}: head revision"
                 );
-                ReadResolution::Present
+                assert_eq!(
+                    head.leaf_node_id, window.window.leaf_node_id,
+                    "{session_id}: leaf node id"
+                );
+                assert_eq!(
+                    head.checkpoint_ref, window.checkpoint_ref,
+                    "{session_id}: checkpoint reference"
+                );
+                Some(head.head_revision)
             }
-            (Err(full), Err(head)) => {
-                assert_two_session_resolution_errors(full, head, expected);
-                ReadResolution::Indeterminate
-            }
-            (full, head) => panic!(
-                "{expected}: full and head reads disagreed about session resolution: full={full:?}, head={head:?}"
+            (window, head) => panic!(
+                "{session_id}: head and window reads disagreed about presence: window={window:?}, head={head:?}"
             ),
         }
     }
 
-    fn request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
-        crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(session_id.to_string()),
-            relation: crate::SessionRelation::Root,
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        }
-    }
+    let committed = SessionId::from("read-agreement");
+    let admitted_only = SessionId::from("read-agreement-admitted-only");
+    let absent = SessionId::from("read-agreement-absent");
+    admit_conformance_session(&store, &admitted_only).await;
+    let state = RuntimeSessionState {
+        session_id: committed.clone(),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    commit_runtime_state_for_test(
+        &store,
+        RuntimeCommit::persisted_state_for_test(&state, &[]),
+        "read-agreement",
+    )
+    .await
+    .expect("commit the named session");
 
-    async fn add_session(
-        handles: &UnboundSessionResolutionHandles,
-        admission_state: UnboundSessionAdmissionState,
-        session_id: &SessionId,
-    ) {
-        let store = handles
-            .factory
-            .create_store(&request(session_id))
-            .await
-            .unwrap_or_else(|error| {
-                panic!(
-                    "{} {admission_state:?}: admit `{session_id}`: {error}",
-                    handles.backend_name
-                )
-            });
-        if admission_state == UnboundSessionAdmissionState::Committed {
-            let state = RuntimeSessionState {
-                session_id: SessionId::from(session_id.to_string()),
-                ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-            };
-            commit_runtime_state_for_test(
-                &store,
-                RuntimeCommit::persisted_state_for_test(&state, &[]),
-                session_id,
-            )
-            .await
-            .unwrap_or_else(|error| {
-                panic!("{}: commit `{session_id}`: {error}", handles.backend_name)
-            });
-        }
-    }
-
-    for admission_state in [
-        UnboundSessionAdmissionState::AdmittedOnly,
-        UnboundSessionAdmissionState::Committed,
-    ] {
-        let handles = make_axis(admission_state).await;
-        let cell = |session_count| {
-            format!(
-                "{} backend, {} sessions, {}",
-                handles.backend_name,
-                session_count,
-                admission_state.label()
-            )
-        };
-
-        assert_eq!(
-            assert_reads_agree(&handles, &cell(0)).await,
-            ReadResolution::Absent,
-            "{} must resolve as absent",
-            cell(0)
-        );
-
-        add_session(
-            &handles,
-            admission_state,
-            &SessionId::from("unbound-resolution-a"),
-        )
-        .await;
-        let one_expected = match admission_state {
-            UnboundSessionAdmissionState::AdmittedOnly => ReadResolution::Absent,
-            UnboundSessionAdmissionState::Committed => ReadResolution::Present,
-        };
-        assert_eq!(
-            assert_reads_agree(&handles, &cell(1)).await,
-            one_expected,
-            "{} must have the expected resolution",
-            cell(1)
-        );
-
-        add_session(
-            &handles,
-            admission_state,
-            &SessionId::from("unbound-resolution-b"),
-        )
-        .await;
-        assert_eq!(
-            assert_reads_agree(&handles, &cell(2)).await,
-            ReadResolution::Indeterminate,
-            "{} must report typed ambiguity",
-            cell(2)
-        );
-    }
+    assert_eq!(
+        assert_reads_agree(store.as_ref(), &committed).await,
+        Some(1),
+        "the committed session reads its own head"
+    );
+    assert_eq!(
+        assert_reads_agree(store.as_ref(), &admitted_only).await,
+        None,
+        "an admitted session with no commit has no head, whatever its neighbours hold"
+    );
+    assert_eq!(
+        assert_reads_agree(store.as_ref(), &absent).await,
+        None,
+        "a session the catalog never held has no head"
+    );
 }
 
 /// A newly minted turn-input identity is store-wide rather than handle-local.
@@ -308,15 +168,18 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
     .expect("commit session prompt layer");
 
     let head = store
-        .load_session_head_meta()
+        .load_session_head_meta(&SessionId::from("session-prompt-layer"))
         .await
         .expect("load session head")
         .expect("committed session head");
     assert_eq!(head.config.prompt, Some(expected_prompt.clone()));
-    let restored = crate::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load persisted session state")
-        .expect("committed session state");
+    let restored = crate::conformance::helpers::load_window_state(
+        &store,
+        &SessionId::from("session-prompt-layer"),
+    )
+    .await
+    .expect("load persisted session state")
+    .expect("committed session state");
     assert_eq!(restored.policy.prompt, expected_prompt);
 }
 
@@ -349,7 +212,7 @@ pub async fn session_protocol_turn_options_round_trip_through_the_committed_head
     .expect("commit session protocol turn options");
 
     let head = store
-        .load_session_head_meta()
+        .load_session_head_meta(&SessionId::from("session-protocol-turn-options"))
         .await
         .expect("load session head")
         .expect("committed session head");
@@ -358,10 +221,13 @@ pub async fn session_protocol_turn_options_round_trip_through_the_committed_head
         Some(expected.clone()),
         "the committed head row must carry the settled protocol turn options"
     );
-    let restored = crate::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load persisted session state")
-        .expect("committed session state");
+    let restored = crate::conformance::helpers::load_window_state(
+        &store,
+        &SessionId::from("session-protocol-turn-options"),
+    )
+    .await
+    .expect("load persisted session state")
+    .expect("committed session state");
     assert_eq!(
         restored.protocol_turn_options, expected,
         "cold load must restore the protocol turn options from the head"
@@ -421,7 +287,10 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     );
 
     let durable = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("execution-state-replace-then-clear"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load replace-then-clear session")
         .expect("replace-then-clear session is durable");
@@ -762,16 +631,11 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
         .commit_runtime_state(same_leaf_commit)
         .await
         .expect("same-leaf commit");
-    assert!(
-        store
-            .load_node(&old_leaf)
-            .await
-            .expect("load old leaf after same-leaf commit")
-            .is_some(),
-        "a same-leaf commit must tombstone nothing"
-    );
+    crate::conformance::helpers::load_one_node(store.as_ref(), &SessionId::from("root"), &old_leaf)
+        .await
+        .expect("a same-leaf commit must tombstone nothing");
 
-    let mut changed_state = loaded_conformance_state(&store).await;
+    let mut changed_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let nodes = vec![crate::SessionAppendNode::plugin(
         "retirement-gate",
         serde_json::json!({"leaf": "replacement"}),
@@ -838,13 +702,16 @@ pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimeStore>) {
     .expect("seed reasoning-only durable usage");
 
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load reasoning-only usage")
         .expect("reasoning-only usage session exists");
-    assert_eq!(read.token_ledger.len(), 1);
-    assert_eq!(read.token_ledger[0].source, usage.source);
-    assert_eq!(read.token_ledger[0].usage, usage.usage);
+    assert_eq!(read.usage.rows.len(), 1);
+    assert_eq!(read.usage.rows[0].source, usage.source);
+    assert_eq!(read.usage.rows[0].usage, usage.usage);
 }
 
 /// FIG-2765: the durable row, not process memory, is what says which calls were
@@ -922,13 +789,18 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     .expect("seed durable usage dispositions");
 
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load usage dispositions")
         .expect("usage disposition session exists");
-    assert_eq!(read.token_ledger.len(), 4, "one row per disposition");
-    let dispositions = read
-        .token_ledger
+    let ledger = crate::conformance::helpers::load_usage_ledger(store.as_ref(), &state.session_id)
+        .await
+        .expect("page the usage ledger");
+    assert_eq!(ledger.len(), 4, "one row per disposition");
+    let dispositions = ledger
         .iter()
         .map(|entry| entry.usage_disposition.clone())
         .collect::<Vec<_>>();
@@ -939,7 +811,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
         );
     }
 
-    let outstanding = crate::runtime::outstanding_unreported_attempts(&read.token_ledger);
+    let outstanding = &read.usage.outstanding;
     let keys = outstanding
         .iter()
         .map(|attempt| (attempt.call_id.as_str(), attempt.attempt_ordinal))
@@ -956,7 +828,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     assert_eq!(outstanding[0].source, "turn");
     assert_eq!(outstanding[0].model, "openrouter/model");
 
-    let report = crate::SessionUsageReport::from_entries(&read.token_ledger);
+    let report = read.usage.report();
     assert_eq!(report.usage.usage.input_tokens, 346);
     assert_eq!(report.usage.unreported_attempts, 1);
     assert_eq!(report.usage.reconciled_attempts, 2);
@@ -1000,7 +872,10 @@ pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimeStore>) {
     .expect("seed distinct durable usage deltas");
 
     let error = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect_err("overflowing usage rows must fail load");
     assert!(matches!(
@@ -1034,7 +909,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     .await
     .expect("seed corrupt checkpoint turn index");
 
-    let error = crate::store::load_persisted_session_state(store.as_ref())
+    let error = crate::conformance::helpers::load_window_state(&store, &SessionId::from("root"))
         .await
         .expect_err("checkpoint turn index without increment headroom must fail restore");
     assert!(matches!(
@@ -1082,7 +957,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     .await
     .expect("seed corrupt checkpoint token usage");
 
-    let error = crate::store::load_persisted_session_state(store.as_ref())
+    let error = crate::conformance::helpers::load_window_state(&store, &SessionId::from("root"))
         .await
         .expect_err("checkpoint usage whose prompt subtotal overflows must fail restore");
     assert!(matches!(
@@ -1120,7 +995,7 @@ pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn Ru
         .await
         .expect("publish first usage identity");
 
-    let mut next_state = loaded_conformance_state(&store).await;
+    let mut next_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     next_state.head_revision = first_result.head_revision;
     let mut republish = RuntimeCommit::persisted_state_for_test(&next_state, &[]);
     republish.usage_deltas = vec![crate::store::RuntimeUsageDelta {
@@ -1136,15 +1011,31 @@ pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn Ru
     );
 
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load idempotent usage")
         .expect("usage session exists");
-    let matching = read
-        .token_ledger
+    let ledger = crate::conformance::helpers::load_usage_ledger(store.as_ref(), &state.session_id)
+        .await
+        .expect("page the usage ledger");
+    let matching = ledger
         .iter()
         .filter(|entry| entry.source == usage.source && entry.model == usage.model)
         .collect::<Vec<_>>();
     assert_eq!(matching.len(), 1);
     assert_eq!(matching[0].usage, usage.usage);
+    let totals = read
+        .usage
+        .rows
+        .iter()
+        .filter(|row| row.source == usage.source && row.model == usage.model)
+        .collect::<Vec<_>>();
+    assert_eq!(totals.len(), 1);
+    assert_eq!(
+        totals[0].usage, usage.usage,
+        "the totals count the delta once"
+    );
 }

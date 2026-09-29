@@ -77,9 +77,9 @@ pub async fn session_tool_access_durable_recovery(
         crate::SessionRelation::Root,
     );
     let open = factory
-        .create_conformance_store(&request)
+        .admit_view(&request)
         .await
-        .expect("create explicit-tool-access store");
+        .expect("admit the explicit-tool-access session");
     let mut state = crate::RuntimeSessionState {
         session_id: session_id.clone(),
         ..crate::RuntimeSessionState::new(request.policy.clone())
@@ -96,14 +96,15 @@ pub async fn session_tool_access_durable_recovery(
     drop(open);
 
     let reopened = factory
-        .open_existing_conformance_store(&request)
+        .live_view(&session_id)
         .await
-        .expect("reopen explicit-tool-access store")
+        .expect("look up the explicit-tool-access session")
         .expect("committed session exists");
-    let loaded = crate::store::load_persisted_session(reopened.as_ref())
-        .await
-        .expect("load restricted-empty authority after reopen")
-        .expect("committed session state");
+    let loaded =
+        crate::store::load_session_window_state(&reopened, crate::store::WindowSelector::Current)
+            .await
+            .expect("load restricted-empty authority after reopen")
+            .expect("committed session state");
     assert_eq!(
         loaded
             .state
@@ -121,12 +122,16 @@ pub async fn session_tool_access_durable_recovery(
     );
 
     let predecessor = crate::store::SESSION_HEAD_META_SCHEMA_VERSION - 1;
-    reopened
-        .rewrite_session_tool_access_for_testing(predecessor, Some(serde_json::json!({})))
+    factory
+        .rewrite_session_tool_access_for_testing(
+            &session_id,
+            predecessor,
+            Some(serde_json::json!({})),
+        )
         .await
         .expect("write predecessor head bytes");
     let error = reopened
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect_err("the predecessor session-head format must refuse");
     assert!(matches!(
@@ -176,15 +181,16 @@ pub async fn session_tool_access_durable_recovery(
         ("duplicate-hidden-name", Some(duplicate_hidden_name)),
     ];
     for (label, access) in invalid {
-        reopened
+        factory
             .rewrite_session_tool_access_for_testing(
+                &session_id,
                 crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
                 access,
             )
             .await
             .unwrap_or_else(|error| panic!("write {label} authority bytes: {error}"));
         let error = reopened
-            .load_session()
+            .load_session_window(crate::store::WindowSelector::Current)
             .await
             .expect_err("invalid authority bytes must refuse");
         let expected_refusal = match &error {

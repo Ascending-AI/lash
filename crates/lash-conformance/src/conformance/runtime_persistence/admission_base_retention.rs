@@ -2,7 +2,7 @@
 //! session's next admission.
 //!
 //! A replay of an admitted turn rebuilds the turn's input state from the head
-//! it was admitted on (`load_session_at`). The turn's own commit supersedes
+//! it was admitted on (an `Admitted` window read). The turn's own commit supersedes
 //! that head, and garbage collection reclaims superseded checkpoints, so the
 //! admission retains its base: collection keeps the base checkpoint while it
 //! is the session's latest admission, and releases it once the next admission
@@ -49,11 +49,12 @@ async fn commit_generation(
 )]
 async fn admitted_on(
     store: &Arc<dyn RuntimeStore>,
+    session_id: &SessionId,
     receipt: &crate::store::RuntimeCommitReceipt,
 ) -> crate::store::SessionHeadRef {
     crate::store::SessionHeadRef {
         generation: store
-            .read_session_state_version()
+            .read_session_state_version(session_id)
             .await
             .expect("read the session-state generation"),
         revision: receipt.head_revision,
@@ -88,7 +89,7 @@ async fn admit_on(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-fn generation_of(read: crate::store::PersistedSessionRead) -> Option<u64> {
+fn generation_of(read: crate::store::SessionWindowRead) -> Option<u64> {
     read.checkpoint
         .and_then(|checkpoint| {
             checkpoint
@@ -110,7 +111,7 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
     let store = factory.open;
     let session_id = SessionId::from("admission-base-retention");
     let first = commit_generation(&store, &session_id, 0, 1, "admission-base-v1").await;
-    let base = admitted_on(&store, &first).await;
+    let base = admitted_on(&store, &session_id, &first).await;
 
     // The turn is admitted on the first head; its commit supersedes it.
     admit_on(&store, &session_id, &base).await;
@@ -133,9 +134,13 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
             .unwrap_or_else(|error| panic!("{sweep} collection: {error}"));
     }
     let replayed = store
-        .load_session_at(&base)
+        .load_session_window(
+            &session_id,
+            crate::store::WindowSelector::Admitted(base.clone()),
+        )
         .await
-        .expect("the admitted turn's base survives collection");
+        .expect("the admitted turn's base survives collection")
+        .expect("an admitted read always answers a window");
     assert_eq!(replayed.head_revision, first.head_revision);
     assert_eq!(replayed.checkpoint_ref, Some(first.checkpoint_ref.clone()));
     assert_eq!(
@@ -146,7 +151,10 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
     assert_eq!(
         generation_of(
             store
-                .load_session()
+                .load_session_window(
+                    &SessionId::from("admission-base-retention"),
+                    crate::store::WindowSelector::Current
+                )
                 .await
                 .expect("load the live head")
                 .expect("the session exists")
@@ -157,7 +165,7 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
 
     // The next turn is admitted on the second head: the first base is
     // released, and collection reclaims it.
-    let next_base = admitted_on(&store, &second).await;
+    let next_base = admitted_on(&store, &session_id, &second).await;
     admit_on(&store, &session_id, &next_base).await;
     let report = store
         .gc_unreachable()
@@ -168,7 +176,10 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
         "the released base is reclaimed: {report:?}"
     );
     let error = store
-        .load_session_at(&base)
+        .load_session_window(
+            &session_id,
+            crate::store::WindowSelector::Admitted(base.clone()),
+        )
         .await
         .expect_err("a released base is no longer retained");
     assert!(
@@ -178,9 +189,13 @@ pub async fn an_admission_base_survives_collection_until_the_next_admission(
     assert_eq!(
         generation_of(
             store
-                .load_session_at(&next_base)
+                .load_session_window(
+                    &session_id,
+                    crate::store::WindowSelector::Admitted(next_base.clone()),
+                )
                 .await
                 .expect("the next admission's base is retained")
+                .expect("an admitted read always answers a window")
         ),
         Some(2)
     );

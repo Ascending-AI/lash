@@ -21,7 +21,9 @@ struct CountingAcceptanceStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for CountingAcceptanceStore {
-    fn inner(&self) -> &(dyn RuntimeStore + '_) {
+    type Inner = dyn RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -160,7 +162,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
         .await;
 
     let reader = make(scenario);
-    super::super::bind_conformance_session(&reader, &identity.session_id).await;
+    super::super::admit_conformance_session(&reader, &identity.session_id).await;
     let admitted = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -229,7 +231,6 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
     let copies = turn
         .state
         .read_view()
-        .expect("the redriven turn's frame scope resolves")
         .messages()
         .iter()
         .filter(|message| {

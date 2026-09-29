@@ -81,11 +81,6 @@ pub use checkpoint_admissions::{
     complete_runtime_checkpoint_component_set_survives_cold_reopens, queued_process_wake_draft,
 };
 
-pub use suite_and_receipts::{
-    UnboundSessionAdmissionState, UnboundSessionResolutionHandles,
-    unbound_session_meta_refuses_ambiguous_resolution,
-    unbound_session_reads_resolve_the_same_session,
-};
 pub use turn_inputs_and_reopen::{
     a_checkpoint_admission_rerun_returns_its_own_rows,
     a_turn_that_cannot_commit_leaves_no_input_pinned_to_it,

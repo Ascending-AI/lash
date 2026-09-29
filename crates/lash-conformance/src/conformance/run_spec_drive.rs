@@ -200,7 +200,7 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
 async fn head_config(parts: &DriveParts) -> crate::PersistedSessionConfig {
     parts
         .store
-        .load_session_head_meta()
+        .load_session_head_meta(&parts.session_id)
         .await
         .expect("read the head")
         .expect("the session committed")
@@ -550,7 +550,7 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
         assert!(
             !parts
                 .store
-                .committed_turn_exists(&TurnId::from("missing-root"))
+                .committed_turn_exists(&parts.session_id, &TurnId::from("missing-root"))
                 .await
                 .expect("read the root's commit"),
             "the refused attempt recorded no outcome"
@@ -889,7 +889,10 @@ async fn runtime_with_switch(
                     .chain([tool])
                     .collect(),
             )
-            .with_store(Arc::clone(&parts.store))
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
@@ -1036,7 +1039,7 @@ pub async fn a_recovered_follow_on_inherits_its_roots_recorded_run(
     );
     let committed = parts
         .store
-        .load_session_head_meta()
+        .load_session_head_meta(&parts.session_id)
         .await
         .expect("read the committed head")
         .expect("the root committed");

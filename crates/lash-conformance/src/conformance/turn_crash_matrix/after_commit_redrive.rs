@@ -158,19 +158,19 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
     );
 
     let reader = make(scenario);
-    super::super::bind_conformance_session(&reader, &identity.session_id).await;
-    let committed = crate::load_persisted_session_state(reader.as_ref())
+    super::super::admit_conformance_session(&reader, &identity.session_id).await;
+    let committed = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read the committed head")
         .expect("the final commit is durable before the crash");
     let committed_head = reader
-        .load_session_head_meta()
+        .load_session_head_meta(&identity.session_id)
         .await
         .expect("read the committed head meta")
         .expect("the committed head has meta");
     assert!(
         reader
-            .committed_turn_exists(&identity.turn_id)
+            .committed_turn_exists(&identity.session_id, &identity.turn_id)
             .await
             .expect("read the root's commit receipt"),
         "{scenario}: the root's final commit is durable before the crash"
@@ -224,7 +224,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
         "{scenario}: the redrive asks the model nothing and runs no tool: {redriven:?}"
     );
     let head = reader
-        .load_session_head_meta()
+        .load_session_head_meta(&identity.session_id)
         .await
         .expect("read the head after the redrive")
         .expect("the head survives the redrive");
@@ -232,7 +232,7 @@ async fn run_after_commit_redrive(law: &MatrixLaw<'_>, scenario: &str, point: &T
         head.head_revision, committed_head.head_revision,
         "{scenario}: the redrive leaves the committed head unchanged"
     );
-    let state = crate::load_persisted_session_state(reader.as_ref())
+    let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read the state after the redrive")
         .expect("the state survives the redrive");

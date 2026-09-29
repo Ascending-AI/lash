@@ -82,7 +82,7 @@ async fn seed_and_admit(
     source: &str,
     lease_ttl_ms: u64,
 ) -> (crate::store::DriveFence, lash_core::store::RootAdmission) {
-    bind_conformance_session(store, session_id).await;
+    admit_conformance_session(store, session_id).await;
     let batch = store
         .enqueue_queued_work(queued_work(session_id, source))
         .await
@@ -136,7 +136,7 @@ where
     tokio::time::timeout(RECOVERY_ACQUIRE_DEADLINE, async {
         loop {
             let store = make(session_id);
-            bind_conformance_session(&store, session_id).await;
+            admit_conformance_session(&store, session_id).await;
             let acquired = store
                 .seal_drive_epoch_for_test(
                     session_id,
@@ -217,7 +217,7 @@ async fn assert_no_second_root(
 )]
 async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, session_id: &SessionId) {
     let reader = make(session_id);
-    bind_conformance_session(&reader, session_id).await;
+    admit_conformance_session(&reader, session_id).await;
     assert!(
         reader
             .list_queued_work(session_id)
@@ -254,11 +254,12 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     drop(writer);
 
     let cold_reader = make(&session_id);
-    bind_conformance_session(&cold_reader, &session_id).await;
-    let mut recovered_state = crate::load_persisted_session_state(cold_reader.as_ref())
-        .await
-        .expect("load the explicitly bound checkpoint session")
-        .expect("checkpoint survives a fresh handle");
+    admit_conformance_session(&cold_reader, &session_id).await;
+    let mut recovered_state =
+        crate::conformance::helpers::load_window_state(&cold_reader, &session_id)
+            .await
+            .expect("load the explicitly bound checkpoint session")
+            .expect("checkpoint survives a fresh handle");
     assert_eq!(recovered_state.head_revision, 1);
     append_conformance_event_node(
         &mut recovered_state,
@@ -312,7 +313,7 @@ where
     drop(writer);
 
     let reader = make(&session_id);
-    bind_conformance_session(&reader, &session_id).await;
+    admit_conformance_session(&reader, &session_id).await;
     assert!(
         reader
             .list_queued_work(&session_id)
@@ -322,7 +323,7 @@ where
     );
     assert!(
         reader
-            .load_session()
+            .load_session_window(&session_id, crate::store::WindowSelector::Current)
             .await
             .expect("load explicitly bound atomic commit")
             .is_some(),
@@ -370,7 +371,7 @@ where
     drop(writer);
 
     let replay_store = make(&session_id);
-    bind_conformance_session(&replay_store, &session_id).await;
+    admit_conformance_session(&replay_store, &session_id).await;
     let replay = replay_store
         .commit_runtime_state(commit)
         .await

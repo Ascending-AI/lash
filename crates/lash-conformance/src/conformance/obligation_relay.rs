@@ -14,6 +14,7 @@
 //! holder, failover after expiry, preemption by a higher rank only after the
 //! holder's minimum tenure, and resignation.
 
+use crate::conformance::DeploymentViewExt as _;
 use std::collections::BTreeMap;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::sync::{Arc, Mutex};
@@ -147,7 +148,7 @@ async fn armed_session(
     fixture
         .stores
         .session_store_factory()
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),

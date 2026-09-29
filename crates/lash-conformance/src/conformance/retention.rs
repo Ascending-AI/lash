@@ -15,7 +15,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         "retention-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.unwrap();
+    let store = factory.admit_view(&request).await.unwrap();
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),
         ..crate::RuntimeSessionState::new(request.policy.clone())
@@ -59,12 +59,9 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     assert!(replay.receipt_replayed);
     assert_eq!(replay.head_revision, receipt.head_revision);
     assert_eq!(
-        store
-            .load_session()
+        crate::conformance::helpers::load_usage_ledger(store.store().as_ref(), store.session_id())
             .await
             .unwrap()
-            .unwrap()
-            .token_ledger
             .len(),
         1
     );
@@ -75,7 +72,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         "retention-model",
         crate::SessionRelation::Root,
     );
-    let live = factory.create_store(&live_request).await.unwrap();
+    let live = factory.admit_view(&live_request).await.unwrap();
     let mut live_state = crate::RuntimeSessionState {
         session_id: live_request.session_id.clone(),
         ..crate::RuntimeSessionState::new(live_request.policy.clone())
@@ -125,10 +122,7 @@ pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
         crate::RetentionReport::default()
     );
     assert!(
-        factory
-            .session_was_deleted(&request.session_id)
-            .await
-            .unwrap(),
+        factory.is_deleted(&request.session_id).await.unwrap(),
         "FIG-754 / FIG-748: permanent identity evidence survives every bound"
     );
     assert!(

@@ -165,7 +165,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         .map(|read| read.input.input_id)
         .collect::<Vec<_>>();
     let before = reader
-        .load_session_head_meta()
+        .load_session_head_meta(&identity.session_id)
         .await
         .expect("read the head before the root")
         .map_or(0, |head| head.head_revision);
@@ -199,7 +199,7 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
         "the redrive asks the model nothing and runs no tool: {redriven:?}"
     );
     let head = reader
-        .load_session_head_meta()
+        .load_session_head_meta(&identity.session_id)
         .await
         .expect("read the head after the redrive")
         .expect("the root committed");
@@ -300,14 +300,11 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
         .ran()
         .expect("the redrive runs its root");
 
-    let state = crate::load_persisted_session_state(reader.as_ref())
+    let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read the redriven root's state")
         .expect("the redriven root committed");
-    let read_model = state
-        .session_graph
-        .read_model(None)
-        .expect("the committed frame resolves");
+    let read_model = state.session_graph.read_model();
     let parts = read_model
         .messages
         .iter()

@@ -68,7 +68,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     );
 
     let reader = make(scenario);
-    super::super::bind_conformance_session(&reader, &identity.session_id).await;
+    super::super::admit_conformance_session(&reader, &identity.session_id).await;
     let during_crash = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -144,10 +144,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     .expect("the successor redelivers the crashed holder's input")
     .expect("the recovered ingress produces a turn");
     successor_invocation.end();
-    let read_model = recovered
-        .state
-        .read_view()
-        .expect("read view after successor redrive");
+    let read_model = recovered.state.read_view();
     for expected in ["durable next-turn input", "active checkpoint input"] {
         let count = read_model
             .messages()

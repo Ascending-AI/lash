@@ -1,5 +1,6 @@
 //! Process-observer intent settlement conformance.
 
+use crate::conformance::DeploymentViewExt as _;
 use crate::{ProcessObserverRegistry as _, ProcessRegistrar as _};
 use lash_sansio::SessionId;
 
@@ -28,7 +29,7 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
         .id;
 
     let store = factory
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
                 process_id.clone(),
@@ -49,7 +50,7 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
     crate::runtime::reconcile_session_process_observer_intents(
         Some(&registry),
         &SessionId::from(SESSION_ID),
-        crate::runtime::SessionObserverIntentSource::Persisted(store.as_ref()),
+        crate::runtime::SessionObserverIntentSource::Persisted(store.store().as_ref()),
     )
     .await
     .expect("transient registry failure must not fail fork observer settlement");

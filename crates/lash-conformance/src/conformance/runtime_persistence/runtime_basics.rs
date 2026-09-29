@@ -18,11 +18,9 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
     state.ensure_agent_frame_initialized();
-    let assignment = state
-        .current_agent_frame()
-        .expect("initial frame")
-        .assignment
-        .clone();
+    let initial_frame = state.current_agent_frame().expect("initial frame");
+    let assignment = initial_frame.assignment.clone();
+    let initial_frame_node_id = initial_frame.frame_node_id.clone();
     let custom_reason = AgentFrameReason::new("plan_mode");
     let second_frame_key =
         crate::FrameKey::from_caller_material("frame-2").expect("non-empty frame material");
@@ -50,7 +48,10 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
     .await
     .expect("commit runtime state");
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load session")
         .expect("session read");
@@ -59,13 +60,20 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn 
         read.current_frame_node_id.as_deref(),
         Some(second_frame_node_id.as_str())
     );
-    let frames = read.graph.agent_frame_records(&SessionId::from("root"));
-    assert_eq!(frames.len(), 2);
-    let current = frames
-        .iter()
-        .find(|frame| frame.frame_node_id == second_frame_node_id)
-        .expect("current frame");
+    // The window is the current frame (ADR 0112 §5): it holds the second
+    // frame's record alone, and its anchor names the first frame below it.
+    let frames = read.window.agent_frame_records(&SessionId::from("root"));
+    assert_eq!(frames.len(), 1);
+    let current = &frames[0];
+    assert_eq!(current.frame_node_id, second_frame_node_id);
     assert_eq!(current.reason, custom_reason);
+    let anchor = read.window.anchor().expect("a stored window is anchored");
+    assert_eq!(anchor.frame_node_id, second_frame_node_id);
+    assert_eq!(
+        anchor.previous_frame_node_id.as_ref(),
+        Some(&initial_frame_node_id),
+        "the anchor names the frame the window's base continues"
+    );
     assert_eq!(
         read.checkpoint.as_ref().and_then(|checkpoint| {
             checkpoint.component_body(crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
@@ -143,17 +151,20 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     );
 
     let persisted = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("concurrent-head-cas"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load state after concurrent head CAS")
         .expect("concurrent head-CAS winner persisted a session");
     assert_eq!(persisted.head_revision, 1, "exactly one commit applied");
-    assert_eq!(persisted.graph.nodes.len(), 1, "exactly one graph applied");
+    assert_eq!(persisted.window.nodes.len(), 1, "exactly one graph applied");
     let left_node_id = caller_frame_node_id(&SessionId::from(session_id), "cas-left");
     let right_node_id = caller_frame_node_id(&SessionId::from(session_id), "cas-right");
     assert!(
-        persisted.graph.nodes[0].node_id == left_node_id.as_str()
-            || persisted.graph.nodes[0].node_id == right_node_id.as_str(),
+        persisted.window.nodes[0].node_id == left_node_id.as_str()
+            || persisted.window.nodes[0].node_id == right_node_id.as_str(),
         "the persisted graph must come from one of the two writers"
     );
 }
@@ -226,7 +237,14 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
     .await
     .expect("commit");
 
-    let read = store.load_session().await.expect("load").expect("session");
+    let read = store
+        .load_session_window(
+            &SessionId::from("hydrated"),
+            crate::store::WindowSelector::Current,
+        )
+        .await
+        .expect("load")
+        .expect("session");
     let checkpoint = read.checkpoint.expect("checkpoint");
     assert_eq!(read.session_id, "hydrated");
     assert_eq!(
@@ -237,8 +255,8 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
             .generation(),
         9
     );
-    assert_eq!(read.token_ledger.len(), 1);
-    assert_eq!(read.token_ledger[0].usage.input_tokens, 11);
+    assert_eq!(read.usage.rows.len(), 1);
+    assert_eq!(read.usage.rows[0].usage.input_tokens, 11);
 }
 
 #[expect(
@@ -283,12 +301,15 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
         .expect("commit linear graph");
 
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("branchy"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load session history")
         .expect("session history exists");
     assert_eq!(
-        read.graph
+        read.window
             .nodes
             .iter()
             .map(|node| node.node_id.as_str())
@@ -299,5 +320,5 @@ pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) 
             .collect::<Vec<_>>(),
         "session reads must return the persisted leaf-to-root history"
     );
-    assert_eq!(read.graph.leaf_node_id, expected_leaf_node_id);
+    assert_eq!(read.window.leaf_node_id, expected_leaf_node_id);
 }

@@ -53,11 +53,9 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         .expect("unpin deleted source leaf to zero");
 
     assert!(
-        source
-            .load_node(&leaf_node_id)
+        !crate::conformance::helpers::node_readable_through_deleted(&source, &leaf_node_id)
             .await
-            .expect("read retained tombstone")
-            .is_none(),
+            .expect("read retained tombstone"),
         "decrement-to-zero tombstones must be hidden before vacuum"
     );
     let fork_error = factory
@@ -124,7 +122,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         .await
         .expect("enqueue pending input a");
     store_a
-        .cancel_pending_turn_input(&req_a.session_id, &input_a.input_id)
+        .cancel_pending_turn_input(&input_a.input_id)
         .await
         .expect("cancel pending input a");
 
@@ -140,7 +138,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         .await
         .expect("enqueue pending input b");
     store_b
-        .cancel_pending_turn_input(&req_b.session_id, &input_b.input_id)
+        .cancel_pending_turn_input(&input_b.input_id)
         .await
         .expect("cancel pending input b");
 
@@ -355,43 +353,5 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
     assert_eq!(
         report.removed_pending_turn_input_tombstone_count, 0,
         "session had no pending input tombstones"
-    );
-}
-
-/// `vacuum` is session-scoped by contract, so a handle with no session binding
-/// has no scope to vacuum and must say so with
-/// [`StoreError::SessionNotBound`](crate::StoreError::SessionNotBound) rather
-/// than fall back to a catalog-wide sweep.
-///
-/// Backends whose store handle cannot exist without a session id have nothing to
-/// police here and report `None`. `None` is a claim about the backend — it is
-/// always bound, so it owns reclaim itself and offers no unbound sweep to fence
-/// — so the skip is a named `tracing` warning rather than a silent pass.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn session_store_factory_unbound_vacuum_is_typed_error(
-    backend: &str,
-    unbound: Option<Arc<dyn crate::store::StoreMaintenance>>,
-) {
-    let Some(unbound) = unbound else {
-        tracing::warn!(
-            backend,
-            "skipping unbound-vacuum conformance: backend reports no unbound store handle shape, \
-             so it takes responsibility for reclaim itself"
-        );
-        return;
-    };
-    let error = unbound
-        .vacuum()
-        .await
-        .expect_err("an unbound handle must refuse to vacuum");
-    assert!(
-        matches!(
-            error.stop,
-            crate::store::MaintenanceStop::Failed(crate::StoreError::SessionNotBound)
-        ),
-        "expected StoreError::SessionNotBound, got {error:?}"
     );
 }

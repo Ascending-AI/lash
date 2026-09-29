@@ -124,7 +124,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
             )
             .await;
         let recovery = make(&scenario);
-        super::super::bind_conformance_session(&recovery, &identity.session_id).await;
+        super::super::admit_conformance_session(&recovery, &identity.session_id).await;
 
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
         runner
@@ -157,7 +157,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
         );
         assert!(
             recovery
-                .pending_turn_cancel_closure_pins()
+                .pending_turn_cancel_closure_pins(&identity.session_id)
                 .await
                 .expect("read closure pins after recovery")
                 .is_empty(),

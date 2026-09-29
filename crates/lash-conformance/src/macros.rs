@@ -128,6 +128,7 @@ macro_rules! runtime_persistence_tests {
             (session_prompt_layer_round_trips_through_the_committed_head, "session-prompt-layer"),
             (session_protocol_turn_options_round_trip_through_the_committed_head, "session-protocol-turn-options"),
             (session_metadata_round_trips, "root"),
+            (head_and_window_reads_agree_for_each_named_session, "read-agreement"),
             (session_metadata_relation_is_write_once, "root"),
             (attachment_manifest_records_intent_and_commit_stamps, "root"),
             (attachment_manifest_keeps_same_content_ownership_per_session, "root"),
@@ -1306,7 +1307,12 @@ macro_rules! fence_integrity_tests {
     };
 }
 
-/// Register the graph-integrity corruption law.
+/// Register the deployment-store (session catalog) laws.
+///
+/// The fixture yields `(guard, make, make_attached, effect_host)`: `make`
+/// returns a fresh, empty `Arc<dyn ConformanceDeployment>`, and
+/// `make_attached` a fresh one with the attachment byte store of its
+/// substrate.
 #[macro_export]
 macro_rules! session_store_factory_tests {
     ($fixture:block) => {
@@ -1333,11 +1339,9 @@ macro_rules! session_store_factory_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, backend, unbound, make, make_attached, _effect_host) =
-                    $fixture;
+                let (_fixture_guard, make, make_attached, _effect_host) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(backend, unbound, make, make_attached)
-                    .await;
+                $crate::registration_macro_support::$law(make, make_attached).await;
             }
         )*
     };
@@ -1345,11 +1349,7 @@ macro_rules! session_store_factory_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, _backend, _unbound, make, _make_attached, _effect_host) =
-                    $fixture;
-                let _unbound: Option<
-                    ::std::sync::Arc<dyn lash_core::store::StoreMaintenance>,
-                > = _unbound;
+                let (_fixture_guard, make, _make_attached, _effect_host) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make()).await;
             }
@@ -1359,11 +1359,7 @@ macro_rules! session_store_factory_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, _backend, _unbound, make, _make_attached, effect_host) =
-                    $fixture;
-                let _unbound: Option<
-                    ::std::sync::Arc<dyn lash_core::store::StoreMaintenance>,
-                > = _unbound;
+                let (_fixture_guard, make, _make_attached, effect_host) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make(), effect_host).await;
             }
@@ -1907,46 +1903,6 @@ macro_rules! append_usage_cancellation_tests {
                 let (_guard, store, arm_and_wait) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(store, arm_and_wait).await;
-            }
-        )*
-    };
-}
-
-/// The fixture supplies the backend's per-admission-axis handle factory.
-#[macro_export]
-macro_rules! unbound_session_read_tests {
-    ($fixture:block) => {
-        $crate::unbound_session_read_tests!(@catalogue $fixture; [
-            (unbound_session_reads_resolve_the_same_session, "unbound-session-reads"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, make_axis) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make_axis).await;
-            }
-        )*
-    };
-}
-
-/// Register unbound-session metadata ambiguity refusal.
-#[macro_export]
-macro_rules! unbound_session_meta_tests {
-    ($fixture:block) => {
-        $crate::unbound_session_meta_tests!(@catalogue $fixture; [
-            (unbound_session_meta_refuses_ambiguous_resolution, "unbound-session-meta"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_guard, backend_name, load) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend_name, load).await;
             }
         )*
     };

@@ -2,6 +2,8 @@ use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
+use crate::conformance::DeploymentViewExt as _;
+
 use super::session_store_request;
 use pretty_assertions::assert_eq;
 
@@ -20,9 +22,9 @@ pub(super) async fn session_state_version_admission_contract(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_conformance_store(&request)
+        .admit_view(&request)
         .await
-        .expect("create session-state marker fixture");
+        .expect("admit the session-state marker fixture");
     assert_eq!(
         store
             .read_session_state_version()
@@ -40,8 +42,9 @@ pub(super) async fn session_state_version_admission_contract(
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
         .expect("seed a guarded session head payload");
-    store
+    factory
         .stamp_session_state_version_and_corrupt_payload_for_testing(
+            &request.session_id,
             crate::store::CURRENT_SESSION_STATE_VERSION + 1,
         )
         .await
@@ -63,6 +66,7 @@ pub(super) async fn session_state_version_admission_contract(
     );
 
     let lease = store
+        .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
@@ -73,10 +77,11 @@ pub(super) async fn session_state_version_admission_contract(
         .expect("claim session execution lease")
         .acquired()
         .expect("session execution lease acquired");
-    let recovery_error = store
-        .load_session()
-        .await
-        .expect_err("recovery must stop at the marker before decoding the corrupt head");
+    // The runtime's load reads the marker before it reads the window.
+    let recovery_error =
+        crate::conformance::helpers::load_window_state(store.store(), &request.session_id)
+            .await
+            .expect_err("recovery must stop at the marker before decoding the corrupt head");
     assert!(
         matches!(
             &recovery_error,
@@ -98,15 +103,15 @@ pub(super) async fn session_state_version_admission_contract(
             current,
         } if found == current + 1
     ));
-    store
-        .stamp_session_state_version_and_corrupt_payload_for_testing(0)
+    factory
+        .stamp_session_state_version_and_corrupt_payload_for_testing(&request.session_id, 0)
         .await
         .expect("stamp snapshot-era marker");
     for _ in 0..2 {
-        let error = store
-            .load_session()
-            .await
-            .expect_err("old state refused before decode");
+        let error =
+            crate::conformance::helpers::load_window_state(store.store(), &request.session_id)
+                .await
+                .expect_err("old state refused before decode");
         assert!(matches!(
             error,
             crate::StoreError::SessionStateVersionUnsupported {

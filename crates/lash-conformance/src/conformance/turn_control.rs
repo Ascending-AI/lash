@@ -33,7 +33,7 @@ async fn driver_for_session(
     address: &TurnAddress,
 ) -> (Arc<dyn EffectHost>, TurnWorkDriver) {
     let store = super::law_session_store(stores.as_ref(), &address.session_id).await;
-    super::bind_conformance_session(&store, &address.session_id).await;
+    super::admit_conformance_session(&store, &address.session_id).await;
     let driver = TurnWorkDriver::for_session(Arc::clone(&host), address.session_id.clone(), store);
     (host, driver)
 }

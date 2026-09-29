@@ -619,7 +619,10 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     assert!(matches!(err, StoreError::IngressRowNotAdmitted { .. }));
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after rejected atomic commit")
             .is_none(),
@@ -651,7 +654,10 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     assert!(matches!(err, StoreError::FollowOnFrameNotCurrent { .. }));
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after rejected follow-on")
             .is_none(),
@@ -700,7 +706,10 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
     );
     assert_eq!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after accepted atomic commit")
             .expect("committed head")

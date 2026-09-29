@@ -3,6 +3,8 @@
 use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::Arc;
 
+use crate::facade_support::SessionGraphFacadeOps as _;
+
 use crate::store::{
     ConformanceDeployment, GraphRowCorruption, HistoryAnchor, HistoryBudget, HistoryStop,
     WindowSelector,

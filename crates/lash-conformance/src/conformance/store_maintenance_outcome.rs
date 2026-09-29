@@ -10,6 +10,7 @@
 //! error, and Postgres propagated. All four were indistinguishable to a caller
 //! reading counters.
 
+use crate::conformance::DeploymentViewExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use lash_sansio::SessionId;
 use std::sync::Arc;
@@ -75,7 +76,9 @@ pub async fn store_maintenance_unimplemented_levers_fail(
     backend: &str,
     store: &dyn crate::store::StoreMaintenance,
 ) {
-    let vacuum = store.vacuum().await;
+    let vacuum = store
+        .vacuum(&SessionId::from("maintenance-unimplemented-levers"))
+        .await;
     let vacuum = vacuum.expect_err(&format!(
         "{backend}: an unimplemented vacuum must fail, not report an empty sweep"
     ));
@@ -115,7 +118,7 @@ pub async fn idle_store_reports_witnessed_nothing_to_do(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
     let vacuum = store
@@ -128,6 +131,7 @@ pub async fn idle_store_reports_witnessed_nothing_to_do(
         "{backend}: an idle vacuum reclaims nothing: {vacuum:?}"
     );
     let gc = store
+        .store()
         .gc_unreachable()
         .await
         .unwrap_or_else(|error| panic!("{backend}: an idle sweep must complete: {error:?}"));
@@ -159,13 +163,14 @@ pub async fn superseded_checkpoint_is_a_witnessed_sweep(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
-    let head_revision = commit_generation(&store, &request.session_id, 1, 0).await;
-    commit_generation(&store, &request.session_id, 2, head_revision).await;
+    let head_revision = commit_generation(store.store(), &request.session_id, 1, 0).await;
+    commit_generation(store.store(), &request.session_id, 2, head_revision).await;
 
     let report = store
+        .store()
         .gc_unreachable()
         .await
         .unwrap_or_else(|error| panic!("{backend}: the sweep must complete: {error:?}"));
@@ -179,7 +184,7 @@ pub async fn superseded_checkpoint_is_a_witnessed_sweep(
         "{backend}: the live checkpoint is a root: {report:?}"
     );
     let read = store
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect("load after sweep")
         .expect("session after sweep");
@@ -206,7 +211,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
         crate::SessionRelation::Root,
     );
     factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
     let orphan = crate::AttachmentStore::put(
@@ -269,13 +274,13 @@ pub async fn sweep_failure_is_not_an_empty_report(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
-    commit_generation(&store, &request.session_id, 1, 0).await;
+    commit_generation(store.store(), &request.session_id, 1, 0).await;
     fault.break_gc_scope(&request.session_id).await;
 
-    let failure = match store.gc_unreachable().await {
+    let failure = match store.store().gc_unreachable().await {
         Ok(report) => panic!(
             "{backend}: a broken sweep must fail rather than report a clean empty sweep, got \
              Ok({report:?})"

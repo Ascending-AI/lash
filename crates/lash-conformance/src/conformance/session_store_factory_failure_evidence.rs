@@ -9,6 +9,8 @@ use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
+use crate::conformance::DeploymentViewExt as _;
+
 /// Prove that a real mid-stream provider failure settles durable evidence that
 /// survives closing the runtime and reopening through the backend's read view.
 /// The turn runs on `backend`'s own effect host, over its session catalog.
@@ -151,21 +153,52 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     )
     .storage_key()
     .expect("later failure-evidence storage key");
+    // Failure evidence is paged, never part of the read view (ADR 0112 §8).
+    let settlements = crate::conformance::helpers::load_failure_evidence(
+        factory.as_ref(),
+        &SessionId::from(SESSION_ID),
+    )
+    .await
+    .expect("page the session's failure evidence");
     assert_eq!(
-        reopened.turn_failure_settlements().len(),
+        settlements.len(),
         2,
         "both failed turns own durable settlement components"
     );
     assert_eq!(
-        reopened
-            .turn_failure_settlements()
+        settlements
             .iter()
             .map(|settlement| settlement.turn_id.as_str())
             .collect::<Vec<_>>(),
         vec![early_storage_key.as_str(), later_storage_key.as_str()],
         "settlements are ordered by committed timestamp before turn id"
     );
-    let settlement = &reopened.turn_failure_settlements()[0];
+    let first_page = factory
+        .load_failure_evidence_page(
+            &SessionId::from(SESSION_ID),
+            None,
+            std::num::NonZeroU32::MIN,
+        )
+        .await
+        .expect("page one settlement");
+    assert_eq!(first_page.settlements, settlements[..1].to_vec());
+    let cursor = first_page
+        .next
+        .expect("a page that stops short of the last settlement carries a cursor");
+    let second_page = factory
+        .load_failure_evidence_page(
+            &SessionId::from(SESSION_ID),
+            Some(&cursor),
+            std::num::NonZeroU32::MIN,
+        )
+        .await
+        .expect("page the next settlement");
+    assert_eq!(second_page.settlements, settlements[1..].to_vec());
+    assert!(
+        second_page.next.is_none(),
+        "the last page carries no cursor"
+    );
+    let settlement = &settlements[0];
     assert!(
         !settlement.turn_id.is_empty(),
         "the settlement names its owning turn"
@@ -179,10 +212,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
             .map(crate::TurnFailurePartialOutput::text),
         Some(PARTIAL_TEXT)
     );
-    assert_eq!(
-        reopened.turn_failure_settlements()[1].evidence,
-        later_turn.failure_evidence
-    );
+    assert_eq!(settlements[1].evidence, later_turn.failure_evidence);
     assert!(
         reopened.messages().iter().all(|message| message
             .parts

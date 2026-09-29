@@ -114,7 +114,7 @@ async fn acceptance_runtime_with_batching(
                     .chain(plugin_factories)
                     .collect(),
             )
-            .with_store(Arc::clone(store))
+            .with_store(crate::conformance::helpers::session_view(store, session_id))
             .build(),
     )
     .await
@@ -253,7 +253,6 @@ pub async fn direct_turn_accepts_before_driving(
     assert!(
         turn.state
             .read_view()
-            .expect("accepted turn frame scope resolves")
             .messages()
             .iter()
             .any(|message| matches!(
@@ -455,7 +454,9 @@ impl RedriveStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for RedriveStore {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -467,10 +468,17 @@ impl crate::store::RuntimeStoreDecorator for RedriveStore {
         self.inner.admit_root(request).await
     }
 
-    async fn load_session(
+    async fn load_session_window(
         &self,
-    ) -> Result<Option<crate::store::PersistedSessionRead>, crate::StoreError> {
-        Ok(None)
+        session_id: &SessionId,
+        selector: crate::store::WindowSelector,
+    ) -> Result<Option<crate::store::SessionWindowRead>, crate::StoreError> {
+        match selector {
+            crate::store::WindowSelector::Current => Ok(None),
+            admitted @ crate::store::WindowSelector::Admitted(_) => {
+                self.inner.load_session_window(session_id, admitted).await
+            }
+        }
     }
 
     async fn list_pending_turn_inputs(
@@ -680,8 +688,8 @@ pub(super) fn recording_provider(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn vacuum(store: &Arc<dyn crate::RuntimeStore>) {
-    crate::store::StoreMaintenance::vacuum(store.as_ref())
+async fn vacuum(store: &Arc<dyn crate::RuntimeStore>, session_id: &SessionId) {
+    crate::store::StoreMaintenance::vacuum(store.as_ref(), session_id)
         .await
         .expect("vacuum the session's terminal rows");
 }
@@ -813,7 +821,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
     let committed = applications(&store).await;
     assert_eq!(committed.len(), 1);
 
-    vacuum(&store).await;
+    vacuum(&store, &SessionId::from(SESSION_ID)).await;
     let (redrive_store, _) = RedriveStore::wrap(&store);
     let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     let replayed = journal
@@ -880,7 +888,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
         "the journaled drive carries all three rows"
     );
 
-    vacuum(&store).await;
+    vacuum(&store, &SessionId::from(SESSION_ID)).await;
     let (redrive_store, _) = RedriveStore::wrap(&store);
     let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     journal
@@ -933,7 +941,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
         .await
         .expect("the host cancels the accepted input");
     assert!(cancelled.is_cancelled(), "{cancelled:?}");
-    vacuum(&store).await;
+    vacuum(&store, &SessionId::from(SESSION_ID)).await;
 
     let (redrive_store, _) = RedriveStore::wrap(&store);
     let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
@@ -1105,7 +1113,9 @@ struct WithdrawBeforeClaim {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for WithdrawBeforeClaim {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -1255,7 +1265,6 @@ pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
     let copies = redriven
         .state
         .read_view()
-        .expect("the redriven turn's frame scope resolves")
         .messages()
         .iter()
         .filter(|message| {

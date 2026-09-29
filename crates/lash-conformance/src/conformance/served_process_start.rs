@@ -235,7 +235,10 @@ impl SpawnWorld {
                 .with_policy(policy)
                 .with_initial_state(state)
                 .with_plugin_factories(factories)
-                .with_store(store)
+                .with_store(crate::conformance::helpers::session_view(
+                    &store,
+                    session_id.clone(),
+                ))
                 .with_process_registry(Arc::clone(&self.registry))
                 .with_process_work(self.process_work.clone())
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))

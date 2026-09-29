@@ -34,7 +34,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
         .await
         .expect("save session meta");
     let loaded = store
-        .load_session_meta()
+        .load_session_meta(&SessionId::from("root"))
         .await
         .expect("load session meta")
         .expect("session meta present");
@@ -68,7 +68,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore
     };
     assert_eq!(
         store
-            .load_session_meta()
+            .load_session_meta(&SessionId::from("root"))
             .await
             .expect("load the admitted session metadata")
             .expect("the fixture admits this session before the law runs"),
@@ -126,7 +126,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore
 
     assert_eq!(
         store
-            .load_session_meta()
+            .load_session_meta(&SessionId::from("root"))
             .await
             .expect("load session meta")
             .expect("session meta present"),
@@ -197,7 +197,10 @@ pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
 
     // The reachable checkpoint survived: the session still loads at generation 2.
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("gc-blobs"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after gc")
         .expect("session after gc");
@@ -324,7 +327,8 @@ pub async fn append_receipt_reopen(factory: ReopenableRuntimePersistence) {
             .await
             .expect("commit append receipt before reopen");
 
-    let mut reopened_state = loaded_conformance_state(&factory.reopen).await;
+    let mut reopened_state =
+        loaded_conformance_state(&factory.reopen, &SessionId::from("root")).await;
     let (retry_commit, _) =
         append_request_commit(&mut reopened_state, "append-receipt-reopen", &nodes, None);
     let replay = factory
@@ -458,14 +462,17 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
 
     let reopened_meta = factory
         .reopen
-        .load_session_meta()
+        .load_session_meta(&SessionId::from("root"))
         .await
         .expect("load reopened meta")
         .expect("reopened meta");
     assert_eq!(reopened_meta, meta);
     let reopened = factory
         .reopen
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load reopened state")
         .expect("reopened state");
@@ -848,11 +855,13 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeSt
         matches!(&err, StoreError::RuntimeTurnCommitConflict { .. }),
         "unexpected mutated-commit error: {err:?}"
     );
-    let stored = store
-        .load_node(&node_id)
-        .await
-        .expect("load guarded node")
-        .expect("guarded node remains stored");
+    let stored = crate::conformance::helpers::load_one_node(
+        store.as_ref(),
+        &SessionId::from("root"),
+        &node_id,
+    )
+    .await
+    .expect("guarded node remains stored");
     assert_eq!(
         stored.parent_node_id, None,
         "a rejected receipt replay must not adopt or persist proposal topology"
@@ -892,7 +901,10 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeSt
     );
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after guard rejection")
             .is_none(),
@@ -965,11 +977,13 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeSto
         ),
         "unexpected durable collision error: {err:?}"
     );
-    let stored = store
-        .load_node(&colliding_id)
-        .await
-        .expect("load original node")
-        .expect("original node remains");
+    let stored = crate::conformance::helpers::load_one_node(
+        store.as_ref(),
+        &state.session_id,
+        &colliding_id,
+    )
+    .await
+    .expect("original node remains");
     let (reason, _, _) = stored.frame_open().expect("stored frame");
     assert_eq!(reason.as_str(), "original");
 }
@@ -1006,7 +1020,10 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore
     );
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load after duplicate rejection")
             .is_none(),
@@ -1052,11 +1069,14 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
         "the committed leaf must be the terminal appended node"
     );
     let loaded = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after derived-leaf commit")
         .expect("committed session remains");
-    assert_eq!(loaded.graph.leaf_node_id.as_ref(), Some(&expected_leaf));
+    assert_eq!(loaded.window.leaf_node_id.as_ref(), Some(&expected_leaf));
 }
 
 #[expect(
@@ -1089,11 +1109,14 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
         "a preserve-head commit must report the resident leaf"
     );
     let loaded = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after preserve-head commit")
         .expect("seeded session remains");
-    assert_eq!(loaded.graph.leaf_node_id, old_leaf);
+    assert_eq!(loaded.window.leaf_node_id, old_leaf);
 }
 
 #[expect(
@@ -1125,9 +1148,12 @@ pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
         .await
         .expect("an empty append preserves the resident head");
     let loaded = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("empty-append-head-move"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after preserve-head append")
         .expect("seeded session remains");
-    assert_eq!(loaded.graph.leaf_node_id, old_leaf);
+    assert_eq!(loaded.window.leaf_node_id, old_leaf);
 }

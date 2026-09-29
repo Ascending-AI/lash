@@ -103,14 +103,14 @@ struct ReferenceModel {
 
 struct LiveSession {
     request: crate::SessionStoreCreateRequest,
-    store: Arc<dyn crate::RuntimeStore>,
+    store: crate::store::SessionStore,
 }
 
 struct SessionGraphScenario {
     seed: u64,
     factory: Arc<dyn crate::DeploymentStore>,
     live: BTreeMap<u8, LiveSession>,
-    handles_by_physical_id: BTreeMap<String, Arc<dyn crate::RuntimeStore>>,
+    handles_by_physical_id: BTreeMap<String, crate::store::SessionStore>,
     model: ReferenceModel,
     shape: RunShape,
 }
@@ -453,11 +453,11 @@ impl SessionGraphScenario {
         );
         let store = self
             .factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .map_err(|error| error.to_string())?;
         self.handles_by_physical_id
-            .insert(physical_id.clone(), Arc::clone(&store));
+            .insert(physical_id.clone(), store.clone());
         self.live.insert(slot, LiveSession { request, store });
         self.model.sessions.insert(
             slot,
@@ -508,7 +508,7 @@ impl SessionGraphScenario {
         };
         let operation_id = self.next_operation_id("append");
         let live = self.live.get(&slot).expect("ensured live session");
-        let mut runtime = property_runtime(&live.store, &live.request).await?;
+        let mut runtime = property_runtime(live.store.store(), &live.request).await?;
         let nodes = (0..usize::from(node_count.max(1)))
             .map(|ordinal| {
                 crate::SessionAppendNode::plugin(
@@ -559,7 +559,7 @@ impl SessionGraphScenario {
             ));
         }
         let read = self.read_live(slot).await?;
-        let actual_path = graph_path_ids(&read.graph)?;
+        let actual_path = graph_path_ids(&read.window)?;
         if !actual_path.starts_with(&old_path) {
             return Err(format!(
                 "append-only history: prior path {old_path:?} is not a prefix of {actual_path:?}"
@@ -568,7 +568,7 @@ impl SessionGraphScenario {
         if !old_path.is_empty()
             && actual_path
                 .get(old_path.len())
-                .and_then(|node_id| read.graph.find_node(node_id))
+                .and_then(|node_id| read.window.find_node(node_id))
                 .and_then(|node| node.parent_node_id.as_ref())
                 != old_path.last()
         {
@@ -668,7 +668,7 @@ impl SessionGraphScenario {
         );
         let result = self
             .factory
-            .fork_at(&crate::ForkSessionRequest {
+            .fork_session(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
@@ -688,7 +688,7 @@ impl SessionGraphScenario {
         result.map_err(|error| error.to_string())?;
         let store = self
             .factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "fork created no reopenable store".to_string())?;
@@ -704,7 +704,7 @@ impl SessionGraphScenario {
             .position(|candidate| candidate == node_id)
             .ok_or_else(|| "fork target left the modeled source path".to_string())?;
         self.handles_by_physical_id
-            .insert(physical_id.clone(), Arc::clone(&store));
+            .insert(physical_id.clone(), store.clone());
         self.live.insert(target, LiveSession { request, store });
         self.model.sessions.insert(
             target,
@@ -762,7 +762,7 @@ impl SessionGraphScenario {
             relation.clone(),
         );
         self.factory
-            .fork_at(&crate::ForkSessionRequest {
+            .fork_session(&crate::ForkSessionRequest {
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(physical_id.clone()),
                 node_id: node_id.clone(),
@@ -773,7 +773,7 @@ impl SessionGraphScenario {
             .map_err(|error| error.to_string())?;
         let store = self
             .factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "rewind fork created no reopenable store".to_string())?;
@@ -787,7 +787,7 @@ impl SessionGraphScenario {
             .position(|candidate| candidate == node_id)
             .expect("rewind node belongs to old path");
         self.handles_by_physical_id
-            .insert(physical_id.clone(), Arc::clone(&store));
+            .insert(physical_id.clone(), store.clone());
         self.live.insert(slot, LiveSession { request, store });
         self.model.sessions.insert(
             slot,
@@ -833,10 +833,13 @@ impl SessionGraphScenario {
         }
         let operation = self.next_operation_id("checkpoint");
         let live = self.live.get(&slot).expect("ensured live session");
-        let mut state = crate::store::load_persisted_session_state(live.store.as_ref())
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "checkpoint subject has no persisted state".to_string())?;
+        let mut state = crate::conformance::helpers::load_window_state(
+            live.store.store(),
+            live.store.session_id(),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "checkpoint subject has no persisted state".to_string())?;
         state.turn_index += 1;
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
@@ -844,7 +847,7 @@ impl SessionGraphScenario {
             operation,
             "checkpoint",
         ));
-        commit_runtime_state_for_property(&live.store, commit, "checkpoint")
+        commit_runtime_state_for_property(live.store.store(), commit, "checkpoint")
             .await
             .map_err(|error| error.to_string())?;
         self.model
@@ -865,20 +868,20 @@ impl SessionGraphScenario {
         let Some(live) = self.live.get(&slot) else {
             return Ok(());
         };
-        let before = persisted_projection(live.store.as_ref()).await?;
+        let before = persisted_projection(&live.store).await?;
         let reopened = self
             .factory
-            .open_existing_store(&live.request)
+            .live_view_for(&live.request)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| "cold reload lost a live session".to_string())?;
-        let after = persisted_projection(reopened.as_ref()).await?;
+        let after = persisted_projection(&reopened).await?;
         if before != after {
             return Err("cold-reload projection equality: reopened state differs".to_string());
         }
         self.handles_by_physical_id.insert(
             live.request.session_id.clone().to_string(),
-            Arc::clone(&reopened),
+            reopened.clone(),
         );
         self.live.get_mut(&slot).expect("live slot").store = reopened;
         self.shape[RunShapeCounter::ColdReloads] += 1;
@@ -888,6 +891,7 @@ impl SessionGraphScenario {
     async fn reachability_sweep(&mut self) -> Result<(), String> {
         if let Some(store) = self.live.values().next().map(|live| &live.store) {
             store
+                .store()
                 .gc_unreachable()
                 .await
                 .map_err(|error| error.to_string())?;
@@ -927,10 +931,13 @@ impl SessionGraphScenario {
         let before = self.session_snapshot(slot).await?;
         let operation_key = self.next_operation_id("malformed");
         let live = self.live.get(&slot).expect("malformed live session");
-        let state = crate::store::load_persisted_session_state(live.store.as_ref())
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "malformed subject has no persisted state".to_string())?;
+        let state = crate::conformance::helpers::load_window_state(
+            live.store.store(),
+            live.store.session_id(),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "malformed subject has no persisted state".to_string())?;
         let operation = crate::OperationId::turn(&state.session_id, operation_key, "malformed");
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(operation.clone());
@@ -942,7 +949,7 @@ impl SessionGraphScenario {
                         .expect("test frame identity is non-empty")
                 });
         }
-        let error = commit_runtime_state_for_property(&live.store, commit, "malformed")
+        let error = commit_runtime_state_for_property(live.store.store(), commit, "malformed")
             .await
             .expect_err("malformed session graph commit must be rejected");
         let typed = match shape % 4 {
@@ -988,10 +995,13 @@ impl SessionGraphScenario {
         let before = self.session_snapshot(slot).await?;
         let operation_key = self.next_operation_id("stale-cas");
         let live = self.live.get(&slot).expect("stale-CAS live session");
-        let state = crate::store::load_persisted_session_state(live.store.as_ref())
-            .await
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| "stale-CAS subject has no persisted state".to_string())?;
+        let state = crate::conformance::helpers::load_window_state(
+            live.store.store(),
+            live.store.session_id(),
+        )
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "stale-CAS subject has no persisted state".to_string())?;
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
         commit.expected_head_revision = state.head_revision - 1;
         commit.turn_commit = crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(
@@ -999,7 +1009,7 @@ impl SessionGraphScenario {
             operation_key,
             "stale-cas",
         ));
-        let error = commit_runtime_state_for_property(&live.store, commit, "stale-cas")
+        let error = commit_runtime_state_for_property(live.store.store(), commit, "stale-cas")
             .await
             .expect_err("stale head revision must be rejected");
         if !matches!(error, crate::StoreError::HeadRevisionConflict { .. }) {
@@ -1027,12 +1037,12 @@ impl SessionGraphScenario {
         }
     }
 
-    async fn read_live(&self, slot: u8) -> Result<crate::PersistedSessionRead, String> {
+    async fn read_live(&self, slot: u8) -> Result<crate::store::SessionWindowRead, String> {
         self.live
             .get(&(slot % SESSION_COUNT))
             .ok_or_else(|| format!("session slot {slot} is not live"))?
             .store
-            .load_session()
+            .load_session_window(crate::store::WindowSelector::Current)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("session slot {slot} has no persisted head"))
@@ -1043,18 +1053,22 @@ impl SessionGraphScenario {
             .live
             .get(&(slot % SESSION_COUNT))
             .ok_or_else(|| format!("session slot {slot} is not live"))?;
-        persisted_projection(live.store.as_ref()).await
+        persisted_projection(&live.store).await
     }
 
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    fn record_read(&mut self, slot: u8, read: &crate::PersistedSessionRead) -> Result<(), String> {
-        let path = graph_path_ids(&read.graph)?;
+    fn record_read(
+        &mut self,
+        slot: u8,
+        read: &crate::store::SessionWindowRead,
+    ) -> Result<(), String> {
+        let path = graph_path_ids(&read.window)?;
         for node_id in &path {
             let node = read
-                .graph
+                .window
                 .find_node(node_id)
                 .ok_or_else(|| format!("active node `{node_id}` does not resolve"))?;
             match self.model.nodes.get(node_id) {
@@ -1106,7 +1120,7 @@ impl SessionGraphScenario {
                 .ok_or_else(|| format!("modeled session slot {slot} has no live handle"))?;
             let read = live
                 .store
-                .load_session()
+                .load_session_window(crate::store::WindowSelector::Current)
                 .await
                 .map_err(|error| error.to_string())?;
             if expected.path.is_empty() {
@@ -1132,7 +1146,7 @@ impl SessionGraphScenario {
                     expected.physical_id, read.head_revision, expected.head_revision
                 ));
             }
-            let actual_path = graph_path_ids(&read.graph)?;
+            let actual_path = graph_path_ids(&read.window)?;
             if actual_path != expected.path {
                 return Err(format!(
                     "active-path integrity: session `{}` actual={actual_path:?}, expected={:?}",
@@ -1141,7 +1155,7 @@ impl SessionGraphScenario {
             }
             for (index, node_id) in actual_path.iter().enumerate() {
                 let node = read
-                    .graph
+                    .window
                     .find_node(node_id)
                     .ok_or_else(|| format!("active leaf/path node `{node_id}` does not resolve"))?;
                 let expected_parent = index
@@ -1209,12 +1223,7 @@ impl SessionGraphScenario {
             }
             let mut loadable = false;
             for handle in self.handles_by_physical_id.values() {
-                if handle
-                    .load_node(node_id)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .is_some()
-                {
+                if handle_reads(handle, node_id).await? {
                     loadable = true;
                     break;
                 }
@@ -1234,12 +1243,7 @@ impl SessionGraphScenario {
                 continue;
             }
             for handle in self.handles_by_physical_id.values() {
-                if handle
-                    .load_node(node_id)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .is_some()
-                {
+                if handle_reads(handle, node_id).await? {
                     return Err(format!(
                         "reachability equals retention: unreachable node `{node_id}` remains loadable"
                     ));
@@ -1282,7 +1286,7 @@ impl SessionGraphScenario {
             crate::SessionRelation::Root,
         );
         self.factory
-            .fork_at(&crate::ForkSessionRequest {
+            .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(probe_id.clone()),
                 node_id: pinned_node_id.to_string().into(),
@@ -1297,7 +1301,7 @@ impl SessionGraphScenario {
             })?;
         let probe = self
             .factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| {
@@ -1306,7 +1310,7 @@ impl SessionGraphScenario {
                 )
             })?;
         let read = probe
-            .load_session()
+            .load_session_window(crate::store::WindowSelector::Current)
             .await
             .map_err(|error| error.to_string())?
             .ok_or_else(|| {
@@ -1314,12 +1318,10 @@ impl SessionGraphScenario {
                     "reachability equals retention: pinned node `{pinned_node_id}` produced no probe head"
                 )
             })?;
-        if read.graph.leaf_node_id.as_deref() != Some(pinned_node_id)
-            || probe
-                .load_node(expected_node_id)
+        if read.window.leaf_node_id.as_deref() != Some(pinned_node_id)
+            || !crate::conformance::helpers::node_readable(&probe, expected_node_id)
                 .await
                 .map_err(|error| error.to_string())?
-                .is_none()
         {
             return Err(format!(
                 "reachability equals retention: node `{expected_node_id}` retained by pin `{pinned_node_id}` did not survive in its probe fork"
@@ -1363,7 +1365,7 @@ async fn property_runtime(
     store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> Result<crate::LashRuntime, String> {
-    let state = crate::store::load_persisted_session_state(store.as_ref())
+    let state = crate::conformance::helpers::load_window_state(store, &request.session_id)
         .await
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -1387,7 +1389,7 @@ async fn property_runtime(
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(store),
+        crate::conformance::helpers::session_view(store, request.session_id.clone()),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -1601,11 +1603,21 @@ fn graph_path_ids(graph: &crate::SessionGraph) -> Result<Vec<lash_core::NodeId>,
         .collect())
 }
 
+/// Whether `handle`'s session reads `node_id`. A handle whose session a
+/// rewind deleted reads nothing.
+async fn handle_reads(handle: &crate::store::SessionStore, node_id: &str) -> Result<bool, String> {
+    match crate::conformance::helpers::node_readable(handle, node_id).await {
+        Ok(readable) => Ok(readable),
+        Err(crate::StoreError::SessionDeleted { .. }) => Ok(false),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 async fn persisted_projection(
-    store: &dyn crate::RuntimeStore,
+    store: &crate::store::SessionStore,
 ) -> Result<serde_json::Value, String> {
     let read = store
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .map_err(|error| error.to_string())?;
     Ok(read.map_or(serde_json::Value::Null, |read| {
@@ -1614,10 +1626,10 @@ async fn persisted_projection(
             "head_revision": read.head_revision,
             "config": read.config,
             "current_frame_node_id": read.current_frame_node_id,
-            "graph": read.graph,
+            "window": read.window,
             "checkpoint_ref": read.checkpoint_ref,
             "checkpoint": read.checkpoint,
-            "token_ledger": read.token_ledger,
+            "usage": read.usage,
         })
     }))
 }

@@ -52,7 +52,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // A recorded intent is a root: `Free -> Condemned` refuses.
     assert!(
         matches!(
-            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
                 .await
                 .expect("first fenced write"),
             crate::AttachmentWriteFence::Granted(_)
@@ -65,7 +65,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "an uncommitted intent is a root: the condemn CAS must refuse"
     );
 
-    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
         .await
         .expect("forget the ref");
     assert_eq!(
@@ -89,18 +89,20 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
 
     // `Condemned -> Free` by writer revoke: the delete can no longer be armed.
     let restoring_intent = intent();
-    let restoring_permit =
-        match crate::AttachmentManifest::begin_attachment_write(&*store, restoring_intent.clone())
-            .await
-            .expect("write against a condemned digest")
-        {
-            crate::AttachmentWriteFence::Granted(permit) => permit,
-            crate::AttachmentWriteFence::ReclamationInFlight => {
-                panic!("a writer must be able to take a condemned digest back")
-            }
-        };
+    let restoring_permit = match crate::AttachmentManifest::begin_attachment_write(
+        store.store().as_ref(),
+        restoring_intent.clone(),
+    )
+    .await
+    .expect("write against a condemned digest")
+    {
+        crate::AttachmentWriteFence::Granted(permit) => permit,
+        crate::AttachmentWriteFence::ReclamationInFlight => {
+            panic!("a writer must be able to take a condemned digest back")
+        }
+    };
     crate::AttachmentManifest::complete_attachment_write(
-        &*store,
+        store.store().as_ref(),
         &restoring_intent,
         restoring_permit,
     )
@@ -114,7 +116,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
 
     // `Condemned -> Deleting`: a writer now parks instead of putting bytes into
     // an in-flight delete, and only the release lets it through.
-    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
         .await
         .expect("forget the ref again");
     assert_eq!(
@@ -132,7 +134,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     );
     assert!(
         matches!(
-            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
                 .await
                 .expect("write against an armed digest"),
             crate::AttachmentWriteFence::ReclamationInFlight
@@ -140,7 +142,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "a writer must park while the physical delete is in flight"
     );
     assert!(
-        !crate::AttachmentManifest::list_all_refs(&*store)
+        !crate::AttachmentManifest::list_all_refs(store.store().as_ref())
             .await
             .map(|refs| refs.contains(&attachment_id))
             .expect("contains_ref"),
@@ -153,7 +155,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         .expect("release");
     assert!(
         matches!(
-            crate::AttachmentManifest::begin_attachment_write(&*store, intent())
+            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
                 .await
                 .expect("write after the release"),
             crate::AttachmentWriteFence::Granted(_)
@@ -165,7 +167,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // back at `Free`, but the digest is no longer adoptable: condemnation
     // cleared its manifest evidence under the same fence, so only a fresh
     // completed write can make it adoptable again.
-    crate::AttachmentManifest::forget(&*store, &request.session_id, &attachment_id)
+    crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
         .await
         .expect("forget the ref before the successful-delete path");
     assert_eq!(
@@ -191,7 +193,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         .await
         .expect("release a retired digest is idempotent");
     let adoption_error = crate::AttachmentManifest::commit_refs(
-        &*store,
+        store.store().as_ref(),
         &request.session_id,
         std::slice::from_ref(&attachment_id),
     )
@@ -204,21 +206,24 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     ));
     let restored_intent = intent();
     let crate::AttachmentWriteFence::Granted(restored_permit) =
-        crate::AttachmentManifest::begin_attachment_write(&*store, restored_intent.clone())
-            .await
-            .expect("a retired digest grants the next writer")
+        crate::AttachmentManifest::begin_attachment_write(
+            store.store().as_ref(),
+            restored_intent.clone(),
+        )
+        .await
+        .expect("a retired digest grants the next writer")
     else {
         panic!("a retired digest must not park a writer");
     };
     crate::AttachmentManifest::complete_attachment_write(
-        &*store,
+        store.store().as_ref(),
         &restored_intent,
         restored_permit,
     )
     .await
     .expect("stamp the restoring upload");
     crate::AttachmentManifest::commit_refs(
-        &*store,
+        store.store().as_ref(),
         &request.session_id,
         std::slice::from_ref(&attachment_id),
     )

@@ -61,7 +61,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
-use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
+use crate::store::{RuntimeCommit, RuntimeCommitReceipt, SessionWindowRead};
 use crate::{
     DriveFence, PendingTurnInputDraft, RuntimeEffectController, RuntimeStore, SessionHeadMeta,
     StoreError,
@@ -169,7 +169,7 @@ impl TurnSeamOperation {
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 enum StoreOperation {
-    LoadSession,
+    LoadSessionWindow,
     LoadSessionHeadMeta,
     OpenSessionCommandRun,
     UnfinishedRoot,
@@ -547,24 +547,33 @@ impl crate::store::RuntimeStoreDecorator for SeamStore {
             )
             .await
     }
-    fn inner(&self) -> &(dyn RuntimeStore + '_) {
+    type Inner = dyn RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
-    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
+    async fn load_session_window(
+        &self,
+        session_id: &SessionId,
+        selector: crate::store::WindowSelector,
+    ) -> Result<Option<SessionWindowRead>, StoreError> {
         self.control
             .around(
-                TurnSeamOperation::Store(StoreOperation::LoadSession),
-                self.inner.load_session(),
+                TurnSeamOperation::Store(StoreOperation::LoadSessionWindow),
+                self.inner.load_session_window(session_id, selector),
             )
             .await
     }
 
-    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
+    async fn load_session_head_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.control
             .around(
                 TurnSeamOperation::Store(StoreOperation::LoadSessionHeadMeta),
-                self.inner.load_session_head_meta(),
+                self.inner.load_session_head_meta(session_id),
             )
             .await
     }
@@ -1043,7 +1052,7 @@ async fn try_build_runtime_over_host(
     mut trace_tool: TraceTool,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
-    super::bind_conformance_session(&store, &identity.session_id).await;
+    super::admit_conformance_session(&store, &identity.session_id).await;
     let mut host = crate::LawBackend::over_stores(stores, effect_host)
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
@@ -1068,7 +1077,10 @@ async fn try_build_runtime_over_host(
         )
         .with_session_id(&identity.session_id)
         .with_policy(runtime_policy())
-        .with_store(store)
+        .with_store(crate::conformance::helpers::session_view(
+            &store,
+            identity.session_id.clone(),
+        ))
         .with_plugin_factories(plugin_factories)
         .build(),
     )
@@ -1105,7 +1117,7 @@ async fn seed_reference_ingress_as(
     scenario: &str,
     root: Option<&TurnId>,
 ) {
-    super::bind_conformance_session(store, &identity.session_id).await;
+    super::admit_conformance_session(store, &identity.session_id).await;
     // FIG-1573: one scenario deliberately seeds no next-turn row, so a recovering
     // drain evaluates the drain-time orphan backstop.
     if !scenario.starts_with("peer-reclaim-pinned-active-input-") {

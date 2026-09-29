@@ -330,7 +330,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         },
     };
     let target = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create wake target");
 
@@ -368,7 +368,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     .expect("serialize producer before delivery");
     assert!(
         target
-            .list_queued_work(&SessionId::from(target_session_id))
+            .list_queued_work()
             .await
             .expect("read target queue before recovery")
             .is_empty(),
@@ -386,10 +386,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     .expect("recover pending wake");
     assert_eq!(first.enqueued, 1, "unexpected delivery report: {first:?}");
     assert_eq!(first.retryable_failures, 0);
-    let queued = target
-        .list_queued_work(&SessionId::from(target_session_id))
-        .await
-        .expect("read target queue");
+    let queued = target.list_queued_work().await.expect("read target queue");
     let source_key = crate::process_wake_source_key(&wake.process_id, wake.sequence);
     assert_eq!(
         queued
@@ -415,7 +412,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     // A synthetic queue draft would miss precisely the seam this guards.
     let authority_target_session_id = "wake-authority-target";
     let authority_target = factory
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(authority_target_session_id.to_string()),
@@ -497,7 +494,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     .expect("deliver authority wake through production driver");
     assert_eq!(authority_report.enqueued, 2);
     let authority_rows = authority_target
-        .list_queued_work(&SessionId::from(authority_target_session_id))
+        .list_queued_work()
         .await
         .expect("list delivered authority wake");
     assert_eq!(authority_rows.len(), 2);
@@ -527,6 +524,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         "wake-authority-owner:incarnation",
     );
     let authority_lease = authority_target
+        .store()
         .seal_drive_epoch_for_test(
             &SessionId::from(authority_target_session_id),
             &authority_owner,
@@ -539,7 +537,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .expect("authority target lease is free");
     let authority_root = "wake-authority-root";
     let authority_admission = super::admitted_root_with_policy(
-        &authority_target,
+        authority_target.store(),
         &authority_lease,
         authority_root,
         crate::store::AdmittedHead::Batch(authority_rows[0].batch_id.clone()),
@@ -566,7 +564,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         )
     );
     super::end_root(
-        &authority_target,
+        authority_target.store(),
         &authority_lease,
         super::releasing(
             authority_root,
@@ -591,7 +589,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         Arc::clone(&factory),
         Arc::clone(&registry),
         Arc::clone(&clock),
-        Arc::clone(&target),
+        Arc::clone(target.store()),
         &SessionId::from(target_session_id),
     )
     .await;
@@ -604,7 +602,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         Arc::clone(&factory),
         Arc::clone(&registry),
         Arc::clone(&clock),
-        Arc::clone(&target),
+        Arc::clone(target.store()),
         &SessionId::from(target_session_id),
     )
     .await;
@@ -612,7 +610,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         Arc::clone(&factory),
         Arc::clone(&registry),
         Arc::clone(&clock),
-        Arc::clone(&target),
+        Arc::clone(target.store()),
         &SessionId::from(target_session_id),
     )
     .await;
@@ -687,7 +685,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         );
     }
     let coalesced_receiver_rows = target
-        .list_queued_work(&SessionId::from(target_session_id))
+        .list_queued_work()
         .await
         .expect("list coalesced receiver rows")
         .into_iter()
@@ -767,7 +765,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         crate::process_wake_source_key(&retarget_wake.process_id, retarget_wake.sequence);
     assert_eq!(
         target
-            .list_queued_work(&SessionId::from(target_session_id))
+            .list_queued_work()
             .await
             .expect("read original target after retarget race")
             .iter()
@@ -858,7 +856,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let crash_source = crate::process_wake_source_key(&crash_wake.process_id, crash_wake.sequence);
     assert_eq!(
         target
-            .list_queued_work(&SessionId::from(target_session_id))
+            .list_queued_work()
             .await
             .expect("read queue after stale-claim recovery")
             .iter()
@@ -984,7 +982,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     assert_eq!(deferred_report.discarded_sequence_rewound, 0);
     assert!(
         target
-            .list_queued_work(&SessionId::from(target_session_id))
+            .list_queued_work()
             .await
             .expect("list receiver rows after deferred fresh retry")
             .iter()
@@ -1179,7 +1177,7 @@ async fn missing_target_is_deferred_and_rearmed(
     assert!(deferred.next_attempt_at_ms > crate::ClockWallTime::timestamp_ms(clock.as_ref()));
 
     factory
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
@@ -1229,7 +1227,7 @@ async fn sender_floor_lifetime(
 ) {
     let target_session_id = "wake-allocation-floor-lifetime-target";
     let target = factory
-        .create_store(&crate::SessionStoreCreateRequest {
+        .admit_view(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
@@ -1275,7 +1273,7 @@ async fn sender_floor_lifetime(
         "unexpected delivery report: {report:?}"
     );
     let batch = target
-        .list_queued_work(&SessionId::from(target_session_id))
+        .list_queued_work()
         .await
         .expect("list sender-floor lifetime receiver row")
         .into_iter()
@@ -1285,7 +1283,7 @@ async fn sender_floor_lifetime(
         })
         .expect("sender-floor lifetime wake reached receiver");
     settle_queued_batch(
-        &target,
+        target.store(),
         &SessionId::from(target_session_id),
         &batch.batch_id,
     )
@@ -1962,7 +1960,7 @@ async fn target_gone_is_a_typed_discard(
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
     factory
-        .create_store(&target_request)
+        .admit_view(&target_request)
         .await
         .expect("create target-gone wake target");
     factory

@@ -546,7 +546,9 @@ impl GateProbe {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for GateProbe {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -1143,7 +1145,7 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
     let before = f
         .parts
         .store
-        .load_session_head_meta()
+        .load_session_head_meta(&f.parts.session_id)
         .await
         .expect("head")
         .map(|head| head.head_revision);
@@ -1156,7 +1158,7 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
     assert_eq!(
         f.parts
             .store
-            .load_session_head_meta()
+            .load_session_head_meta(&f.parts.session_id)
             .await
             .expect("head")
             .map(|head| head.head_revision),

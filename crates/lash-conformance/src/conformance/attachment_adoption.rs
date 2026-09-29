@@ -1,6 +1,7 @@
 //! Cross-session stored references acquire receiver roots in the boundary commit.
 //! Root reconciliation is the layer-1 operation also used by terminal evidence
 //! reclamation, so this witness can run at every head in the stack.
+use crate::conformance::DeploymentViewExt as _;
 use lash_core::facade_support::{SessionAttachmentStore, reclaim_unreferenced_attachments};
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::testing::store_fixtures::session_store_request;
@@ -249,13 +250,14 @@ fn with_image(state: &mut RuntimeSessionState, reference: &AttachmentRef) {
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 async fn create(f: &Arc<dyn DeploymentStore>, id: &str) -> Arc<dyn RuntimeStore> {
-    f.create_store(&session_store_request(
+    f.admit_session(&session_store_request(
         &SessionId::from(id),
         "probe",
         SessionRelation::Root,
     ))
     .await
-    .unwrap()
+    .unwrap();
+    Arc::clone(f) as Arc<dyn RuntimeStore>
 }
 
 /// Prove abandoned-writer recovery through destruction and reconstruction of
@@ -284,7 +286,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let session_id = SessionId::from(format!("cold-condemned-recovery-writer-{namespace}"));
     let adopter_id = SessionId::from(format!("cold-recovery-adopter-{namespace}"));
     let request = session_store_request(&session_id, "probe", SessionRelation::Root);
-    let store = initial_factory.create_store(&request).await.unwrap();
+    let store = initial_factory.admit_view(&request).await.unwrap();
     let backend: Arc<dyn AttachmentStore> = make_bytes();
     let payload = format!("cold-recovery-payload-{namespace}").into_bytes();
     let attachment_id = lash_core::attachments::content_id(&payload);
@@ -293,10 +295,10 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let committed_id =
         lash_core::attachments::content_id(format!("recovery-committed-{namespace}").as_bytes());
     let survivor_intent = write_intent(&session_id, &survivor_id);
-    record_completed_write(&store, &survivor_intent).await;
-    record_completed_write(&store, &write_intent(&session_id, &committed_id)).await;
+    record_completed_write(store.store(), &survivor_intent).await;
+    record_completed_write(store.store(), &write_intent(&session_id, &committed_id)).await;
     store
-        .commit_refs(&session_id, std::slice::from_ref(&committed_id))
+        .commit_refs(std::slice::from_ref(&committed_id))
         .await
         .expect("commit unrelated attachment root");
 
@@ -317,7 +319,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         AttachmentWriteFence::Granted(permit) => permit,
         AttachmentWriteFence::ReclamationInFlight => panic!("first restoring writer must win"),
     };
-    let before_reopen = store.list_uncommitted(u64::MAX).await.unwrap();
+    let before_reopen = store.store().list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         before_reopen.iter().any(|entry| {
             entry.session_id == session_id && entry.attachment_id == attachment_id
@@ -335,11 +337,11 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     drop(initial_factory);
     let reopened_factory = reopen().await;
     let reopened = reopened_factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen session after factory reconstruction")
         .expect("cold-reopened session exists");
-    let before_recovery = reopened.list_uncommitted(u64::MAX).await.unwrap();
+    let before_recovery = reopened.store().list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         before_recovery.iter().any(|entry| {
             entry.session_id == session_id && entry.attachment_id == attachment_id
@@ -351,7 +353,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         .recover_abandoned_attachment_write(&attachment_id)
         .await
         .expect("recover abandoned writer after cold reopen");
-    let after_recovery = reopened.list_uncommitted(u64::MAX).await.unwrap();
+    let after_recovery = reopened.store().list_uncommitted(u64::MAX).await.unwrap();
     assert!(
         after_recovery.iter().all(|entry| {
             entry.session_id != session_id || entry.attachment_id != attachment_id
@@ -377,8 +379,11 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
         .await
         .expect("the pre-reopen permit is stale after recovery");
 
-    let scoped =
-        SessionAttachmentStore::new(Arc::clone(&backend), reopened.clone(), session_id.clone());
+    let scoped = SessionAttachmentStore::new(
+        Arc::clone(&backend),
+        Arc::clone(reopened.store()) as Arc<dyn crate::AttachmentManifest>,
+        session_id.clone(),
+    );
     let restored = scoped
         .put(payload.clone(), image_meta())
         .await
@@ -477,9 +482,15 @@ pub async fn cross_owner_attachment_adoption_conformance(
     f.delete_session(&SessionId::from(owner_id)).await.unwrap();
     let removed = sweep(&f, &bytes).await;
     assert_eq!(removed, 0, "receiver owns a committed attachment root");
-    let loaded = live.load_session().await.unwrap().unwrap();
+    let loaded = crate::conformance::helpers::load_current_window(
+        live.as_ref(),
+        &SessionId::from(receiver_id.as_str()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert!(
-        serde_json::to_string(&loaded.graph)
+        serde_json::to_string(&loaded.window)
             .unwrap()
             .contains(r.id.as_str())
     );
@@ -528,7 +539,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn Deployme
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("condemnation-list-owner-{namespace}"));
     let store = f
-        .create_store(&session_store_request(
+        .admit_view(&session_store_request(
             &session_id,
             "condemnation-list",
             SessionRelation::Root,
@@ -697,7 +708,7 @@ pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, R
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("condemnation-crash-{namespace}"));
     factory
-        .create_store(&session_store_request(
+        .admit_view(&session_store_request(
             &session_id,
             "condemnation-crash",
             SessionRelation::Root,
@@ -1325,7 +1336,7 @@ async fn committed_restoring_settlement_preserves_root(
         ));
         let turn_id = TurnId::from(format!("attachment-restoring-turn-{namespace}"));
         let request = session_store_request(&session_id, "probe", SessionRelation::Root);
-        let store = factory.create_store(&request).await.unwrap();
+        let store = factory.admit_view(&request).await.unwrap();
         let attachment_id = lash_core::attachments::content_id(
             format!("committed restoring {settlement:?} {namespace}").as_bytes(),
         );
@@ -1352,7 +1363,7 @@ async fn committed_restoring_settlement_preserves_root(
                 panic!("the first restoring writer must acquire the digest")
             }
         };
-        commit_turn_owned_intent(&store, &request, &turn_id, &attachment_id).await;
+        commit_turn_owned_intent(store.store(), &request, &turn_id, &attachment_id).await;
 
         match settlement {
             CommittedRestoringSettlement::Abort => store
@@ -1452,7 +1463,7 @@ async fn committed_restoring_abort_survives_the_older_sweep(
     let session_id = SessionId::from(format!("attachment-committed-sweep-{namespace}"));
     let turn_id = TurnId::from(format!("attachment-committed-sweep-turn-{namespace}"));
     let request = session_store_request(&session_id, "probe", SessionRelation::Root);
-    let store = factory.create_store(&request).await.unwrap();
+    let store = factory.admit_view(&request).await.unwrap();
     let backend: Arc<dyn AttachmentStore> = make_bytes();
     let reference = backend
         .put(
@@ -1495,7 +1506,7 @@ async fn committed_restoring_abort_survives_the_older_sweep(
         AttachmentWriteFence::Granted(permit) => permit,
         AttachmentWriteFence::ReclamationInFlight => panic!("restoring writer must win"),
     };
-    commit_turn_owned_intent(&store, &request, &turn_id, &attachment_id).await;
+    commit_turn_owned_intent(store.store(), &request, &turn_id, &attachment_id).await;
     store
         .abort_attachment_write(&intent, permit)
         .await
@@ -1932,16 +1943,20 @@ async fn adoption_fence_and_rollback(
     );
     let mut commit = RuntimeCommit::persisted_state_for_test(&st, &[]);
     commit.committed_attachment_ids = ids.clone();
-    let snapshot = |loaded: Option<lash_core::store::PersistedSessionRead>| {
+    let snapshot = |loaded: Option<lash_core::store::SessionWindowRead>| {
         loaded.map(|s| {
             (
                 s.head_revision,
                 s.checkpoint_ref,
-                serde_json::to_value(s.graph).unwrap(),
+                serde_json::to_value(s.window).unwrap(),
             )
         })
     };
-    let before = snapshot(store.load_session().await.unwrap());
+    let before = snapshot(
+        crate::conformance::helpers::load_current_window(store.as_ref(), &session_id)
+            .await
+            .unwrap(),
+    );
     let error = store
         .commit_runtime_state(commit.clone())
         .await
@@ -1951,7 +1966,11 @@ async fn adoption_fence_and_rollback(
         "{error}"
     );
     assert_eq!(
-        snapshot(store.load_session().await.unwrap()),
+        snapshot(
+            crate::conformance::helpers::load_current_window(store.as_ref(), &session_id)
+                .await
+                .unwrap()
+        ),
         before,
         "failed adoption publishes no graph/head/checkpoint"
     );
@@ -2053,16 +2072,21 @@ async fn adoption_after_full_gc_and_release_is_refused(
         Err(AttachmentStoreError::NotFound(_))
     ));
 
-    let snapshot = |loaded: Option<lash_core::store::PersistedSessionRead>| {
+    let snapshot = |loaded: Option<lash_core::store::SessionWindowRead>| {
         loaded.map(|session| {
             (
                 session.head_revision,
                 session.checkpoint_ref,
-                serde_json::to_value(session.graph).unwrap(),
+                serde_json::to_value(session.window).unwrap(),
             )
         })
     };
-    let before = snapshot(receiver.load_session().await.unwrap());
+    let receiver_session = SessionId::from(receiver_id.as_str());
+    let before = snapshot(
+        crate::conformance::helpers::load_current_window(receiver.as_ref(), &receiver_session)
+            .await
+            .unwrap(),
+    );
     let mut receiver_state = state(&receiver_id);
     with_image(&mut receiver_state, &reference);
     let mut receiver_commit = RuntimeCommit::persisted_state_for_test(&receiver_state, &[]);
@@ -2076,7 +2100,11 @@ async fn adoption_after_full_gc_and_release_is_refused(
         StoreError::UnknownAttachment { ref digest } if digest == &reference.id
     ));
     assert_eq!(
-        snapshot(receiver.load_session().await.unwrap()),
+        snapshot(
+            crate::conformance::helpers::load_current_window(receiver.as_ref(), &receiver_session)
+                .await
+                .unwrap()
+        ),
         before,
         "typed refusal publishes no graph or head state"
     );

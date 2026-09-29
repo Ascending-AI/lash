@@ -61,13 +61,14 @@ async fn create_bound_store(
     session_id: &SessionId,
 ) -> Arc<dyn RuntimeStore> {
     factory
-        .create_store(&session_store_request(
+        .admit_session(&session_store_request(
             session_id,
             "park-feed-model",
             crate::SessionRelation::Root,
         ))
         .await
-        .expect("create the session's store")
+        .expect("admit the session");
+    Arc::clone(factory) as Arc<dyn RuntimeStore>
 }
 
 async fn commit_turn(

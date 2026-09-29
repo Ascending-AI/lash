@@ -159,6 +159,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         .expect("committed root still has a head");
     assert_eq!(head_after.head_revision, head_before.head_revision);
     let first_lease = root
+        .store()
         .seal_drive_epoch_for_test(
             &root_request.session_id,
             &crate::LeaseOwnerIdentity::opaque("enumeration-proof", "first"),

@@ -81,7 +81,10 @@ async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
                     .chain([plugin])
                     .collect(),
             )
-            .with_store(store)
+            .with_store(crate::conformance::helpers::session_view(
+                &store,
+                session_id.clone(),
+            ))
             .with_process_work(crate::testing::process_work_wiring_for_registry(
                 stores.process_registry(),
             ))

@@ -1,5 +1,6 @@
 //! Cross-backend conformance for process retention's trigger-store effects.
 
+use crate::conformance::DeploymentViewExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeMap;
@@ -65,7 +66,7 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
     );
     handles
         .sessions
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("materialize trigger owner session");
     let original_draft = draft(
@@ -115,7 +116,7 @@ async fn deleted_session_frontier_authorizes_trigger_owner_reclamation(
     );
     handles
         .sessions
-        .create_store(&receipt_only_request)
+        .admit_view(&receipt_only_request)
         .await
         .expect("materialize receipt-only trigger owner session");
     handles

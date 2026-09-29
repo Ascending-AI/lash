@@ -188,10 +188,11 @@ pub async fn plugin_state_boundary_trace(
         })
     ));
     assert_eq!(handle.get("counter"), Some(serde_json::json!(1)));
-    let crash_state = crate::store::load_persisted_session_state(store.as_ref())
-        .await
-        .unwrap()
-        .unwrap();
+    let crash_state =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::from(parent_id))
+            .await
+            .unwrap()
+            .unwrap();
     let rebuilt_fixture = MockPlugin::default();
     let rebuilt_host = rebuilt_fixture.host();
     let rebuilt = rebuilt_host
@@ -227,10 +228,11 @@ pub async fn plugin_state_boundary_trace(
         ),
         "generation unchanged: checkpoint must use its resident reference"
     );
-    let durable = crate::store::load_persisted_session_state(store.as_ref())
-        .await
-        .unwrap()
-        .unwrap();
+    let durable =
+        crate::conformance::helpers::load_window_state(&store, &SessionId::from(parent_id))
+            .await
+            .unwrap()
+            .unwrap();
     let rebuilt = rebuilt_host
         .rematerialize_session(
             parent_id,
@@ -272,10 +274,11 @@ pub async fn plugin_state_boundary_trace(
     };
     child_state.refresh_plugin_states(&child);
     commit(&child_store, &mut child_state).await;
-    let child_durable = crate::store::load_persisted_session_state(child_store.as_ref())
-        .await
-        .unwrap()
-        .unwrap();
+    let child_durable =
+        crate::conformance::helpers::load_window_state(&child_store, &SessionId::from(child_id))
+            .await
+            .unwrap()
+            .unwrap();
     assert_eq!(child_durable.plugin_state(), Some(&child.export_state()));
     vec![
         crash_state.plugin_state().unwrap().clone(),
@@ -316,7 +319,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        store.clone(),
+        crate::conformance::helpers::session_view(&store, id),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -332,7 +335,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     let hook_error = hook_session
         .before_turn(crate::plugin::TurnHookContext {
             session_id: id.into(),
-            state: runtime.read_view().expect("runtime frame scope resolves"),
+            state: runtime.read_view(),
             sessions: runtime.session_state_service().unwrap(),
             turn_context: crate::TurnContext::default(),
         })
@@ -344,7 +347,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         .set("counter", serde_json::json!(11))
         .unwrap();
     Box::pin(runtime.park()).await.unwrap();
-    let state = crate::store::load_persisted_session_state(store.as_ref())
+    let state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
         .unwrap()
         .unwrap();
@@ -382,7 +385,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     ));
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        store.clone(),
+        crate::conformance::helpers::session_view(&store, id),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -401,7 +404,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
         "runtime assembly must preserve ready writes"
     );
     Box::pin(runtime.park()).await.unwrap();
-    let final_state = crate::store::load_persisted_session_state(store.as_ref())
+    let final_state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
         .unwrap()
         .unwrap();
@@ -442,7 +445,7 @@ async fn registration_state_law(
     state.refresh_plugin_states(&plugins);
     commit(&store, &mut state).await;
     drop(plugins);
-    let mut durable = crate::store::load_persisted_session_state(store.as_ref())
+    let mut durable = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
         .unwrap()
         .unwrap();
@@ -461,7 +464,7 @@ async fn registration_state_law(
     assert_eq!(rebuilt.state(id).generation(), 6);
     durable.refresh_plugin_states(&plugins);
     commit(&store, &mut durable).await;
-    let final_state = crate::store::load_persisted_session_state(store.as_ref())
+    let final_state = crate::conformance::helpers::load_window_state(&store, &SessionId::from(id))
         .await
         .unwrap()
         .unwrap();

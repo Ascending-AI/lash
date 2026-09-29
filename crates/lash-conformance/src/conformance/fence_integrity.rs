@@ -72,7 +72,9 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     let session_id = "fence-negative-head";
     handles
         .runtime
-        .admit_and_bind_session(&crate::SessionBinding::root(session_id))
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &SessionId::from(session_id),
+        ))
         .await
         .expect("admit negative-head session");
     let state = crate::RuntimeSessionState {
@@ -91,7 +93,10 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
     let before = handles.injector.observe_raw_value(&target).await;
     let error = handles
         .runtime
-        .load_session()
+        .load_session_window(
+            &SessionId::from(session_id),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect_err("negative session-head revision must refuse");
     assert_corrupt(error, "SessionHeadMeta", "head_revision", -1);

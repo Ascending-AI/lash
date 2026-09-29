@@ -306,7 +306,9 @@ struct CrashAtSettlingCommit {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for CrashAtSettlingCommit {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -378,7 +380,9 @@ impl RowWitness {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for RowWitness {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -459,7 +463,10 @@ impl LawParts {
                         .chain([tools_plugin()])
                         .collect(),
                 )
-                .with_store(store)
+                .with_store(crate::conformance::helpers::session_view(
+                    &store,
+                    self.session_id.clone(),
+                ))
                 .build(),
         )
         .await
@@ -500,14 +507,17 @@ impl LawParts {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn committed_mentions(store: &Arc<dyn crate::RuntimeStore>, text: &str) -> usize {
-    crate::load_persisted_session_state(store.as_ref())
+async fn committed_mentions(
+    store: &Arc<dyn crate::RuntimeStore>,
+    session_id: &crate::SessionId,
+    text: &str,
+) -> usize {
+    crate::conformance::helpers::load_window_state(store, session_id)
         .await
         .expect("read the committed session")
         .expect("the session has committed turns")
         .session_graph
-        .read_model(None)
-        .expect("the committed frame resolves")
+        .read_model()
         .messages
         .iter()
         .flat_map(|message| message.parts.iter())
@@ -704,12 +714,12 @@ async fn a_row_is_answered_only_by_its_root(
         ),
     }
     assert_eq!(
-        committed_mentions(&raw, words).await,
+        committed_mentions(&raw, &session_id, words).await,
         1,
         "the row is committed once"
     );
     assert_eq!(
-        committed_mentions(&raw, FIRST_EXECUTION_REPLY).await,
+        committed_mentions(&raw, &session_id, FIRST_EXECUTION_REPLY).await,
         0,
         "the peer's drive sealed a later drive epoch, so the dead drive's redrive \
          writes nothing: its journaled answer is never committed"

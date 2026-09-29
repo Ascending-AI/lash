@@ -2283,7 +2283,7 @@ async fn consume_wake(
             batch.batch_id
         ));
     }
-    let state = crate::load_persisted_session_state(runtime)
+    let state = crate::conformance::helpers::load_window_state(runtime, &session)
         .await
         .map_err(|error| error.to_string())?
         .unwrap_or_else(|| RuntimeSessionState {

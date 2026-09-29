@@ -61,7 +61,7 @@ pub(super) async fn run_crash_matrix_case(
         .unwrap_or_else(|error| panic!("successor failed for {scenario} ({entry:?}): {error}"));
 
     let reader = make(scenario);
-    super::super::bind_conformance_session(&reader, &identity.session_id).await;
+    super::super::admit_conformance_session(&reader, &identity.session_id).await;
     let recovered_pending = reader
         .list_pending_turn_inputs(&identity.session_id)
         .await
@@ -94,7 +94,7 @@ pub(super) async fn run_crash_matrix_case(
     let mut drain_turns = 0;
     loop {
         let reader = make(scenario);
-        super::super::bind_conformance_session(&reader, &identity.session_id).await;
+        super::super::admit_conformance_session(&reader, &identity.session_id).await;
         let pending = reader
             .list_pending_turn_inputs(&identity.session_id)
             .await
@@ -121,11 +121,11 @@ pub(super) async fn run_crash_matrix_case(
         .await;
     }
 
-    let state = crate::load_persisted_session_state(reader.as_ref())
+    let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read recovered state")
         .expect("recovered turn commits state");
-    let read_model = state.session_graph.read_model(None).unwrap();
+    let read_model = state.session_graph.read_model();
     let part_count = |content: &str| {
         read_model
             .messages

@@ -242,7 +242,7 @@ async fn recover_turn_cancel_closure(
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
-    super::super::bind_conformance_session(&store, &identity.session_id).await;
+    super::super::admit_conformance_session(&store, &identity.session_id).await;
     let owner = LeaseOwnerIdentity::opaque(
         "cold-process-cancel-recovery",
         format!("{}:cancel-recovery", identity.turn_id),
@@ -382,7 +382,7 @@ async fn recover_turn_cancel_closure(
             mode: request.mode,
             honoured_after_step: None,
         };
-        let state = crate::store::load_persisted_session_state(store.as_ref())
+        let state = crate::conformance::helpers::load_window_state(&store, &identity.session_id)
             .await
             .expect("load the crashed session's head")
             .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -418,7 +418,7 @@ async fn recover_turn_cancel_closure(
     );
     assert!(
         store
-            .pending_turn_cancel_closure_pins()
+            .pending_turn_cancel_closure_pins(&identity.session_id)
             .await
             .expect("read recovered closure pins")
             .is_empty(),
@@ -543,7 +543,7 @@ pub async fn cold_process_real_turn_driver(
             LeaseOwnerIdentity::opaque("cold-process-peer", format!("{scenario}:peer-reclaim"));
         let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
-                super::super::bind_conformance_session(&store, &identity.session_id).await;
+                super::super::admit_conformance_session(&store, &identity.session_id).await;
                 // The killed helper ran on a term wide enough that no
                 // scheduling delay could lapse it before the crash point;
                 // expire what it abandoned rather than waiting the term out.
@@ -598,7 +598,7 @@ pub async fn cold_process_real_turn_driver(
         );
         tokio::time::timeout(RECOVERY_TIMEOUT, async {
             loop {
-                super::super::bind_conformance_session(&store, &identity.session_id).await;
+                super::super::admit_conformance_session(&store, &identity.session_id).await;
                 // Same collapse as the peer-reclaim probe above: the crashed
                 // helper's lease is expired on demand, so displacement stays a
                 // real store decision instead of a wall-clock race.
@@ -678,14 +678,13 @@ pub async fn cold_process_real_turn_driver(
         .await
         .expect("join cold-process recovered turn")
         .expect("drive cold-process recovered turn");
-    let state = crate::load_persisted_session_state(reader.as_ref())
+    let state = crate::conformance::helpers::load_window_state(&reader, &identity.session_id)
         .await
         .expect("read cold-process recovered state")
         .expect("cold-process recovery committed a session head");
     let terminal_count = state
         .session_graph
-        .read_model(None)
-        .unwrap()
+        .read_model()
         .messages
         .iter()
         .flat_map(|message| message.parts.iter())

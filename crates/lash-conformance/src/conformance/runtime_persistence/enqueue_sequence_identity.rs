@@ -70,7 +70,7 @@ pub async fn delete_then_enqueue_never_reuses_ingress_sequences(store: Arc<dyn R
                 .expect("cancel pending turn input"),
             &input.input_id,
         );
-        let vacuum = store.vacuum().await.expect("vacuum tombstones");
+        let vacuum = store.vacuum(&session).await.expect("vacuum tombstones");
         assert!(
             vacuum.removed_pending_turn_input_tombstone_count >= 1,
             "the cancelled tombstone must be physically deleted before the next enqueue"

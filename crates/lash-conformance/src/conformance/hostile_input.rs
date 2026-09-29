@@ -63,20 +63,25 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
         );
         assert!(
             matches!(
-                factory.create_store(&request).await,
+                factory.admit_view(&request).await,
                 Err(crate::StoreError::InvalidSessionId { .. })
             ),
             "malformed session id must be rejected before namespace mutation"
         );
         assert!(
             matches!(
-                factory.read_session(&SessionId::from(raw)).await,
+                factory
+                    .load_session_window(
+                        &SessionId::from(raw),
+                        crate::store::WindowSelector::Current,
+                    )
+                    .await,
                 Err(crate::StoreError::InvalidSessionId { .. })
             ),
             "malformed session id must be rejected before namespace lookup"
         );
         assert!(
-            factory.open_existing_store(&request).await.is_err(),
+            factory.live_view_for(&request).await.is_err(),
             "malformed session id must not resolve through request lookup"
         );
         assert!(
@@ -84,21 +89,18 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
             "malformed session id must not reach deletion"
         );
         assert!(
-            factory
-                .session_was_deleted(&SessionId::from(raw))
-                .await
-                .is_err(),
+            factory.is_deleted(&SessionId::from(raw)).await.is_err(),
             "malformed session id must not reach tombstone lookup"
         );
         assert!(
-            factory.has_claimable_queued_work(&request).await.is_err(),
+            factory
+                .has_claimable_queued_work(&request.session_id)
+                .await
+                .is_err(),
             "malformed session id must not reach queued-work lookup"
         );
         assert!(
-            factory
-                .open_existing_store_by_id(&SessionId::from(raw))
-                .await
-                .is_err(),
+            factory.lookup_session(&SessionId::from(raw)).await.is_err(),
             "malformed session id must not resolve through id lookup"
         );
     }
@@ -117,7 +119,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
             crate::SessionRelation::Root,
         );
         factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("admit opaque session key");
     }
@@ -133,7 +135,7 @@ pub(super) async fn session_namespace(factory: Arc<dyn crate::DeploymentStore>) 
             crate::SessionRelation::Root,
         );
         let store = factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .expect("open opaque key")
             .expect("key retained");

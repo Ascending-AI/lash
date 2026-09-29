@@ -5,6 +5,7 @@
 //! and then deletes the session, closure pins its close superseded
 //! included.
 
+use crate::conformance::DeploymentViewExt as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
@@ -334,10 +335,7 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
         "an undelivered scope close holds the delete: {first:?}"
     );
     assert!(
-        !factory
-            .session_was_deleted(&id)
-            .await
-            .expect("read the tombstone"),
+        !factory.is_deleted(&id).await.expect("read the tombstone"),
         "nothing was deleted"
     );
     let page = NonZeroUsize::new(8).expect("non-zero page");
@@ -368,12 +366,7 @@ pub async fn the_physical_delete_waits_for_cleanup_then_deletes_the_session(
         pass.claim_lost, 1,
         "the physical delete removed the row its obligation lived on: {pass:?}"
     );
-    assert!(
-        factory
-            .session_was_deleted(&id)
-            .await
-            .expect("read the tombstone")
-    );
+    assert!(factory.is_deleted(&id).await.expect("read the tombstone"));
     assert_eq!(
         stores
             .session_delete_ledger()
@@ -436,12 +429,7 @@ pub async fn the_physical_delete_retires_the_closure_pins_its_close_superseded(
         matches!(verdict, RelayVerdict::ClaimLost),
         "the physical delete removed the row its obligation lived on: {verdict:?}"
     );
-    assert!(
-        factory
-            .session_was_deleted(&id)
-            .await
-            .expect("read the tombstone")
-    );
+    assert!(factory.is_deleted(&id).await.expect("read the tombstone"));
     assert!(
         factory
             .pending_turn_cancel_closure_pins(&id)

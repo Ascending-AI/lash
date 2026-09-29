@@ -91,7 +91,7 @@ async fn committed_checkpoint(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create blob-reclaim session");
     let mut state = crate::RuntimeSessionState {
@@ -123,7 +123,7 @@ async fn committed_checkpoint(
         .collect();
     CommittedCheckpoint {
         request,
-        store,
+        store: Arc::clone(store.store()),
         checkpoint_ref: receipt.checkpoint_ref,
         manifest: receipt.manifest,
         component_refs,
@@ -170,7 +170,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create dependent content-alias session");
     let mut state = crate::RuntimeSessionState {
@@ -369,7 +369,7 @@ async fn session_delete_keeps_fork_shared_checkpoint_blobs(
     };
     handles
         .factory
-        .fork_at(&fork_request)
+        .fork_session(&fork_request)
         .await
         .expect("fork shared checkpoint");
 
@@ -435,7 +435,7 @@ async fn session_delete_blob_failure_rolls_back_with_partial_report(
     assert!(
         handles
             .factory
-            .open_existing_store(&committed.request)
+            .live_view_for(&committed.request)
             .await
             .expect("open after failed delete")
             .is_some(),
@@ -513,10 +513,13 @@ async fn attachment_prefix_retention(
         "session-delete-blob-reclaim-model",
         crate::SessionRelation::Root,
     );
-    let store = handles.factory.create_store(&request).await.unwrap();
+    let store = handles.factory.admit_view(&request).await.unwrap();
     let bytes = Arc::clone(&handles.attachments);
-    let parent =
-        crate::SessionAttachmentStore::new(bytes.clone(), store.clone(), &request.session_id);
+    let parent = crate::SessionAttachmentStore::new(
+        bytes.clone(),
+        Arc::clone(store.store()) as Arc<dyn crate::AttachmentManifest>,
+        &request.session_id,
+    );
     let reference = parent
         .put(
             vec![1, 2, 3],
@@ -541,7 +544,7 @@ async fn attachment_prefix_retention(
         .await
         .unwrap();
     crate::conformance::helpers::record_completed_attachment_write(
-        &store,
+        store.store(),
         crate::AttachmentIntent {
             attachment_id: orphan.id.clone(),
             session_id: request.session_id.clone(),
@@ -588,12 +591,12 @@ async fn attachment_prefix_retention(
     };
     handles
         .factory
-        .fork_at(&fork_request)
+        .fork_session(&fork_request)
         .await
         .expect("fork prefix");
     let fork = handles
         .factory
-        .open_existing_store(&session_store_request(
+        .live_view_for(&session_store_request(
             &fork_request.session_id,
             "session-delete-blob-reclaim-model",
             crate::SessionRelation::Root,
@@ -601,10 +604,14 @@ async fn attachment_prefix_retention(
         .await
         .unwrap()
         .unwrap();
-    let inherited = fork.load_session().await.unwrap().unwrap();
+    let inherited = fork
+        .load_session_window(crate::store::WindowSelector::Current)
+        .await
+        .unwrap()
+        .unwrap();
     assert!(
         inherited
-            .graph
+            .window
             .nodes
             .iter()
             .any(|node| serde_json::to_string(node)
@@ -612,7 +619,11 @@ async fn attachment_prefix_retention(
                 .contains(reference.id.as_str())),
         "fork history retains the stored image reference"
     );
-    let child = crate::SessionAttachmentStore::new(bytes.clone(), fork, &fork_request.session_id);
+    let child = crate::SessionAttachmentStore::new(
+        bytes.clone(),
+        Arc::clone(fork.store()) as Arc<dyn crate::AttachmentManifest>,
+        &fork_request.session_id,
+    );
     assert_eq!(
         child
             .get(&reference.id)

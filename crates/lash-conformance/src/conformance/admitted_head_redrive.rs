@@ -169,7 +169,10 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
                     Some(protocol as Arc<dyn lash_core::plugin::CodeExecutorPlugin>),
                 ),
             ])
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
@@ -269,7 +272,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
     };
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
     let mut revision = store
-        .load_session_head_meta()
+        .load_session_head_meta(&session_id)
         .await
         .expect("read the session head")
         .map_or(0, |head| head.head_revision);
@@ -312,7 +315,7 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
             turn.state.turn_index, ordinal,
             "turn {ordinal}: the redrive keeps the turn index its admission recorded"
         );
-        let committed = crate::load_persisted_session_state(store.as_ref())
+        let committed = crate::conformance::helpers::load_window_state(&store, &session_id)
             .await
             .expect("read the committed head")
             .expect("the turn's commit is durable");

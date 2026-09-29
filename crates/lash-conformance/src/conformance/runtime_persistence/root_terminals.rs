@@ -82,9 +82,9 @@ async fn terminal_of(
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own read"
 )]
-async fn head_revision(store: &Arc<dyn RuntimeStore>) -> u64 {
+async fn head_revision(store: &Arc<dyn RuntimeStore>, session_id: &SessionId) -> u64 {
     store
-        .load_session_head_meta()
+        .load_session_head_meta(session_id)
         .await
         .expect("load the head")
         .map_or(0, |meta| meta.head_revision)
@@ -145,8 +145,8 @@ pub async fn root_terminal_evidence_commits_in_the_head_transaction(store: Arc<d
         "a retry rewrites nothing"
     );
 
-    let revision = head_revision(&store).await;
-    let resumed = loaded_conformance_state(&store).await;
+    let revision = head_revision(&store, &session_id).await;
+    let resumed = loaded_conformance_state(&store, &session_id).await;
     let other = turn_commit(
         &resumed,
         "r:1",
@@ -161,7 +161,7 @@ pub async fn root_terminal_evidence_commits_in_the_head_transaction(store: Arc<d
         "a second, different terminal is refused"
     );
     assert_eq!(
-        head_revision(&store).await,
+        head_revision(&store, &session_id).await,
         revision,
         "the refused commit moved no head"
     );
@@ -211,8 +211,8 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<
     let current = seal("drive-b#0", 1).await;
     assert_eq!((stale.epoch(), current.epoch()), (1, 2));
 
-    let resumed = loaded_conformance_state(&store).await;
-    let revision = head_revision(&store).await;
+    let resumed = loaded_conformance_state(&store, &session_id).await;
+    let revision = head_revision(&store, &session_id).await;
     assert!(
         matches!(
             store
@@ -231,7 +231,11 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<
         ),
         "a commit sealed under a superseded admission is refused"
     );
-    assert_eq!(head_revision(&store).await, revision, "no head moved");
+    assert_eq!(
+        head_revision(&store, &session_id).await,
+        revision,
+        "no head moved"
+    );
     assert_eq!(terminal_of(&store, &session_id, "r").await, None);
 
     store

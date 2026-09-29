@@ -145,7 +145,7 @@ pub(crate) async fn head_commit(
     session_id: &crate::SessionId,
 ) -> crate::RuntimeCommit {
     let revision = store
-        .load_session_head_meta()
+        .load_session_head_meta(session_id)
         .await
         .expect("load the head")
         .map_or(0, |meta| meta.head_revision);

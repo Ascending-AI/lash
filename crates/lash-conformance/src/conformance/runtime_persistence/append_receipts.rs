@@ -51,7 +51,7 @@ pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
 
     // U2 is recorded after U1 confirmation. Replaying A reuses ordinal zero,
     // but its content-bound full identity is distinct.
-    let mut retry_state = loaded_conformance_state(&store).await;
+    let mut retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let (mut replay_append, _) =
         append_request_commit(&mut retry_state, "usage-ordinal-reuse-a", &nodes, None);
     replay_append.usage_deltas = crate::store::RuntimeUsageDelta::for_operation(
@@ -90,7 +90,7 @@ pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
 
     // The caller therefore retains U2 and publishes it on the next natural
     // commit. Both full identities must be durable exactly once.
-    let mut natural_state = loaded_conformance_state(&store).await;
+    let mut natural_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let mut natural_commit = RuntimeCommit::persisted_state_for_test(&natural_state, &[]);
     natural_commit.usage_deltas = vec![later_delta.clone()];
     let natural =
@@ -102,11 +102,12 @@ pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
         vec![later_delta.identity]
     );
 
-    natural_state = loaded_conformance_state(&store).await;
+    natural_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let durable = natural_state
-        .token_ledger
+        .usage
+        .rows
         .iter()
-        .find(|entry| entry.source == "ordinal-reuse" && entry.model == "usage-model")
+        .find(|row| row.source == "ordinal-reuse" && row.model == "usage-model")
         .expect("merged U1 and U2 are durable");
     assert_eq!(durable.usage.input_tokens, 40);
 }
@@ -130,7 +131,7 @@ pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
 
     assert!(
         !store
-            .committed_turn_exists(&committed)
+            .committed_turn_exists(&SessionId::from("root"), &committed)
             .await
             .expect("read the committed-turn fact before any commit"),
         "no turn has committed yet"
@@ -153,14 +154,14 @@ pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
 
     assert!(
         store
-            .committed_turn_exists(&committed)
+            .committed_turn_exists(&SessionId::from("root"), &committed)
             .await
             .expect("read the committed-turn fact after the commit"),
         "the committed turn is visible to the parent-end recovery sweep"
     );
     assert!(
         !store
-            .committed_turn_exists(&interrupted)
+            .committed_turn_exists(&SessionId::from("root"), &interrupted)
             .await
             .expect("read the committed-turn fact for an uncommitted turn"),
         "a turn interrupted before its commit is never reported as ended"
@@ -223,8 +224,11 @@ pub(super) fn append_request_commit(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn loaded_conformance_state(store: &Arc<dyn RuntimeStore>) -> RuntimeSessionState {
-    crate::store::load_persisted_session_state(store.as_ref())
+pub(super) async fn loaded_conformance_state(
+    store: &Arc<dyn RuntimeStore>,
+    session_id: &SessionId,
+) -> RuntimeSessionState {
+    crate::conformance::helpers::load_window_state(store, session_id)
         .await
         .expect("load conformance append state")
         .expect("conformance append state exists")
@@ -249,7 +253,7 @@ pub(super) async fn seed_append_receipt_state(
     commit_runtime_state_for_test(store, commit, "append-receipt-seed")
         .await
         .expect("seed append receipt state");
-    loaded_conformance_state(store).await
+    loaded_conformance_state(store, &state.session_id).await
 }
 
 #[expect(
@@ -270,7 +274,7 @@ pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn Ru
         .await
         .expect("first append receipt commit");
 
-    let mut advanced = loaded_conformance_state(&store).await;
+    let mut advanced = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let advance_nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
         serde_json::json!({"value": 2}),
@@ -281,7 +285,7 @@ pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn Ru
         .await
         .expect("advance append receipt head");
 
-    let mut retry_state = loaded_conformance_state(&store).await;
+    let mut retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let (retry_commit, retry_node_ids) = append_request_commit(
         &mut retry_state,
         "head-advanced-retry",
@@ -307,13 +311,16 @@ pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn Ru
         first.realized_node_timestamps
     );
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load exactly-once append")
         .expect("append session");
     for node_id in first_node_ids {
         assert_eq!(
-            read.graph
+            read.window
                 .nodes
                 .iter()
                 .filter(|node| node.node_id == node_id)
@@ -341,12 +348,15 @@ pub async fn append_request_receipt_rejects_changed_content(store: Arc<dyn Runti
         .await
         .expect("first changed-content append");
     let before = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load before conflict")
         .unwrap();
 
-    let mut retry_state = loaded_conformance_state(&store).await;
+    let mut retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let changed_nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
         serde_json::json!({"value": "changed"}),
@@ -363,17 +373,20 @@ pub async fn append_request_receipt_rejects_changed_content(store: Arc<dyn Runti
             if session_id == "root"
     ));
     let after = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after conflict")
         .unwrap();
     assert_eq!(after.head_revision, before.head_revision);
-    assert_eq!(after.graph.leaf_node_id, before.graph.leaf_node_id);
-    assert_eq!(after.graph.nodes.len(), before.graph.nodes.len());
+    assert_eq!(after.window.leaf_node_id, before.window.leaf_node_id);
+    assert_eq!(after.window.nodes.len(), before.window.nodes.len());
     assert!(
         first_ids
             .iter()
-            .all(|id| after.graph.find_node(id).is_some())
+            .all(|id| after.window.find_node(id).is_some())
     );
 }
 
@@ -495,7 +508,7 @@ pub(super) fn semantic_boundary_commit(
 pub async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn RuntimeStore>) {
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
-        let state = loaded_conformance_state(&store).await;
+        let state = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let first_commit = semantic_boundary_commit(&state, boundary, key);
         let first_hash = first_commit
             .turn_commit_hash()
@@ -504,7 +517,7 @@ pub async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn
             .await
             .expect("first semantic-boundary commit");
 
-        let mut advanced = loaded_conformance_state(&store).await;
+        let mut advanced = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let nodes = vec![crate::SessionAppendNode::plugin(
             "semantic-boundary-advance",
             serde_json::json!({ "advance": key }),
@@ -515,7 +528,7 @@ pub async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn
             .await
             .expect("advance head between semantic-boundary attempts");
 
-        let retry_state = loaded_conformance_state(&store).await;
+        let retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let retry_commit = semantic_boundary_commit(&retry_state, boundary, key);
         assert_ne!(
             retry_commit
@@ -544,18 +557,21 @@ pub async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn
 pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn RuntimeStore>) {
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
-        let state = loaded_conformance_state(&store).await;
+        let state = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let first = semantic_boundary_commit(&state, boundary, key);
         commit_runtime_state_for_test(&store, first, "semantic-changed-first")
             .await
             .expect("first semantic-boundary commit");
         let before = store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current,
+            )
             .await
             .expect("load before semantic conflict")
             .expect("semantic conflict session");
 
-        let retry_state = loaded_conformance_state(&store).await;
+        let retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let operation = lash_core::testing::conformance_support::boundary_operation(
             &retry_state.session_id,
             boundary,
@@ -582,7 +598,10 @@ pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn Ru
             "{key} differing canonical encoding must refuse, got {error:?}"
         );
         let after = store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current,
+            )
             .await
             .expect("load after semantic conflict")
             .expect("semantic conflict session");
@@ -598,7 +617,7 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dy
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
         // An Append-labeled identity on a semantic-boundary operation is refused.
-        let state = loaded_conformance_state(&store).await;
+        let state = loaded_conformance_state(&store, &SessionId::from("root")).await;
         let operation = lash_core::testing::conformance_support::boundary_operation(
             &state.session_id,
             boundary,
@@ -675,7 +694,7 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dy
     }
 
     // A non-adopting operation cannot claim a semantic identity.
-    let state = loaded_conformance_state(&store).await;
+    let state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     let operation = lash_core::testing::conformance_support::boundary_operation(
         &state.session_id,
         "semantic-park",
@@ -782,13 +801,16 @@ pub async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dy
         "one concurrent attempt must publish and the other must replay"
     );
     let read = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load same-operation race")
         .expect("same-operation race session");
     for node_id in node_ids {
         assert_eq!(
-            read.graph
+            read.window
                 .nodes
                 .iter()
                 .filter(|node| node.node_id == node_id)
@@ -836,7 +858,7 @@ pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
         .expect("first ancestor append");
 
     supersede(superseding_leaf).await;
-    let mut retry_state = loaded_conformance_state(&store).await;
+    let mut retry_state = loaded_conformance_state(&store, &SessionId::from("root")).await;
     assert!(
         !retry_state.session_graph.active_path_contains(&required),
         "the backend hook must move the requested ancestor off the active path"
@@ -1060,7 +1082,10 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
     assert!(matches!(error, StoreError::FollowOnHeadInvariant { .. }));
     assert!(
         store
-            .load_session()
+            .load_session_window(
+                &SessionId::from("root"),
+                crate::store::WindowSelector::Current
+            )
             .await
             .expect("load failed append")
             .is_none()
@@ -1069,8 +1094,15 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
     commit_runtime_state_for_test(&store, clean, "atomic-append-retry")
         .await
         .expect("fresh retry after rollback succeeds");
-    let read = store.load_session().await.expect("load retry").unwrap();
-    assert!(ids.iter().all(|id| read.graph.find_node(id).is_some()));
+    let read = store
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
+        .await
+        .expect("load retry")
+        .unwrap();
+    assert!(ids.iter().all(|id| read.window.find_node(id).is_some()));
 }
 
 #[expect(
@@ -1081,7 +1113,10 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeSt
 pub async fn fresh_append_receipt_enforces_ancestor_precondition(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let before = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load before stale")
         .unwrap();
@@ -1105,11 +1140,14 @@ pub async fn fresh_append_receipt_enforces_ancestor_precondition(store: Arc<dyn 
             if required_node_id == "not-on-the-active-path"
     ));
     let after = store
-        .load_session()
+        .load_session_window(
+            &SessionId::from("root"),
+            crate::store::WindowSelector::Current,
+        )
         .await
         .expect("load after stale")
         .unwrap();
     assert_eq!(after.head_revision, before.head_revision);
-    assert_eq!(after.graph.leaf_node_id, before.graph.leaf_node_id);
-    assert_eq!(after.graph.nodes.len(), before.graph.nodes.len());
+    assert_eq!(after.window.leaf_node_id, before.window.leaf_node_id);
+    assert_eq!(after.window.nodes.len(), before.window.nodes.len());
 }

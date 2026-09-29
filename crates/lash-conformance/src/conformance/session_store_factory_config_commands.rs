@@ -25,7 +25,9 @@ impl PausedConfigSettlementStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -97,6 +99,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         "config-command-coalescing:incarnation",
     );
     let lease = store
+        .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
@@ -128,11 +131,11 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         .iter()
         .map(|batch| batch.batch_id.clone())
         .collect::<Vec<_>>();
-    commit_session_command_claim(store.as_ref(), &request, &lease, claim).await;
+    commit_session_command_claim(store.store(), &request, &lease, claim).await;
     for batch_id in completed_batch_ids {
         assert!(
             store
-                .queued_work_batch_completed(&request.session_id, &batch_id)
+                .queued_work_batch_completed(&batch_id)
                 .await
                 .expect("read config-command completion marker"),
             "every batch in a coalesced command commit must leave completion evidence"
@@ -182,6 +185,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         "config-command-claim-bound:incarnation",
     );
     let lease = store
+        .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
@@ -200,14 +204,14 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         first.len(),
         crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN
     );
-    commit_session_command_claim(store.as_ref(), &request, &lease, first).await;
+    commit_session_command_claim(store.store(), &request, &lease, first).await;
 
     let second = store
         .open_session_command_run(&lease)
         .await
         .expect("claim remaining bounded command prefix");
     assert_eq!(second.len(), 3);
-    commit_session_command_claim(store.as_ref(), &request, &lease, second).await;
+    commit_session_command_claim(store.store(), &request, &lease, second).await;
 
     assert!(
         store
@@ -220,7 +224,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
 }
 
 async fn commit_session_command_claim(
-    store: &dyn crate::RuntimeStore,
+    store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
     run: Vec<crate::QueuedWorkBatch>,
@@ -235,13 +239,13 @@ async fn commit_session_command_claim(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_session_command_claim_with(
-    store: &dyn crate::RuntimeStore,
+    store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
     run: Vec<crate::QueuedWorkBatch>,
     adjust: impl FnOnce(&mut crate::RuntimeSessionState),
 ) {
-    let mut state = crate::load_persisted_session_state(store)
+    let mut state = crate::conformance::helpers::load_window_state(store, &request.session_id)
         .await
         .expect("load config-command state")
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -410,7 +414,7 @@ where
         .admit_view(request)
         .await
         .expect("create config-settlement store");
-    (backend, store)
+    (backend, Arc::clone(store.store()))
 }
 
 #[expect(
@@ -423,7 +427,7 @@ async fn runtime_for_config_settlement(
     request: &crate::SessionStoreCreateRequest,
     clock: Arc<ConfigSettlementClock>,
 ) -> crate::LashRuntime {
-    let mut state = crate::load_persisted_session_state(store.as_ref())
+    let mut state = crate::conformance::helpers::load_window_state(&store, &request.session_id)
         .await
         .expect("load config-settlement state")
         .unwrap_or_else(|| crate::RuntimeSessionState {
@@ -460,7 +464,7 @@ async fn runtime_for_config_settlement(
     let runtime_host = crate::EmbeddedRuntimeHost::new(host);
     let runtime_services = crate::PersistentRuntimeServices::new(
         plugins,
-        store,
+        crate::conformance::helpers::session_view(&store, request.session_id.clone()),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -708,7 +712,7 @@ where
         .build()
         .expect("superseding model");
     let newer_model = superseding_model.clone();
-    commit_session_command_claim_with(store.as_ref(), &request, &lease, claim, move |state| {
+    commit_session_command_claim_with(&store, &request, &lease, claim, move |state| {
         state.policy.model = newer_model;
     })
     .await;

@@ -114,7 +114,10 @@ async fn build_runtime(parts: &Parts) -> crate::LashRuntime {
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(factories)
-            .with_store(Arc::clone(&parts.store))
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )

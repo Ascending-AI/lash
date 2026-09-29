@@ -141,7 +141,10 @@ async fn build_migrated_runtime(parts: MigratedRuntimeParts) -> crate::LashRunti
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_factories(parts.factories)
-            .with_store(parts.store)
+            .with_store(crate::conformance::helpers::session_view(
+                &parts.store,
+                parts.session_id.clone(),
+            ))
             .with_process_registry(parts.registry)
             .with_process_work(parts.process_work)
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))

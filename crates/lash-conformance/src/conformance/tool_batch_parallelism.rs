@@ -1179,10 +1179,11 @@ async fn drive_turn(
             .with_policy(policy)
             .with_initial_state(state)
             .with_plugin_host(plugin_host)
-            .with_store(
-                crate::conformance::law_session_store(world.stores.as_ref(), &world.session_id)
+            .with_store(crate::conformance::helpers::session_view(
+                &crate::conformance::law_session_store(world.stores.as_ref(), &world.session_id)
                     .await,
-            )
+                world.session_id.clone(),
+            ))
             .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )

@@ -3,7 +3,6 @@
 
 use super::session_store_factory_enumeration::session_store_factory_enumeration_is_read_only_and_keeps_tombstones;
 use super::session_store_factory_vacuum::{
-    session_store_factory_unbound_vacuum_is_typed_error,
     session_store_factory_vacuum_agrees_on_unpin_before_delete,
     session_store_factory_vacuum_is_scoped_to_bound_session,
     session_store_factory_vacuums_organic_retained_tombstone,
@@ -77,26 +76,11 @@ pub async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
 
 /// `make` must return a fresh, empty factory on each call.
 ///
-/// `backend` names the implementation under test; it only appears in
-/// diagnostics for cases a backend cannot express.
-///
-/// `unbound_store` is a store handle the backend built without a session
-/// binding, which the suite uses to police the session-scoped `vacuum`
-/// contract. Backends whose store handle cannot exist without a session id
-/// pass `None`: that is an assertion that the backend takes responsibility for
-/// reclaim itself (its handle is always bound, so it has no unbound sweep to
-/// police), not a licence to skip the contract. The skip is logged as a
-/// `tracing` warning naming the backend so it can never pass unnoticed.
-///
 /// `make_attached` returns a fresh factory together with the attachment byte
 /// store of the same substrate, for the laws that sweep bytes against the
 /// factory's roots.
-pub async fn session_store_factory<F, A>(
-    backend: &str,
-    unbound_store: Option<Arc<dyn crate::store::StoreMaintenance>>,
-    make: F,
-    make_attached: A,
-) where
+pub async fn session_store_factory<F, A>(make: F, make_attached: A)
+where
     F: Fn() -> Arc<dyn crate::store::ConformanceDeployment>,
     A: Fn() -> (
         Arc<dyn crate::store::ConformanceDeployment>,
@@ -133,7 +117,6 @@ pub async fn session_store_factory<F, A>(
     session_store_factory_vacuums_organic_retained_tombstone(make()).await;
     session_store_factory_vacuum_is_scoped_to_bound_session(make()).await;
     session_store_factory_vacuum_agrees_on_unpin_before_delete(make()).await;
-    session_store_factory_unbound_vacuum_is_typed_error(backend, unbound_store).await;
     session_store_factory_delete_removes_store_and_is_idempotent(make()).await;
     session_store_factory_delete_fences_stale_handles(make()).await;
     turn_park_feed::parked_turns_list_by_since_with_filters_and_keyset_pages(make()).await;
@@ -147,7 +130,7 @@ pub async fn session_store_factory<F, A>(
 
 /// Hold a backend to the read-only session-view contract.
 ///
-/// The factory must expose committed history, tree, and usage while another
+/// The factory must expose committed history, failure evidence and usage while another
 /// handle owns the live execution lease. Reading must leave that writer's
 /// authority intact, and deleting the session must produce the same absent
 /// read disposition as the ordinary live-open surface.
@@ -232,6 +215,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         "read-only-session-writer:incarnation",
     );
     let held = writer
+        .store()
         .seal_drive_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
         .await
         .expect("claim live writer lease")
@@ -246,14 +230,20 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     assert_eq!(view.session_id(), SESSION_ID);
     assert_eq!(view.durable_relation(), Some(&expected_relation));
     assert_eq!(view.messages().len(), 1, "history is projected");
-    assert_eq!(view.message_tree().len(), 1, "tree is projected");
+    // Failure evidence is not part of the view; it is paged (ADR 0112 §8).
+    let settlements = crate::conformance::helpers::load_failure_evidence(
+        factory.as_ref(),
+        &SessionId::from(SESSION_ID),
+    )
+    .await
+    .expect("page the session's failure evidence");
     assert_eq!(
-        view.turn_failure_settlements().len(),
+        settlements.len(),
         1,
         "the failed generation's evidence remains readable after factory reopen"
     );
     assert_eq!(
-        view.turn_failure_settlements()[0].evidence,
+        settlements[0].evidence,
         vec![failure_evidence],
         "the turn settlement preserves typed partial output, billed usage, and refusal facts"
     );
@@ -275,11 +265,12 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
 
     let current = writer
-        .drive_epoch(held.session())
+        .drive_epoch()
         .await
         .expect("reader leaves drive epoch available");
     assert_eq!(current.epoch, held.epoch());
     writer
+        .store()
         .supersede_drive_epoch_for_test(&held)
         .await
         .expect("release live writer after inspection");
@@ -298,11 +289,11 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
 }
 
-/// Assert that the first admission through a fresh session handle creates the
-/// session's durable metadata.
+/// Assert that the first admission of a session into a fresh catalog creates
+/// the session's durable metadata, and that admitting it again rebinds.
 ///
-/// `make` must return a fresh handle bound (when the backend requires explicit
-/// identity binding) to the supplied session id, without admitting that id.
+/// `make` must return a fresh, empty catalog; the law names the session it
+/// admits (ADR 0112 §1.1).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -311,21 +302,30 @@ pub async fn fresh_session_admission_returns_created<F>(make: F)
 where
     F: FnOnce(&str) -> Arc<dyn crate::RuntimeStore>,
 {
-    let binding = crate::SessionBinding {
-        session_id: SessionId::from("fresh-admission-created"),
-        relation: crate::SessionRelation::Child {
+    let request = session_store_request(
+        &SessionId::from("fresh-admission-created"),
+        "fresh-admission-model",
+        crate::SessionRelation::Child {
             parent_session_id: SessionId::from("fresh-admission-parent"),
             caused_by: None,
         },
-    };
-    let store = make(&binding.session_id);
+    );
+    let store = make(&request.session_id);
 
     assert_eq!(
         store
-            .admit_and_bind_session(&binding)
+            .admit_session(&request)
             .await
             .expect("admit a fresh session"),
         crate::SessionAdmission::Created
+    );
+    assert_eq!(
+        store
+            .admit_session(&request)
+            .await
+            .expect("admit the same session again"),
+        crate::SessionAdmission::Rebound,
+        "a second admission with the same lineage rebinds and writes nothing"
     );
 }
 
@@ -344,11 +344,10 @@ async fn session_store_factory_claimable_queued_work_peek(
         crate::SessionRelation::Root,
     );
     assert!(
-        factory
-            .has_claimable_queued_work(&request)
+        !factory
+            .has_claimable_queued_work(&request.session_id)
             .await
-            .expect("peek a missing session")
-            == Some(false),
+            .expect("peek a missing session"),
         "a missing session must not report claimable queued work"
     );
     let store = factory
@@ -356,11 +355,10 @@ async fn session_store_factory_claimable_queued_work_peek(
         .await
         .expect("create peek conformance store");
     assert!(
-        factory
-            .has_claimable_queued_work(&request)
+        !factory
+            .has_claimable_queued_work(&request.session_id)
             .await
-            .expect("peek an empty queue")
-            == Some(false),
+            .expect("peek an empty queue"),
         "an empty queue must not report claimable queued work"
     );
 
@@ -376,23 +374,21 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue queued work");
     assert!(
         factory
-            .has_claimable_queued_work(&request)
+            .has_claimable_queued_work(&request.session_id)
             .await
-            .expect("peek a populated queue")
-            == Some(true),
+            .expect("peek a populated queue"),
         "queued work must be visible through the factory peek"
     );
     store
-        .cancel_queued_work_batch(&request.session_id, &ready.batch_id)
+        .cancel_queued_work_batch(&ready.batch_id)
         .await
         .expect("cancel queued work")
         .expect("batch remains cancellable");
     assert!(
-        factory
-            .has_claimable_queued_work(&request)
+        !factory
+            .has_claimable_queued_work(&request.session_id)
             .await
-            .expect("peek after cancelling the only batch")
-            == Some(false),
+            .expect("peek after cancelling the only batch"),
         "the queue must report empty again after its batch is removed"
     );
 
@@ -406,10 +402,9 @@ async fn session_store_factory_claimable_queued_work_peek(
         .expect("enqueue claimable next-turn input");
     assert!(
         factory
-            .has_claimable_queued_work(&request)
+            .has_claimable_queued_work(&request.session_id)
             .await
-            .expect("peek a claimable next-turn input")
-            == Some(true),
+            .expect("peek a claimable next-turn input"),
         "deferred next-turn input must be visible through the factory peek"
     );
 
@@ -441,18 +436,18 @@ async fn session_store_factory_claimable_queued_work_peek(
         .await
         .expect("enqueue claim-fenced next-turn input");
     let first_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
-        &fenced_store,
+        fenced_store.store(),
         &fenced_request.session_id,
         "peek-fence-first",
     )
     .await;
     let wake = fenced_store
-        .list_open_queued_work(&fenced_request.session_id)
+        .list_open_queued_work()
         .await
         .expect("list the open wake")
         .remove(0);
     let admission = crate::conformance::admitted_root(
-        &fenced_store,
+        fenced_store.store(),
         &first_lease,
         "claimable-peek-root",
         crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
@@ -461,27 +456,26 @@ async fn session_store_factory_claimable_queued_work_peek(
     assert_eq!(admission.batch_ids(), vec![wake.batch_id.clone()]);
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request)
+            .has_claimable_queued_work(&fenced_request.session_id)
             .await
-            .expect("conservatively peek admitted rows")
-            == Some(true),
+            .expect("conservatively peek admitted rows"),
         "an unfinished root's rows must keep bounded recovery armed rather than create a false negative"
     );
 
     fenced_store
+        .store()
         .supersede_drive_epoch_for_test(&first_lease)
         .await
         .expect("supersede the first drive deterministically");
     assert!(
         factory
-            .has_claimable_queued_work(&fenced_request)
+            .has_claimable_queued_work(&fenced_request.session_id)
             .await
-            .expect("peek after the drive is superseded")
-            == Some(true),
+            .expect("peek after the drive is superseded"),
         "an unfinished root's rows stay visible to the conservative recovery peek"
     );
     let successor_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
-        &fenced_store,
+        fenced_store.store(),
         &fenced_request.session_id,
         "peek-fence-successor",
     )
@@ -491,7 +485,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         "the successor's seal must advance the drive epoch"
     );
     let resumed = crate::conformance::admitted_root(
-        &fenced_store,
+        fenced_store.store(),
         &successor_lease,
         "claimable-peek-root",
         crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
@@ -525,9 +519,9 @@ pub async fn session_store_factory_delete_fences_stale_handles(
         crate::SessionRelation::Root,
     );
     let stale = factory
-        .create_conformance_store(&request)
+        .admit_view(&request)
         .await
-        .expect("create the handle that will go stale");
+        .expect("admit the session behind the view that will go stale");
     let stale_meta = stale
         .load_session_meta()
         .await
@@ -576,17 +570,23 @@ pub async fn session_store_factory_delete_fences_stale_handles(
             .is_none(),
         "a stale handle must observe deleted session metadata as absent"
     );
+    // Every history read of a deleted session answers `SessionDeleted`
+    // (ADR 0112 §5), never an empty window.
+    let window_error = stale
+        .load_session_window(crate::store::WindowSelector::Current)
+        .await
+        .expect_err("a stale view must not read the deleted session's window");
     assert!(
-        stale
-            .load_session()
-            .await
-            .expect("load checkpoint through the stale handle")
-            .is_none(),
-        "a stale handle must observe the deleted session checkpoint as absent"
+        matches!(
+            window_error,
+            crate::StoreError::SessionDeleted { ref session_id }
+                if session_id == request.session_id
+        ),
+        "a stale view must observe the deleted session as deleted, got: {window_error}"
     );
     assert!(
         stale
-            .list_pending_turn_inputs(&request.session_id)
+            .list_pending_turn_inputs()
             .await
             .expect("list pending inputs through the stale handle")
             .is_empty(),
@@ -594,16 +594,17 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     );
     assert!(
         stale
-            .list_queued_work(&request.session_id)
+            .list_queued_work()
             .await
             .expect("list queued work through the stale handle")
             .is_empty(),
         "a stale handle must observe deleted queued work as absent"
     );
     let ensure_error = stale
-        .admit_and_bind_session(&crate::SessionBinding::from_create_request(&request))
+        .store()
+        .admit_session(&request)
         .await
-        .expect_err("a stale handle must not reinsert deleted session metadata");
+        .expect_err("a stale view's store must not reinsert deleted session metadata");
     assert!(
         matches!(
             ensure_error,
@@ -728,7 +729,7 @@ pub async fn process_prune_deletes_owned_session_stores(
             .await
             .expect("create process-owned session store");
         crate::conformance::helpers::record_completed_attachment_write(
-            &store,
+            store.store(),
             crate::AttachmentIntent {
                 attachment_id: crate::AttachmentId::parse(format!(
                     "process-owned-session-intent-{index}"
@@ -753,6 +754,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .expect("open process-owned session for closure pin")
         .expect("process-owned session exists");
     let lease = pinned_store
+        .store()
         .seal_drive_epoch_for_test(
             &pinned_request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
@@ -777,12 +779,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)
             .expect("bind process cancellation scope");
     pinned_store
-        .validate_turn_cancellation_binding(
-            &pinned_request.session_id,
-            &lease,
-            &binding_id,
-            &physical_scope,
-        )
+        .validate_turn_cancellation_binding(&lease, &binding_id, &physical_scope)
         .await
         .expect("bind process-owned cancellation authority");
     let address = crate::TurnAddress::new(
@@ -862,7 +859,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .await
         .expect("settle process-owned closure before consumption");
     turn_cancel::commit_teardown(
-        pinned_store.as_ref(),
+        pinned_store.store().as_ref(),
         &lease,
         &address.turn_id,
         &crate::TurnCancelIntentSnapshot::Absent,
@@ -973,14 +970,18 @@ pub async fn attachment_reference_lifecycle_with_store(
     let session_a = crate::SessionAttachmentStore::new(
         backend.clone(),
         Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(a_manifest.clone()),
+            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                a_manifest.store(),
+            )),
         ),
         a_request.session_id.clone(),
     );
     let session_b = crate::SessionAttachmentStore::new(
         backend.clone(),
         Arc::new(
-            lash_core::testing::conformance_support::PersistenceManifestAdapter(b_manifest.clone()),
+            lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                b_manifest.store(),
+            )),
         ),
         b_request.session_id.clone(),
     );
@@ -1001,7 +1002,7 @@ pub async fn attachment_reference_lifecycle_with_store(
         .await
         .expect("put a attachment");
     a_manifest
-        .commit_refs(&a_request.session_id, std::slice::from_ref(&a_ref.id))
+        .commit_refs(std::slice::from_ref(&a_ref.id))
         .await
         .expect("commit a's attachment ref");
 
@@ -1037,7 +1038,7 @@ pub async fn attachment_reference_lifecycle_with_store(
         .await
         .expect("b resolves the blob it now references");
     b_manifest
-        .commit_refs(&b_request.session_id, std::slice::from_ref(&b_ref.id))
+        .commit_refs(std::slice::from_ref(&b_ref.id))
         .await
         .expect("commit b's attachment ref");
 
@@ -1152,10 +1153,10 @@ where
             .await
             .expect("create the explicitly bound target store");
         assert_eq!(
-            store
-                .admit_and_bind_session(&crate::SessionBinding::from_create_request(&target))
+            factory
+                .admit_session(&target)
                 .await
-                .expect("write-bind the target session"),
+                .expect("readmit the target session"),
             crate::SessionAdmission::Rebound
         );
         let loaded = store
@@ -1239,7 +1240,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     );
     assert_deleted_write(
         crate::AttachmentManifest::begin_attachment_write(
-            stale.as_ref(),
+            stale.store().as_ref(),
             crate::AttachmentIntent {
                 attachment_id: crate::AttachmentId::parse("write-after-delete-attachment")
                     .expect("valid attachment id"),
@@ -1255,6 +1256,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     );
     assert_deleted_write(
         stale
+            .store()
             .seal_drive_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
@@ -1648,11 +1650,9 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         .expect("commit intruder's own frame");
     second_state.apply_persisted_commit_result(second_result);
     assert!(
-        second
-            .load_node(&foreign_parent)
+        !crate::conformance::helpers::node_readable(&second, &foreign_parent)
             .await
-            .expect("probe unrelated history")
-            .is_none(),
+            .expect("probe unrelated history"),
         "a bound store must not expose an unrelated session's node"
     );
     let child = crate::SessionNodeRecord {
@@ -1691,12 +1691,12 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         _ => false,
     });
     let intruder_after_rejection = second
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect("load intruder after rejection")
         .expect("intruder head survives rejection");
     assert_eq!(
-        intruder_after_rejection.graph.nodes.len(),
+        intruder_after_rejection.window.nodes.len(),
         1,
         "cross-session parent rejection must be atomic"
     );
@@ -1766,7 +1766,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     assert!(pinned.pinned);
 
     append_conformance_event_node(&mut state, "source-child", "source child");
-    commit_conformance_state(&source, &mut state)
+    commit_conformance_state(source.store(), &mut state)
         .await
         .expect("advance source past pinned root");
     let unpinned_past_node_id = state
@@ -1775,7 +1775,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .clone()
         .expect("source child leaf");
     append_conformance_event_node(&mut state, "source-tip", "source tip");
-    commit_conformance_state(&source, &mut state)
+    commit_conformance_state(source.store(), &mut state)
         .await
         .expect("advance source past unpinned child");
     let source_tip_node_id = state
@@ -1832,11 +1832,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .await
         .expect("delete branch before source");
     assert!(
-        source
-            .load_node(&source_tip_node_id)
+        crate::conformance::helpers::node_readable(&source, &source_tip_node_id)
             .await
-            .expect("load source tip after branch-first delete")
-            .is_some(),
+            .expect("load source tip after branch-first delete"),
         "deleting a branch first must not reclaim its live source sibling"
     );
 
@@ -1905,14 +1903,14 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .expect("open fork")
         .expect("fork exists");
     let branch_read = branch
-        .load_session()
+        .load_session_window(crate::store::WindowSelector::Current)
         .await
         .expect("load fork")
         .expect("fork head");
     assert_eq!(branch_read.head_revision, 0);
-    assert_eq!(branch_read.graph.nodes.len(), 1, "fork writes zero nodes");
+    assert_eq!(branch_read.window.nodes.len(), 1, "fork writes zero nodes");
     assert_eq!(
-        branch_read.graph.leaf_node_id.as_deref(),
+        branch_read.window.leaf_node_id.as_deref(),
         Some(root_node_id.as_str())
     );
     assert_eq!(
@@ -1923,15 +1921,16 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         "fork inherits the retained continuation checkpoint"
     );
     assert!(
-        branch_read.token_ledger.is_empty(),
+        branch_read.usage.rows.is_empty(),
         "usage is execution-scoped and must not cross a fork"
     );
-    let mut branch_state = crate::store::load_persisted_session_state(branch.as_ref())
-        .await
-        .expect("load fork state")
-        .expect("fork state exists");
+    let mut branch_state =
+        crate::conformance::helpers::load_window_state(branch.store(), branch.session_id())
+            .await
+            .expect("load fork state")
+            .expect("fork state exists");
     append_conformance_event_node(&mut branch_state, "branch-child", "branch child");
-    commit_conformance_state(&branch, &mut branch_state)
+    commit_conformance_state(branch.store(), &mut branch_state)
         .await
         .expect("advance fork independently");
     let branch_leaf = branch_state
@@ -1969,11 +1968,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     );
     assert_eq!(orphaned_source_point.config.model, state.policy.model);
     assert!(
-        branch
-            .load_node(&root_node_id)
+        crate::conformance::helpers::node_readable(&branch, &root_node_id)
             .await
-            .expect("load shared prefix after source delete")
-            .is_some(),
+            .expect("load shared prefix after source delete"),
         "deleting one branch must stop at the first still-referenced node"
     );
     factory
@@ -1981,11 +1978,9 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .await
         .expect("release rewind pin");
     assert!(
-        branch
-            .load_node(&root_node_id)
+        crate::conformance::helpers::node_readable(&branch, &root_node_id)
             .await
-            .expect("load prefix after unpin")
-            .is_some(),
+            .expect("load prefix after unpin"),
         "the live branch child edge retains the prefix after unpin"
     );
 
@@ -2070,13 +2065,14 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("enqueue pending turn input before delete");
     assert_eq!(
         created
-            .list_pending_turn_inputs(&request.session_id)
+            .list_pending_turn_inputs()
             .await
             .expect("list pending input before delete")
             .len(),
         1
     );
     let initial_lease = created
+        .store()
         .seal_drive_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
@@ -2107,11 +2103,9 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .expect("delete session");
     for node_id in [&frame_node_id, &live_leaf.node_id] {
         assert!(
-            created
-                .load_node(node_id)
+            !crate::conformance::helpers::node_readable_through_deleted(&created, node_id)
                 .await
-                .expect("load reclaimed node through stale handle")
-                .is_none(),
+                .expect("load reclaimed node through stale handle"),
             "delete_session must physically reclaim graph node {node_id}"
         );
     }
@@ -2231,7 +2225,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     // writer is granted immediately.
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
-            &*store,
+            store.store().as_ref(),
             crate::AttachmentIntent {
                 attachment_id: orphan.id.clone(),
                 session_id: request.session_id.clone(),
@@ -2278,7 +2272,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
     // Record uncommitted intents at timestamp 1000 with no owner (so they age out immediately when cutoff >= 1000).
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
-            &*store,
+            store.store().as_ref(),
             crate::AttachmentIntent {
                 attachment_id: aged_uncommitted_id.clone(),
                 session_id: request.session_id.clone(),
@@ -2293,7 +2287,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
     ));
 
     crate::conformance::helpers::record_completed_attachment_write(
-        &store,
+        store.store(),
         crate::AttachmentIntent {
             attachment_id: committed_id.clone(),
             session_id: request.session_id.clone(),
@@ -2304,7 +2298,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
     )
     .await;
     crate::AttachmentManifest::commit_refs(
-        &*store,
+        store.store().as_ref(),
         &request.session_id,
         std::slice::from_ref(&committed_id),
     )
@@ -2313,7 +2307,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
 
     assert!(matches!(
         crate::AttachmentManifest::begin_attachment_write(
-            &*store,
+            store.store().as_ref(),
             crate::AttachmentIntent {
                 attachment_id: cond_target_id.clone(),
                 session_id: request.session_id.clone(),
@@ -2329,9 +2323,10 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
 
     for large_cutoff in [u64::MAX, (i64::MAX as u64) + 1] {
         // 1. list_uncommitted must find all uncommitted intents whose intent_at_epoch_ms <= large_cutoff
-        let uncommitted = crate::AttachmentManifest::list_uncommitted(&*store, large_cutoff)
-            .await
-            .expect("list_uncommitted with large cutoff");
+        let uncommitted =
+            crate::AttachmentManifest::list_uncommitted(store.store().as_ref(), large_cutoff)
+                .await
+                .expect("list_uncommitted with large cutoff");
         let uncommitted_ids = uncommitted
             .iter()
             .map(|entry| entry.attachment_id.clone())

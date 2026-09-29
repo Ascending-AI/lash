@@ -103,7 +103,10 @@ impl DriveParts {
                 .with_policy(policy)
                 .with_initial_state(state)
                 .with_plugin_factories(crate::testing::test_standard_protocol_factories())
-                .with_store(store)
+                .with_store(crate::conformance::helpers::session_view(
+                    &store,
+                    self.session_id.clone(),
+                ))
                 .with_queued_work(Arc::new(crate::NoSessionWork::new()))
                 .build(),
         )
@@ -1251,7 +1254,9 @@ struct CrashAfterAdmission {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for CrashAfterAdmission {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -1397,7 +1402,9 @@ struct NoReplayRepairRead {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for NoReplayRepairRead {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -1512,7 +1519,9 @@ impl AdmissionFaultsOnce {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimeStoreDecorator for AdmissionFaultsOnce {
-    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
+    type Inner = dyn crate::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
