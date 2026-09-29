@@ -19,13 +19,18 @@ async fn observation_get_preserves_config(path: &str) {
         .await
         .unwrap();
     drop(session);
-    let store = state
+    let lookup = state
         .session_store_factory
-        .open_existing_store(&state_store_request(&state, &session_id))
+        .lookup_session(&session_id)
+        .await
+        .unwrap();
+    assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
+    let store = state.session_store_factory.clone();
+    let before = store
+        .load_session_head_meta(&session_id)
         .await
         .unwrap()
         .unwrap();
-    let before = store.load_session_head_meta().await.unwrap().unwrap();
     assert_eq!(before.config.model.id, peer_model.id);
     let app = Router::new()
         .route("/api/state", get(app_state))
@@ -48,7 +53,11 @@ async fn observation_get_preserves_config(path: &str) {
         response.status()
     );
     drop(response);
-    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    let after = store
+        .load_session_head_meta(&session_id)
+        .await
+        .unwrap()
+        .unwrap();
     server.abort();
     let _ = server.await;
     assert_eq!(

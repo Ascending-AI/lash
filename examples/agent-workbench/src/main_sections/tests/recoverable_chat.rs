@@ -1617,37 +1617,21 @@ async fn continue_as_keeps_session_user_rows_collapses_old_assistant_and_survive
         .await
         .expect("settle continue_as turn");
 
-    let durable_rows = session
-        .read_view()
-        .message_tree()
+    let durable_rows = support::durable_history_messages(&state, &session_id)
+        .await
         .into_iter()
-        .flat_map(|root| {
-            let mut rows = vec![(root.active, root.message)];
-            let mut pending = root.children;
-            while let Some(node) = pending.pop() {
-                rows.push((node.active, node.message));
-                pending.extend(node.children);
-            }
-            rows
-        })
-        .map(|(active, message)| {
-            (
-                active,
-                lash::message_role(&message),
-                lash::message_text(&message),
-            )
-        })
+        .map(|message| (lash::message_role(&message), lash::message_text(&message)))
         .collect::<Vec<_>>();
     assert!(
         durable_rows
             .iter()
-            .any(|(_, role, text)| *role == "user" && text == first_prompt),
+            .any(|(role, text)| *role == "user" && text == first_prompt),
         "the durable graph must retain the pre-switch user input"
     );
     assert!(
         durable_rows
             .iter()
-            .any(|(_, role, text)| *role == "assistant" && text == "old frame answer"),
+            .any(|(role, text)| *role == "assistant" && text == "old frame answer"),
         "the old assistant must remain in the durable graph even though the current-frame projection collapses it"
     );
     session.close().await.expect("close switched session");
@@ -2120,36 +2104,29 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         .await
         .expect("/api/state must remain readable while the turn lease is held");
     assert_eq!(running.active_turns.len(), 1);
-    let in_flight_store = state
-        .session_store_factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: state.current_session_id(),
-            relation: lash::persistence::SessionRelation::Root,
-            policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("open the in-flight session store");
-    let in_flight = lash::persistence::load_persisted_session_state(&*in_flight_store)
-        .await
-        .expect("read the admitted in-flight durable state");
+    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+        state.session_store_factory.clone();
+    let in_flight_store =
+        lash::persistence::SessionStore::new(runtime_store, state.current_session_id())
+            .expect("valid session id");
+    let in_flight = lash::persistence::load_session_window_state(
+        &in_flight_store,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await
+    .expect("read the admitted in-flight durable state")
+    .map(|loaded| loaded.state);
     assert!(
         in_flight.as_ref().is_none_or(|state| {
-            state
-                .read_view()
-                .expect("durable frame scope resolves")
-                .messages()
-                .iter()
-                .all(|message| {
-                    !matches!(
-                        message.origin.as_ref(),
-                        Some(lash::messages::MessageOrigin::TurnInput {
-                            turn_id: committed_turn_id,
-                            ..
-                        }) if committed_turn_id == turn_id
-                    )
-                })
+            state.read_view().messages().iter().all(|message| {
+                !matches!(
+                    message.origin.as_ref(),
+                    Some(lash::messages::MessageOrigin::TurnInput {
+                        turn_id: committed_turn_id,
+                        ..
+                    }) if committed_turn_id == turn_id
+                )
+            })
         }),
         "the initial turn input is not committed while the first provider call is in flight"
     );

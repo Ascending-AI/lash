@@ -205,11 +205,12 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let store = core_store_factory
-            .open_existing_store_by_id(&old_session_id)
+        let lookup = core_store_factory
+            .lookup_session(&old_session_id)
             .await
-            .expect("open old session store")
-            .expect("old session still exists");
+            .expect("look up old session");
+        assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
+        let store = Arc::clone(&core_store_factory);
         // The pending queue view omits live claims. The complete queue keeps
         // those rows until the final transaction consumes their closure pin.
         loop {

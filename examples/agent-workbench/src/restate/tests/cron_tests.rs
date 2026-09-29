@@ -929,37 +929,12 @@ async fn a_failed_delete_cancel_preserves_the_registration() {
 }
 
 struct MetaLossSessionStoreFactory {
-    inner: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
+    inner: Arc<lash_sqlite_store::SqliteStore>,
     absent_session_ids: std::sync::Mutex<std::collections::HashSet<SessionId>>,
 }
 
-struct ContendedRuntimePersistence {
-    inner: Arc<dyn lash::persistence::RuntimeStore>,
-    contend: Arc<std::sync::atomic::AtomicBool>,
-    contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl lash::persistence::RuntimeStoreDecorator for ContendedRuntimePersistence {
-    fn inner(&self) -> &(dyn lash::persistence::RuntimeStore + '_) {
-        self.inner.as_ref()
-    }
-
-    async fn admit_session_state(
-        &self,
-        authority: &lash::persistence::DriveFence,
-    ) -> Result<lash::persistence::SessionStateAdmission, lash::persistence::StoreError> {
-        if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
-            self.contended_attempts
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            return Err(lash::persistence::StoreError::Contended);
-        }
-        self.inner.admit_session_state(authority).await
-    }
-}
-
 struct ContendedSessionStoreFactory {
-    inner: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
+    inner: Arc<lash_sqlite_store::SqliteStore>,
     contend: Arc<std::sync::atomic::AtomicBool>,
     contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
@@ -985,198 +960,27 @@ impl ContendedSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<
-        std::collections::BTreeSet<lash::attachments::AttachmentId>,
-        lash::persistence::StoreError,
-    > {
-        lash::persistence::AttachmentRootSet::live_attachment_refs(
-            self.inner.as_ref(),
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+impl lash::persistence::RuntimeStoreDecorator for ContendedSessionStoreFactory {
+    type Inner = dyn lash::persistence::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
-    async fn has_live_attachment_ref(
+    async fn admit_session_state(
         &self,
-        id: &lash::attachments::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, lash::persistence::StoreError> {
-        lash::persistence::AttachmentRootSet::has_live_attachment_ref(
-            self.inner.as_ref(),
-            id,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+        fence: &lash::persistence::DriveFence,
+    ) -> Result<lash::persistence::SessionStateAdmission, lash::persistence::StoreError> {
+        if self.contend.load(std::sync::atomic::Ordering::SeqCst) {
+            self.contended_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Err(lash::persistence::StoreError::Contended);
+        }
+        lash::persistence::SessionCommitStore::admit_session_state(self.inner.as_ref(), fence).await
     }
 }
 
-#[async_trait::async_trait]
-impl lash::persistence::DeploymentStore for ContendedSessionStoreFactory {
-    // A decorator forwards the non-creating by-id seam, keeping the
-    // contention wrapper on the store it hands back.
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, lash::persistence::StoreError>
-    {
-        Ok(
-            lash::persistence::DeploymentStore::open_existing_store_by_id(
-                self.inner.as_ref(),
-                session_id,
-            )
-            .await?
-            .map(|inner| {
-                Arc::new(ContendedRuntimePersistence {
-                    inner,
-                    contend: Arc::clone(&self.contend),
-                    contended_attempts: Arc::clone(&self.contended_attempts),
-                }) as Arc<dyn lash::persistence::RuntimeStore>
-            }),
-        )
-    }
-
-    async fn create_store(
-        &self,
-        request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn lash::persistence::RuntimeStore>, lash::persistence::StoreError> {
-        let inner =
-            lash::persistence::DeploymentStore::create_store(self.inner.as_ref(), request).await?;
-        Ok(Arc::new(ContendedRuntimePersistence {
-            inner,
-            contend: Arc::clone(&self.contend),
-            contended_attempts: Arc::clone(&self.contended_attempts),
-        }))
-    }
-
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id)
-            .await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::DeploymentStore::delete_session(self.inner.as_ref(), session_id).await
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash::persistence::TurnParkQuery,
-    ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash::persistence::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<
-        lash::persistence::ParkFeedPage<lash::persistence::TurnParkTarget>,
-        lash::persistence::StoreError,
-    > {
-        lash::persistence::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash::SessionId,
-        root: &lash::TurnId,
-    ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
-    {
-        lash::persistence::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root)
-            .await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash::persistence::ParkFeedCursor,
-    ) -> Result<(), lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::persistence::ControlIntentStore for ContendedSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::begin_session_close(
-            self.inner.as_ref(),
-            session_id,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::claim_intent_application(
-            self.inner.as_ref(),
-            id,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        claim: &lash::persistence::ClaimToken,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::acknowledge_intent(
-            self.inner.as_ref(),
-            id,
-            claim,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        claim: &lash::persistence::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::record_intent_failure(
-            self.inner.as_ref(),
-            id,
-            claim,
-            error,
-            retryable,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash::persistence::ControlIntentId,
-    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
-    }
-}
+impl lash::persistence::DeploymentStoreDecorator for ContendedSessionStoreFactory {}
 
 impl MetaLossSessionStoreFactory {
     pub(crate) fn new() -> Self {
@@ -1193,204 +997,27 @@ impl MetaLossSessionStoreFactory {
     }
 }
 
-// This decorator changes only metadata visibility; attachment ownership stays
-// with the inner factory and must be delegated explicitly.
 #[async_trait::async_trait]
-impl lash::persistence::AttachmentRootSet for MetaLossSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<
-        std::collections::BTreeSet<lash::attachments::AttachmentId>,
-        lash::persistence::StoreError,
-    > {
-        lash::persistence::AttachmentRootSet::live_attachment_refs(
-            self.inner.as_ref(),
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+impl lash::persistence::RuntimeStoreDecorator for MetaLossSessionStoreFactory {
+    type Inner = dyn lash::persistence::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &lash::attachments::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, lash::persistence::StoreError> {
-        lash::persistence::AttachmentRootSet::has_live_attachment_ref(
-            self.inner.as_ref(),
-            id,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash::persistence::DeploymentStore for MetaLossSessionStoreFactory {
-    async fn create_store(
-        &self,
-        request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn lash::persistence::RuntimeStore>, lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::create_store(self.inner.as_ref(), request).await
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, String> {
-        if self
-            .absent_session_ids
-            .lock_recover()
-            .contains(&request.session_id)
-        {
-            return Ok(None);
-        }
-        lash::persistence::DeploymentStore::open_existing_store(self.inner.as_ref(), request).await
-    }
-
-    // A Durable Session acquires by id; the fixture's meta loss must be
-    // visible through that seam too, not hidden behind an unimplemented
-    // default that reports the session as absent.
-    async fn open_existing_store_by_id(
+    async fn lookup_session(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, lash::persistence::StoreError>
-    {
+    ) -> Result<lash::persistence::SessionLookup, lash::persistence::StoreError> {
         if self.absent_session_ids.lock_recover().contains(session_id) {
-            return Ok(None);
+            return Ok(lash::persistence::SessionLookup::Absent);
         }
-        lash::persistence::DeploymentStore::open_existing_store_by_id(
-            self.inner.as_ref(),
-            session_id,
-        )
-        .await
-    }
-
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id)
-            .await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::DeploymentStore::delete_session(self.inner.as_ref(), session_id).await
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash::persistence::TurnParkQuery,
-    ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash::persistence::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<
-        lash::persistence::ParkFeedPage<lash::persistence::TurnParkTarget>,
-        lash::persistence::StoreError,
-    > {
-        lash::persistence::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash::SessionId,
-        root: &lash::TurnId,
-    ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
-    {
-        lash::persistence::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root)
-            .await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash::persistence::ParkFeedCursor,
-    ) -> Result<(), lash::persistence::StoreError> {
-        lash::persistence::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through)
+        lash::persistence::SessionCatalogStore::lookup_session(self.inner.as_ref(), session_id)
             .await
     }
 }
 
-#[async_trait::async_trait]
-impl lash::persistence::ControlIntentStore for MetaLossSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::begin_session_close(
-            self.inner.as_ref(),
-            session_id,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::claim_intent_application(
-            self.inner.as_ref(),
-            id,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        claim: &lash::persistence::ClaimToken,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::acknowledge_intent(
-            self.inner.as_ref(),
-            id,
-            claim,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash::persistence::ControlIntentId,
-        claim: &lash::persistence::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> Result<lash::persistence::IntentSettle, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::record_intent_failure(
-            self.inner.as_ref(),
-            id,
-            claim,
-            error,
-            retryable,
-            at_ms,
-        )
-        .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash::persistence::ControlIntentId,
-    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
-    }
-}
+impl lash::persistence::DeploymentStoreDecorator for MetaLossSessionStoreFactory {}
 
 async fn materialize_cron_test_session(state: &crate::AppState, session_id: &SessionId) {
     drop(

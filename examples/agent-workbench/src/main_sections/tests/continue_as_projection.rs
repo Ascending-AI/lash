@@ -120,19 +120,9 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         }),
         "the asserted follow-frame send must carry runtime-stamped TurnInput provenance"
     );
-    let all_frame_turn_ids = session
-        .read_view()
-        .message_tree()
+    let all_frame_turn_ids = support::durable_history_messages(&state, &session_id)
+        .await
         .into_iter()
-        .flat_map(|root| {
-            let mut messages = vec![root.message];
-            let mut pending = root.children;
-            while let Some(node) = pending.pop() {
-                messages.push(node.message);
-                pending.extend(node.children);
-            }
-            messages
-        })
         .filter_map(|message| match message.origin {
             Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) => Some(turn_id),
             _ => None,

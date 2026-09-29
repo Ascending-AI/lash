@@ -66,11 +66,12 @@ fn expiring_terminal_driver(
     let stores = Arc::clone(&state.session_store_factory);
     (driver, async move {
         let address = installed.recv().await.expect("attachment started");
-        let store = stores
-            .open_existing_store_by_id(&address.session_id)
+        let lookup = stores
+            .lookup_session(&address.session_id)
             .await
-            .expect("read durable cancellation store")
-            .expect("cancellation store exists");
+            .expect("read durable cancellation store");
+        assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
+        let store = stores;
         assert!(
             store
                 .turn_cancel_request(&address)
@@ -828,14 +829,16 @@ impl lash::TurnAttach for ConcurrentCancelTerminal {
         address: &lash::TurnAddress,
     ) -> Result<lash::TurnTerminal, lash::runtime::RuntimeError> {
         let leader = self.attached.wait().await.is_leader();
-        let store = self
+        let lookup = self
             .state
             .session_store_factory
-            .open_existing_store_by_id(&address.session_id)
+            .lookup_session(&address.session_id)
             .await
-            .unwrap()
             .unwrap();
-        let request = store
+        assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
+        let request = self
+            .state
+            .session_store_factory
             .turn_cancel_request(address)
             .await
             .unwrap()
@@ -1112,12 +1115,14 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
         }
         other => panic!("Abort after Stop must report an escalation: {other:?}"),
     }
+    let lookup = state
+        .session_store_factory
+        .lookup_session(&session_id)
+        .await
+        .expect("look up store");
+    assert!(matches!(lookup, lash::persistence::SessionLookup::Live(_)));
     let durable = state
         .session_store_factory
-        .open_existing_store_by_id(&session_id)
-        .await
-        .expect("open store")
-        .expect("store exists")
         .turn_cancel_request(&session.turn_address("escalate-turn"))
         .await
         .expect("read durable request")

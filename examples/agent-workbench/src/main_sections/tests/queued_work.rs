@@ -83,8 +83,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         // controls them.
         let _hold = double.hold_session_drive(&session_id).await;
         let cursor = session.observe().current_observation().cursor;
-        let store = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
+        store_factory
+            .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -93,6 +93,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             })
             .await
             .expect("open queued-work controls store");
+        let store = Arc::clone(&store_factory);
         let first = store
             .enqueue_queued_work(queued_work_test_draft(
                 &session_id,
@@ -200,8 +201,8 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
             .open()
             .await
             .expect("open targeted wake session");
-        let target = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
+        store_factory
+            .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
@@ -210,6 +211,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
             })
             .await
             .expect("open targeted wake receiver");
+        let target = Arc::clone(&store_factory);
 
         let clock = Arc::new(lash::testing::TestClock::new(1_800_000_000_000));
         let wake_delivery_config = lash::process::WakeDeliveryConfig::new(10_000)
@@ -426,7 +428,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
 
         let deleted_target_id = "workbench-deleted-wake-target";
         store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
+            .admit_session(&lash::persistence::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(deleted_target_id.to_string()),

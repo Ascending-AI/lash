@@ -1,4 +1,17 @@
 use super::*;
+use lash::persistence::{SessionCatalogStore as _, TurnInputStore as _};
+
+async fn open_catalog(root: impl AsRef<std::path::Path>) -> Arc<lash_sqlite_store::SqliteStore> {
+    let root = root.as_ref();
+    std::fs::create_dir_all(root).expect("create Restate closure catalog root");
+    Arc::new(
+        lash_sqlite_store::SqliteStore::open(
+            &root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+        )
+        .await
+        .expect("open Restate closure catalog"),
+    )
+}
 
 /// Admit a scope this e2e fixture mints directly, standing in for the store
 /// admission step the real worker performs.
@@ -8,7 +21,7 @@ fn live_restate_admission(scope: &lash::runtime::ExecutionScope) -> lash::runtim
 
 async fn authorize_restate_completion_closure(
     host: &Arc<dyn lash::durability::EffectHost>,
-    factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    factory: &Arc<lash_sqlite_store::SqliteStore>,
     session: &str,
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
@@ -16,11 +29,9 @@ async fn authorize_restate_completion_closure(
     lash::persistence::DriveFence,
     lash::TurnCancelClosureAuthorization,
 ) {
-    use lash::persistence::DeploymentStore as _;
-
     let address = lash::TurnAddress::new(session, "turn");
-    let store = factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
+    factory
+        .admit_session(&lash::persistence::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
@@ -29,6 +40,7 @@ async fn authorize_restate_completion_closure(
         })
         .await
         .expect("create live Restate catalog session");
+    let store: Arc<dyn lash::persistence::RuntimeStore> = factory.clone();
     let lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
         &store,
         &address.session_id,
@@ -116,7 +128,7 @@ async fn consume_closure_by_commit(
 
 async fn settle_and_release_restate_completion_closure(
     effect_host: Arc<dyn lash::durability::EffectHost>,
-    factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    factory: &Arc<lash_sqlite_store::SqliteStore>,
     scope: &lash::runtime::ExecutionScope,
     store: Arc<dyn lash::persistence::RuntimeStore>,
     lease: lash::persistence::DriveFence,
@@ -257,7 +269,7 @@ fn live_restate_participant_protocol_crash_child() {
             boundary,
             marker,
         });
-        let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(catalog);
+        let factory = open_catalog(catalog).await;
         factory.bind_effect_host(&host);
         let scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(&format!(
             "live-restate-participant-crash-{scenario}"
@@ -346,7 +358,7 @@ async fn prove_live_restate_participant_crash_windows(
         "register",
         &register_marker,
     );
-    let register_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&register_catalog);
+    let register_factory = open_catalog(&register_catalog).await;
     register_factory.bind_effect_host(effect_host);
     let register_session = lash::SessionId::from("live-restate-participant-crash-register");
     assert!(
@@ -381,7 +393,7 @@ async fn prove_live_restate_participant_crash_windows(
 
     let release_scenario = "release";
     let release_catalog = data_dir.join("participant-crash-release-catalog");
-    let release_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&release_catalog);
+    let release_factory = open_catalog(&release_catalog).await;
     release_factory.bind_effect_host(effect_host);
     let release_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
         "live-restate-participant-crash-release",
@@ -414,7 +426,7 @@ async fn prove_live_restate_participant_crash_windows(
         "release",
         &release_marker,
     );
-    let release_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&release_catalog);
+    let release_factory = open_catalog(&release_catalog).await;
     release_factory.bind_effect_host(effect_host);
     assert!(
         host.retire_effect_journal(
@@ -486,12 +498,8 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                     .expect("valid live Restate authority"),
             ));
             let effect_host: Arc<dyn lash::durability::EffectHost> = host.clone();
-            let factory_a = lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.join("closure-catalog-a"),
-            );
-            let factory_b = lash_sqlite_store::SqliteSessionStoreFactory::new(
-                data_dir.join("closure-catalog-b"),
-            );
+            let factory_a = open_catalog(data_dir.join("closure-catalog-a")).await;
+            let factory_b = open_catalog(data_dir.join("closure-catalog-b")).await;
             factory_a.bind_effect_host(&effect_host);
             factory_b.bind_effect_host(&effect_host);
 
@@ -553,8 +561,8 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 "live-restate-retire-first",
             ));
             let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
-            let late_store = factory_a
-                .create_store(&lash::persistence::SessionStoreCreateRequest {
+            factory_a
+                .admit_session(&lash::persistence::SessionStoreCreateRequest {
                     owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: late_address.session_id.clone(),
@@ -563,6 +571,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 })
                 .await
                 .expect("create late live Restate catalog session");
+            let late_store: Arc<dyn lash::persistence::RuntimeStore> = factory_a.clone();
             let late_lease = lash::testing::store_fixtures::seal_drive_fence_for_test(
                 &late_store,
                 &late_address.session_id,
@@ -627,7 +636,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
                 .expect_err("retired live Restate owner refuses late catalog authorization");
             assert!(
                 late_store
-                    .pending_turn_cancel_closure_pins()
+                    .pending_turn_cancel_closure_pins(&late_address.session_id)
                     .await
                     .expect("read late live Restate catalog pins")
                     .is_empty()

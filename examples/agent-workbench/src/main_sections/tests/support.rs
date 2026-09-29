@@ -1,5 +1,47 @@
 use super::*;
 
+/// Read the durable ancestry in bounded pages, including earlier frames that
+/// are deliberately absent from the resident read view.
+pub(crate) async fn durable_history_messages(
+    state: &AppState,
+    session_id: &lash::SessionId,
+) -> Vec<lash::messages::Message> {
+    let runtime_store: Arc<dyn lash::persistence::RuntimeStore> =
+        state.session_store_factory.clone();
+    let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
+        .expect("valid session id");
+    let mut anchor = lash::persistence::HistoryAnchor::Head;
+    let mut messages = Vec::new();
+    loop {
+        let page = store
+            .load_ancestors(
+                anchor,
+                lash::persistence::HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::new(128).expect("positive node budget"),
+                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
+                        .expect("positive byte budget"),
+                },
+            )
+            .await
+            .expect("read durable history page");
+        messages.extend(
+            page.nodes
+                .into_iter()
+                .filter_map(|node| match node.record.payload {
+                    lash::persistence::SessionNodePayload::Event {
+                        event: lash::persistence::SessionHistoryRecord::Conversation(message),
+                    } => Some(message.to_message()),
+                    _ => None,
+                }),
+        );
+        match page.next {
+            Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
+            None => break,
+        }
+    }
+    messages
+}
+
 /// The sessions root of a test data directory, created if absent: the root a
 /// store the test opens beside its core keeps its files under.
 pub(crate) fn sessions_root(data_dir: &std::path::Path) -> std::path::PathBuf {
@@ -245,7 +287,7 @@ pub(crate) async fn standalone_process_registry(
 }
 
 /// The session catalog of a fresh SQLite memory store set.
-pub(crate) fn memory_session_store_factory() -> Arc<lash_sqlite_store::SqliteSessionStoreFactory> {
+pub(crate) fn memory_session_store_factory() -> Arc<lash_sqlite_store::SqliteStore> {
     sync_await(async {
         lash_sqlite_store::SqliteStoreSet::memory()
             .await

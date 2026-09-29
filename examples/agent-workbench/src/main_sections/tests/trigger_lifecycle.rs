@@ -229,8 +229,8 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
     let target_session_id = state.current_session_id();
-    let session_store = session_store_factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
+    session_store_factory
+        .admit_session(&lash::persistence::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
@@ -239,6 +239,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         })
         .await
         .expect("open session store");
+    let session_store = Arc::clone(&session_store_factory);
     let queued = session_store
         .list_queued_work(&session_id)
         .await

@@ -1,7 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
-use lash::testing::store_fixtures::RuntimePersistenceTestDriveExt;
+use lash::testing::store_fixtures::RuntimeStoreTestDriveExt;
 
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
     state
@@ -197,14 +197,19 @@ async fn new_turn_after_abandoned_drive_admits_without_waiting() {
         )])
         .await
         .expect("the post-takeover append commits");
-    let durable_after_append = lash::persistence::load_persisted_session_state(&store)
-        .await
-        .expect("re-read durable session after lane-less append")
-        .expect("the durable session remains present");
+    let view = lash::persistence::SessionStore::new(store.clone(), session_id.clone())
+        .expect("valid session id");
+    let durable_after_append = lash::persistence::load_session_window_state(
+        &view,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await
+    .expect("re-read durable session after lane-less append")
+    .expect("the durable session remains present")
+    .state;
     assert!(
         durable_after_append
             .read_view()
-            .expect("durable frame scope resolves")
             .messages()
             .iter()
             .any(|message| lash::message_text(message) == "append committed under head CAS"),
@@ -275,14 +280,19 @@ async fn same_worker_successor_opens_after_abandoned_drive() {
         )])
         .await
         .expect("same-turn successor commits without a lease wait");
-    let durable = lash::persistence::load_persisted_session_state(&store)
-        .await
-        .expect("read same-turn successor state")
-        .expect("same-turn successor state exists");
+    let view = lash::persistence::SessionStore::new(store.clone(), session_id.clone())
+        .expect("valid session id");
+    let durable = lash::persistence::load_session_window_state(
+        &view,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await
+    .expect("read same-turn successor state")
+    .expect("same-turn successor state exists")
+    .state;
     assert!(
         durable
             .read_view()
-            .expect("durable frame scope resolves")
             .messages()
             .iter()
             .any(|message| { lash::message_text(message) == "same-turn successor committed" })
