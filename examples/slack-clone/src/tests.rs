@@ -10,6 +10,7 @@
 //! actually produced.
 
 mod bot_events;
+mod browser_views;
 mod full_host_driver;
 mod log_atomicity;
 mod platform_wire;

@@ -61,8 +61,13 @@ lash_rust_unit_test(
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+        "//examples/slack-clone:package_files",
+    ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -840,8 +845,13 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+        "//examples/slack-clone:package_files",
+    ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",
@@ -867,8 +877,13 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+        "//examples/slack-clone:package_files",
+    ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",
@@ -892,8 +907,13 @@ lash_rust_feature_test(
         "//examples:shared_rust_sources",
         "//:workspace_test_scripts",
     ],
+    extra_data = [
+        "@workbench_node_linux_x64//:bin/node",
+        "//examples/slack-clone:package_files",
+    ],
     manifest_dir = "examples/slack-clone",
     package_name = "slack-clone",
+    test_env = {"LASH_SLACK_TEST_NODE": "$(rootpath @workbench_node_linux_x64//:bin/node)"},
     tags = [
         "feature-lane",
         "manual",

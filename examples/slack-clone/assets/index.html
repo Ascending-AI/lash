@@ -194,11 +194,8 @@
       me: null,
       channels: [],
       users: new Map(),
-      channel: null,
-      channelSeen: new Set(),
-      threadSeen: new Set(),
-      threadTs: null,
-      stream: null,
+      channelView: null,
+      threadView: null,
     };
 
     const el = (id) => document.getElementById(id);
@@ -241,7 +238,7 @@
       return fragment;
     }
 
-    function renderMessage(message, target = streamNode, seen = state.channelSeen, interactive = true) {
+    function renderMessage(message, target, seen, channelView, interactive = true) {
       if (seen.has(message.ts)) return;
       seen.add(message.ts);
       const row = document.createElement('div');
@@ -251,7 +248,7 @@
         row.tabIndex = 0;
         row.setAttribute('role', 'button');
         row.setAttribute('aria-label', 'Open thread');
-        const open = () => openThread(message.thread_ts || message.ts);
+        const open = () => openThread(message.thread_ts || message.ts, channelView);
         row.addEventListener('click', open);
         row.addEventListener('keydown', (event) => {
           if (event.key === 'Enter' || event.key === ' ') {
@@ -291,14 +288,14 @@
 
       column.append(head, body);
       if (!message.thread_ts && Number(message.reply_count) > 0) {
-        column.append(replyBadge(message.ts, Number(message.reply_count)));
+        column.append(replyBadge(message.ts, Number(message.reply_count), channelView));
       }
       row.append(avatar, column);
       target.append(row);
       target.scrollTop = target.scrollHeight;
     }
 
-    function replyBadge(threadTs, count) {
+    function replyBadge(threadTs, count, channelView) {
       const badge = document.createElement('button');
       badge.className = 'thread-badge';
       badge.type = 'button';
@@ -307,17 +304,17 @@
       badge.textContent = `${count} ${count === 1 ? 'reply' : 'replies'}`;
       badge.addEventListener('click', (event) => {
         event.stopPropagation();
-        openThread(threadTs);
+        openThread(threadTs, channelView);
       });
       return badge;
     }
 
-    function incrementReplyCount(threadTs) {
+    function incrementReplyCount(threadTs, channelView) {
       const parent = streamNode.querySelector(`.msg[data-ts="${CSS.escape(threadTs)}"]`);
       if (!parent) return;
       let badge = parent.querySelector('.thread-badge');
       if (!badge) {
-        badge = replyBadge(threadTs, 0);
+        badge = replyBadge(threadTs, 0, channelView);
         parent.lastElementChild.append(badge);
       }
       const count = Number(badge.dataset.replyCount) + 1;
@@ -333,7 +330,7 @@
         button.className = 'channel';
         button.type = 'button';
         button.textContent = `# ${channel.name}`;
-        button.setAttribute('aria-current', String(channel.id === state.channel?.id));
+        button.setAttribute('aria-current', String(channel.id === state.channelView?.channel.id));
         button.addEventListener('click', () => selectChannel(channel));
         list.append(button);
       }
@@ -341,115 +338,170 @@
 
     // Reads the product's own surface, not `conversations.history`: that method
     // needs the bot token, and a bot token has no business in a browser.
-    async function loadHistory(channel) {
+    async function loadHistory(view) {
       const body = await api(
-        `/platform/history?channel=${encodeURIComponent(channel.id)}`,
-      ).catch(() => ({ messages: [] }));
+        `/platform/history?channel=${encodeURIComponent(view.channel.id)}`,
+        { signal: view.history.signal },
+      );
       return body.messages ?? [];
     }
 
+    function isCurrentChannel(view) {
+      return state.channelView === view;
+    }
+
+    function isCurrentThread(view) {
+      return state.threadView === view && isCurrentChannel(view.channelView);
+    }
+
     async function selectChannel(channel) {
-      state.channel = channel;
+      const old = state.channelView;
+      const view = {
+        channel,
+        seen: new Set(),
+        history: new AbortController(),
+        stream: null,
+        retry: null,
+      };
+      state.channelView = view;
+      old?.history.abort();
+      old?.stream?.abort();
+      clearTimeout(old?.retry);
       closeThread();
-      state.channelSeen = new Set();
+      showError(null);
       streamNode.replaceChildren();
       el('channelName').textContent = `# ${channel.name}`;
       el('channelId').textContent = channel.id;
       renderChannels();
 
-      const history = await loadHistory(channel);
-      if (history.length === 0) {
-        const empty = document.createElement('div');
-        empty.className = 'empty';
-        empty.textContent = 'Nothing here yet. Say hello, or mention the bot.';
-        streamNode.append(empty);
+      try {
+        const history = await loadHistory(view);
+        if (!isCurrentChannel(view)) return;
+        if (history.length === 0) {
+          const empty = document.createElement('div');
+          empty.className = 'empty';
+          empty.textContent = 'Nothing here yet. Say hello, or mention the bot.';
+          streamNode.append(empty);
+        }
+        for (const message of history) {
+          renderMessage(message, streamNode, view.seen, view);
+        }
+      } catch (error) {
+        if (!isCurrentChannel(view) || view.history.signal.aborted) return;
+        showError(`Could not load channel: ${error.message}`);
       }
-      for (const message of history) {
-        renderMessage(message);
-      }
-      follow(channel);
+      if (isCurrentChannel(view)) follow(view);
     }
 
-    async function openThread(threadTs) {
-      if (!state.channel) return;
-      state.threadTs = threadTs;
-      state.threadSeen = new Set();
+    async function openThread(threadTs, channelView = state.channelView) {
+      if (!channelView || !isCurrentChannel(channelView)) return;
+      closeThread();
+      const view = {
+        channelView,
+        threadTs,
+        seen: new Set(),
+        history: new AbortController(),
+      };
+      state.threadView = view;
       const panel = el('threadPanel');
       const threadStream = el('threadStream');
       panel.hidden = false;
       el('workbench').classList.add('has-thread');
-      el('threadContext').textContent = `in #${state.channel.name}`;
-      threadStream.replaceChildren();
+      el('threadContext').textContent = `in #${channelView.channel.name}`;
+      showError(null);
       try {
         const body = await api(
-          `/platform/history?channel=${encodeURIComponent(state.channel.id)}&thread_ts=${encodeURIComponent(threadTs)}`,
+          `/platform/history?channel=${encodeURIComponent(channelView.channel.id)}&thread_ts=${encodeURIComponent(threadTs)}`,
+          { signal: view.history.signal },
         );
+        if (!isCurrentThread(view)) return;
         for (const message of body.messages ?? []) {
-          renderMessage(message, threadStream, state.threadSeen, false);
+          renderMessage(message, threadStream, view.seen, channelView, false);
         }
         el('threadText').focus();
       } catch (error) {
+        if (!isCurrentThread(view) || view.history.signal.aborted) return;
         closeThread();
         showError(`Could not open thread: ${error.message}`);
       }
     }
 
     function closeThread() {
-      state.threadTs = null;
-      state.threadSeen = new Set();
+      const old = state.threadView;
+      state.threadView = null;
+      old?.history.abort();
       el('threadPanel').hidden = true;
+      el('threadStream').replaceChildren();
+      el('threadText').value = '';
       el('workbench').classList.remove('has-thread');
     }
 
     // One NDJSON response, read line by line. No second protocol, no framing.
-    async function follow(channel) {
-      state.stream?.abort();
+    async function follow(view) {
+      if (!isCurrentChannel(view)) return;
+      clearTimeout(view.retry);
+      view.retry = null;
+      view.stream?.abort();
       const controller = new AbortController();
-      state.stream = controller;
+      view.stream = controller;
+      const ownsStream = () => isCurrentChannel(view)
+        && view.stream === controller && !controller.signal.aborted;
+      const reconnect = (delay) => {
+        if (!ownsStream()) return;
+        view.retry = setTimeout(() => {
+          if (ownsStream()) follow(view);
+        }, delay);
+      };
+      let reader;
       try {
         const response = await fetch(
-          `/platform/stream?channel=${encodeURIComponent(channel.id)}`,
+          `/platform/stream?channel=${encodeURIComponent(view.channel.id)}`,
           { signal: controller.signal },
         );
-        const reader = response.body.getReader();
+        reader = response.body?.getReader();
+        if (!ownsStream()) return;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const decoder = new TextDecoder();
         let buffer = '';
         for (;;) {
           const { done, value } = await reader.read();
+          if (!ownsStream()) return;
           if (done) break;
           buffer += decoder.decode(value, { stream: true });
           let newline;
           while ((newline = buffer.indexOf('\n')) >= 0) {
             const line = buffer.slice(0, newline).trim();
             buffer = buffer.slice(newline + 1);
-            if (line) handleLive(JSON.parse(line));
+            if (line) handleLive(view, JSON.parse(line));
           }
         }
       } catch (error) {
-        if (controller.signal.aborted) return;
+        if (!ownsStream()) return;
         showError(`Live stream dropped: ${error.message}. Reconnecting…`);
-        setTimeout(() => {
-          if (state.channel?.id === channel.id) follow(channel);
-        }, 1000);
+        reconnect(1000);
         return;
+      } finally {
+        await reader?.cancel().catch(() => {});
       }
-      if (state.channel?.id === channel.id) setTimeout(() => follow(channel), 500);
+      reconnect(500);
     }
 
-    function handleLive(event) {
+    function handleLive(view, event) {
+      if (!isCurrentChannel(view)) return;
       if (event.type === 'message') {
         if (event.thread_ts) {
-          incrementReplyCount(event.thread_ts);
-          if (state.threadTs === event.thread_ts) {
-            renderMessage(event, el('threadStream'), state.threadSeen, false);
+          incrementReplyCount(event.thread_ts, view);
+          const threadView = state.threadView;
+          if (threadView && isCurrentThread(threadView) && threadView.threadTs === event.thread_ts) {
+            renderMessage(event, el('threadStream'), threadView.seen, view, false);
           }
           if (event.reply_broadcast) {
             streamNode.querySelector('.empty')?.remove();
-            renderMessage(event);
+            renderMessage(event, streamNode, view.seen, view);
           }
         } else {
           streamNode.querySelector('.empty')?.remove();
-          renderMessage(event);
+          renderMessage(event, streamNode, view.seen, view);
         }
         showError(null);
       } else if (event.type === 'channel_created') {
@@ -501,20 +553,22 @@
       event.preventDefault();
       const input = el('text');
       const text = input.value.trim();
-      if (!text || !state.channel || !state.me) return;
+      const view = state.channelView;
+      if (!text || !view || !state.me) return;
       input.value = '';
       try {
         await api('/platform/messages', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            channel: state.channel.id,
+            channel: view.channel.id,
             user_id: state.me.user_id,
             text,
           }),
         });
-        showError(null);
+        if (isCurrentChannel(view)) showError(null);
       } catch (error) {
+        if (!isCurrentChannel(view)) return;
         input.value = text;
         showError(error.message);
       }
@@ -526,21 +580,23 @@
       event.preventDefault();
       const input = el('threadText');
       const text = input.value.trim();
-      if (!text || !state.channel || !state.me || !state.threadTs) return;
+      const view = state.threadView;
+      if (!text || !view || !state.me || !isCurrentThread(view)) return;
       input.value = '';
       try {
         await api('/platform/messages', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            channel: state.channel.id,
+            channel: view.channelView.channel.id,
             user_id: state.me.user_id,
             text,
-            thread_ts: state.threadTs,
+            thread_ts: view.threadTs,
           }),
         });
-        showError(null);
+        if (isCurrentThread(view)) showError(null);
       } catch (error) {
+        if (!isCurrentThread(view)) return;
         input.value = text;
         showError(error.message);
       }

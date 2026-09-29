@@ -378,6 +378,13 @@ kinds = ["bin-unit-test"]
 data = ["@workbench_node_linux_x64//:bin/node"]
 env = { LASH_AGENT_SERVICE_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/node)" }
 
+# Slack's asynchronous view fixture executes the production browser script.
+[[rule]]
+packages = ["slack-clone"]
+kinds = ["unit-test"]
+data = ["@workbench_node_linux_x64//:bin/node", "//examples/slack-clone:package_files"]
+env = { LASH_SLACK_TEST_NODE = "$(rootpath @workbench_node_linux_x64//:bin/node)" }
+
 # --- Test-run requests --------------------------------------------------------
 
 # A test run's request comes from its measured row in test-run-sizes.json.
