@@ -145,13 +145,15 @@ fn take_batch(pending: &mut Vec<CaptureFrame>) -> Result<Vec<CaptureFrame>, Stor
     Ok(pending.drain(..count).collect())
 }
 
-/// The live fault a failed capture write ends its step with: retried, never
-/// recorded, never a stop or an empty partial. A deleted session stays the
-/// settled refusal it is.
+/// What a failed capture write ends its step with. A transient store fault
+/// is the live `TransientCaptureWrite`: retried, never recorded, never a stop
+/// or an empty partial. Anything else is the store's deterministic refusal,
+/// which a retry would meet again, so the step ends with that typed error
+/// instead (FIG-4069).
 pub(in crate::runtime) fn capture_write_fault(
     error: StoreError,
 ) -> crate::RuntimeEffectControllerError {
-    if matches!(error, StoreError::SessionDeleted { .. }) {
+    if !error.is_transient() {
         return error.into();
     }
     crate::RuntimeEffectControllerError::turn_capture_write_failed(format!(

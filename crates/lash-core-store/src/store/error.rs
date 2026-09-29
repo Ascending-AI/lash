@@ -820,6 +820,119 @@ impl StoreError {
         Ok(current + 1)
     }
 
+    /// Whether this is a fault of the storage substrate rather than a refusal:
+    /// the identical operation may succeed when it is made again. Every other
+    /// variant is the store's deterministic answer to the request, and making
+    /// it again is refused the same way.
+    ///
+    /// The match is exhaustive for the same reason as [`Self::variant_name`]'s:
+    /// a new variant does not compile until it is classified.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Contended | Self::StorageFailure { .. } | Self::Backend(_) => true,
+            Self::ExecutionStateCaptureFailed { .. }
+            | Self::TurnOutcomeMaterializationRefused { .. }
+            | Self::CommitNodeBudgetExceeded { .. }
+            | Self::CommitByteBudgetExceeded { .. }
+            | Self::QueuedWorkActionReserveExhaustsContext { .. }
+            | Self::QueuedWorkRowExceedsContextWindow { .. }
+            | Self::SessionBindingMismatch { .. }
+            | Self::SessionRelationMismatch { .. }
+            | Self::SessionNotBound
+            | Self::SessionResolutionAmbiguous { .. }
+            | Self::SessionBindingNotMaterialized { .. }
+            | Self::SessionStateVersionUnsupported { .. }
+            | Self::Incompatible { .. }
+            | Self::WriterFenced { .. }
+            | Self::SessionStateVersionNewerThanRuntime { .. }
+            | Self::InvalidSessionId { .. }
+            | Self::SessionDeleted { .. }
+            | Self::UnsupportedStoreOperation { .. }
+            | Self::UnfinishedRootConflict { .. }
+            | Self::FollowOnPending { .. }
+            | Self::FollowOnFrameNotCurrent { .. }
+            | Self::FollowOnHeadInvariant { .. }
+            | Self::FollowOnNotPending { .. }
+            | Self::HeadRevisionConflict { .. }
+            | Self::TurnCancelIntentChanged { .. }
+            | Self::TurnCancelBindingMismatch { .. }
+            | Self::TurnCancelClosureConflict { .. }
+            | Self::TurnCancelClosureAuthorizationMismatch { .. }
+            | Self::TurnCancelClosureLifecyclePinned { .. }
+            | Self::TurnCancelClosureScopeRetired { .. }
+            | Self::UnknownAttachment { .. }
+            | Self::StaleWritePermit { .. }
+            | Self::RuntimeTurnCommitConflict { .. }
+            | Self::AppendOperationIdentityConflict { .. }
+            | Self::SemanticBoundaryIdentityConflict { .. }
+            | Self::AppendReceiptRequestedNodeCountCorrupt { .. }
+            | Self::TokenUsageAccountingOverflow { .. }
+            | Self::CheckpointTurnIndexOutOfRange { .. }
+            | Self::CheckpointTokenUsageOutOfRange { .. }
+            | Self::AppendAncestorNotActive { .. }
+            | Self::NodeIdDerivationMismatch { .. }
+            | Self::NodeIdCollision { .. }
+            | Self::InvalidGraphNodeId { .. }
+            | Self::GraphGenerationCollision { .. }
+            | Self::InvalidGraphLeaf { .. }
+            | Self::ForkPointNotRetained { .. }
+            | Self::TurnBaseNotRetained { .. }
+            | Self::ForkSessionAlreadyExists { .. }
+            | Self::InvalidGraphParent { .. }
+            | Self::MissingFrameOpenAncestor { .. }
+            | Self::CurrentFrameNodeMismatch { .. }
+            | Self::IngressTurnAddressUnknown { .. }
+            | Self::IngressRowNotAdmitted { .. }
+            | Self::IngressSettlementDuplicate { .. }
+            | Self::IngressSettlementUnfenced { .. }
+            | Self::SessionCommandWithdrawn { .. }
+            | Self::StaleDriveFence { .. }
+            | Self::RootAlreadyTerminal { .. }
+            | Self::RootInputWithdrawn { .. }
+            | Self::SessionClosing { .. }
+            | Self::ControlIntentUnknown { .. }
+            | Self::DriveEpochUnavailable { .. }
+            | Self::DriveFenceSessionMismatch { .. }
+            | Self::IngressReservedSourceKey { .. }
+            | Self::UnstagedUsageConfirmation { .. }
+            | Self::MonotonicCounterOverflow { .. }
+            | Self::PendingTurnInputSourceKeyConflict { .. }
+            | Self::PendingTurnInputIdConflict { .. }
+            | Self::PendingTurnInputBatchDuplicate { .. }
+            | Self::PendingTurnInputBatchForeignSession { .. }
+            | Self::RunSpecHashCollision { .. }
+            | Self::PendingTurnInputRunSpecMismatch { .. }
+            | Self::RunSpecMissing { .. }
+            | Self::ProcessWakeSequenceRewound { .. }
+            | Self::SessionExecutionLeaseExpired { .. }
+            | Self::UnfencedHeadPublication { .. }
+            | Self::UnsupportedRecordSchemaVersion { .. }
+            | Self::MissingRecordSchemaVersion { .. }
+            | Self::InvalidRecordSchemaVersion { .. }
+            | Self::CheckpointComponentMissing { .. }
+            | Self::CheckpointRootMissing { .. }
+            | Self::CheckpointComponentEncodingVersionMismatch { .. }
+            | Self::IncompleteCheckpointComponentSet
+            | Self::RecordEncodingFailed { .. }
+            | Self::ExecutionStateBodiesReleased
+            | Self::StoredDataCorrupt { .. }
+            | Self::ArtifactReferrerEnded { .. }
+            | Self::ArtifactMissing { .. }
+            | Self::ArtifactCarryMissing { .. }
+            | Self::ParkFeedCursorCompacted { .. }
+            | Self::CaptureWriterFenced { .. }
+            | Self::CaptureSealed { .. }
+            | Self::CaptureBatchTooLarge { .. }
+            | Self::CaptureBatchEmpty { .. }
+            | Self::CaptureBatchConflict { .. }
+            | Self::CaptureBaseStale { .. }
+            | Self::CaptureSealBelowWatermark { .. }
+            | Self::CaptureCorrupt { .. }
+            | Self::StoppedPartialNotSealed { .. }
+            | Self::StoppedPartialConflict { .. } => false,
+        }
+    }
+
     /// Stable name of this error's enum variant.
     ///
     /// The match is deliberately exhaustive inside `lash-core` so adding a
