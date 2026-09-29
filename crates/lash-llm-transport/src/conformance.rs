@@ -637,6 +637,7 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 sse.len()
             );
             let assembled = n.assemble_stream(scenario, sse);
+            assert_tool_input_law(&assembled.stream_events, who);
             let tool = assembled
                 .parts
                 .iter()
@@ -680,6 +681,7 @@ fn check_scenario(n: &dyn ProviderNormalizer, scenario: Scenario, wire: Provider
                 "[{who}] {scenario:?}: abort prefix must contain provider-native events"
             );
             let assembled = n.assemble_stream(scenario, sse);
+            assert_tool_input_law(&assembled.stream_events, who);
             let parsed_tool_calls = assembled
                 .parts
                 .iter()
@@ -1051,6 +1053,66 @@ fn assert_terminal(
 
 fn is_tool_call(part: &LlmOutputPart) -> bool {
     matches!(part, LlmOutputPart::ToolCall { .. })
+}
+
+/// Checks the adapter's tool-input event law on a completed fixture.
+pub fn assert_tool_input_law(events: &[LlmStreamEvent], who: &str) {
+    use std::collections::HashMap;
+
+    let mut calls: HashMap<u64, (String, bool)> = HashMap::new();
+    let mut next_ordinal = 0;
+    let mut completed = 0;
+    let mut parts = 0;
+    for event in events {
+        match event {
+            LlmStreamEvent::ToolInputStart { call } => {
+                assert_eq!(
+                    call.ordinal, next_ordinal,
+                    "[{who}] tool ordinals must be dense"
+                );
+                next_ordinal += 1;
+                assert!(
+                    calls.insert(call.ordinal, (String::new(), false)).is_none(),
+                    "[{who}] duplicate tool start"
+                );
+            }
+            LlmStreamEvent::ToolInputDelta { call, text } => {
+                let (raw, ended) = calls
+                    .get_mut(&call.ordinal)
+                    .unwrap_or_else(|| panic!("[{who}] tool delta before start"));
+                assert!(!*ended, "[{who}] tool delta after end");
+                assert!(!text.is_empty(), "[{who}] empty tool delta");
+                raw.push_str(text);
+            }
+            LlmStreamEvent::ToolInputEnd {
+                call,
+                raw_arguments,
+            } => {
+                let (raw, ended) = calls
+                    .get_mut(&call.ordinal)
+                    .unwrap_or_else(|| panic!("[{who}] tool end before start"));
+                assert!(!*ended, "[{who}] duplicate tool end");
+                if !raw.is_empty() {
+                    assert_eq!(
+                        raw, raw_arguments,
+                        "[{who}] tool deltas differ from authoritative end"
+                    );
+                }
+                *ended = true;
+                completed += 1;
+            }
+            LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. }) => {
+                parts += 1;
+                assert!(completed >= parts, "[{who}] tool part before input end");
+            }
+            _ => {}
+        }
+    }
+    assert!(next_ordinal > 0, "[{who}] fixture exercised no tool input");
+    assert_eq!(
+        completed, parts,
+        "[{who}] completed inputs and tool parts differ"
+    );
 }
 
 fn as_tool_call(part: &LlmOutputPart) -> Option<(String, String)> {

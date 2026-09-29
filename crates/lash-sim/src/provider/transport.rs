@@ -970,3 +970,38 @@ fn script_match_error(message: String) -> LlmTransportError {
         .with_kind(ProviderFailureKind::Validation)
         .with_lash_code(TurnFailureCode::from_wire("provider_wire_script_mismatch"))
 }
+
+#[cfg(test)]
+mod tool_input_chunk_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scripted_stream_preserves_a_cut_inside_tool_arguments() {
+        let fragments = [
+            "data: {\"type\":\"response.output_item.added\"}\n\n",
+            "data: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"path\\\":\\\"READ\"}\n\n",
+        ];
+        let mut stream = ScriptedByteStream::new(
+            fragments
+                .iter()
+                .enumerate()
+                .map(|(event_index, text)| StreamStep::Chunk {
+                    event_index,
+                    bytes: Bytes::copy_from_slice(text.as_bytes()),
+                })
+                .chain(std::iter::once(StreamStep::End {
+                    event_index: fragments.len(),
+                }))
+                .collect(),
+        );
+        for fragment in fragments {
+            let chunk = stream
+                .next_chunk()
+                .await
+                .expect("scripted chunk")
+                .expect("chunk exists");
+            assert_eq!(chunk.as_ref(), fragment.as_bytes());
+        }
+        assert!(stream.next_chunk().await.expect("scripted end").is_none());
+    }
+}

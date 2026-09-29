@@ -403,6 +403,7 @@ pub(crate) struct GoogleStreamState {
     /// or tool-call boundary. Text on both sides of a boundary never shares
     /// one identity.
     pub text_block: Option<StreamBlockIdentity>,
+    next_tool_ordinal: u64,
     /// Text accumulated by the open run only; `full` still holds the whole
     /// visible response for the completed parts.
     open_text_run: String,
@@ -553,6 +554,34 @@ impl GoogleStreamState {
             self.close_text_run(&mut deltas.text_events);
         }
         deltas.tool_calls_added = tool_calls.len();
+        for call in &tool_calls {
+            if let LlmOutputPart::ToolCall {
+                call_id,
+                tool_name,
+                input_json,
+                ..
+            } = call
+            {
+                let identity = lash_sansio::ToolInputIdentity {
+                    ordinal: self.next_tool_ordinal,
+                    call_id: Some(call_id.clone()),
+                    tool_name: Some(tool_name.clone()),
+                    item_id: None,
+                };
+                self.next_tool_ordinal += 1;
+                deltas.text_events.push(LlmStreamEvent::ToolInputStart {
+                    call: identity.clone(),
+                });
+                deltas.text_events.push(LlmStreamEvent::ToolInputDelta {
+                    call: identity.clone(),
+                    text: input_json.clone(),
+                });
+                deltas.text_events.push(LlmStreamEvent::ToolInputEnd {
+                    call: identity,
+                    raw_arguments: input_json.clone(),
+                });
+            }
+        }
         self.tool_call_parts.extend(tool_calls);
         // Capture the last event carrying a non-empty `finishReason` so the
         // streaming finalizer can derive the terminal reason exactly like the
@@ -634,5 +663,46 @@ impl GoogleStreamState {
         full.push_str(piece);
         text_deltas.push(piece.to_string());
         Some(piece.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tool_input_tests {
+    use super::*;
+
+    #[test]
+    fn whole_google_arguments_emit_one_delta_before_each_part() {
+        let mut state = GoogleStreamState::default();
+        let wire = serde_json::json!({"response":{"candidates":[{"content":{"parts":[
+            {"functionCall":{"id":"a","name":"lookup","args":{"q":"x"}}},
+            {"functionCall":{"id":"b","name":"lookup","args":{"q":"y"}}}
+        ]}}]}});
+        let deltas = state
+            .push_event(&GoogleOAuthProvider::for_test(), &wire.to_string(), None)
+            .expect("recorded Google event parses");
+        let tool_events = deltas
+            .text_events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    LlmStreamEvent::ToolInputStart { .. }
+                        | LlmStreamEvent::ToolInputDelta { .. }
+                        | LlmStreamEvent::ToolInputEnd { .. }
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(tool_events.len(), 6);
+        for (ordinal, events) in tool_events.chunks_exact(3).enumerate() {
+            assert!(
+                matches!(events[0], LlmStreamEvent::ToolInputStart { call } if call.ordinal == ordinal as u64)
+            );
+            assert!(
+                matches!(events[1], LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == ordinal as u64 && text == &serde_json::json!({"q": if ordinal == 0 { "x" } else { "y" }}).to_string())
+            );
+            assert!(
+                matches!(events[2], LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.ordinal == ordinal as u64 && raw_arguments == &serde_json::json!({"q": if ordinal == 0 { "x" } else { "y" }}).to_string())
+            );
+        }
     }
 }

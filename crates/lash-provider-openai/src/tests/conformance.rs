@@ -211,7 +211,10 @@ impl ProviderNormalizer for OpenAiNormalizer {
                 ),
             Scenario::StreamingToolCallAbortEquivalence => {
                 ProviderWire::body(json!({})).with_aborted_tool_call_stream(
-                    vec![r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abort","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}"#.to_string()],
+                    vec![
+                        r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abort","type":"function","function":{"name":"lookup","arguments":"{\"q\":\"x\"}"}}]}}]}"#.to_string(),
+                        r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#.to_string(),
+                    ],
                     "lookup",
                     json!({ "q": "x" }),
                 )
@@ -311,6 +314,7 @@ impl ProviderNormalizer for OpenAiNormalizer {
         for raw in sse_events {
             OpenAiCompatibleProvider::process_chat_sse_event(raw, &mut state)
                 .expect("chat sse event parses");
+            stream_events.extend(state.take_block_events());
             stream_events.extend(
                 state
                     .take_completed_tool_call_parts()

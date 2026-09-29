@@ -4,6 +4,7 @@
 //! reason.
 
 use crate::support::*;
+use lash_sansio::ToolInputIdentity;
 
 /// One `content_block_*` slot, keyed by the block type announced at
 /// `content_block_start`. Each variant carries only the state its deltas can
@@ -29,6 +30,7 @@ pub(crate) enum StreamBlock {
         signature: String,
     },
     ToolUse {
+        ordinal: u64,
         /// Streaming buffer for `input_json_delta` partial JSON.
         input_buffer: String,
         call_id: String,
@@ -46,6 +48,7 @@ impl StreamBlock {
             call_id,
             name,
             initial_input,
+            ..
         } = self
         else {
             return None;
@@ -112,6 +115,7 @@ pub(crate) struct StreamState {
     pub(crate) stop_reason: Option<String>,
     pub(crate) message_started: bool,
     pub(crate) message_stopped: bool,
+    pub(crate) next_tool_ordinal: u64,
     /// Stamped from `ProviderOptions::expose_thinking` at state construction
     /// so the assembled `LlmResponse` carries the visibility policy forward
     /// for the runtime's reasoning republication gate.
@@ -343,6 +347,7 @@ impl AnthropicProvider {
                                 .with_retry_verdict(TransportRetryVerdict::NotRetryable)
                             })?;
                         *slot = StreamBlock::ToolUse {
+                            ordinal: state.next_tool_ordinal,
                             input_buffer: String::new(),
                             call_id: call_id.to_string(),
                             name: block_meta
@@ -352,6 +357,20 @@ impl AnthropicProvider {
                                 .to_string(),
                             initial_input: block_meta.get("input").cloned().unwrap_or(Value::Null),
                         };
+                        state.next_tool_ordinal += 1;
+                        if let Some(tx) = stream_events {
+                            tx.send(LlmStreamEvent::ToolInputStart {
+                                call: ToolInputIdentity {
+                                    ordinal: state.next_tool_ordinal - 1,
+                                    call_id: Some(call_id.to_string()),
+                                    tool_name: block_meta
+                                        .get("name")
+                                        .and_then(Value::as_str)
+                                        .map(str::to_string),
+                                    item_id: Some(block_id),
+                                },
+                            });
+                        }
                     }
                     _ => {
                         *slot = StreamBlock::Unknown;
@@ -416,13 +435,33 @@ impl AnthropicProvider {
                             signature.push_str(piece);
                         }
                     }
-                    ("input_json_delta", StreamBlock::ToolUse { input_buffer, .. }) => {
+                    (
+                        "input_json_delta",
+                        StreamBlock::ToolUse {
+                            input_buffer,
+                            ordinal,
+                            call_id,
+                            name,
+                            ..
+                        },
+                    ) => {
                         let piece = delta
                             .get("partial_json")
                             .and_then(|v| v.as_str())
                             .unwrap_or("");
                         if !piece.is_empty() {
                             input_buffer.push_str(piece);
+                            if let Some(tx) = stream_events {
+                                tx.send(LlmStreamEvent::ToolInputDelta {
+                                    call: ToolInputIdentity {
+                                        ordinal: *ordinal,
+                                        call_id: Some(call_id.clone()),
+                                        tool_name: Some(name.clone()),
+                                        item_id: Some(format!("content_block:{index}")),
+                                    },
+                                    text: piece.to_string(),
+                                });
+                            }
                         }
                     }
                     (
@@ -447,6 +486,25 @@ impl AnthropicProvider {
                 let index = event.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 let block_id = format!("content_block:{index}");
                 if let Some(tx) = stream_events {
+                    if let Some(StreamBlock::ToolUse {
+                        ordinal,
+                        call_id,
+                        name,
+                        ..
+                    }) = state.blocks.get(index)
+                        && let Some(LlmOutputPart::ToolCall { input_json, .. }) =
+                            state.blocks[index].tool_call_part()
+                    {
+                        tx.send(LlmStreamEvent::ToolInputEnd {
+                            call: ToolInputIdentity {
+                                ordinal: *ordinal,
+                                call_id: Some(call_id.clone()),
+                                tool_name: Some(name.clone()),
+                                item_id: Some(block_id.clone()),
+                            },
+                            raw_arguments: input_json,
+                        });
+                    }
                     match state.blocks.get(index) {
                         Some(StreamBlock::Text { text }) => {
                             tx.send(LlmStreamEvent::TextBlockEnd {
@@ -587,6 +645,61 @@ impl AnthropicProvider {
             None => terminal_reason_from_parts(&parts),
         };
         (parts, state.usage, terminal_reason)
+    }
+}
+
+#[cfg(test)]
+mod tool_input_tests {
+    use super::*;
+
+    #[test]
+    fn interleaved_arguments_and_cut_preserve_each_call_prefix() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let sender = LlmEventSender::new(move |event| {
+            sink.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push(event);
+        });
+        let mut state = StreamState::default();
+        let wire = [
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"a","name":"lookup","input":{}}}),
+            json!({"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"b","name":"lookup","input":{}}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"READ"}}),
+            json!({"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"q\":\"x\"}"}}),
+            json!({"type":"content_block_stop","index":1}),
+        ];
+        for event in wire {
+            AnthropicProvider::process_sse_event(
+                &event.to_string(),
+                &mut state,
+                Some(&sender),
+                false,
+            )
+            .expect("recorded Anthropic event parses");
+        }
+        let events = seen.lock().unwrap_or_else(|poison| poison.into_inner());
+        let kinds = events
+            .iter()
+            .filter_map(|event| match event {
+                LlmStreamEvent::ToolInputStart { call } => Some(("start", call.ordinal)),
+                LlmStreamEvent::ToolInputDelta { call, .. } => Some(("delta", call.ordinal)),
+                LlmStreamEvent::ToolInputEnd { call, .. } => Some(("end", call.ordinal)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            [
+                ("start", 0),
+                ("start", 1),
+                ("delta", 0),
+                ("delta", 1),
+                ("end", 1)
+            ]
+        );
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputDelta { call, text } if call.ordinal == 0 && text == "{\"path\":\"READ")));
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.ordinal == 1 && raw_arguments == "{\"q\":\"x\"}")));
     }
 }
 

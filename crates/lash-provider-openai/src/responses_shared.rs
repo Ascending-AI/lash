@@ -466,6 +466,8 @@ pub fn response_parts_from_value_with_decoder(
 
 #[derive(Clone, Debug, Default)]
 pub struct ResponsesStreamingToolCall {
+    pub ordinal: Option<u64>,
+    pub ended: bool,
     pub call_id: String,
     pub tool_name: String,
     pub input_json: String,
@@ -505,6 +507,7 @@ pub struct ResponsesStreamState {
     /// Block-boundary stream events minted at the provider edge, drained by
     /// the driver after each SSE event.
     pub(crate) block_events: Vec<LlmStreamEvent>,
+    pub(crate) next_tool_ordinal: u64,
     /// Per-response block ordinal; every minted block gets the next value so
     /// ordering never depends on parsing `id`.
     pub(crate) next_block_ordinal: u64,
@@ -663,6 +666,51 @@ impl ResponsesStreamState {
         match self.slot_owners.get_mut(owner) {
             Some(ResponsesPartSlot::ToolCall(tool_call)) => Some(tool_call),
             _ => None,
+        }
+    }
+
+    fn tool_input_identity(&self, owner: usize) -> Option<lash_sansio::ToolInputIdentity> {
+        let Some(ResponsesPartSlot::ToolCall(call)) = self.slot_owners.get(owner) else {
+            return None;
+        };
+        Some(lash_sansio::ToolInputIdentity {
+            ordinal: call.ordinal?,
+            call_id: (!call.call_id.is_empty()).then(|| call.call_id.clone()),
+            tool_name: (!call.tool_name.is_empty()).then(|| call.tool_name.clone()),
+            item_id: (!call.item_id.is_empty()).then(|| call.item_id.clone()),
+        })
+    }
+
+    fn start_tool_input(&mut self, owner: usize) {
+        let ordinal = self.next_tool_ordinal;
+        let Some(call) = self.tool_call_mut(owner) else {
+            return;
+        };
+        if call.ordinal.is_some() {
+            return;
+        }
+        call.ordinal = Some(ordinal);
+        self.next_tool_ordinal += 1;
+        if let Some(call) = self.tool_input_identity(owner) {
+            self.block_events
+                .push(LlmStreamEvent::ToolInputStart { call });
+        }
+    }
+
+    fn end_tool_input(&mut self, owner: usize) {
+        let Some(call) = self.tool_call_mut(owner) else {
+            return;
+        };
+        if call.ended {
+            return;
+        }
+        call.ended = true;
+        let raw_arguments = call.input_json.clone();
+        if let Some(call) = self.tool_input_identity(owner) {
+            self.block_events.push(LlmStreamEvent::ToolInputEnd {
+                call,
+                raw_arguments,
+            });
         }
     }
 
@@ -1325,12 +1373,14 @@ impl ResponsesStreamState {
             }
             if let Some(arguments) = item.get("arguments").and_then(|v| v.as_str())
                 && !arguments.is_empty()
+                && !tool_call.ended
             {
                 tool_call.input_json = arguments.to_string();
                 content_received = true;
             }
         }
         self.streamed_item_content_received |= content_received;
+        self.start_tool_input(owner);
         Some(owner)
     }
 
@@ -1347,8 +1397,15 @@ impl ResponsesStreamState {
             return;
         };
         self.streamed_item_content_received = true;
+        self.start_tool_input(owner);
         if let Some(tool_call) = self.tool_call_mut(owner) {
             tool_call.input_json.push_str(delta);
+        }
+        if let Some(call) = self.tool_input_identity(owner) {
+            self.block_events.push(LlmStreamEvent::ToolInputDelta {
+                call,
+                text: delta.to_string(),
+            });
         }
     }
 
@@ -1361,12 +1418,21 @@ impl ResponsesStreamState {
         let Some(owner) = self.tool_call_slot(output_index, item_id) else {
             return;
         };
-        if arguments.is_empty() {
-            return;
-        }
-        self.streamed_item_content_received = true;
+        self.streamed_item_content_received |= !arguments.is_empty();
         if let Some(tool_call) = self.tool_call_mut(owner) {
             tool_call.input_json = arguments.to_string();
+        }
+        self.end_tool_input(owner);
+    }
+
+    pub fn close_tool_call_arguments(
+        &mut self,
+        output_index: Option<usize>,
+        item_id: Option<&str>,
+    ) {
+        if let Some(owner) = self.tool_call_slot(output_index, item_id) {
+            self.start_tool_input(owner);
+            self.end_tool_input(owner);
         }
     }
 
@@ -1389,6 +1455,7 @@ impl ResponsesStreamState {
             }
             tool_call.clone()
         };
+        self.end_tool_input(owner);
         let tool_name = tool_call.tool_name;
         let part = LlmOutputPart::ToolCall {
             call_id: tool_call.call_id,
