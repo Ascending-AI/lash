@@ -255,7 +255,9 @@ impl ObligationKey {
                 Self::ArtifactCleanup {
                     referrer: ArtifactReferrer::decode(&referrer_kind, &referrer_id).map_err(
                         |error| UndecodableObligation {
-                            detail: error.to_string(),
+                            detail: error
+                                .into_store_error("artifact_cleanup_obligation")
+                                .to_string(),
                         },
                     )?,
                 }
@@ -702,5 +704,25 @@ mod tests {
                 "{kind} decoded {columns:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_cleanup_key_of_an_unknown_referrer_kind_names_the_typed_refusal() {
+        let label = crate::artifact_referrer::SYNTHETIC_NEXT_REFERRER_KIND;
+        let undecodable = ObligationKey::decode(
+            ObligationKind::ArtifactCleanup,
+            vec![
+                KeyColumn::Text(label.to_owned()),
+                KeyColumn::Text("x".to_owned()),
+            ],
+        )
+        .expect_err("no build of this window names the next kind");
+        let refusal = StoreError::Incompatible {
+            refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                surface: "artifact referrer kind".to_owned(),
+                label: label.to_owned(),
+            },
+        };
+        assert_eq!(undecodable.detail, refusal.to_string());
     }
 }

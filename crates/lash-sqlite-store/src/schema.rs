@@ -638,10 +638,18 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
 
 -- Exact referrer edges for immutable artifacts. The edge is the liveness fact;
 -- no maintained count or last-operation field exists on shared bytes.
+--
+-- The referrer-kind CHECKs here, on the fences and on both cleanup tables
+-- admit any non-empty label, not the kind list (ADR 0115 section 5). SQLite
+-- cannot alter a CHECK, so a list would make a later build's kind a table
+-- rebuild. The vocabulary is enforced where it is typed: every write binds
+-- ArtifactReferrerKind::as_str, and every read decodes through
+-- ArtifactReferrer::decode, which refuses a label this build does not know
+-- as Incompatible(UnknownVocabulary) and never reads the row as absent.
 CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
@@ -649,7 +657,7 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
 
 -- Every ended referrer has a permanent publication fence.
 CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
-    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (length(referrer_id) > 0),
     ended_at_ms INTEGER NOT NULL,
     PRIMARY KEY (referrer_kind, referrer_id)
@@ -704,7 +712,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
     ON artifact_referrer_edges(referrer_kind, referrer_id);
 
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,
@@ -1378,8 +1386,11 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
+-- The referrer-kind CHECK admits any non-empty label, as the durable core's
+-- does: the vocabulary is typed in ArtifactReferrer::decode (ADR 0115
+-- section 5), so a later build's kind needs no table rebuild.
 CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
-    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_kind TEXT NOT NULL CHECK (length(referrer_kind) > 0),
     referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
     cleanup_json TEXT NOT NULL,
     obligation_id TEXT NOT NULL,

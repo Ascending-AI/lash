@@ -498,6 +498,91 @@ pub async fn a_refused_or_undecodable_row_stalls_without_failing_the_page(
     assert_eq!(reason(&poison_id), Some(StallReason::Undecodable));
 }
 
+/// ADR 0115 §5: a cleanup row whose referrer kind a later build wrote. The
+/// backend writes it due, as that build would, as obligation `id` with
+/// referrer kind `label`, in a store that owes no other cleanup. Reading it
+/// is refused `Incompatible(UnknownVocabulary)`; the relay stalls it
+/// `undecodable` in the pass that claims it, without a delivery; and nothing
+/// counts it as absent: it stays stalled, listed and refused typed, and no
+/// later pass takes it again.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn an_unknown_referrer_kind_is_refused_typed_and_stalled(
+    stores: Arc<dyn crate::StoreSet>,
+    id: ObligationId,
+    label: &str,
+) {
+    let typed = |error: &lash_core::store::StoreError| {
+        matches!(
+            error,
+            lash_core::store::StoreError::Incompatible {
+                refusal: lash_core::compat::CompatRefusal::UnknownVocabulary { label: found, .. }
+            } if found == label
+        )
+    };
+    let cleanup = stores.artifact_cleanup();
+    let ledger = stores.obligation_ledger(ObligationKind::ArtifactCleanup);
+    let refused = cleanup
+        .load_cleanup(&id)
+        .await
+        .expect_err("a later build's kind is refused, never read as absent");
+    assert!(typed(&refused), "the refusal is typed: {refused:?}");
+    let before = ledger.count_stalled().await.expect("count before");
+
+    let clock = TestClock::new(T0);
+    let relay = ScriptedRelay::new(Arc::clone(&ledger), policy(16));
+    let pass = relay_due(&relay, &clock, page(64)).await.expect("one pass");
+    assert_eq!(
+        (pass.claimed, pass.stalled, pass.delivered),
+        (1, 1, 0),
+        "{pass:?}"
+    );
+    assert!(
+        relay
+            .attempts
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty(),
+        "a row this build cannot name is never delivered"
+    );
+    let stalled = ledger
+        .list_stalled(None, page(1_000))
+        .await
+        .expect("list stalled")
+        .into_iter()
+        .find(|stalled| stalled.id == id)
+        .expect("the stalled row is listed");
+    assert_eq!(stalled.kind, ObligationKind::ArtifactCleanup);
+    assert_eq!(stalled.reason, StallReason::Undecodable);
+    let detail = stalled
+        .key
+        .expect_err("the key names a kind this build does not know")
+        .detail;
+    assert!(
+        detail.contains(&format!("label `{label}` is unknown to this build")),
+        "the stall names the typed refusal: {detail}"
+    );
+    assert_eq!(stalled.last_error.as_deref(), Some(detail.as_str()));
+    assert_eq!(
+        ledger.count_stalled().await.expect("count after"),
+        before + 1
+    );
+
+    clock.advance(3_600_000);
+    let later = relay_due(&relay, &clock, page(64))
+        .await
+        .expect("later pass");
+    assert_eq!(later.claimed, 0, "a stalled row waits for an operator");
+    assert_eq!(
+        ledger.state(&id).await.expect("state after"),
+        Some(ObligationState::Stalled)
+    );
+    let refused = cleanup
+        .load_cleanup(&id)
+        .await
+        .expect_err("the stalled row is still refused, never absent");
+    assert!(typed(&refused), "the refusal is typed: {refused:?}");
+}
+
 /// Only an explicit re-arm puts a stalled obligation back: due now, its
 /// attempts reset, and a second re-arm of a live obligation does nothing.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]

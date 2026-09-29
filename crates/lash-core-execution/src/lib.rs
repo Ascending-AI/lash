@@ -26,7 +26,7 @@ pub use lash_core_store::artifact_referrer::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
     FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
-    SubscriptionRevisionId,
+    SYNTHETIC_NEXT_REFERRER_KIND, SubscriptionRevisionId,
 };
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;

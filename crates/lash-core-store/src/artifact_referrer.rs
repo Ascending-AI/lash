@@ -5,8 +5,10 @@
 //! referrer is a durable reader. There are seven kinds. Each referrer has one
 //! canonical `referrer_id` text, which is what the edge, fence and cleanup
 //! tables store; [`ArtifactReferrer::decode`] refuses every stored pair whose
-//! text is not exactly that rendering, so a store maps a refusal to
-//! `StoredDataCorrupt` rather than skipping the row.
+//! text is not exactly that rendering, and a store classifies the refusal
+//! with [`ArtifactReferrerError::into_store_error`] rather than skipping the
+//! row: a kind a newer build wrote is `Incompatible(UnknownVocabulary)`,
+//! anything else `StoredDataCorrupt` (ADR 0115 §5).
 //!
 //! The cleanup vocabulary lives here too: [`ArtifactCleanup`] is the durable
 //! body of one cleanup obligation, and [`ResolvedArtifactCleanup`] is what one
@@ -32,6 +34,11 @@ pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
 /// unknown kind, which N refuses typed and never counts as absent.
 #[cfg(feature = "synthetic-next")]
 pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 2;
+
+/// The label vocabulary version 2 adds: what the stores' laws write as a
+/// later build's referrer kind. No build of this window names it, so every
+/// decode refuses it as `Incompatible(UnknownVocabulary)`.
+pub const SYNTHETIC_NEXT_REFERRER_KIND: &str = "synthetic_next";
 
 /// The seven referrer kinds, as the `referrer_kind` column stores them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -164,7 +171,8 @@ impl ArtifactReferrer {
 
     /// Typed decode of a stored pair. Refuses an unknown kind, an empty id,
     /// an id that does not decode, and an id whose re-encoding differs from
-    /// the stored text. Stores map a refusal to `StoredDataCorrupt`.
+    /// the stored text. Stores classify a refusal with
+    /// [`ArtifactReferrerError::into_store_error`].
     ///
     /// # Errors
     ///
@@ -466,6 +474,29 @@ pub enum ArtifactReferrerError {
     Malformed { kind: &'static str, detail: String },
     #[error("{kind} referrer id is not canonical")]
     NotCanonical { kind: &'static str },
+}
+
+impl ArtifactReferrerError {
+    /// How a store reports a stored pair it refuses, for the row
+    /// `record_kind` names (ADR 0115 §5). A kind this build has no name for
+    /// was written by a newer build: it is `Incompatible(UnknownVocabulary)`,
+    /// so no pass counts the row as absent or corrupt. Any other refusal is
+    /// `StoredDataCorrupt`.
+    #[must_use]
+    pub fn into_store_error(self, record_kind: &'static str) -> crate::store::StoreError {
+        match self {
+            Self::UnknownKind(label) => crate::store::StoreError::Incompatible {
+                refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                    surface: "artifact referrer kind".to_owned(),
+                    label,
+                },
+            },
+            other => crate::store::StoreError::StoredDataCorrupt {
+                record_kind,
+                message: other.to_string(),
+            },
+        }
+    }
 }
 
 /// A write's referrer plus, for a guarded kind, the guard its first
@@ -945,6 +976,26 @@ mod tests {
                 "{kind} {id}"
             );
         }
+    }
+
+    #[test]
+    fn an_unknown_kind_is_incompatible_and_a_bad_id_is_corrupt() {
+        let unknown = ArtifactReferrer::decode(SYNTHETIC_NEXT_REFERRER_KIND, "x")
+            .expect_err("no build of this window names the next kind");
+        assert!(matches!(
+            unknown.into_store_error("artifact_cleanup_obligation"),
+            crate::store::StoreError::Incompatible {
+                refusal: crate::compat::CompatRefusal::UnknownVocabulary { ref label, .. }
+            } if label == SYNTHETIC_NEXT_REFERRER_KIND
+        ));
+        let malformed = ArtifactReferrer::decode("host_pin", "").expect_err("an empty id");
+        assert!(matches!(
+            malformed.into_store_error("artifact_cleanup_obligation"),
+            crate::store::StoreError::StoredDataCorrupt {
+                record_kind: "artifact_cleanup_obligation",
+                ..
+            }
+        ));
     }
 
     #[test]

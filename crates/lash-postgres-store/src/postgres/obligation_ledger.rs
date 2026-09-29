@@ -146,11 +146,14 @@ fn corrupt_cleanup(message: impl ToString) -> StoreError {
     }
 }
 
+/// One cleanup row. A referrer kind a newer build wrote is refused
+/// `Incompatible(UnknownVocabulary)`, never read as corrupt or absent.
 fn cleanup_row(row: &PgRow) -> Result<(ObligationId, ArtifactCleanup), StoreError> {
     let id = ObligationId::new(row.try_get::<String, _>(0).map_err(store_sqlx_error)?);
     let kind: String = row.try_get(2).map_err(store_sqlx_error)?;
     let referrer_id: String = row.try_get(3).map_err(store_sqlx_error)?;
-    let referrer = ArtifactReferrer::decode(&kind, &referrer_id).map_err(corrupt_cleanup)?;
+    let referrer = ArtifactReferrer::decode(&kind, &referrer_id)
+        .map_err(|error| error.into_store_error("artifact_cleanup_obligation"))?;
     let json: String = row.try_get(4).map_err(store_sqlx_error)?;
     let cleanup = ArtifactCleanup::from_json(&json, &referrer).map_err(corrupt_cleanup)?;
     Ok((id, cleanup))

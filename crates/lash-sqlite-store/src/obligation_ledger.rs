@@ -555,7 +555,7 @@ pub(crate) fn arm_cleanup_tx(
         .as_ref()
         .map(|(_, _, row_kind, row_id, body)| {
             let stored = ArtifactReferrer::decode(row_kind, row_id)
-                .map_err(|error| stored_data_corrupt("artifact cleanup", error))?;
+                .map_err(|error| error.into_store_error("artifact cleanup"))?;
             ArtifactCleanup::from_json(body, &stored)
                 .map_err(|error| stored_data_corrupt("artifact cleanup", error))
         })
@@ -774,9 +774,11 @@ impl ArtifactCleanupLedger for SqliteArtifactCleanupLedger {
             })
             .await
             .map_err(sqlite_error)?;
+        // A referrer kind a newer build wrote is refused
+        // `Incompatible(UnknownVocabulary)`, never read as corrupt or absent.
         row.map(|(kind, id, body)| {
             let referrer = ArtifactReferrer::decode(&kind, &id)
-                .map_err(|error| stored_data_corrupt("artifact cleanup", error))?;
+                .map_err(|error| error.into_store_error("artifact cleanup"))?;
             ArtifactCleanup::from_json(&body, &referrer)
                 .map_err(|error| stored_data_corrupt("artifact cleanup", error))
         })
