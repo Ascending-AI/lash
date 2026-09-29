@@ -1750,9 +1750,8 @@ pub struct LlmResponse {
     ///
     /// `header:<lowercased-name>` and `body:<json-pointer>` keys are
     /// allowlisted by host-supplied endpoint configuration and are absent
-    /// unless explicitly requested. `gateway:meta` holds an OpenAI-compatible
-    /// gateway's top-level `meta` block verbatim whenever the response carries
-    /// one, so served-route provenance survives; lash never interprets it.
+    /// unless explicitly requested; lash holds no provider- or
+    /// gateway-specific keys of its own (ADR 0038).
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub response_metadata: std::collections::BTreeMap<String, serde_json::Value>,
     /// Whether the caller asked the provider to surface reasoning. Providers
