@@ -1,0 +1,9 @@
+**
+!target/
+!target/loadtest-image/
+!target/loadtest-image/bin/
+!target/loadtest-image/bin/**
+!target/loadtest-image/witness.sql
+!crates/
+!crates/lash-postgres-store/
+!crates/lash-postgres-store/schema.sql

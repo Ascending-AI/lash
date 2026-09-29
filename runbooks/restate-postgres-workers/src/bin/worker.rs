@@ -96,9 +96,17 @@ impl AppState {
     async fn connect() -> Result<Self> {
         let worker_id = env("WORKER_INSTANCE_ID", "worker-local");
         let database_url = required_env("DATABASE_URL")?;
-        let storage = PostgresStorage::connect(&database_url)
-            .await
-            .context("connect Postgres storage")?;
+        let storage = PostgresStorage::connect_with(
+            &database_url,
+            lash_postgres_store::PostgresStoreConfig {
+                max_connections: env("POSTGRES_CONNECTIONS_PER_WORKER", "16")
+                    .parse()
+                    .context("parse worker PostgreSQL connection limit")?,
+                ..Default::default()
+            },
+        )
+        .await
+        .context("connect Postgres storage")?;
         ensure_e2e_schema(storage.pool()).await?;
         let restate_ingress_url = env("RESTATE_INGRESS_URL", "http://restate:8080");
         let restate_authority_id =
@@ -817,6 +825,38 @@ async fn direct_health(State(state): State<AppState>) -> AxumJson<HealthResponse
     })
 }
 
+async fn topology_attachment(
+    State(state): State<AppState>,
+    axum::extract::Path((session_id, attachment_id)): axum::extract::Path<(String, String)>,
+) -> Result<AxumJson<serde_json::Value>, (StatusCode, String)> {
+    let read = async {
+        let core = state.build_core()?;
+        let session = core.session(session_id.clone()).open().await?;
+        let id = lash::attachments::AttachmentId::parse(&attachment_id)?;
+        let stored = lash::persistence::AttachmentStore::get(&s3_store_from_env()?, &id).await?;
+        let committed: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM lash_attachment_manifest
+             WHERE session_id = $1 AND attachment_id = $2 AND committed_at_ms IS NOT NULL)",
+        )
+        .bind(&session_id)
+        .bind(&attachment_id)
+        .fetch_one(state.storage.pool())
+        .await?;
+        anyhow::ensure!(committed, "attachment has no committed session ownership");
+        session.close().await?;
+        Ok::<_, anyhow::Error>(serde_json::json!({
+            "worker_id": state.worker_id,
+            "session_id": session_id,
+            "attachment_id": attachment_id,
+            "bytes": stored.bytes,
+            "committed": committed,
+        }))
+    };
+    read.await
+        .map(AxumJson)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("{error:#}")))
+}
+
 async fn direct_resolve_durable_wait(
     State(state): State<AppState>,
     AxumJson(request): AxumJson<DirectDurableWaitResolveRequest>,
@@ -1116,12 +1156,8 @@ fn main() -> Result<()> {
 
 async fn async_main() -> Result<()> {
     tracing_subscriber::fmt::init();
-    let database_url = required_env("DATABASE_URL")?;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .context("connect Postgres storage for process deployment")?;
-    ensure_e2e_schema(storage.pool()).await?;
     let state = AppState::connect().await?;
+    let storage = state.storage.clone();
     let backend = Arc::clone(&state.backend);
     if state.fail_once {
         tracing::warn!(worker_id = %state.worker_id, "worker can exit once from crash_once tool");
@@ -1210,6 +1246,10 @@ async fn async_main() -> Result<()> {
         .context("bind worker control endpoint")?;
     let control_router = Router::new()
         .route("/health", get(direct_health))
+        .route(
+            "/topology/attachments/{session_id}/{attachment_id}",
+            get(topology_attachment),
+        )
         .route("/await-durable-wait", post(direct_await_durable_wait))
         .route("/resolve-durable-wait", post(direct_resolve_durable_wait))
         .with_state(state.clone());

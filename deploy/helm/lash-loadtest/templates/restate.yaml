@@ -1,0 +1,93 @@
+{{- $name := include "loadtest.name" . -}}
+{{- if gt (int .Values.restate.replication) (int .Values.restate.replicas) -}}
+{{- fail "restate.replication cannot exceed restate.replicas" -}}
+{{- end -}}
+{{- if eq .Values.s3.attachmentPrefix .Values.s3.snapshotPrefix -}}
+{{- fail "attachments and snapshots require separate prefixes" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ $name }}-restate}
+data:
+  restate.toml: |
+    cluster-name = "{{ .Release.Namespace }}"
+    auto-provision = false
+    default-num-partitions = {{ .Values.restate.partitions }}
+    default-replication = {{ .Values.restate.replication }}
+    roles = ["worker", "admin", "log-server", "metadata-server", "http-ingress"]
+    base-dir = "/data"
+    rocksdb-total-memory-size = "{{ .Values.restate.rocksdbMemory }}"
+    [metadata-client]
+    type = "replicated"
+    addresses = [{{ range $index := until (int .Values.restate.replicas) }}{{ if $index }}, {{ end }}"http://{{ $name }}-restate-{{ $index }}.{{ $name }}-peers:5122"{{ end }}]
+    [admin.query-engine]
+    memory-size = "{{ .Values.restate.queryMemory }}"
+    [worker.snapshots]
+    destination = "s3://{{ .Values.s3.bucket }}/{{ .Values.s3.snapshotPrefix }}"
+    aws-region = "{{ .Values.s3.region }}"
+    aws-endpoint-url = "{{ include "loadtest.s3" . }}"
+    aws-allow-http = {{ eq .Values.s3.mode "garage" }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-peers}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: {{ $name }}-restate}
+  ports: [{name: fabric, port: 5122}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-restate}
+spec:
+  selector: {app: {{ $name }}-restate}
+  ports: [{name: ingress, port: 8080}, {name: admin, port: 9070}, {name: fabric, port: 5122}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: {{ $name }}-restate}
+spec:
+  serviceName: {{ $name }}-peers
+  replicas: {{ .Values.restate.replicas }}
+  podManagementPolicy: Parallel
+  selector: {matchLabels: {app: {{ $name }}-restate}}
+  template:
+    metadata: {labels: {app: {{ $name }}-restate}}
+    spec:
+      nodeSelector: {{ toJson .Values.restate.nodeSelector }}
+      affinity:
+        podAntiAffinity:
+          {{ if eq .Values.restate.antiAffinity "required" }}requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector: {matchLabels: {app: {{ $name }}-restate}}
+              topologyKey: kubernetes.io/hostname
+          {{ else }}preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector: {matchLabels: {app: {{ $name }}-restate}}
+                topologyKey: kubernetes.io/hostname
+          {{ end }}
+      {{- include "loadtest.network" . | nindent 6 }}
+      containers:
+        - name: restate
+          image: {{ .Values.restate.image }}
+          args: [--config-file, /config/restate.toml]
+          env:
+            - {name: POD_NAME, valueFrom: {fieldRef: {fieldPath: metadata.name}}}
+            - {name: RESTATE_NODE_NAME, value: "$(POD_NAME)"}
+            - {name: RESTATE_ADVERTISED_ADDRESS, value: "http://$(POD_NAME).{{ $name }}-peers:5122"}
+            - {name: RESTATE_BIND_ADDRESS, value: "0.0.0.0:5122"}
+            - {name: RESTATE_WORKER__SNAPSHOTS__AWS_ACCESS_KEY_ID, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: s3-access-key}}}
+            - {name: RESTATE_WORKER__SNAPSHOTS__AWS_SECRET_ACCESS_KEY, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: s3-secret-key}}}
+          resources: {{ toJson .Values.restate.resources }}
+          readinessProbe: {tcpSocket: {port: 5122}, periodSeconds: 2}
+          volumeMounts: [{name: data, mountPath: /data}, {name: config, mountPath: /config}]
+      volumes: [{name: config, configMap: {name: {{ $name }}-restate}}]
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if .Values.restate.storageClass }}
+        storageClassName: {{ .Values.restate.storageClass | quote }}
+        {{- end }}
+        resources: {requests: {storage: {{ .Values.restate.storage }}}}

@@ -1,0 +1,88 @@
+{{- $name := include "loadtest.name" . -}}
+{{- if has .Values.workers.generation .Values.workers.retainedGenerations -}}
+{{- fail "workers.generation cannot also be retained" -}}
+{{- end -}}
+{{- range $generation := concat (list .Values.workers.generation) .Values.workers.retainedGenerations }}
+{{- if gt (len (printf "%s-worker-%d-%s" $name (sub (int $.Values.workers.count) 1) $generation)) 63 -}}
+{{- fail "the worker name and generation exceed Kubernetes' 63-character Service name limit" -}}
+{{- end -}}
+{{- $tag := index $.Values.workers.generationImages $generation | default $.Values.image.tag -}}
+{{- if ne $generation $.Values.workers.generation -}}
+{{- $tag = required "retained generations require their immutable image tag in workers.generationImages" (index $.Values.workers.generationImages $generation) -}}
+{{- end }}
+{{- range $index := until (int $.Values.workers.count) }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-worker-{{ $index }}-{{ $generation }}}
+spec:
+  selector: {app: {{ $name }}-worker-{{ $index }}, generation: {{ $generation | quote }}}
+  ports: [{name: endpoint, port: 18100}, {name: control, port: 18101}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}-worker-{{ $index }}-{{ $generation }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-worker-{{ $index }}, generation: {{ $generation | quote }}}}
+  template:
+    metadata:
+      labels: {app: {{ $name }}-worker-{{ $index }}, generation: {{ $generation | quote }}}
+      annotations: {lash-loadtest/generation: {{ $generation | quote }}}
+    spec:
+      nodeSelector: {{ toJson $.Values.workers.nodeSelector }}
+      {{- include "loadtest.network" (dict "Values" $.Values "tag" $tag) | nindent 6 }}
+      containers:
+        - name: worker
+          image: "{{ $.Values.image.repository }}:{{ $tag }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: [lash-e2e-worker]
+          resources: {{ toJson $.Values.workers.resources }}
+          {{- include "loadtest.env" $ | nindent 10 }}
+            - {name: POSTGRES_CONNECTIONS_PER_WORKER, value: {{ $.Values.workers.pgConnections | quote }}}
+            - {name: WORKER_INSTANCE_ID, value: "worker-{{ $index }}"}
+          readinessProbe: {httpGet: {path: /health, port: 18101}, periodSeconds: 2}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ $name }}-proxy-{{ $generation }}}
+data:
+  Caddyfile: |
+    {
+      servers {
+        protocols h1 h2c
+      }
+    }
+    :18100 {
+      reverse_proxy {{ range $index := until (int $.Values.workers.count) }}h2c://{{ $name }}-worker-{{ $index }}-{{ $generation }}:18100 {{ end }}{
+        lb_policy round_robin
+        health_port 18101
+        health_uri /health
+        health_interval 1s
+      }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-workers-{{ $generation }}}
+spec:
+  selector: {app: {{ $name }}-proxy-{{ $generation }}}
+  ports: [{name: endpoint, port: 18100}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}-proxy-{{ $generation }}}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-proxy-{{ $generation }}}}
+  template:
+    metadata: {labels: {app: {{ $name }}-proxy-{{ $generation }}}}
+    spec:
+      containers:
+        - name: proxy
+          image: {{ $.Values.proxy.image }}
+          resources: {{ toJson $.Values.proxy.resources }}
+          volumeMounts: [{name: config, mountPath: /etc/caddy}]
+      volumes: [{name: config, configMap: {name: {{ $name }}-proxy-{{ $generation }}}}]
+{{- end }}

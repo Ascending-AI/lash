@@ -721,3 +721,11 @@ publish-all *args:
 
 check-file-size:
   python3 scripts/check-production-file-size.py
+
+# Foreground local Kubernetes proof for the FIG-3790 topology.
+# Run through kiln gate so every cluster, namespace and artifact has an owner.
+multi-node-load:
+  bash "{{repo}}/scripts/multi-node-load.sh"
+
+loadtest-chart-check:
+  bash "{{repo}}/scripts/check-loadtest-chart.sh"

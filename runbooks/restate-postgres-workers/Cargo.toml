@@ -33,6 +33,11 @@ name = "lash-e2e-context-overflow-recovery"
 path = "src/bin/context_overflow_recovery.rs"
 test = false
 
+[[bin]]
+name = "lash-loadtest-smoke"
+path = "src/bin/loadtest_smoke.rs"
+test = false
+
 [lib]
 doctest = false
 

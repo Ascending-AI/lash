@@ -1,0 +1,86 @@
+nameOverride: lash-loadtest
+credentialsSecret: lash-loadtest-credentials
+image:
+  repository: lash-loadtest
+  tag: local
+  pullPolicy: IfNotPresent
+  runtimeBase: ubuntu:24.04
+restate:
+  image: restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b
+  replicas: 3
+  partitions: 24
+  replication: 2
+  storage: 10Gi
+  storageClass: ""
+  rocksdbMemory: 512 MiB
+  queryMemory: 128 MiB
+  resources:
+    requests: {cpu: "2", memory: 4Gi}
+    limits: {cpu: "2", memory: 4Gi}
+  nodeSelector: {}
+  antiAffinity: preferred
+workers:
+  pgConnections: 16
+  count: 2
+  generation: initial
+  retainedGenerations: []
+  generationImages: {}
+  resources:
+    requests: {cpu: "2", memory: 2Gi}
+    limits: {cpu: "2", memory: 2Gi}
+  nodeSelector: {}
+postgres:
+  image: postgres:16-alpine
+  storage: 20Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: "4", memory: 8Gi}
+    limits: {cpu: "4", memory: 8Gi}
+  nodeSelector: {}
+s3:
+  mode: garage
+  image: dxflrs/garage:v2.3.0@sha256:866bd13ed2038ba7e7190e840482bc27234c4afaf77be8cfa439ae088c1e4690
+  region: us-east-1
+  bucket: lash-loadtest
+  attachmentPrefix: attachments
+  snapshotPrefix: snapshots
+  externalEndpoint: ""
+  storage: 20Gi
+  storageClass: ""
+  resources:
+    requests: {cpu: "2", memory: 2Gi}
+    limits: {cpu: "2", memory: 2Gi}
+  nodeSelector: {}
+provider:
+  resources:
+    requests: {cpu: "1", memory: 256Mi}
+    limits: {cpu: "2", memory: 512Mi}
+proxy:
+  image: caddy:2.10.2-alpine
+  resources:
+    requests: {cpu: 100m, memory: 64Mi}
+    limits: {cpu: "1", memory: 256Mi}
+driver:
+  enabled: true
+  activeDeadlineSeconds: 300
+  resources:
+    requests: {cpu: "1", memory: 512Mi}
+    limits: {cpu: "2", memory: 1Gi}
+metrics:
+  image: prom/prometheus:v3.5.0
+  scrapeInterval: 1s
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+network:
+  enabled: true
+  delayMs: 1
+  jitterMs: 0.25
+  bandwidthMbps: 1000
+faults:
+  workerKill: {enabled: true, index: 0, restartDelaySeconds: 5}
+  restateRestart: {enabled: true, index: 0, restartDelaySeconds: 5}
+  rollingDeploy: {enabled: true, trigger: ""}
+local:
+  nodeImage: kindest/node:v1.33.1@sha256:050072256b9a903bd914c0b2866828150cb229cea0efe5892e2b644d5dd3b34f
+  nodes: 3

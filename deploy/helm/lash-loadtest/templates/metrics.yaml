@@ -1,0 +1,52 @@
+{{- $name := include "loadtest.name" . -}}
+{{- if ge (int .Values.faults.workerKill.index) (int .Values.workers.count) -}}
+{{- fail "faults.workerKill.index must select an existing worker" -}}
+{{- end -}}
+{{- if ge (int .Values.faults.restateRestart.index) (int .Values.restate.replicas) -}}
+{{- fail "faults.restateRestart.index must select an existing Restate node" -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ $name }}-metrics}
+data:
+  prometheus.yml: |
+    global: {scrape_interval: {{ .Values.metrics.scrapeInterval }}}
+    scrape_configs:
+      - job_name: restate
+        static_configs:
+          - targets: [{{ range $index := until (int .Values.restate.replicas) }}{{ if $index }}, {{ end }}"{{ $name }}-restate-{{ $index }}.{{ $name }}-peers:5122"{{ end }}]
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}-metrics}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-metrics}}
+  template:
+    metadata: {labels: {app: {{ $name }}-metrics}}
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.metrics.image }}
+          args: [--config.file=/etc/prometheus/prometheus.yml, --storage.tsdb.retention.time=2h]
+          resources: {{ toJson .Values.metrics.resources }}
+          volumeMounts: [{name: config, mountPath: /etc/prometheus}]
+      volumes: [{name: config, configMap: {name: {{ $name }}-metrics}}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-metrics}
+spec:
+  selector: {app: {{ $name }}-metrics}
+  ports: [{name: http, port: 9090}]
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ $name }}-faults}
+data:
+  hooks.json: {{ toJson .Values.faults | quote }}
+  targets.json: |
+    {"namespace": {{ .Release.Namespace | quote }}, "workerDeployment": "{{ $name }}-worker-{{ .Values.faults.workerKill.index }}-{{ .Values.workers.generation }}", "restatePod": "{{ $name }}-restate-{{ .Values.faults.restateRestart.index }}", "generation": {{ .Values.workers.generation | quote }}, "deploymentUrl": "http://{{ $name }}-workers-{{ .Values.workers.generation }}:18100"}

@@ -1,0 +1,18 @@
+# PENDING account/credentials and measured release qualification.
+# Create these labeled Kapsule pools before installation. Pool sizes and
+# instance types must provide the resource requests in values.yaml.
+restate:
+  storageClass: sbs-5k
+  antiAffinity: required
+  nodeSelector: {lash-loadtest-pool: restate}
+workers:
+  nodeSelector: {lash-loadtest-pool: workers}
+postgres:
+  storageClass: sbs-5k
+  nodeSelector: {lash-loadtest-pool: storage}
+s3:
+  storageClass: sbs-5k
+  nodeSelector: {lash-loadtest-pool: storage}
+# To use Scaleway Object Storage, override s3.mode=external,
+# s3.externalEndpoint=https://s3.fr-par.scw.cloud and s3.region=fr-par.
+# The bucket must exist; keys come only from credentialsSecret.

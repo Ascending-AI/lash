@@ -1,0 +1,6 @@
+apiVersion: v2
+name: lash-loadtest
+description: On-demand synthetic Lash topology with replicated Restate, PostgreSQL and S3
+type: application
+version: 0.1.0
+appVersion: "1.7.12"

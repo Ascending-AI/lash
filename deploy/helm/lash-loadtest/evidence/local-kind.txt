@@ -1,0 +1,80 @@
+FIG-4167 local kind proof
+Run: 20260929T220842Z UTC
+Recipe: kiln gate lash fig-4167 -- just multi-node-load
+Profile: values-local.yaml
+Repository runtime platform manifest: sha256:31d861a52aad9bdd8eb4a270ba1565665770a1de805e1b53758671b6e6beb025
+
+replication.txt:
+cluster_nodes=3 metadata_members=3 partitions=24 replicated_logs=24 replication=2 sequencers=3
+
+placement.txt:
+assigned_partitions=24 replicas_per_partition=2 leaders=3
+
+availability.txt:
+quorum_nodes=2 unavailable_nodes=1 leaders=24 followers=24 sequencers=24 placement=lash-loadtest-restate-0:12/12/12,lash-loadtest-restate-1:12/12/12
+
+smoke.log:
+attachment read passed worker="worker-0" writer=worker-0 bytes=68
+attachment read passed worker="worker-1" writer=worker-0 bytes=68
+topology smoke passed: public_turns=1 peer_reads=1 pg_ownership=committed s3_bytes=identical workflow=topology-83c73a3b-c73e-431c-8106-d7c127c324eb
+
+recovery.txt:
+recovered_nodes=3 metadata_members=3 stable_node_ids=3 restarted_node=lash-loadtest-restate-2 generation=2
+
+metrics.txt:
+restate_scrapes=3 healthy=3
+
+metadata-quorum.txt:
+Metadata service
+ NODE  STATUS  VERSION  LEADER  MEMBERS     APPLIED  COMMITTED  TERM  LOG-LENGTH  SNAP-INDEX  SNAP-SIZE
+ N1    Member  v3       N1      [N1,N2,N3]  15       15         2     2           13          3.7 KiB
+ N2    Member  v3       N1      [N1,N2,N3]  12       13         2     0           13          3.7 KiB
+ N3    Member  v0       -       []          0        0          0     0           0           0 B
+
+snapshots.txt:
+Defaulted container "restate" out of: restate, directed-link (init)
+Snapshot created for partition 0: snap_16qnXtwXgfFpf6XxtXpy6Bj (log 0 @ LSN >= 17)
+Snapshot created for partition 1: snap_15zhBzQkzCud7MU5ZI5YoF3 (log 1 @ LSN >= 30)
+Snapshot created for partition 2: snap_10V6xgkvAIjIVnF2pJx1VyV (log 2 @ LSN >= 5)
+Snapshot created for partition 3: snap_1597WS3B30kNBaToa34zX3j (log 3 @ LSN >= 60)
+Snapshot created for partition 4: snap_11PpliQfKydQcM8eR5XOtIB (log 4 @ LSN >= 3)
+Snapshot created for partition 5: snap_15XT9OSpCJKRFVyhP94E8UN (log 5 @ LSN >= 74)
+Snapshot created for partition 6: snap_16ODNlusivQ3IGJWENwRFSh (log 6 @ LSN >= 87)
+Snapshot created for partition 7: snap_12CkFia5Kb4tZuC3JgmSFAR (log 7 @ LSN >= 40)
+Snapshot created for partition 8: snap_145CV4ihALGWHmBEjtFyyMV (log 8 @ LSN >= 38)
+Snapshot created for partition 9: snap_10qv1SeUIP5U562E521KpB7 (log 9 @ LSN >= 486)
+Snapshot created for partition 10: snap_12Hw7VebitZYZCxMdByiTJf (log 10 @ LSN >= 108)
+Snapshot created for partition 11: snap_11w8FST5CxBhYlipK0ANpol (log 11 @ LSN >= 70)
+Snapshot created for partition 12: snap_119Mgec66oEYcXkuxjSMbxn (log 12 @ LSN >= 12)
+Snapshot created for partition 13: snap_11dgYIs8EQRt67IowfMPAkh (log 13 @ LSN >= 541)
+Snapshot created for partition 14: snap_129P6h8KpMtktwr8Tj83XX3 (log 14 @ LSN >= 168)
+Snapshot created for partition 15: snap_11TwIGVNMDNaf7yVqiv8Bcl (log 15 @ LSN >= 239)
+Snapshot created for partition 16: snap_15X1D3wTyyBoCy48YI6XnDH (log 16 @ LSN >= 33)
+Snapshot created for partition 17: snap_1147cRaag5DUKiHn3lM7TA5 (log 17 @ LSN >= 4)
+Snapshot created for partition 18: snap_13RSMtlM4YUTIqP8q8wkRX3 (log 18 @ LSN >= 25)
+Snapshot created for partition 19: snap_15EpEzPK3Xsj994KEXcUUHn (log 19 @ LSN >= 263)
+Snapshot created for partition 20: snap_12A47k5CeNDedRujX9FOzdL (log 20 @ LSN >= 4)
+Snapshot created for partition 21: snap_11JvfenDfKOA2QpPgLHhYhH (log 21 @ LSN >= 251)
+Snapshot created for partition 22: snap_16Jncsqd15fGOFk8t5x7sNX (log 22 @ LSN >= 4)
+Snapshot created for partition 23: snap_130I4D3oC6REseAPqeEw4tH (log 23 @ LSN >= 48)
+
+namespace-cleanup.log:
+Warning: deleting cluster-scoped resources, not scoped to the provided namespace
+namespace "lash-fig-4167" deleted
+
+cluster-cleanup.log:
+Deleting cluster "lash-fig-4167" ...
+Deleted nodes: ["lash-fig-4167-control-plane" "lash-fig-4167-worker" "lash-fig-4167-worker2"]
+
+image-cleanup.log:
+Untagged: lash-loadtest:lash-fig-4167
+Deleted: sha256:a8341de339294f3cad712d890686c5cc0e29dfb97cd6c56a1c86733f7ae397af
+
+topology_exit=0; namespace absent; kind cluster absent; owned runtime image removed; image.tar absent
+
+recovered-status.txt (live metadata status after the selected restart):
+Node Configuration (v13)
+ NODE-ID  NAME                     UPTIME  METADATA  LEADER  FOLLOWER  NODESET-MEMBER  SEQUENCER  ROLES
+ N1:2     lash-loadtest-restate-0  1m 31s  Member    12      12        24              12         admin | http-ingress | log-server | metadata-server | worker
+ N2:2     lash-loadtest-restate-2  n/a     Member    0       0         24              0          admin | http-ingress | log-server | metadata-server | worker
+ N3:1     lash-loadtest-restate-1  1m 30s  Member    12      12        24              12         admin | http-ingress | log-server | metadata-server | worker

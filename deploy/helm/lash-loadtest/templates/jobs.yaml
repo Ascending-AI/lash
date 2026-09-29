@@ -1,0 +1,92 @@
+{{- $name := include "loadtest.name" . -}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-schema
+  annotations:
+    helm.sh/hook: post-install
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 180
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: schema
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "loadtest.env" . | nindent 10 }}
+            - {name: WITNESS_PASSWORD, valueFrom: {secretKeyRef: {name: {{ .Values.credentialsSecret }}, key: witness-password}}}
+          command: [bash, -ec]
+          args:
+            - |
+              until psql "$DATABASE_URL" -Atqc 'SELECT 1' >/dev/null 2>&1; do sleep 1; done
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /opt/lash/schema.sql
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -v witness_password="$WITNESS_PASSWORD" <<'SQL'
+              CREATE ROLE lash_witness LOGIN PASSWORD :'witness_password';
+              CREATE DATABASE lash_witness OWNER lash;
+              SQL
+              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f /opt/lash/witness.sql
+          resources: {{ toJson .Values.driver.resources }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-provider}
+spec:
+  selector: {app: {{ $name }}-provider}
+  ports: [{name: http, port: 18001}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: {{ $name }}-provider}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-provider}}
+  template:
+    metadata: {labels: {app: {{ $name }}-provider}}
+    spec:
+      containers:
+        - name: provider
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [lash-e2e-mock-provider]
+          {{- include "loadtest.env" . | nindent 10 }}
+            - {name: MOCK_PROVIDER_PORT, value: "18001"}
+          resources: {{ toJson .Values.provider.resources }}
+          readinessProbe: {httpGet: {path: /health, port: 18001}, periodSeconds: 2}
+{{- if .Values.driver.enabled }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $name }}-smoke
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: {{ .Values.driver.activeDeadlineSeconds }}
+  template:
+    spec:
+      restartPolicy: Never
+      initContainers:
+        - name: wait-for-topology
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bash, -ec]
+          args:
+            - |
+              until curl -fsS http://{{ $name }}-restate:9070/health >/dev/null; do sleep 1; done
+              {{ range $index := until (int .Values.workers.count) }}until curl -fsS http://{{ $name }}-worker-{{ $index }}-{{ $.Values.workers.generation }}:18101/health >/dev/null; do sleep 1; done
+              {{ end }}
+      containers:
+        - name: smoke
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [lash-loadtest-smoke]
+          {{- include "loadtest.env" . | nindent 10 }}
+            - {name: WORKER_DEPLOYMENT_URL, value: "http://{{ $name }}-workers-{{ .Values.workers.generation }}:18100"}
+            - {name: WORKER_CONTROL_URLS, value: "{{ range $index := until (int .Values.workers.count) }}{{ if $index }},{{ end }}http://{{ $name }}-worker-{{ $index }}-{{ $.Values.workers.generation }}:18101{{ end }}"}
+          resources: {{ toJson .Values.driver.resources }}
+{{- end }}

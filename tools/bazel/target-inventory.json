@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 191,
+  "cargo_target_count": 192,
   "feature_lane_units": [
     {
       "features": [],
@@ -19189,7 +19189,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 252,
+  "generated_label_count": 253,
   "packages": [
     {
       "declared_features": [
@@ -22643,6 +22643,12 @@
           "cargo": "lash-e2e-worker",
           "kind": "bin",
           "label": "//runbooks/restate-postgres-workers:lash-e2e-worker__bin",
+          "tags": []
+        },
+        {
+          "cargo": "lash-loadtest-smoke",
+          "kind": "bin",
+          "label": "//runbooks/restate-postgres-workers:lash-loadtest-smoke__bin",
           "tags": []
         }
       ],

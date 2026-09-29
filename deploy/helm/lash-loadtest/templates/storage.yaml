@@ -1,0 +1,72 @@
+{{- $name := include "loadtest.name" . -}}
+{{- range $component := list "postgres" "s3" }}
+{{- $config := index $.Values $component }}
+{{- if or (eq $component "postgres") (eq $.Values.s3.mode "garage") }}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: {{ $name }}-{{ $component }}}
+spec:
+  selector: {app: {{ $name }}-{{ $component }}}
+  ports: [{name: api, port: {{ if eq $component "postgres" }}5432{{ else }}3900{{ end }}}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: {name: {{ $name }}-{{ $component }}}
+spec:
+  serviceName: {{ $name }}-{{ $component }}
+  replicas: 1
+  selector: {matchLabels: {app: {{ $name }}-{{ $component }}}}
+  template:
+    metadata: {labels: {app: {{ $name }}-{{ $component }}}}
+    spec:
+      nodeSelector: {{ toJson $config.nodeSelector }}
+      {{- include "loadtest.network" $ | nindent 6 }}
+      containers:
+        - name: {{ $component }}
+          image: {{ $config.image }}
+          resources: {{ toJson $config.resources }}
+          {{- if eq $component "postgres" }}
+          env:
+            - {name: POSTGRES_USER, value: lash}
+            - {name: POSTGRES_DB, value: lash}
+            - {name: PGDATA, value: /data/postgres}
+            - {name: POSTGRES_PASSWORD, valueFrom: {secretKeyRef: {name: {{ $.Values.credentialsSecret }}, key: postgres-password}}}
+          readinessProbe: {exec: {command: [pg_isready, -h, 127.0.0.1, -U, lash]}, periodSeconds: 2}
+          volumeMounts: [{name: data, mountPath: /data}]
+          {{- else }}
+          command: [/garage, server, --single-node, --default-bucket]
+          env:
+            - {name: GARAGE_DEFAULT_BUCKET, value: {{ $.Values.s3.bucket | quote }}}
+            - {name: GARAGE_DEFAULT_ACCESS_KEY, valueFrom: {secretKeyRef: {name: {{ $.Values.credentialsSecret }}, key: s3-access-key}}}
+            - {name: GARAGE_DEFAULT_SECRET_KEY, valueFrom: {secretKeyRef: {name: {{ $.Values.credentialsSecret }}, key: s3-secret-key}}}
+            - {name: GARAGE_RPC_SECRET, valueFrom: {secretKeyRef: {name: {{ $.Values.credentialsSecret }}, key: garage-rpc-secret}}}
+          readinessProbe: {exec: {command: [/garage, bucket, info, {{ $.Values.s3.bucket | quote }}]}, periodSeconds: 2}
+          volumeMounts: [{name: data, mountPath: /var/lib/garage}, {name: config, mountPath: /etc/garage.toml, subPath: garage.toml}]
+      volumes: [{name: config, configMap: {name: {{ $name }}-garage}}]
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- if $config.storageClass }}
+        storageClassName: {{ $config.storageClass | quote }}
+        {{- end }}
+        resources: {requests: {storage: {{ $config.storage }}}}
+{{- end }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: {{ $name }}-garage}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = 1
+    rpc_bind_addr = "127.0.0.1:3901"
+    rpc_public_addr = "127.0.0.1:3901"
+    [s3_api]
+    s3_region = "{{ .Values.s3.region }}"
+    api_bind_addr = "0.0.0.0:3900"

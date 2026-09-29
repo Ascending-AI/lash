@@ -18,6 +18,7 @@ repos:
       - id: end-of-file-fixer
         exclude: '^tools/bazel/patches/.*\.patch$'
       - id: check-yaml
+        exclude: '^deploy/helm/[^/]+/templates/'
       - id: check-json
 
   - repo: local
