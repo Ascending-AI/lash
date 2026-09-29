@@ -5,12 +5,27 @@
 
 use lash_core_execution::store::GraphAppend;
 use lash_core_execution::{
-    Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit, RuntimeSessionState,
-    SessionCommitStore, SessionPolicy, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
-    StoreMaintenance, TokenLedgerEntry, TokenUsage, ToolState, facade_support::shared_parts,
+    FleetFormatStore, Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit,
+    RuntimeSessionState, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
+    SessionLookup, SessionPolicy, SessionStoreCreateRequest, StoreError, StoreMaintenance,
+    TokenLedgerEntry, TokenUsage, ToolState, WindowSelector, facade_support::shared_parts,
 };
 use lash_sansio::SessionId;
-use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, SqliteStore};
+use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+fn catalog_uri(root: &Path) -> PathBuf {
+    root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name())
+}
+
+async fn admit_store(
+    catalog: &Arc<SqliteStore>,
+    request: &SessionStoreCreateRequest,
+) -> Result<Arc<SqliteStore>, StoreError> {
+    catalog.admit_session(request).await?;
+    Ok(Arc::clone(catalog))
+}
 
 fn model_spec(id: &str) -> ModelSpec {
     ModelSpec::builder(id)
@@ -41,12 +56,12 @@ fn user_message(id: &str, content: &str) -> Message {
 }
 
 async fn factory_state(
-    store: &std::sync::Arc<dyn lash_core_execution::RuntimePersistence>,
+    store: &Arc<SqliteStore>,
     session_id: &SessionId,
     head_revision: u64,
 ) -> RuntimeSessionState {
     store
-        .load_session_meta()
+        .load_session_meta(session_id)
         .await
         .expect("load factory session metadata")
         .expect("factory session metadata");
@@ -81,9 +96,13 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
     state.set_tool_state_snapshot(Some(tool_state));
     state.set_plugin_state(Some(plugin_state));
     store
-        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
-            state.session_id.clone(),
-        ))
+        .admit_session(&SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: state.session_id.clone(),
+            relation: lash_core_execution::SessionRelation::Root,
+            policy: state.policy.clone(),
+        })
         .await
         .expect("bind session to store");
     state.ensure_agent_frame_initialized();
@@ -148,18 +167,20 @@ async fn gc_unreachable_keeps_rooted_checkpoint_blobs() {
 #[tokio::test]
 async fn sqlite_catalog_indexes_usage_by_session() {
     let root = unique_temp_dir("usage-index");
-    let factory = SqliteSessionStoreFactory::new(&root);
-    factory
-        .create_store(&SessionStoreCreateRequest {
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
+    admit_store(
+        &factory,
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("usage-index"),
             relation: lash_core_execution::SessionRelation::Root,
             policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create store");
-    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
+        },
+    )
+    .await
+    .expect("create store");
+    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
     let indexed: bool = conn
         .query_row(
             "SELECT EXISTS(
@@ -179,7 +200,7 @@ async fn sqlite_catalog_indexes_usage_by_session() {
 #[tokio::test]
 async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
     let root = unique_temp_dir("metadata");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -194,17 +215,18 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
         },
     };
 
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = admit_store(&factory, &request).await.expect("create store");
     let meta = store
-        .load_session_meta()
+        .load_session_meta(&request.session_id)
         .await
         .expect("load meta")
         .expect("meta");
     assert_eq!(meta.session_id, "chat/alpha");
     assert_eq!(meta.parent_session_id(), Some("preserved-parent"));
 
-    let reopened = factory
-        .create_store(&SessionStoreCreateRequest {
+    let reopened = admit_store(
+        &factory,
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             relation: lash_core_execution::SessionRelation::Root,
@@ -213,11 +235,12 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
                 ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
             },
             ..request
-        })
-        .await
-        .expect("reopen store");
+        },
+    )
+    .await
+    .expect("reopen store");
     let reopened_meta = reopened
-        .load_session_meta()
+        .load_session_meta(&SessionId::from("chat/alpha"))
         .await
         .expect("load reopened meta")
         .expect("reopened meta");
@@ -227,7 +250,7 @@ async fn sqlite_factory_creates_metadata_once_and_preserves_on_reopen() {
 #[tokio::test]
 async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     let root = unique_temp_dir("delete-session");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -238,12 +261,10 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
             ..SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded)
         },
     };
-    let deleted_store = factory
-        .create_store(&request(&SessionId::from("delete/me")))
+    let deleted_store = admit_store(&factory, &request(&SessionId::from("delete/me")))
         .await
         .expect("create deleted session");
-    factory
-        .create_store(&request(&SessionId::from("keep/me")))
+    admit_store(&factory, &request(&SessionId::from("keep/me")))
         .await
         .expect("create retained session");
     let mut deleted_state = factory_state(&deleted_store, &SessionId::from("delete/me"), 0).await;
@@ -253,7 +274,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
         .await
         .expect("commit deleted session checkpoint");
     {
-        let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
+        let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
         conn.execute(
             "INSERT INTO blobs (hash, content) VALUES ('host-artifact-blob', X'02')",
             [],
@@ -282,19 +303,19 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
     );
     assert!(
         factory
-            .open_existing_store(&request(&SessionId::from("delete/me")))
+            .lookup_session(&SessionId::from("delete/me"))
             .await
             .expect("probe deleted session")
-            .is_none()
+            == SessionLookup::Deleted
     );
-    assert!(
+    assert!(matches!(
         factory
-            .open_existing_store(&request(&SessionId::from("keep/me")))
+            .lookup_session(&SessionId::from("keep/me"))
             .await
-            .expect("probe retained session")
-            .is_some()
-    );
-    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
+            .expect("probe retained session"),
+        SessionLookup::Live(_)
+    ));
+    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
     let host_ref_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM artifact_refs
@@ -319,7 +340,7 @@ async fn sqlite_factory_delete_session_removes_only_the_selected_session() {
 #[tokio::test]
 async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
     let root = unique_temp_dir("global-node-id");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     let store_for = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -327,12 +348,10 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         relation: lash_core_execution::SessionRelation::Root,
         policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let first = factory
-        .create_store(&store_for(&SessionId::from("first")))
+    let first = admit_store(&factory, &store_for(&SessionId::from("first")))
         .await
         .expect("first store");
-    let second = factory
-        .create_store(&store_for(&SessionId::from("second")))
+    let second = admit_store(&factory, &store_for(&SessionId::from("second")))
         .await
         .expect("second store");
     let first_state = factory_state(&first, &SessionId::from("first"), 0).await;
@@ -394,14 +413,24 @@ async fn sqlite_catalog_partitions_derived_node_ids_by_session() {
         frame_key.as_str(),
     );
     assert_ne!(first_node_id, second_node_id);
-    assert!(first.load_node(&first_node_id).await.unwrap().is_some());
-    assert!(second.load_node(&second_node_id).await.unwrap().is_some());
+    assert!(
+        first
+            .contains_active_ancestor(&first_state.session_id, &first_node_id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        second
+            .contains_active_ancestor(&second_state.session_id, &second_node_id)
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
 async fn sqlite_catalog_leaf_validation_is_session_scoped() {
     let root = unique_temp_dir("leaf-scope");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -409,12 +438,10 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         relation: lash_core_execution::SessionRelation::Root,
         policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let first = factory
-        .create_store(&request(&SessionId::from("leaf-a")))
+    let first = admit_store(&factory, &request(&SessionId::from("leaf-a")))
         .await
         .expect("first store");
-    let second = factory
-        .create_store(&request(&SessionId::from("leaf-b")))
+    let second = admit_store(&factory, &request(&SessionId::from("leaf-b")))
         .await
         .expect("second store");
     let first_state = factory_state(&first, &SessionId::from("leaf-a"), 0).await;
@@ -463,7 +490,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
         .await
         .expect("a preserve-head append cannot adopt another session's leaf");
     let head = second
-        .load_session_head_meta()
+        .load_session_head_meta(&SessionId::from("leaf-b"))
         .await
         .expect("load head after preserve-head append")
         .expect("session head remains published");
@@ -474,7 +501,7 @@ async fn sqlite_catalog_leaf_validation_is_session_scoped() {
 #[tokio::test]
 async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
     let root = unique_temp_dir("maintenance-scope");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
     let request = |session_id: &SessionId| SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -482,12 +509,10 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         relation: lash_core_execution::SessionRelation::Root,
         policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
     };
-    let first = factory
-        .create_store(&request(&SessionId::from("maintenance-a")))
+    let first = admit_store(&factory, &request(&SessionId::from("maintenance-a")))
         .await
         .expect("first store");
-    let second = factory
-        .create_store(&request(&SessionId::from("maintenance-b")))
+    let second = admit_store(&factory, &request(&SessionId::from("maintenance-b")))
         .await
         .expect("second store");
     let source_key = "maintenance-b-source";
@@ -507,7 +532,10 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         .await
         .expect("cancel second input");
 
-    let first_report = first.vacuum().await.expect("vacuum first session");
+    let first_report = first
+        .vacuum(&SessionId::from("maintenance-a"))
+        .await
+        .expect("vacuum first session");
     assert_eq!(first_report.removed_node_count, 0);
     assert_eq!(first_report.removed_pending_turn_input_tombstone_count, 0);
     let replay = second
@@ -527,235 +555,29 @@ async fn sqlite_vacuum_is_scoped_to_the_bound_session() {
         lash_core_execution::runtime::TurnInputStateKind::Cancelled
     );
 
-    let second_report = second.vacuum().await.expect("vacuum second session");
+    let second_report = second
+        .vacuum(&SessionId::from("maintenance-b"))
+        .await
+        .expect("vacuum second session");
     assert_eq!(second_report.removed_node_count, 0);
     assert_eq!(second_report.removed_pending_turn_input_tombstone_count, 1);
 }
 
-#[tokio::test]
-async fn sqlite_snapshot_read_propagates_graph_statement_errors() {
-    let root = unique_temp_dir("graph-read-error");
-    let factory = SqliteSessionStoreFactory::new(&root);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("graph-read-error"),
-            relation: lash_core_execution::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create store");
-    let mut state = factory_state(&store, &SessionId::from("graph-read-error"), 0).await;
-    state.ensure_agent_frame_initialized();
-    store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit head");
-    rusqlite::Connection::open(factory.catalog_uri())
-        .expect("open catalog")
-        .execute("DROP TABLE graph_nodes", [])
-        .expect("drop graph table");
-
-    assert!(matches!(
-        store.load_session().await,
-        Err(StoreError::StorageFailure {
-            backend: "sqlite",
-            ..
-        })
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_snapshot_read_rejects_undecodable_graph_nodes() {
-    let root = unique_temp_dir("graph-node-decode-error");
-    let factory = SqliteSessionStoreFactory::new(&root);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("graph-node-decode-error"),
-            relation: lash_core_execution::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create store");
-    let mut state = factory_state(&store, &SessionId::from("graph-node-decode-error"), 0).await;
-    state.ensure_agent_frame_initialized();
-    state.append_active_conversation_messages(&[
-        user_message("first", "first"),
-        user_message("second", "second"),
-    ]);
-    store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit graph");
-    rusqlite::Connection::open(factory.catalog_uri())
-        .expect("open catalog")
-        .execute(
-            "UPDATE graph_nodes
-             SET node_json = '{\"totally\":\"unreadable\"}'
-             WHERE node_id = (
-                 SELECT node_id FROM graph_nodes
-                 WHERE session_id = ?1
-                 ORDER BY generation ASC
-                 LIMIT 1 OFFSET 1
-             )",
-            ["graph-node-decode-error"],
-        )
-        .expect("corrupt middle graph node");
-
-    let error = store
-        .load_session()
-        .await
-        .expect_err("an undecodable graph node must fail the snapshot");
-    assert!(matches!(
-        error,
-        StoreError::StoredDataCorrupt {
-            record_kind: "SessionGraph node",
-            ..
-        }
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_snapshot_read_propagates_usage_statement_errors() {
-    let root = unique_temp_dir("usage-read-error");
-    let factory = SqliteSessionStoreFactory::new(&root);
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("usage-read-error"),
-            relation: lash_core_execution::SessionRelation::Root,
-            policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create store");
-    let state = factory_state(&store, &SessionId::from("usage-read-error"), 0).await;
-    store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit head");
-    rusqlite::Connection::open(factory.catalog_uri())
-        .expect("open catalog")
-        .execute("DROP TABLE usage_deltas", [])
-        .expect("drop usage table");
-
-    assert!(matches!(
-        store.load_session().await,
-        Err(StoreError::StorageFailure {
-            backend: "sqlite",
-            ..
-        })
-    ));
-}
-
-#[tokio::test]
-async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
-    let root = unique_temp_dir("unbound-vacuum");
-    let factory = SqliteSessionStoreFactory::new(&root);
-
-    // 1. Live session with cancelled pending input
-    let live_req = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("unbound-vacuum-live"),
-        relation: lash_core_execution::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-    };
-    let live_store = factory
-        .create_store(&live_req)
-        .await
-        .expect("create live store");
-    let cancelled = live_store
-        .enqueue_pending_turn_input(
-            lash_core_execution::PendingTurnInputDraft::new(
-                "unbound-vacuum-live",
-                lash_core_execution::TurnInputIngress::NextTurn,
-                lash_core_execution::TurnInput::text("input"),
-            )
-            .with_source_key("test-key"),
-        )
-        .await
-        .expect("enqueue");
-    live_store
-        .cancel_pending_turn_input(&SessionId::from("unbound-vacuum-live"), &cancelled.input_id)
-        .await
-        .expect("cancel");
-
-    // 2. Deleted session with unpinned tombstoned node
-    let del_req = SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("unbound-vacuum-del"),
-        relation: lash_core_execution::SessionRelation::Root,
-        policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-    };
-    let del_store = factory
-        .create_store(&del_req)
-        .await
-        .expect("create del store");
-    let mut state = factory_state(&del_store, &SessionId::from("unbound-vacuum-del"), 0).await;
-    state.ensure_agent_frame_initialized();
-    let leaf = state
-        .session_graph
-        .leaf_node_id
-        .clone()
-        .expect("leaf node id");
-    del_store
-        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
-        .await
-        .expect("commit");
-    factory.pin(&leaf).await.expect("pin");
-    factory
-        .delete_session(&del_req.session_id)
-        .await
-        .expect("delete");
-    factory.unpin(&leaf).await.expect("unpin");
-
-    let unbound = SqliteStore::open_file_for_testing(
-        &root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-    )
-    .await
-    .expect("open unbound store");
-    let err = unbound
-        .vacuum()
-        .await
-        .expect_err("unbound vacuum must return typed error");
-    assert!(
-        matches!(
-            err.stop,
-            lash_core_execution::MaintenanceStop::Failed(StoreError::SessionNotBound)
-        ),
-        "expected SessionNotBound, got {err:?}"
-    );
-
-    // Verify catalog rows were NOT deleted by unbound vacuum
-    let live_report = live_store.vacuum().await.expect("vacuum live store");
-    assert_eq!(live_report.removed_node_count, 0);
-    assert_eq!(live_report.removed_pending_turn_input_tombstone_count, 1);
-
-    let del_report = del_store.vacuum().await.expect("vacuum del store");
-    assert_eq!(del_report.removed_node_count, 1);
-    assert_eq!(del_report.removed_pending_turn_input_tombstone_count, 0);
-}
-
 /// Node ids physically resident in the catalog, tombstoned or not: reads hide
 /// tombstones, so only raw SQL can tell a reclaimed row from a hidden one.
-fn resident_graph_node_ids(factory: &SqliteSessionStoreFactory) -> Vec<String> {
-    raw_node_ids(factory, "SELECT node_id FROM graph_nodes ORDER BY node_id")
+fn resident_graph_node_ids(root: &Path) -> Vec<String> {
+    raw_node_ids(root, "SELECT node_id FROM graph_nodes ORDER BY node_id")
 }
 
-fn resident_tombstoned_node_ids(factory: &SqliteSessionStoreFactory) -> Vec<String> {
+fn resident_tombstoned_node_ids(root: &Path) -> Vec<String> {
     raw_node_ids(
-        factory,
+        root,
         "SELECT node_id FROM graph_nodes WHERE tombstoned = 1 ORDER BY node_id",
     )
 }
 
-fn raw_node_ids(factory: &SqliteSessionStoreFactory, sql: &str) -> Vec<String> {
-    let conn = rusqlite::Connection::open(factory.catalog_uri()).expect("open catalog");
+fn raw_node_ids(root: &Path, sql: &str) -> Vec<String> {
+    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
     let mut statement = conn.prepare(sql).expect("prepare node id probe");
     statement
         .query_map([], |row| row.get::<_, String>(0))
@@ -765,22 +587,21 @@ fn raw_node_ids(factory: &SqliteSessionStoreFactory, sql: &str) -> Vec<String> {
 }
 
 async fn commit_single_root_node(
-    factory: &SqliteSessionStoreFactory,
+    factory: &Arc<SqliteStore>,
     session_id: &SessionId,
-) -> (
-    std::sync::Arc<dyn lash_core_execution::RuntimePersistence>,
-    String,
-) {
-    let store = factory
-        .create_store(&SessionStoreCreateRequest {
+) -> (Arc<SqliteStore>, String) {
+    let store = admit_store(
+        factory,
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core_execution::SessionRelation::Root,
             policy: SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create store");
+        },
+    )
+    .await
+    .expect("create store");
     let mut state = factory_state(&store, session_id, 0).await;
     state.ensure_agent_frame_initialized();
     let leaf = state
@@ -804,7 +625,7 @@ async fn commit_single_root_node(
 #[tokio::test]
 async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete() {
     let root = unique_temp_dir("orphan-unpin-after-delete");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
 
     let leaf = {
         let (store, leaf) =
@@ -823,7 +644,7 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
         .expect("unpin after owner delete");
 
     assert_eq!(
-        resident_tombstoned_node_ids(&factory),
+        resident_tombstoned_node_ids(&root),
         vec![leaf.clone()],
         "the unpin must tombstone the deleted owner's leaf"
     );
@@ -835,11 +656,11 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
         .expect("delete sweeper session");
 
     assert!(
-        resident_tombstoned_node_ids(&factory).is_empty(),
+        resident_tombstoned_node_ids(&root).is_empty(),
         "a delete must reclaim tombstones owned by already-deleted sessions"
     );
     assert!(
-        !resident_graph_node_ids(&factory).contains(&leaf),
+        !resident_graph_node_ids(&root).contains(&leaf),
         "the orphaned tombstone row must be physically gone, not just hidden"
     );
 }
@@ -850,7 +671,7 @@ async fn sqlite_delete_reclaims_tombstone_orphaned_by_unpin_after_owner_delete()
 #[tokio::test]
 async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete() {
     let root = unique_temp_dir("orphan-fork-ancestry");
-    let factory = SqliteSessionStoreFactory::new(&root);
+    let factory = std::sync::Arc::new(SqliteStore::open(&root).await.expect("open catalog"));
 
     let parent_leaf = {
         let (store, leaf) =
@@ -860,7 +681,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
     };
     let policy = SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded);
     factory
-        .fork_at(&lash_core_execution::ForkSessionRequest {
+        .fork_session(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
             node_id: parent_leaf.clone().into(),
@@ -870,22 +691,18 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .await
         .expect("fork at the parent's live tip");
     {
-        let child = factory
-            .open_existing_store(&SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from("orphan-fork-child"),
-                relation: lash_core_execution::SessionRelation::Root,
-                policy,
-            })
+        let child = &factory;
+        let read = child
+            .load_session_window(
+                &SessionId::from("orphan-fork-child"),
+                WindowSelector::Current,
+            )
             .await
-            .expect("open forked child")
-            .expect("forked child exists");
-        let mut child_state =
-            lash_core_execution::store::load_persisted_session_state(child.as_ref())
-                .await
-                .expect("load child state")
-                .expect("child state exists");
+            .expect("load child window")
+            .expect("child window exists");
+        let mut child_state = lash_core_execution::store::window_state(read, child.fleet_format())
+            .expect("adopt child window")
+            .state;
         let parent_node_id = child_state.session_graph.leaf_node_id.clone();
         child_state
             .session_graph
@@ -917,7 +734,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .await
         .expect("delete parent session");
     assert!(
-        resident_graph_node_ids(&factory).contains(&parent_leaf),
+        resident_graph_node_ids(&root).contains(&parent_leaf),
         "the parent's node survives its own delete while the fork child hangs off it"
     );
 
@@ -927,10 +744,10 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .expect("delete forked child session");
 
     assert!(
-        resident_tombstoned_node_ids(&factory).is_empty(),
+        resident_tombstoned_node_ids(&root).is_empty(),
         "the child's delete must reclaim ancestry owned by the already-deleted parent"
     );
-    let resident = resident_graph_node_ids(&factory);
+    let resident = resident_graph_node_ids(&root);
     assert!(
         resident.is_empty(),
         "both the child's nodes and the orphaned parent ancestry must be gone, got {resident:?}"
