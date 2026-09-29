@@ -45,12 +45,56 @@ fn admission_after_handoff(
     }
 }
 
+/// The input half of the handoff law also drives `pending_turn_input`, the
+/// keyed point read (FIG-3976): `Open` after the enqueue and `none` for an id
+/// no case enqueued, `Admitted` naming the differential root once it is
+/// admitted and still after the stale fence's refused settle, and `none` once
+/// the successor's commit completes it.
 pub(super) fn turn_input_admission_after_handoff() -> GeneratedCase {
-    admission_after_handoff(
-        CaseName::TurnInputAdmissionAfterHandoff,
-        StoreOperation::EnqueueNextTurnInput,
-        HeadKind::Input,
-    )
+    let pending_input = |known| StoreOperation::DriveSurface {
+        method: SurfaceMethod::PendingTurnInput { known },
+    };
+    GeneratedCase {
+        name: CaseName::TurnInputAdmissionAfterHandoff,
+        operations: vec![
+            StoreOperation::EnqueueNextTurnInput,
+            pending_input(true),
+            pending_input(false),
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "first-owner",
+            },
+            StoreOperation::AdmitRoot {
+                lease: LeaseSlot::First,
+                head: HeadKind::Input,
+            },
+            pending_input(true),
+            StoreOperation::ReleaseSessionLease {
+                lease: LeaseSlot::First,
+            },
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::Successor,
+                owner: "successor-owner",
+            },
+            StoreOperation::EndRootCompleting {
+                lease: LeaseSlot::First,
+                expected_head_revision: 0,
+            },
+            // The refused settle moved nothing: the row is still the root's.
+            pending_input(true),
+            StoreOperation::AdmitRoot {
+                lease: LeaseSlot::Successor,
+                head: HeadKind::Input,
+            },
+            StoreOperation::EndRootCompleting {
+                lease: LeaseSlot::Successor,
+                expected_head_revision: 0,
+            },
+            // The completing commit made the row terminal: the point read
+            // hides it.
+            pending_input(true),
+        ],
+    }
 }
 
 pub(super) fn queued_work_admission_after_handoff() -> GeneratedCase {
