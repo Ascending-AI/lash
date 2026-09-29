@@ -68,6 +68,10 @@ for the landing commit, so alpha.113 predates it). Figments' pinned revision
 - **Runtime role.** `CONNECT` on the database, `USAGE` on the lash schema,
   `SELECT/INSERT/UPDATE/DELETE` on its tables, `USAGE, SELECT` on its sequences. No
   `CREATE`, no ownership — under PgBouncer this is the only role the pool uses.
+  `UPDATE` on `lash_fleet_format` stays in the grant even though the runtime never
+  moves the row: every mutating transaction's writer fence reads it `FOR SHARE`,
+  and a row lock needs the privilege (ADR 0115 §2.2). A role holding only `SELECT`
+  never writes, so it never runs the fence.
 
 ## Failure semantics — no auto-repair
 

@@ -927,8 +927,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         &self,
     ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
     {
-        crate::attachments::begin_attachment_sweep(&self.pool, &self.fence, &self.catalog_id)
-            .await
+        crate::attachments::begin_attachment_sweep(&self.pool, &self.fence, &self.catalog_id).await
     }
 
     async fn adopt_attachment_condemnations(

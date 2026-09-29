@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fixture tests for check-guarded-transactions.py, plus the tree itself."""
+"""Fixture tests for check-guarded-transactions.py's PostgreSQL section, plus
+the whole check over the tree."""
 
 from __future__ import annotations
 
@@ -56,15 +57,17 @@ class CheckTests(unittest.TestCase):
         self.write("crates/lash-store-sql/src/widgets.rs", STATEMENTS)
         self.write(f"{SRC}/lib.rs", LIB)
         self.write(f"{SRC}/postgres/guarded_tx.rs", GUARD)
-        self.allow("")
 
     def write(self, relative: str, text: str) -> None:
         path = self.repo / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(textwrap.dedent(text), encoding="utf-8")
 
-    def allow(self, text: str) -> None:
-        self.write(gate.ALLOWLIST, text)
+    def check(self) -> list[str]:
+        return [
+            f"{site.path}:{site.line}: {site.function}: {site.what}"
+            for site in gate.check_postgres(self.repo)
+        ]
 
     def widgets(self, body: str) -> None:
         self.write(f"{SRC}/postgres/widgets.rs", body)
@@ -78,7 +81,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        problems = gate.check(self.repo)
+        problems = self.check()
         self.assertEqual(len(problems), 1)
         self.assertIn(f"{SRC}/postgres/widgets.rs:2: save", problems[0])
 
@@ -92,7 +95,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        self.assertEqual(gate.check(self.repo), [])
+        self.assertEqual(self.check(), [])
 
     def test_an_isolation_level_after_the_fence_is_flagged(self) -> None:
         self.widgets(
@@ -105,7 +108,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        problems = gate.check(self.repo)
+        problems = self.check()
         self.assertEqual(len(problems), 1)
         self.assertIn("isolation level set after the fence", problems[0])
 
@@ -117,7 +120,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        self.assertEqual(len(gate.check(self.repo)), 1)
+        self.assertEqual(len(self.check()), 1)
 
     def test_a_named_write_run_straight_on_a_pool_is_flagged(self) -> None:
         self.widgets(
@@ -130,7 +133,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        problems = gate.check(self.repo)
+        problems = self.check()
         self.assertEqual(len(problems), 1)
         self.assertIn("mutating statement run straight on a pool", problems[0])
 
@@ -143,7 +146,7 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        self.assertEqual(len(gate.check(self.repo)), 1)
+        self.assertEqual(len(self.check()), 1)
 
     def test_a_read_run_straight_on_a_pool_passes(self) -> None:
         self.widgets(
@@ -153,9 +156,9 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        self.assertEqual(gate.check(self.repo), [])
+        self.assertEqual(self.check(), [])
 
-    def test_unresolved_sql_on_a_pool_is_flagged_until_allowlisted(self) -> None:
+    def test_unresolved_sql_on_a_pool_is_flagged(self) -> None:
         self.widgets(
             """\
             async fn listing(&self, sql: &str) {
@@ -163,11 +166,9 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        problems = gate.check(self.repo)
+        problems = self.check()
         self.assertEqual(len(problems), 1)
         self.assertIn("unresolved SQL", problems[0])
-        self.allow(f"{SRC}/postgres/widgets.rs::listing -- runs the listing SELECT its callers pass\n")
-        self.assertEqual(gate.check(self.repo), [])
 
     def test_test_code_and_comments_are_out_of_scope(self) -> None:
         self.write(
@@ -187,23 +188,12 @@ class CheckTests(unittest.TestCase):
             }
             """
         )
-        self.assertEqual(gate.check(self.repo), [])
-
-    def test_an_allowlist_entry_needs_a_reason_and_a_site(self) -> None:
-        self.widgets("fn nothing() {}\n")
-        self.allow(
-            f"{SRC}/postgres/widgets.rs::nothing\n"
-            f"{SRC}/postgres/widgets.rs::gone -- used to read\n"
-        )
-        problems = gate.check(self.repo)
-        self.assertEqual(len(problems), 2)
-        self.assertIn("expected", problems[0])
-        self.assertIn("stale entry", problems[1])
+        self.assertEqual(self.check(), [])
 
 
 class TreeTests(unittest.TestCase):
-    def test_the_tree_begins_every_mutating_transaction_at_the_guard(self) -> None:
-        self.assertEqual(gate.check(gate.REPO_ROOT), [])
+    def test_the_tree_passes_every_section(self) -> None:
+        self.assertEqual(gate.main(), 0)
 
 
 if __name__ == "__main__":
