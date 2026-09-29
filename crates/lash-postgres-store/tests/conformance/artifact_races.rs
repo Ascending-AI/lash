@@ -18,10 +18,15 @@ fn frame_state(session_id: &str) -> lash_core_execution::RuntimeSessionState {
 fn append_successor_frame(
     state: &mut lash_core_execution::RuntimeSessionState,
 ) -> lash_core_execution::FrameNodeId {
-    let successor = lash_core_execution::FrameNodeId::new("successor-frame").expect("frame id");
+    // The commit derives a frame's node id from its key, so the successor
+    // carries that id, the one the committed head will name.
+    let key =
+        lash_core_execution::FrameKey::from_caller_material("successor-frame").expect("frame key");
+    let successor =
+        lash_core_execution::session_graph::frame_node_id(&state.session_id, key.as_str());
     assert!(state.session_graph.append_frame_open_with_id_at(
         successor.clone(),
-        lash_core_execution::FrameKey::from_caller_material("successor-frame").expect("frame key"),
+        key,
         lash_core_execution::AgentFrameReason::initial(),
         lash_core_execution::AgentFrameAssignment::from_policy(state.policy.clone()),
         state.protocol_turn_options.clone(),
@@ -203,6 +208,235 @@ async fn postgres_first_commit_rejects_transition_successor_other_than_committed
         Err(StoreError::Backend(message)) if message == "frame transition does not match the committed head"
     ));
     assert_no_frame_commit_rows(&storage, &session_id).await;
+}
+
+/// Commit every pending frame open in `state`, with `transition` attached.
+async fn commit_frame_opens(
+    store: &impl SessionCommitStore,
+    state: &mut lash_core_execution::RuntimeSessionState,
+    transition: Option<lash_core_execution::store::FrameTransition>,
+) {
+    let mut commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(state, &[]);
+    let appended = commit
+        .graph
+        .nodes()
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    commit.frame_transition = transition;
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("commit frame opens");
+    state.apply_persisted_commit_result(receipt);
+    state.mark_node_ids_persisted(appended);
+}
+
+fn open_resident_frame(
+    state: &mut lash_core_execution::RuntimeSessionState,
+    key: &str,
+) -> lash_core_execution::FrameEnvironmentId {
+    lash_core::runtime::state::open_agent_frame_in_state_with_clock(
+        state,
+        lash_core_execution::OpenAgentFrameRequest::new(
+            lash_core_execution::FrameKey::from_caller_material(key).expect("frame key"),
+            lash_core_execution::AgentFrameReason::new("test"),
+        ),
+        &lash_core::testing::TestClock::new(1_000),
+    )
+    .expect("open frame");
+    current_frame(state)
+}
+
+fn current_frame(
+    state: &lash_core_execution::RuntimeSessionState,
+) -> lash_core_execution::FrameEnvironmentId {
+    lash_core_execution::FrameEnvironmentId::new(
+        state.session_id.clone(),
+        state.current_frame_node_id.clone().expect("current frame"),
+    )
+}
+
+/// Whether `frame` is fenced, and the cleanup record that will sever its
+/// edges, if one exists.
+async fn frame_end(
+    storage: &PostgresStorage,
+    frame: &lash_core_execution::FrameEnvironmentId,
+) -> (bool, Option<ArtifactCleanup>) {
+    let referrer = ArtifactReferrer::FrameEnvironment(frame.clone());
+    let fenced: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM lash_artifact_referrer_fences
+         WHERE referrer_kind = $1 AND referrer_id = $2)",
+    )
+    .bind(referrer.kind().as_str())
+    .bind(referrer.canonical_id())
+    .fetch_one(storage.pool())
+    .await
+    .expect("read frame fence");
+    let cleanup: Option<String> = sqlx::query_scalar(
+        "SELECT cleanup_json FROM lash_artifact_cleanup_obligations
+         WHERE referrer_kind = $1 AND referrer_id = $2",
+    )
+    .bind(referrer.kind().as_str())
+    .bind(referrer.canonical_id())
+    .fetch_optional(storage.pool())
+    .await
+    .expect("read frame cleanup");
+    (
+        fenced,
+        cleanup.map(|body| ArtifactCleanup::from_json(&body, &referrer).expect("decode cleanup")),
+    )
+}
+
+/// FIG-4031 corner (a) on PostgreSQL: a turn admitted on a frame opened only
+/// in resident state after a committed frame switches away from it. Its one
+/// final commit leaves both frames, and neither may keep its edges.
+#[tokio::test]
+async fn postgres_switch_out_of_a_resident_frame_ends_every_frame_the_commit_leaves() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("resident-frame-switch");
+    let store = storage.session_store(state.session_id.clone());
+    commit_frame_opens(&store, &mut state, None).await;
+    let first = current_frame(&state);
+    let resident = open_resident_frame(&mut state, "resident");
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(resident.clone()))
+        .expect("frame claim");
+    storage
+        .lashlang_artifact_store()
+        .publish_module_artifact(&claim, "held-by-resident-frame", b"bytes")
+        .await
+        .expect("hold module under the resident frame");
+    let successor = open_resident_frame(&mut state, "successor");
+    // The transition a switch out of an uncommitted frame names: the last
+    // committed frame, with no carries.
+    let transition = lash_core_execution::store::FrameTransition {
+        ended: first.clone(),
+        successor: successor.clone(),
+        carries: Vec::new(),
+        gate: lash_sansio::ExecutionScope::runtime_operation("postgres-frame-switch")
+            .journal_identity()
+            .expect("journal identity"),
+    };
+    let gate = transition.gate.clone();
+    commit_frame_opens(&store, &mut state, Some(transition)).await;
+
+    for frame in [&first, &resident] {
+        assert_eq!(
+            frame_end(&storage, frame).await,
+            (
+                true,
+                Some(ArtifactCleanup::ended(
+                    ArtifactReferrer::FrameEnvironment(frame.clone()),
+                    Vec::new(),
+                    Some(gate.clone()),
+                ))
+            ),
+            "{frame:?} must be fenced and owe a gated cleanup that severs its edges"
+        );
+    }
+    assert_eq!(frame_end(&storage, &successor).await, (false, None));
+    assert!(matches!(
+        storage
+            .lashlang_artifact_store()
+            .publish_module_artifact(&claim, "held-by-resident-frame", b"bytes")
+            .await,
+        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+    ));
+}
+
+/// FIG-4031 corner (b) on PostgreSQL: a frame opened directly in resident
+/// state is committed by a park or a session command, so no transition rides
+/// the commit. The frame it leaves ends anyway, ungated.
+#[tokio::test]
+async fn postgres_commit_without_a_transition_that_changes_the_frame_ends_the_frame_it_leaves() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("park-frame-switch");
+    let store = storage.session_store(state.session_id.clone());
+    commit_frame_opens(&store, &mut state, None).await;
+    let first = current_frame(&state);
+    let claim = ReferrerClaim::unguarded(ArtifactReferrer::FrameEnvironment(first.clone()))
+        .expect("frame claim");
+    storage
+        .lashlang_artifact_store()
+        .publish_module_artifact(&claim, "held-by-first-frame", b"bytes")
+        .await
+        .expect("hold module under the first frame");
+    let opened = open_resident_frame(&mut state, "opened-directly");
+    commit_frame_opens(&store, &mut state, None).await;
+
+    assert_eq!(
+        frame_end(&storage, &first).await,
+        (
+            true,
+            Some(ArtifactCleanup::ended(
+                ArtifactReferrer::FrameEnvironment(first.clone()),
+                Vec::new(),
+                None,
+            ))
+        ),
+        "the frame a park leaves must be fenced and owe a cleanup that severs its edges"
+    );
+    assert_eq!(frame_end(&storage, &opened).await, (false, None));
+}
+
+/// FIG-4031 corner (c) on PostgreSQL: a `continue_as` seed carrying a forged
+/// process value names a module the frame holds no edge of, either never
+/// stored or held only by another referrer. The switch fails closed with
+/// `ArtifactCarryMissing` and writes nothing.
+#[tokio::test]
+async fn postgres_switch_carrying_a_module_its_frame_does_not_hold_fails_closed() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let mut state = frame_state("forged-carry");
+    let store = storage.session_store(state.session_id.clone());
+    commit_frame_opens(&store, &mut state, None).await;
+    let first = current_frame(&state);
+    let (_, pinned) = host_pin();
+    storage
+        .lashlang_artifact_store()
+        .publish_module_artifact(&pinned, "held-by-a-host-pin", b"bytes")
+        .await
+        .expect("hold module under a host pin");
+    let head_revision = state.head_revision;
+    let successor = open_resident_frame(&mut state, "successor");
+    for forged in ["never-stored", "held-by-a-host-pin"] {
+        let mut transition = frame_transition(
+            &state.session_id,
+            first.frame_node_id().clone(),
+            successor.frame_node_id().clone(),
+        );
+        transition.carries = vec![lash_core_execution::ArtifactName {
+            store: lash_core_execution::ArtifactStoreId::LashlangModule,
+            artifact_ref: forged.into(),
+        }];
+        let commit = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
+            .with_frame_transition(transition);
+        let refused = store.commit_runtime_state(commit).await;
+        assert!(
+            matches!(
+                &refused,
+                Err(StoreError::ArtifactCarryMissing { artifact_ref, to })
+                    if artifact_ref == forged
+                        && *to == ArtifactReferrer::FrameEnvironment(successor.clone())
+            ),
+            "{forged}: {refused:?}"
+        );
+        assert_eq!(frame_end(&storage, &first).await, (false, None), "{forged}");
+        let head = store
+            .load_session()
+            .await
+            .expect("read head")
+            .expect("head exists");
+        assert_eq!(head.head_revision, head_revision, "{forged}");
+    }
 }
 
 fn host_pin() -> (ArtifactReferrer, ReferrerClaim) {

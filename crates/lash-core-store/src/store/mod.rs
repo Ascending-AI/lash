@@ -169,7 +169,7 @@ pub use runtime_commit::{
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SemanticBoundaryOperation, decode_runtime_commit_receipt,
     decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
-    ensure_supported_receipt_version_for_fleet,
+    ensure_supported_receipt_version_for_fleet, frames_left_by_commit,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,

@@ -1992,9 +1992,32 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
             gate: gate.clone(),
         })
     );
-    // A switch out of a frame the store does not hold yet ends the
-    // committed frame instead, and carries nothing out of it.
+    // A switch out of a frame opened in resident state since the last
+    // commit, which the commit appends, carries its seed's modules out of
+    // that frame; the store ends the committed frame beside it.
     let uncommitted = crate::FrameNodeId::new(opened_frame_a(&state)).unwrap();
+    let appended = [
+        crate::NodeId::new(uncommitted.as_str().to_string()),
+        crate::NodeId::new(opened.frame_node_id().as_str().to_string()),
+    ];
+    assert_eq!(
+        committed_frame_transition(
+            &state,
+            Some(uncommitted.clone()),
+            vec![carried.clone()],
+            &committing,
+            &appended,
+        )
+        .unwrap(),
+        Some(crate::store::FrameTransition {
+            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), uncommitted.clone()),
+            successor: opened.clone(),
+            carries: vec![carried.clone()],
+            gate: gate.clone(),
+        })
+    );
+    // A switch that names no frame, or one the commit does not leave, names
+    // the committed frame and carries nothing out of it.
     for named in [None, Some(uncommitted)] {
         assert_eq!(
             committed_frame_transition(&state, named, vec![carried.clone()], &committing, &[])

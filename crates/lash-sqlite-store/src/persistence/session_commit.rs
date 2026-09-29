@@ -8,9 +8,13 @@ use graph_nodes::{
 };
 use lash_core_execution::FleetFormatStore;
 
+/// Apply a commit's frame transition: carry out of `ended` into the
+/// successor, then end every frame in `left` (the frames the commit leaves,
+/// `ended` among them) gated on the transition's execution.
 fn commit_frame_transition_tx(
     tx: &rusqlite::Connection,
     transition: &lash_core_execution::store::FrameTransition,
+    left: &[lash_core_execution::FrameNodeId],
     now_ms: u64,
 ) -> Result<(), StoreError> {
     use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
@@ -62,23 +66,38 @@ fn commit_frame_transition_tx(
         )
         .map_err(sqlite_error)?;
     }
-    crate::artifact_store::fence_artifact_referrer_tx(tx, &source, now_ms).map_err(sqlite_error)?;
-    crate::obligation_ledger::arm_cleanup_tx(tx, &transition.ended_cleanup(), now_ms, "core")?;
-    Ok(())
+    end_frames_tx(
+        tx,
+        transition.ended.session_id(),
+        left,
+        Some(&transition.gate),
+        now_ms,
+    )
 }
 
-fn transition_source_matches_head_or_append(
-    prior: Option<&lash_core_execution::FrameNodeId>,
-    graph: &lash_core_execution::store::GraphAppend,
-    ended: &lash_core_execution::FrameNodeId,
-) -> bool {
-    match prior {
-        Some(frame) => frame == ended,
-        None => graph
-            .nodes()
-            .iter()
-            .any(|node| node.node_id.as_str() == ended.as_str() && node.frame_open().is_some()),
+/// End each frame in `left`: fence it and upsert its `Ended` cleanup with no
+/// carries, gated on `gate` (ADR 0113 §3.1, Lane G amendment).
+fn end_frames_tx(
+    tx: &rusqlite::Connection,
+    session_id: &SessionId,
+    left: &[lash_core_execution::FrameNodeId],
+    gate: Option<&lash_sansio::EffectJournalIdentity>,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    for frame in left {
+        let referrer = lash_core_execution::ArtifactReferrer::FrameEnvironment(
+            lash_core_execution::FrameEnvironmentId::new(session_id.clone(), frame.clone()),
+        );
+        crate::artifact_store::fence_artifact_referrer_tx(tx, &referrer, now_ms)
+            .map_err(sqlite_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            tx,
+            &lash_core_execution::ArtifactCleanup::ended(referrer, Vec::new(), gate.cloned()),
+            now_ms,
+            "core",
+        )?;
     }
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -851,14 +870,15 @@ impl SessionCommitStore for Store {
                             });
                         }
                     }
+                    let left = lash_core_execution::store::frames_left_by_commit(
+                        existing.as_ref().and_then(|head| head.current_frame_node_id.as_ref()),
+                        &commit.graph,
+                        meta.current_frame_node_id.as_ref(),
+                    );
                     if let Some(transition) = &commit.frame_transition {
                         if transition.ended.session_id() != commit.session_id
                             || transition.successor.session_id() != commit.session_id
-                            || !transition_source_matches_head_or_append(
-                                existing.as_ref().and_then(|head| head.current_frame_node_id.as_ref()),
-                                &commit.graph,
-                                transition.ended.frame_node_id(),
-                            )
+                            || !left.contains(transition.ended.frame_node_id())
                             || meta.current_frame_node_id.as_ref()
                                 != Some(transition.successor.frame_node_id())
                         {
@@ -866,7 +886,9 @@ impl SessionCommitStore for Store {
                                 "frame transition does not match the committed head".into(),
                             ));
                         }
-                        commit_frame_transition_tx(tx, transition, now)?;
+                        commit_frame_transition_tx(tx, transition, &left, now)?;
+                    } else {
+                        end_frames_tx(tx, &commit.session_id, &left, None, now)?;
                     }
                     crate::conn::cached_execute(tx,
                         session_sql().head.upsert.sql(),
@@ -1405,169 +1427,4 @@ impl Store {
 }
 
 #[cfg(test)]
-mod artifact_frame_transition_tests {
-    use super::*;
-    use lash_core_execution::{
-        ArtifactName, ArtifactReferrer, ArtifactStoreId, FrameEnvironmentId, FrameNodeId,
-    };
-
-    #[test]
-    fn first_commit_may_end_its_own_appended_frame_open() {
-        let session = SessionId::from("first-turn-switch");
-        let first = FrameNodeId::new("first-frame").expect("frame id");
-        let successor = FrameNodeId::new("successor-frame").expect("frame id");
-        let graph = lash_core_execution::store::GraphAppend::Extend {
-            nodes: vec![lash_core_execution::SessionNodeRecord {
-                node_id: first.as_str().to_owned().into(),
-                parent_node_id: None,
-                timestamp: "2026-09-29T00:00:00Z".into(),
-                payload: lash_core_execution::SessionNodePayload::FrameOpen {
-                    frame_key: lash_core_execution::FrameKey::from_caller_material("first-frame")
-                        .expect("frame key"),
-                    reason: lash_core_execution::AgentFrameReason::initial(),
-                    assignment: lash_core_execution::AgentFrameAssignment::from_policy(
-                        lash_core_execution::SessionPolicy::new(
-                            lash_core_execution::TurnBudget::Unbounded,
-                        ),
-                    ),
-                    protocol_turn_options: lash_core_execution::ProtocolTurnOptions::default(),
-                },
-            }],
-        };
-        assert!(transition_source_matches_head_or_append(
-            None, &graph, &first
-        ));
-        assert!(!transition_source_matches_head_or_append(
-            None, &graph, &successor
-        ));
-        assert!(!transition_source_matches_head_or_append(
-            Some(&successor),
-            &graph,
-            &first
-        ));
-
-        let mut conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
-        conn.execute_batch(crate::schema::SCHEMA)
-            .expect("create durable core");
-        let ended = FrameEnvironmentId::new(session.clone(), first);
-        let ended_referrer = ArtifactReferrer::FrameEnvironment(ended.clone());
-        conn.execute(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, 'module', 'blob')",
-            params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE],
-        )
-        .expect("artifact pointer");
-        conn.execute(
-            crate::artifact_store::artifact_sql()
-                .edges
-                .insert_edge
-                .sql(),
-            params![
-                crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
-                "module",
-                ended_referrer.kind().as_str(),
-                ended_referrer.canonical_id(),
-            ],
-        )
-        .expect("first frame edge");
-        let transition = lash_core_execution::store::FrameTransition {
-            ended,
-            successor: FrameEnvironmentId::new(session, successor),
-            carries: Vec::new(),
-            gate: lash_sansio::ExecutionScope::runtime_operation("first-turn-switch")
-                .journal_identity()
-                .expect("journal identity"),
-        };
-        let tx = conn.transaction().expect("transaction");
-        commit_frame_transition_tx(&tx, &transition, 123).expect("transition");
-        tx.commit().expect("commit");
-        assert!(
-            crate::artifact_store::artifact_fenced_tx(&conn, &ended_referrer)
-                .expect("first frame fence")
-        );
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM artifact_cleanup_obligations WHERE referrer_kind = 'frame_environment'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("cleanup obligation");
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn frame_transition_carries_then_fences_and_records_gated_cleanup() {
-        let mut conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
-        conn.execute_batch(crate::schema::SCHEMA)
-            .expect("create durable core");
-        let session = SessionId::from("frame-transition-test");
-        let old = FrameEnvironmentId::new(
-            session.clone(),
-            FrameNodeId::new("old-frame").expect("frame id"),
-        );
-        let next =
-            FrameEnvironmentId::new(session, FrameNodeId::new("next-frame").expect("frame id"));
-        let source = ArtifactReferrer::FrameEnvironment(old.clone());
-        conn.execute(
-            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES (?1, ?2, 'blob')",
-            params![crate::artifact_store::MODULE_ARTIFACT_NAMESPACE, "carried"],
-        )
-        .expect("artifact pointer");
-        conn.execute(
-            crate::artifact_store::artifact_sql()
-                .edges
-                .insert_edge
-                .sql(),
-            params![
-                crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
-                "carried",
-                source.kind().as_str(),
-                source.canonical_id()
-            ],
-        )
-        .expect("source edge");
-        let transition = lash_core_execution::store::FrameTransition {
-            ended: old,
-            successor: next.clone(),
-            carries: vec![ArtifactName {
-                store: ArtifactStoreId::LashlangModule,
-                artifact_ref: "carried".into(),
-            }],
-            gate: lash_sansio::ExecutionScope::runtime_operation("switch")
-                .journal_identity()
-                .expect("journal identity"),
-        };
-        let tx = conn.transaction().expect("transaction");
-        commit_frame_transition_tx(&tx, &transition, 123).expect("transition");
-        tx.commit().expect("commit");
-        let successor = ArtifactReferrer::FrameEnvironment(next);
-        assert!(crate::artifact_store::artifact_fenced_tx(&conn, &source).expect("source fence"));
-        assert!(
-            conn.query_row(
-                crate::artifact_store::artifact_sql()
-                    .edges
-                    .select_edge_exists
-                    .sql(),
-                params![
-                    crate::artifact_store::MODULE_ARTIFACT_NAMESPACE,
-                    "carried",
-                    successor.kind().as_str(),
-                    successor.canonical_id()
-                ],
-                |row| row.get::<_, bool>(0)
-            )
-            .expect("successor edge")
-        );
-        let body: String = conn
-            .query_row(
-                "SELECT cleanup_json FROM artifact_cleanup_obligations",
-                [],
-                |row| row.get(0),
-            )
-            .expect("cleanup record");
-        assert_eq!(
-            lash_core_execution::ArtifactCleanup::from_json(&body, &source)
-                .expect("decode cleanup"),
-            transition.ended_cleanup()
-        );
-    }
-}
+mod artifact_frame_transition_tests;
