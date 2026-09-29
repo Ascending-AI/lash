@@ -1886,11 +1886,15 @@ pub trait TriggerStore: Send + Sync {
     ) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
     /// List every reserved delivery snapshot, including deliveries whose live
-    /// subscription has since been updated or tombstoned. Recovery uses this
-    /// direct delivery-table view to close the reserve/start crash window.
+    /// subscription has since been updated or tombstoned: the direct
+    /// delivery-table view, bound or unbound. Recovery of an unbound delivery
+    /// does not scan it: the reservation's `TriggerDelivery` obligation
+    /// carries the delivery to its start (ADR 0109, ADR 0021).
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
-    /// Bind the process a delivery's start registered to its reservation.
+    /// Bind the process a delivery's start registered to its reservation,
+    /// delivering the reservation's `TriggerDelivery` obligation in the same
+    /// write.
     ///
     /// Idempotent: binding the same process again is a no-op. Binding a
     /// different process to an already-bound reservation is refused — a

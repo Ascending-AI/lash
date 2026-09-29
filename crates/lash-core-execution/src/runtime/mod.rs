@@ -9,6 +9,7 @@ pub mod host;
 pub use lash_core_store::input_normalization as io;
 pub mod process;
 pub mod process_start;
+pub mod trigger_delivery;
 pub mod work;
 pub(crate) use lash_core_store::queued_drain_policy;
 use lash_core_store::session_catalog;

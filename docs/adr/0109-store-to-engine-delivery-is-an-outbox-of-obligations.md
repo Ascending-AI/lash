@@ -699,3 +699,25 @@ every deployment on PostgreSQL and on the elected leader on SQLite. A
 either. A stranded claim was therefore a delay, not a leak. The claimant now
 settles its own claim, so the declared start does not depend on any
 recovery pass.
+
+## Amendment (FIG-4090, 2026-09-29)
+
+`TriggerDelivery` is an obligation kind, labelled `trigger_delivery`, with key
+`TriggerDelivery { occurrence_id, subscription_id }` on the trigger store's
+`trigger_deliveries` table. It sits between `SessionDelete` and
+`ProcessStart` in `ObligationKind::ALL`. On SQLite the ledger lives in the
+trigger store's file.
+
+| Kind | Table (both stores) | Armed by | Delivered when | Replaces |
+|---|---|---|---|---|
+| `TriggerDelivery` | `trigger_deliveries` | the reservation's insert | the bind that records the delivery's process, in its own write | the native worker's delivery sweep (ADR 0021) |
+
+The emit's own start and bind are the producer's immediate attempt, and they
+do not claim the row. Its bind delivers the row in whatever state it is in, so
+a relay that claimed the row concurrently settles `ClaimLost`. The relay's
+deliver starts the delivery from the stored reservation through
+`TriggerRouter::recover_delivery`, wired like the deployment's emits, then
+binds it. The relay needs the process-work port and the session
+administration's engine registry, and a core without either refuses to build.
+The PostgreSQL due read locks `FOR UPDATE SKIP LOCKED` like every other
+ledger. The shapes changed in place under the version freeze.

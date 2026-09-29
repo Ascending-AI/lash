@@ -386,7 +386,8 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         kind: lash_core_execution::store::ObligationKind,
     ) -> Arc<dyn lash_core_execution::store::ObligationLedger> {
         // Each kind's table lives in one database: the process registry file
-        // holds plans and processes, the durable core everything else.
+        // holds plans and processes, the trigger store's file deliveries, the
+        // durable core everything else.
         // Ingress spans two tables of the durable core.
         if kind == lash_core_execution::store::ObligationKind::Ingress {
             return crate::ingress_obligation::ingress_ledger(&self.inner.process_env_store.conn);
@@ -397,7 +398,9 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
                 self.inner.process_registry.conn.clone(),
             ));
         }
-        let conn = if crate::obligation_ledger::in_process_registry(kind) {
+        let conn = if kind == lash_core_execution::store::ObligationKind::TriggerDelivery {
+            self.inner.trigger_store.conn.clone()
+        } else if crate::obligation_ledger::in_process_registry(kind) {
             self.inner.process_registry.conn.clone()
         } else {
             self.inner.process_env_store.conn.clone()

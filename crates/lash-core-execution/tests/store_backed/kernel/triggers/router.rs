@@ -427,6 +427,130 @@ mod tests {
         handler.close().await.expect("close the emit handler");
     }
 
+    /// FIG-4090: a delivery reserved before a crash is recovered from its
+    /// reservation, and the recovery keeps the route's two failures apart: an
+    /// unavailable provider leaves the delivery owed for a retry under the
+    /// same identity, a revoked route refuses it for good. Neither starts a
+    /// process; a restored provider's recovery starts and binds the one
+    /// process the delivery's start key names.
+    #[tokio::test]
+    async fn a_recovered_delivery_retries_an_unavailable_route_and_refuses_a_revoked_one() {
+        for (refusal, retryable) in [
+            (
+                TriggerRouteRefusal::Unavailable {
+                    provider_id: "ui-provider".to_string(),
+                    message: "connect timeout".to_string(),
+                },
+                true,
+            ),
+            (
+                TriggerRouteRefusal::Revoked {
+                    provider_id: "ui-provider".to_string(),
+                    message: "grant withdrawn".to_string(),
+                },
+                false,
+            ),
+        ] {
+            let world = router_world().await;
+            let source_key = empty_trigger_source_key("ui.button.pressed").expect("source key");
+            register(
+                world.store.as_ref(),
+                "recover-register",
+                trigger_process_draft(&source_key, "recover", world.env_ref.clone())
+                    .with_source_capture(captured_provider_source()),
+            )
+            .await;
+            // The emit reserved the delivery; the deployment died before its
+            // start.
+            let reservation = world
+                .store
+                .ingest_occurrence(
+                    TriggerOccurrenceRequest::new(
+                        "ui.button.pressed",
+                        source_key,
+                        serde_json::json!({"button": "Blue"}),
+                        "recover-occurrence",
+                    )
+                    .with_source(serde_json::json!({"account": "a"})),
+                )
+                .await
+                .expect("reserve the delivery")
+                .reservations
+                .remove(0);
+            let occurrence_id = reservation.occurrence.occurrence_id.clone();
+            let subscription_id = reservation.subscription.subscription_id.clone();
+            let router = |restorer: StubRestorer| {
+                router_with_restorer(
+                    Arc::clone(&world.store),
+                    Arc::clone(&world.registry),
+                    Arc::clone(&world.process_env_store),
+                    Some(Arc::new(restorer)),
+                )
+            };
+            let stub = |refusal: Option<TriggerRouteRefusal>| StubRestorer {
+                refusal,
+                calls: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+                seen: Arc::new(Mutex::new(Vec::new())),
+            };
+
+            let failed = router(stub(Some(refusal.clone())))
+                .await
+                .recover_delivery(&occurrence_id, &subscription_id)
+                .await
+                .expect_err("a refused route starts nothing");
+            assert_eq!(
+                matches!(failed, TriggerDeliveryRecoveryError::Retryable(_)),
+                retryable,
+                "{refusal:?} classifies as retryable={retryable}, got {failed:?}"
+            );
+            let start_key = trigger_delivery_start_key(&reservation);
+            assert!(
+                world
+                    .registry
+                    .get_process_by_start_key(&start_key)
+                    .await
+                    .expect("read the start key")
+                    .is_none(),
+                "a refused route registers no process"
+            );
+
+            let process_id = router(stub(None))
+                .await
+                .recover_delivery(&occurrence_id, &subscription_id)
+                .await
+                .expect("a restored route recovers the delivery");
+            assert_eq!(
+                world
+                    .registry
+                    .get_process_by_start_key(&start_key)
+                    .await
+                    .expect("read the start key")
+                    .map(|record| record.id),
+                Some(process_id.clone()),
+                "recovery registered the one process the start key names"
+            );
+            assert_eq!(
+                world
+                    .store
+                    .list_deliveries_by_occurrence_id(&occurrence_id)
+                    .await
+                    .expect("read the delivery")[0]
+                    .process_id,
+                Some(process_id.clone()),
+                "recovery bound the delivery"
+            );
+            assert_eq!(
+                router(stub(None))
+                    .await
+                    .recover_delivery(&occurrence_id, &subscription_id)
+                    .await
+                    .expect("a bound delivery answers at once"),
+                process_id,
+                "recovering a bound delivery again answers its process"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn trigger_store_accepts_a_target_label_independent_of_the_identity() {
         // FIG-2995: the target_label gate is gone. The label is host-facing

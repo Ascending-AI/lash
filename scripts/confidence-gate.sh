@@ -1134,6 +1134,8 @@ run_state_machine_and_fault_matrix() {
     step "Durable trigger fault-matrix evidence"
     run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
       process_trigger_retention
+    run_cargo_tests -p lash-internal-sqlite-store --locked --test conformance \
+      trigger_delivery_recovery
   fi
 
   if area_selected store; then

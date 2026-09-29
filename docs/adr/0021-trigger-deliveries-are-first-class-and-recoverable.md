@@ -165,3 +165,35 @@ Item 10:
 [ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) govern
 process identity, lifetime, recovery and artifact ownership. Earlier
 substrate-specific language here is historical.
+
+## Amendment (FIG-4090, 2026-09-29): a reserved delivery recovers through its obligation
+
+The recovery sweep this ADR names was the native process worker's
+`reconcile_trigger_deliveries`, deleted with the native engine (FIG-3860).
+Nothing replaced it: a crash after a reservation committed and before its
+start registered a process left the delivery reserved and unbound for good,
+because a replayed emit finds the pair already reserved.
+
+A reserved delivery is now a recoverable obligation under
+[ADR 0109](0109-store-to-engine-delivery-is-an-outbox-of-obligations.md).
+The `trigger_deliveries` row carries the obligation columns, and the kind is
+`TriggerDelivery`, keyed by `(occurrence_id, subscription_id)`. The reserving
+insert arms the row due in the reservation's own transaction. The bind that
+records the delivery's process delivers the obligation in the same write,
+whatever state the obligation was in. The emit's own start and bind are the
+producer's immediate attempt. The relay's due pass is the recovery. It reads
+the reservation the store holds, starts the process its start key names
+(registration is idempotent by that key, so a registration that landed
+before a second crash is found again rather than doubled), and binds it. The
+relay never ingests the occurrence again. Re-emitting is not a recovery path.
+A delivery that can never start as reserved stalls `refused` rather than
+retrying: its payload or source fails the captured contract, its route was
+revoked, its target is no engine process, or its registration was refused
+terminally. A `refused` stall surfaces like every other stall.
+
+Binding the delivery inside the reserving transaction was rejected. The
+trigger store and the process registry need not share a transaction: SQLite
+keeps them in separate files (the cross-store amendment above). The start
+also validates the payload, restores the captured route and stages the
+process's environment and engine artifacts before it registers, and none of
+that can run inside the trigger store's transaction.

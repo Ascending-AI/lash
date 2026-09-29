@@ -1,5 +1,5 @@
-//! Two crash windows a clean run never opens (FIG-4095), on the server double
-//! and on a live `restate-server` (the `crash-windows` Restate suite).
+//! Crash windows a clean run never opens (FIG-4095, FIG-4090), on the server
+//! double and on a live `restate-server` (the `crash-windows` Restate suite).
 //!
 //! * **The process handover (ADR 0025 §5).** A segment that crosses its
 //!   boundary writes its handover in the journaled `lash.segment.handover`
@@ -17,6 +17,12 @@
 //!   the recorded presentation: the step never runs a third time, the store
 //!   holds one blob, the journal one presentation, and the model is shown the
 //!   presentation that was recorded.
+//! * **The trigger delivery's reservation (ADR 0021, ADR 0109).** An emit
+//!   reserves its deliveries, then starts and binds each one. The deployment
+//!   dies between the reservation and the start. Nothing emits the occurrence
+//!   again: the restarted deployment's reconcile tick takes the reservation's
+//!   `TriggerDelivery` obligation and starts exactly one process, bound to
+//!   the delivery, which runs to its terminal once.
 
 #![expect(
     clippy::unwrap_used,
@@ -418,6 +424,32 @@ fn process_core(engine: &Engine, executions: &Arc<AtomicUsize>) -> lash::LashCor
 /// }
 /// ```
 async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
+    let input = publish_process_input(engine)
+        .await
+        .into_process_input()
+        .expect("the process input serializes");
+    lash_core::ProcessStartRequest::new(
+        input,
+        lash_core::ProcessOriginator::host(),
+        lash_core::Lifetime::Detached,
+    )
+    .with_env_spec(process_env_spec())
+    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
+}
+
+/// The environment every process of this file runs in.
+fn process_env_spec() -> lash_core::ProcessExecutionEnvSpec {
+    lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy {
+            model: model_spec(),
+            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
+        },
+    )
+}
+
+/// Publish the counted process and answer its engine input.
+async fn publish_process_input(engine: &Engine) -> lash_lashlang_runtime::LashlangProcessInput {
     let call = || b::module_call(&["tools"], TOOL, vec![b::record(Vec::new())]);
     let program = b::module(
         vec![b::process_with_signals(
@@ -461,7 +493,7 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
         )
         .await
         .expect("publish the process artifact");
-    let input = lash_lashlang_runtime::LashlangProcessInput {
+    lash_lashlang_runtime::LashlangProcessInput {
         module_ref: linked.artifact.module_ref().clone(),
         process_ref: linked
             .artifact
@@ -472,21 +504,6 @@ async fn publish_process(engine: &Engine) -> lash_core::ProcessStartRequest {
         process_name: PROCESS.to_owned(),
         args: serde_json::Map::new(),
     }
-    .into_process_input()
-    .expect("the process input serializes");
-    lash_core::ProcessStartRequest::new(
-        input,
-        lash_core::ProcessOriginator::host(),
-        lash_core::Lifetime::Detached,
-    )
-    .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::default(),
-        lash_core::SessionPolicy {
-            model: model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-    ))
-    .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
 }
 
 /// A crash at `cut` in the handover of segment `ordinal`: the process
@@ -878,4 +895,198 @@ async fn live_restate_a_presentation_put_before_its_journal_crash_replays_one_re
         Engine::live("presentation", None).await,
     )
     .await;
+}
+
+// ---------------------------------------------------------------------------
+// The trigger delivery's reservation window
+// ---------------------------------------------------------------------------
+
+const TRIGGER_SOURCE_TYPE: &str = "crash.windows.fired";
+
+/// The deployment that emitted died after its reservation committed and
+/// before the delivery's start registered a process; the deployment that
+/// comes back recovers the delivery through its obligation alone.
+///
+/// The reservation is the emit's first durable act, so the crash leaves the
+/// store holding the occurrence and its reserved, unbound delivery, and no
+/// process. The law writes exactly that state, then brings the deployment
+/// back. Nobody emits again: the restarted core's reconcile tick claims the
+/// delivery's `TriggerDelivery` obligation, starts the one process its start
+/// key names and binds it. The process runs to its terminal once, each tool
+/// call runs once, and the obligation is left delivered.
+async fn a_reserved_delivery_crash_recovers_one_bound_process(engine: Engine) {
+    let backend = engine.lash_backend();
+    let triggers = backend.trigger_store();
+    let input = publish_process_input(&engine).await;
+    let spec = process_env_spec();
+    let env_ref = spec.stable_ref().expect("the env ref");
+    backend
+        .process_env_store()
+        .publish_process_execution_env(
+            &lash_core::ReferrerClaim::unguarded(lash_core::ArtifactReferrer::HostPin(
+                lash_core::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
+            &env_ref,
+            &spec.to_store_bytes().expect("encode the env"),
+        )
+        .await
+        .expect("publish the subscription's env");
+    let source_key = run_tag("delivery-source");
+    triggers
+        .execute_command(
+            &run_tag("delivery-register"),
+            lash_core::TriggerCommand::Register {
+                owner_scope: lash_core::TriggerOwnerScope::host("crash-windows")
+                    .expect("host owner scope"),
+                actor: lash_core::ProcessOriginator::host_scoped("crash-windows"),
+                draft: lash_core::TriggerSubscriptionDraft {
+                    source_capture: lash_core::TriggerSourceCapture::resident(
+                        ["crash", "windows"],
+                        lash_core::LashSchema::any(),
+                    ),
+                    subscription_key: run_tag("delivery-subscription"),
+                    env_ref,
+                    wake_target: None,
+                    name: Some(PROCESS.to_owned()),
+                    source_type: TRIGGER_SOURCE_TYPE.to_owned(),
+                    source_key: source_key.clone(),
+                    source: json!({}),
+                    payload_schema: lash_core::LashSchema::any(),
+                    target: input
+                        .clone()
+                        .into_process_input()
+                        .expect("the process input serializes"),
+                    target_identity: input.process_identity(),
+                    event_types: lash_lashlang_runtime::lashlang_process_event_types(),
+                    input_template: std::collections::BTreeMap::new(),
+                    target_label: Some(PROCESS.to_owned()),
+                },
+            },
+        )
+        .await
+        .expect("register the subscription")
+        .expect("the subscription registers");
+
+    // The emit's reservation commits; the deployment dies before the start.
+    let reserved = triggers
+        .ingest_occurrence(lash_core::TriggerOccurrenceRequest::new(
+            TRIGGER_SOURCE_TYPE,
+            source_key,
+            json!({}),
+            run_tag("delivery-occurrence"),
+        ))
+        .await
+        .expect("reserve the delivery");
+    assert_eq!(reserved.reservations.len(), 1, "one subscription matches");
+    let reservation = reserved.reservations[0].clone();
+    let occurrence_id = reservation.occurrence.occurrence_id.clone();
+    let start_key = lash_core::facade_support::trigger_delivery_start_key(&reservation);
+    let registry = backend.process_registry();
+    assert!(
+        registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .is_none(),
+        "the crash left no process"
+    );
+
+    // The deployment comes back. Its reconcile tick is the only actor.
+    let executions = Arc::new(AtomicUsize::new(0));
+    let core = process_core(&engine, &executions);
+    engine.install_process_worker(
+        lash::durability::DurableProcessWorker::new(
+            core.durable_process_worker_config()
+                .expect("the core's process worker configuration"),
+        )
+        .expect("build the process worker"),
+    );
+    let process_id = tokio::time::timeout(BOUND, async {
+        loop {
+            let deliveries = triggers
+                .list_deliveries_by_occurrence_id(&occurrence_id)
+                .await
+                .expect("read the delivery");
+            if let Some(process_id) = deliveries
+                .first()
+                .and_then(|delivery| delivery.process_id.clone())
+            {
+                return process_id;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("the restarted deployment binds the reserved delivery");
+
+    let output = tokio::time::timeout(BOUND, core.processes().await_output(&process_id))
+        .await
+        .expect("the recovered process reaches its terminal")
+        .expect("the terminal resolves");
+    let lash_core::ProcessAwaitOutput::Settled { output } = &output else {
+        panic!("the recovered process ended without output: {output:?}")
+    };
+    let lash_core::ToolCallOutcome::Success(value) = &output.outcome else {
+        panic!("the recovered process failed: {output:?}")
+    };
+    assert_eq!(value.to_json_value(), json!({"result": "counted"}));
+    engine.settle().await;
+
+    assert_eq!(
+        registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .map(|record| record.id),
+        Some(process_id.clone()),
+        "the delivery's start key names the one process it is bound to"
+    );
+    assert_eq!(
+        executions.load(Ordering::SeqCst),
+        2,
+        "the recovered process ran once: each tool call ran once"
+    );
+    assert_eq!(
+        triggers
+            .list_occurrences(lash_core::TriggerOccurrenceFilter {
+                source_type: Some(TRIGGER_SOURCE_TYPE.to_owned()),
+                ..Default::default()
+            })
+            .await
+            .expect("list the occurrences")
+            .into_iter()
+            .filter(|occurrence| occurrence.occurrence_id == occurrence_id)
+            .count(),
+        1,
+        "recovery never emitted the occurrence again"
+    );
+    let runs: Vec<_> = engine
+        .invocations(&format!("{PROCESS_WORKFLOW}/{process_id}/run"))
+        .await;
+    assert_eq!(runs.len(), 1, "one run of the one process: {runs:#?}");
+    assert_eq!(runs[0].status, "completed", "the run ended: {runs:#?}");
+    assert_eq!(
+        backend
+            .obligation_ledger(lash_core::store::ObligationKind::TriggerDelivery)
+            .count_stalled()
+            .await
+            .expect("count stalled deliveries"),
+        0,
+        "the delivery's obligation was delivered, not stalled"
+    );
+    engine.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_crash_between_a_trigger_reservation_and_its_start_recovers_one_bound_process() {
+    a_reserved_delivery_crash_recovers_one_bound_process(Engine::double(0x4090, None).await).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs a live restate-server: the `crash-windows` Restate suite runs it"]
+async fn live_restate_a_crash_between_a_trigger_reservation_and_its_start_recovers_one_bound_process()
+ {
+    a_reserved_delivery_crash_recovers_one_bound_process(Engine::live("delivery", None).await)
+        .await;
 }

@@ -136,10 +136,13 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "trigger-delivery-reserve-start-crash-window",
         kind: DurableFaultKind::TriggerDeliveryRecovery,
-        contract: "A trigger delivery reserved before a crash but missing its process row is reconciled into exactly one deterministic process start.",
-        evidence: FaultEvidence::Blocked {
-            rationale: "The native worker sweep that reconciled a reserved delivery into its process start was deleted with the native engine; the Restate engine's reconcile of an unbound delivery is FIG-3860's B6 follow-up, and the store still offers such a delivery to recovery (process_trigger_retention).",
-        },
+        contract: "A trigger delivery reserved before a crash but missing its process row is recovered through its TriggerDelivery obligation into exactly one process, bound to the delivery, without the occurrence being emitted again; a crash after the registration and before the bind recovers the same process.",
+        evidence: FaultEvidence::CargoTest(CargoTestEvidence {
+            package: "lash-internal-sqlite-store",
+            test_target: Some("conformance"),
+            filter: "trigger_delivery_recovery",
+            required_env: None,
+        }),
     },
     DurableFaultMatrixRow {
         id: "trigger-delivery-prune-orphan-retention",

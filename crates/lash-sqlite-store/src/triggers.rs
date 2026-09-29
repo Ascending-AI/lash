@@ -328,7 +328,7 @@ pub(crate) fn subscription_list_sql(
 mod listing_plan_tests;
 
 pub struct SqliteTriggerStore {
-    conn: SqliteConnection,
+    pub(crate) conn: SqliteConnection,
     /// Held so a store opened on a memory backend keeps its database alive.
     _location: crate::location::DatabaseLocation,
     clock: Arc<dyn lash_core_execution::Clock>,
@@ -1035,6 +1035,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         let occurrence_id = occurrence_id.to_string();
         let subscription_id = subscription_id.to_string();
         let process_id = process_id.clone();
+        let bound_at_ms = self.clock.timestamp_ms();
         self.conn
             .write(move |conn| {
                 Ok((|| {
@@ -1044,7 +1045,8 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             params![
                                 occurrence_id.as_str(),
                                 subscription_id.as_str(),
-                                process_id.as_str()
+                                process_id.as_str(),
+                                bound_at_ms as i64,
                             ],
                         )
                         .map_err(process_sqlite_error)?;
@@ -1421,6 +1423,10 @@ fn reserve_sqlite_deliveries(
                 sql_revision,
                 SqliteTriggerStore::encode_json(&subscription)?,
                 created_at_ms as i64,
+                lash_core_execution::store::ObligationId::mint(
+                    lash_core_execution::store::ObligationKind::TriggerDelivery,
+                )
+                .as_str(),
             ],
         )
         .map_err(process_sqlite_error)?;

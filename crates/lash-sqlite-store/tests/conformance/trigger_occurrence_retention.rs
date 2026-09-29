@@ -56,6 +56,11 @@ lash_conformance::process_trigger_retention_tests!({
                 registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
                 triggers: backend.trigger_store() as Arc<dyn TriggerStore>,
                 sessions: backend.store().await as Arc<dyn lash_core_execution::DeploymentStore>,
+                deliveries: lash_core_execution::StoreSet::obligation_ledger(
+                    &*backend,
+                    lash_core_execution::store::ObligationKind::TriggerDelivery,
+                ),
+                process_env: lash_core_execution::StoreSet::process_env_store(&*backend),
             }
         }
     })

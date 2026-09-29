@@ -2,7 +2,8 @@
 //! each table's shared obligation statements.
 //!
 //! Ingress, intents, roots and the session catalog live in the durable core;
-//! parent-end plans and processes in the process registry file. Each ledger
+//! parent-end plans and processes in the process registry file; trigger
+//! deliveries in the trigger store's file. Each ledger
 //! holds a connection to its own database. Ingress spans two tables, one
 //! ledger each, composed by [`crate::ingress_obligation`]. SQLite has one writer, so a due
 //! claim is one `BEGIN IMMEDIATE` transaction that reads the due page and
@@ -31,6 +32,7 @@ use lash_store_sql::process::processes::{
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
+use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use rusqlite::types::Value;
 use rusqlite::{Row, params_from_iter};
 
@@ -50,6 +52,8 @@ static PROCESSES: LazyLock<ProcessObligationStatements> =
     LazyLock::new(|| ProcessObligationStatements::render(Schema::Main.dialect()));
 static PROCESS_STARTS: LazyLock<ProcessStartObligationStatements> =
     LazyLock::new(|| ProcessStartObligationStatements::render(Schema::Main.dialect()));
+static DELIVERIES: LazyLock<DeliveryObligationStatements> =
+    LazyLock::new(|| DeliveryObligationStatements::render(Schema::Main.dialect()));
 static CLEANUPS: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(Schema::Main.dialect()));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -69,6 +73,7 @@ pub(crate) fn obligation_sql(kind: ObligationKind) -> ObligationSql<'static> {
         ObligationKind::ScopeClose => ROOTS.obligation_sql(),
         ObligationKind::SessionDelete => META.obligation_sql(),
         ObligationKind::ParentEnd => PLANS.obligation_sql(),
+        ObligationKind::TriggerDelivery => DELIVERIES.obligation_sql(),
         ObligationKind::ProcessStart => PROCESS_STARTS.obligation_sql(),
         ObligationKind::ProcessTerminal => PROCESSES.obligation_sql(),
         ObligationKind::ArtifactCleanup => CLEANUP_LEDGER.obligation_sql(),

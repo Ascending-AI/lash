@@ -954,6 +954,7 @@ macro_rules! process_trigger_retention_tests {
     ($fixture:block) => {
         $crate::process_trigger_retention_tests!(@catalogue $fixture; [
             (process_trigger_retention, "process-trigger-retention"),
+            (trigger_delivery_recovery, "trigger-delivery-recovery"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

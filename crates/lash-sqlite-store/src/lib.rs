@@ -142,6 +142,7 @@ mod session_sql_tests;
 mod test_support;
 #[cfg(feature = "testing")]
 pub mod testing;
+mod trigger_schema;
 mod triggers;
 mod turn_ingress;
 

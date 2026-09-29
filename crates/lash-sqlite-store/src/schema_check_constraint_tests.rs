@@ -255,4 +255,14 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
          ) VALUES ('bad-owner-kind', 'workflow', 'owner', 'fingerprint', '{}', 0)",
         "ck_trigger_receipts_owner_kind",
     );
+    assert_check_rejects(
+        &triggers,
+        "INSERT INTO trigger_deliveries (
+             occurrence_id, subscription_id, process_id, subscription_incarnation,
+             subscription_revision, subscription_snapshot_json, created_at_ms,
+             obligation_id, obligation_state, obligation_due_at_ms
+         ) VALUES ('occurrence', 'subscription', NULL, 'incarnation', 1, '{}', 0,
+                   NULL, 'due', 0)",
+        "ck_trigger_deliveries_obligation",
+    );
 }

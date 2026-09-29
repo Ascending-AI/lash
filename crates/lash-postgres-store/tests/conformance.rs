@@ -1735,6 +1735,10 @@ lash_conformance::process_trigger_retention_tests!({
                 triggers: Arc::new(storage.trigger_store()) as Arc<dyn TriggerStore>,
                 sessions: Arc::new(storage.session_store_factory_with_shared_process_registry())
                     as Arc<dyn lash_core_execution::DeploymentStore>,
+                deliveries: storage
+                    .obligation_ledger(lash_core_execution::store::ObligationKind::TriggerDelivery),
+                process_env: Arc::new(storage.process_env_store())
+                    as Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
             }
         }
     })

@@ -19,6 +19,10 @@ pub struct ProcessTriggerRetentionHandles {
     pub registry: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
     pub sessions: Arc<dyn crate::DeploymentStore>,
+    /// The trigger store's `TriggerDelivery` obligation ledger (ADR 0109).
+    pub deliveries: Arc<dyn crate::ObligationLedger>,
+    /// The environments a delivery's process names (ADR 0113 §3.3).
+    pub process_env: Arc<dyn crate::ProcessExecutionEnvStore>,
 }
 
 pub async fn process_trigger_retention<F, Fut>(make: F)
@@ -46,6 +50,16 @@ where
     unregistered_delivery_is_offered_to_the_recovery_sweep(make().await).await;
     the_narrow_delivery_worklist_agrees_with_the_delivery_table(make().await).await;
     outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
+}
+
+/// The reserve/start crash window's recovery (ADR 0021, FIG-4090), a law of
+/// its own so a crash-window run can repeat it alone.
+pub async fn trigger_delivery_recovery<F, Fut>(make: F)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ProcessTriggerRetentionHandles>,
+{
+    a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process(make().await).await;
 }
 
 #[expect(
@@ -784,22 +798,22 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
     );
 }
 
-/// ADR 0021's recovery sweep, from the store side.
+/// The delivery table's view of the reserve/start crash window, from the
+/// store side.
 ///
-/// `ProcessWorker::reconcile_trigger_deliveries` starts a delivery whose
-/// process row was never registered, and it decides that from exactly two
-/// store reads: `TriggerStore::list_deliveries` for the candidate set, then
-/// `ProcessRegistry::filter_unregistered_process_ids` to narrow it. The
-/// existing law covers the *negative* direction only -- a pruned process is
-/// not offered back. Nothing covered the direction the sweep actually depends
-/// on: that a reserved-but-unstarted delivery IS offered, and that a started
-/// one is not.
+/// Recovery itself runs through the reservation's `TriggerDelivery`
+/// obligation ([`trigger_delivery_recovery`]); these two reads are the
+/// delivery table's own account of the same window: `TriggerStore::list_deliveries`
+/// lists every reservation, and `ProcessRegistry::filter_unregistered_process_ids`
+/// narrows process ids to those with no row. The neighbouring law covers the
+/// *negative* direction only -- a pruned process is not offered back. This
+/// one covers the other: a reserved-but-unstarted delivery IS listed unbound,
+/// and a started one is not reported unregistered.
 ///
-/// This is the reserve/start crash window. A backend whose `list_deliveries`
-/// quietly filtered to deliveries with a live subscription, or whose
-/// `filter_unregistered_process_ids` reported a registered process as missing,
-/// would either strand the delivery forever or start it twice -- and both
-/// backends would still pass every other law in this group.
+/// A backend whose `list_deliveries` quietly filtered to deliveries with a
+/// live subscription, or whose `filter_unregistered_process_ids` reported a
+/// registered process as missing, would misreport the window to every reader
+/// of the table -- and would still pass every other law in this group.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -873,6 +887,453 @@ async fn unregistered_delivery_is_offered_to_the_recovery_sweep(
         "the delivery row itself outlives the start, bound to its process: it is \
          retention's to reclaim, not the sweep's"
     );
+}
+
+/// ADR 0021's recovery, through the obligation outbox (ADR 0109, FIG-4090).
+///
+/// The reserving transaction arms the delivery's `TriggerDelivery`
+/// obligation, and the write that binds the delivery to its process delivers
+/// it. A crash after the reservation and before the start leaves the row due,
+/// and nothing emits the occurrence again. A restarted deployment's relay
+/// takes the due row, starts the delivery from the reservation the store
+/// holds, and binds it: exactly one process, under the delivery's start key,
+/// bound to the delivery.
+///
+/// The second crash window sits between the registration and the bind. The
+/// next pass registers again under the same start key, which finds the
+/// process the first attempt registered, and binds that one: still exactly
+/// one process. A pass after recovery finds nothing due.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn a_reserved_delivery_recovers_through_its_obligation_into_one_bound_process(
+    handles: ProcessTriggerRetentionHandles,
+) {
+    const SESSION: &str = "delivery-obligation-session";
+    const SOURCE: &str = "delivery-obligation-source";
+    let session_id = SessionId::from(SESSION);
+    // The environment the subscription names is durable before any delivery
+    // starts, the way a registration publishes it.
+    let spec = crate::ProcessExecutionEnvSpec::new(
+        crate::PluginOptions::default(),
+        crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+    );
+    let env_ref = spec.stable_ref().expect("stable env ref");
+    handles
+        .process_env
+        .publish_process_execution_env(
+            &crate::ReferrerClaim::unguarded(crate::ArtifactReferrer::HostPin(
+                crate::HostArtifactPin::mint(),
+            ))
+            .expect("host pin claim"),
+            &env_ref,
+            &spec.to_store_bytes().expect("encode env"),
+        )
+        .await
+        .expect("publish the subscription's environment");
+    handles
+        .triggers
+        .execute_command(
+            "delivery-obligation-register",
+            TriggerCommand::Register {
+                owner_scope: owner(&session_id),
+                actor: actor(&session_id),
+                draft: TriggerSubscriptionDraft {
+                    env_ref,
+                    ..draft(&session_id, "delivery-obligation-key", SOURCE)
+                },
+            },
+        )
+        .await
+        .expect("register trigger call")
+        .expect("register trigger succeeds");
+    let reserve = |idempotency_key: &'static str| {
+        let triggers = Arc::clone(&handles.triggers);
+        async move {
+            let ingress = triggers
+                .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
+                    "ui.button.pressed",
+                    SOURCE,
+                    serde_json::json!({ "button": "Blue" }),
+                    idempotency_key,
+                ))
+                .await
+                .expect("ingest occurrence");
+            assert_eq!(ingress.reservations.len(), 1, "one subscription matches");
+            ingress.reservations[0].clone()
+        }
+    };
+    // A restarted deployment's clock, past every due instant the store armed.
+    let clock = crate::testing::TestClock::new(4_000_000_000_000);
+    let relay_over = |triggers: Arc<dyn TriggerStore>| {
+        lash_core::runtime::trigger_delivery::TriggerDeliveryRelay::new(
+            Arc::clone(&handles.deliveries),
+            lash_core::facade_support::TriggerRouter::new(
+                triggers,
+                crate::ProcessWorkWiring::without_process_work(Arc::clone(&handles.registry)),
+            )
+            .with_process_artifacts(
+                Arc::clone(&handles.process_env),
+                crate::ProcessEngineRegistry::new().with_registration(
+                    crate::ProcessEngineRegistration::accepting(Arc::new(TriggerTargetEngine)),
+                ),
+            ),
+        )
+    };
+    let page = std::num::NonZeroUsize::new(16).expect("a nonzero page");
+    let occurrences = || async {
+        handles
+            .triggers
+            .list_occurrences(crate::TriggerOccurrenceFilter::default())
+            .await
+            .expect("list occurrences")
+            .len()
+    };
+
+    // Crash after the reservation, before the registration: the row is
+    // reserved, unbound, and owes its start.
+    let reserved = reserve("delivery-obligation-reserve-crash").await;
+    assert_eq!(reserved.process_id, None);
+    let start_key = lash_core::facade_support::trigger_delivery_start_key(&reserved);
+    assert!(
+        handles
+            .registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .is_none(),
+        "the crash left no process"
+    );
+    let occurrences_before = occurrences().await;
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&handles.triggers)),
+        &clock,
+        page,
+    )
+    .await
+    .expect("the restarted relay's due pass");
+    assert_eq!(
+        (pass.claimed, pass.retried, pass.stalled),
+        (1, 0, 0),
+        "the restart claims the reserved delivery and starts it: {pass:?}"
+    );
+    let recovered = handles
+        .registry
+        .get_process_by_start_key(&start_key)
+        .await
+        .expect("read the start key")
+        .expect("recovery registered the delivery's process");
+    let bound = handles
+        .triggers
+        .list_deliveries_by_occurrence_id(&reserved.occurrence.occurrence_id)
+        .await
+        .expect("list the delivery");
+    assert_eq!(bound.len(), 1);
+    assert_eq!(
+        bound[0].process_id.as_ref(),
+        Some(&recovered.id),
+        "the delivery is bound to the one process its start key registered"
+    );
+    assert_eq!(
+        occurrences().await,
+        occurrences_before,
+        "recovery starts from the reservation, never from a re-emitted occurrence"
+    );
+
+    // Crash after the registration, before the bind.
+    let reserved = reserve("delivery-obligation-register-crash").await;
+    let start_key = lash_core::facade_support::trigger_delivery_start_key(&reserved);
+    let crashing = Arc::new(BindCrashesOnce::new(Arc::clone(&handles.triggers)));
+    clock.advance(3_600_000);
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&crashing) as Arc<dyn TriggerStore>),
+        &clock,
+        page,
+    )
+    .await
+    .expect("the crashing relay's due pass");
+    assert_eq!(
+        (pass.claimed, pass.retried, pass.stalled),
+        (1, 1, 0),
+        "the bind's crash leaves the delivery owed: {pass:?}"
+    );
+    let registered = handles
+        .registry
+        .get_process_by_start_key(&start_key)
+        .await
+        .expect("read the start key")
+        .expect("the crash came after the registration");
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_occurrence_id(&reserved.occurrence.occurrence_id)
+            .await
+            .expect("list the delivery")[0]
+            .process_id,
+        None,
+        "the crash came before the bind"
+    );
+    clock.advance(3_600_000);
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&handles.triggers)),
+        &clock,
+        page,
+    )
+    .await
+    .expect("the restarted relay's due pass");
+    assert_eq!(
+        (pass.claimed, pass.retried, pass.stalled),
+        (1, 0, 0),
+        "the restart retakes the owed delivery: {pass:?}"
+    );
+    assert_eq!(
+        handles
+            .registry
+            .get_process_by_start_key(&start_key)
+            .await
+            .expect("read the start key")
+            .map(|record| record.id),
+        Some(registered.id.clone()),
+        "the start key found the registered process again rather than a second one"
+    );
+    assert_eq!(
+        handles
+            .triggers
+            .list_deliveries_by_occurrence_id(&reserved.occurrence.occurrence_id)
+            .await
+            .expect("list the delivery")[0]
+            .process_id,
+        Some(registered.id),
+        "the delivery is bound to the process the first attempt registered"
+    );
+
+    // Both deliveries are delivered: a later pass has nothing to recover.
+    clock.advance(3_600_000);
+    let pass = lash_core::drive::relay::relay_due(
+        &relay_over(Arc::clone(&handles.triggers)),
+        &clock,
+        page,
+    )
+    .await
+    .expect("a later due pass");
+    assert_eq!(pass.claimed, 0, "a bound delivery owes nothing: {pass:?}");
+    assert_eq!(
+        handles
+            .deliveries
+            .count_stalled()
+            .await
+            .expect("count stalled deliveries"),
+        0
+    );
+}
+
+/// The `test` engine the law's subscription targets: it names no artifacts,
+/// so a start stages only its environment.
+struct TriggerTargetEngine;
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for TriggerTargetEngine {
+    fn kind(&self) -> &'static str {
+        "test"
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        Ok(
+            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                serde_json::Value::Null,
+            ))
+            .into(),
+        )
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        _cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        Ok(())
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+}
+
+/// A trigger store whose first delivery bind fails as a crash would: the
+/// registration before it landed, the bind did not.
+struct BindCrashesOnce {
+    inner: Arc<dyn TriggerStore>,
+    crashed: std::sync::atomic::AtomicBool,
+}
+
+impl BindCrashesOnce {
+    fn new(inner: Arc<dyn TriggerStore>) -> Self {
+        Self {
+            inner,
+            crashed: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl TriggerStore for BindCrashesOnce {
+    async fn execute_command(
+        &self,
+        operation_id: &str,
+        command: TriggerCommand,
+    ) -> Result<crate::TriggerEffectResult, crate::PluginError> {
+        self.inner.execute_command(operation_id, command).await
+    }
+
+    async fn list_subscriptions(
+        &self,
+        filter: crate::TriggerSubscriptionFilter,
+    ) -> Result<Vec<crate::TriggerSubscriptionRecord>, crate::PluginError> {
+        self.inner.list_subscriptions(filter).await
+    }
+
+    async fn delete_session_subscriptions(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<usize, crate::PluginError> {
+        self.inner.delete_session_subscriptions(session_id).await
+    }
+
+    async fn ingest_occurrence(
+        &self,
+        request: crate::TriggerOccurrenceRequest,
+    ) -> Result<crate::TriggerIngressReceipt, crate::PluginError> {
+        self.inner.ingest_occurrence(request).await
+    }
+
+    async fn list_occurrences(
+        &self,
+        filter: crate::TriggerOccurrenceFilter,
+    ) -> Result<Vec<crate::TriggerOccurrenceRecord>, crate::PluginError> {
+        self.inner.list_occurrences(filter).await
+    }
+
+    async fn list_deliveries_by_occurrence_id(
+        &self,
+        occurrence_id: &str,
+    ) -> Result<Vec<crate::TriggerDeliveryReservation>, crate::PluginError> {
+        self.inner
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+    }
+
+    async fn list_deliveries_by_subscription_id(
+        &self,
+        subscription_id: &str,
+    ) -> Result<Vec<crate::TriggerDeliveryReservation>, crate::PluginError> {
+        self.inner
+            .list_deliveries_by_subscription_id(subscription_id)
+            .await
+    }
+
+    async fn list_deliveries_by_process_id(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<Vec<crate::TriggerDeliveryReservation>, crate::PluginError> {
+        self.inner.list_deliveries_by_process_id(process_id).await
+    }
+
+    async fn list_deliveries(
+        &self,
+    ) -> Result<Vec<crate::TriggerDeliveryReservation>, crate::PluginError> {
+        self.inner.list_deliveries().await
+    }
+
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> Result<(), crate::PluginError> {
+        if !self.crashed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err(crate::PluginError::Session(
+                "the deployment crashed before the delivery's bind".to_string(),
+            ));
+        }
+        self.inner
+            .bind_delivery_process(occurrence_id, subscription_id, process_id)
+            .await
+    }
+
+    async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, crate::PluginError> {
+        self.inner.list_delivery_process_ids().await
+    }
+
+    async fn list_delivery_retention_candidates(
+        &self,
+    ) -> Result<Vec<crate::TriggerDeliveryRetentionCandidate>, crate::PluginError> {
+        self.inner.list_delivery_retention_candidates().await
+    }
+
+    async fn list_session_owner_ids_for_retention(
+        &self,
+    ) -> Result<Vec<SessionId>, crate::PluginError> {
+        self.inner.list_session_owner_ids_for_retention().await
+    }
+
+    async fn reconcile_trigger_retention(
+        &self,
+        candidates: &[crate::TriggerDeliveryRetentionCandidate],
+        deleted_session_ids: &[SessionId],
+    ) -> Result<crate::TriggerRetentionReconciliationReport, crate::PluginError> {
+        self.inner
+            .reconcile_trigger_retention(candidates, deleted_session_ids)
+            .await
+    }
+
+    async fn delete_delivery_retention_candidates(
+        &self,
+        candidates: &[crate::TriggerDeliveryRetentionCandidate],
+    ) -> Result<usize, crate::PluginError> {
+        self.inner
+            .delete_delivery_retention_candidates(candidates)
+            .await
+    }
+
+    async fn reclaim_trigger_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> crate::TriggerOccurrenceReclamationResult {
+        self.inner
+            .reclaim_trigger_occurrences(cutoff_epoch_ms)
+            .await
+    }
+
+    async fn prune_mutation_receipts(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, crate::PluginError> {
+        self.inner.prune_mutation_receipts(cutoff_epoch_ms).await
+    }
+
+    async fn prune_non_fired_occurrences(
+        &self,
+        cutoff_epoch_ms: u64,
+    ) -> Result<usize, crate::PluginError> {
+        self.inner
+            .prune_non_fired_occurrences(cutoff_epoch_ms)
+            .await
+    }
 }
 
 /// `list_delivery_process_ids` is the narrow worklist read, and it had no

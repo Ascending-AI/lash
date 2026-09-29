@@ -18,6 +18,7 @@ use crate::runtime::artifact_cleanup::{
 use crate::runtime::process_start::ProcessStartRelay;
 use crate::runtime::process_terminal::ProcessTerminalRelay;
 use crate::runtime::session_delete::SessionDeleteRelay;
+use crate::runtime::trigger_delivery::TriggerDeliveryRelay;
 use crate::store::ObligationKind;
 use crate::{
     Backend, Clock, DeploymentStore, ProcessWorkWiring, SessionAdministration, SessionWorkEngine,
@@ -32,24 +33,26 @@ pub enum RelayNeed {
     /// published through it.
     ProcessWork,
     /// The session administration a physical delete runs through, and
-    /// whose engine registry an artifact cleanup applies to.
+    /// whose engine registry an artifact cleanup applies to and a recovered
+    /// trigger delivery registers its process against.
     SessionAdministration,
 }
 
 impl RelayNeed {
-    /// What `kind`'s relay needs, if anything.
+    /// What `kind`'s relay needs, in the order a missing need is reported.
     #[must_use]
-    pub const fn of(kind: ObligationKind) -> Option<Self> {
+    pub const fn of(kind: ObligationKind) -> &'static [Self] {
         match kind {
             ObligationKind::Ingress
             | ObligationKind::ControlIntent
-            | ObligationKind::ScopeClose => None,
+            | ObligationKind::ScopeClose => &[],
             ObligationKind::ParentEnd
             | ObligationKind::ProcessStart
-            | ObligationKind::ProcessTerminal => Some(Self::ProcessWork),
+            | ObligationKind::ProcessTerminal => &[Self::ProcessWork],
             ObligationKind::SessionDelete | ObligationKind::ArtifactCleanup => {
-                Some(Self::SessionAdministration)
+                &[Self::SessionAdministration]
             }
+            ObligationKind::TriggerDelivery => &[Self::ProcessWork, Self::SessionAdministration],
         }
     }
 
@@ -96,9 +99,7 @@ impl RelaySupply {
     /// supply lacks.
     pub fn check(self) -> Result<(), ObligationRelayUnavailable> {
         for kind in ObligationKind::ALL {
-            if let Some(need) = RelayNeed::of(kind)
-                && !self.has(need)
-            {
+            if let Some(&need) = RelayNeed::of(kind).iter().find(|&&need| !self.has(need)) {
                 return Err(ObligationRelayUnavailable { kind, need });
             }
         }
@@ -159,10 +160,8 @@ pub fn obligation_relays(
         Arc::clone(&sessions),
         Arc::clone(&scopes),
     ));
-    let unavailable = |kind: ObligationKind| ObligationRelayUnavailable {
-        kind,
-        need: RelayNeed::of(kind).unwrap_or(RelayNeed::ProcessWork),
-    };
+    let unavailable =
+        |kind: ObligationKind, need: RelayNeed| ObligationRelayUnavailable { kind, need };
     let mut relays = Vec::with_capacity(ObligationKind::ALL.len());
     for kind in ObligationKind::ALL {
         let relay: Arc<dyn ObligationRelay> = match kind {
@@ -181,7 +180,9 @@ pub fn obligation_relays(
             )),
             ObligationKind::ScopeClose => Arc::clone(&scope_close),
             ObligationKind::ParentEnd => {
-                let wiring = processes.as_ref().ok_or_else(|| unavailable(kind))?;
+                let wiring = processes
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
                 Arc::new(ParentEndRelay::new(
                     backend.obligation_ledger(kind),
                     Arc::clone(wiring.registry()),
@@ -189,11 +190,39 @@ pub fn obligation_relays(
                     Arc::clone(&clock),
                 ))
             }
-            ObligationKind::SessionDelete => Arc::new(SessionDeleteRelay::new(
-                administration.clone().ok_or_else(|| unavailable(kind))?,
-            )),
+            ObligationKind::SessionDelete => {
+                Arc::new(SessionDeleteRelay::new(administration.clone().ok_or_else(
+                    || unavailable(kind, RelayNeed::SessionAdministration),
+                )?))
+            }
+            ObligationKind::TriggerDelivery => {
+                let wiring = processes
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
+                let administration = administration
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?;
+                // The router a recovered delivery starts through is wired the
+                // way the deployment's own emits are, so the recovered start
+                // registers the process a first attempt would have.
+                let router = crate::TriggerRouter::new(backend.trigger_store(), wiring.clone())
+                    .with_process_artifacts(
+                        backend.process_env_store(),
+                        administration.process_engines().clone(),
+                    )
+                    .with_process_starts(
+                        backend.obligation_ledger(ObligationKind::ProcessStart),
+                        Arc::clone(&clock),
+                    );
+                Arc::new(TriggerDeliveryRelay::new(
+                    backend.obligation_ledger(kind),
+                    router,
+                ))
+            }
             ObligationKind::ProcessStart => {
-                let wiring = processes.as_ref().ok_or_else(|| unavailable(kind))?;
+                let wiring = processes
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
                 Arc::new(ProcessStartRelay::new(
                     backend.obligation_ledger(kind),
                     Arc::clone(wiring.registry()),
@@ -202,7 +231,9 @@ pub fn obligation_relays(
                 ))
             }
             ObligationKind::ProcessTerminal => {
-                let wiring = processes.as_ref().ok_or_else(|| unavailable(kind))?;
+                let wiring = processes
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::ProcessWork))?;
                 Arc::new(ProcessTerminalRelay::new(
                     backend.obligation_ledger(kind),
                     Arc::clone(wiring.registry()),
@@ -210,7 +241,9 @@ pub fn obligation_relays(
                 ))
             }
             ObligationKind::ArtifactCleanup => {
-                let administration = administration.as_ref().ok_or_else(|| unavailable(kind))?;
+                let administration = administration
+                    .as_ref()
+                    .ok_or_else(|| unavailable(kind, RelayNeed::SessionAdministration))?;
                 Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
                     ledger: backend.artifact_cleanup(),
                     authorities: Arc::new(StoreSetAuthorities {
@@ -268,7 +301,7 @@ mod tests {
         );
         for kind in ObligationKind::ALL {
             assert!(
-                RelayNeed::of(kind).is_none_or(|need| full.has(need)),
+                RelayNeed::of(kind).iter().all(|&need| full.has(need)),
                 "{kind:?} runs on a full supply"
             );
         }

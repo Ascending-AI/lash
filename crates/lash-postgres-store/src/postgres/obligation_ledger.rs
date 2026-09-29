@@ -28,6 +28,7 @@ use lash_store_sql::process::processes::{
 use lash_store_sql::session::meta::SessionMetaObligationStatements;
 use lash_store_sql::session_roots::control_intents::ControlIntentObligationStatements;
 use lash_store_sql::session_roots::roots::SessionRootObligationStatements;
+use lash_store_sql::trigger::deliveries::DeliveryObligationStatements;
 use sqlx::postgres::PgRow;
 use sqlx::{PgPool, Postgres, Row};
 
@@ -84,6 +85,8 @@ static PROCESS_STARTS: LazyLock<
     shared: ProcessStartObligationStatements::render(Dialect::postgres()),
     locking: ProcessStartObligationPostgresStatements::render(Dialect::postgres()),
 });
+static DELIVERIES: LazyLock<DeliveryObligationStatements> =
+    LazyLock::new(|| DeliveryObligationStatements::render(Dialect::postgres()));
 static CLEANUP: LazyLock<CleanupObligationStatements> =
     LazyLock::new(|| CleanupObligationStatements::render(Dialect::postgres()));
 static CLEANUP_LEDGER: LazyLock<CleanupObligationLedgerStatements> =
@@ -111,6 +114,13 @@ fn obligation_sql(kind: ObligationKind) -> (ObligationSql<'static>, &'static str
         ObligationKind::ParentEnd => (
             PLANS.shared.obligation_sql(),
             PLANS.locking.obligation_select_due_locking.sql(),
+        ),
+        ObligationKind::TriggerDelivery => (
+            DELIVERIES.obligation_sql(),
+            crate::trigger_store::trigger_sql()
+                .delivery_postgres
+                .obligation_select_due_locking
+                .sql(),
         ),
         ObligationKind::ProcessStart => (
             PROCESS_STARTS.shared.obligation_sql(),

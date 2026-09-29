@@ -43,6 +43,7 @@ mod lifecycle;
 pub mod process_start;
 pub mod process_terminal;
 pub mod recovery_lease;
+pub mod trigger_delivery;
 use turn_settlement::TurnIngressSettlement;
 #[cfg(feature = "testing")]
 pub mod logical_turn;

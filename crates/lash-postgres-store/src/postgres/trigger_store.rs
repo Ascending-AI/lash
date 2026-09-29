@@ -201,6 +201,15 @@ lash_store_sql::statements! {
                     (subscription_snapshot_json::jsonb #>> '{owner_scope,session_id}')
              FROM trigger_deliveries
              WHERE subscription_snapshot_json::jsonb #>> '{owner_scope,type}' = 'session'";
+
+        /// At most `?2` delivery obligations due at `?1`, oldest due first,
+        /// each row locked for the caller's claim and skipped by every
+        /// concurrent claimant: two deployments' relays take disjoint pages.
+        obligation_select_due_locking = "SELECT obligation_id FROM trigger_deliveries
+             WHERE obligation_state IN ('due', 'claimed') AND obligation_due_at_ms <= ?1
+             ORDER BY obligation_due_at_ms, obligation_id
+             LIMIT ?2
+             FOR UPDATE SKIP LOCKED";
     }
 }
 
@@ -255,7 +264,7 @@ pub(crate) struct TriggerSql {
     /// `trigger_deliveries` statements both backends issue verbatim.
     delivery: DeliveryStatements,
     /// `trigger_deliveries` statements only PostgreSQL issues.
-    delivery_postgres: DeliveryPostgresStatements,
+    pub(crate) delivery_postgres: DeliveryPostgresStatements,
     /// `trigger_mutation_receipts` statements both backends issue verbatim.
     receipt: MutationReceiptStatements,
     /// `trigger_mutation_receipts` statements only PostgreSQL issues.
@@ -777,10 +786,12 @@ impl TriggerStore for PostgresTriggerStore {
         subscription_id: &str,
         process_id: &ProcessId,
     ) -> Result<(), PluginError> {
+        let bound_at_ms = i64::try_from(self.clock.timestamp_ms()).unwrap_or(i64::MAX);
         let bound = sqlx::query(trigger_sql().delivery.bind_process.sql())
             .bind(occurrence_id)
             .bind(subscription_id)
             .bind(process_id.as_str())
+            .bind(bound_at_ms)
             .execute(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?
@@ -1120,6 +1131,12 @@ async fn reserve_postgres_deliveries(
             .bind(sql_revision)
             .bind(serde_json::to_string(&subscription).map_err(process_decode_error)?)
             .bind(created_at_ms as i64)
+            .bind(
+                lash_core_execution::store::ObligationId::mint(
+                    lash_core_execution::store::ObligationKind::TriggerDelivery,
+                )
+                .as_str(),
+            )
             .execute(&mut **tx)
             .await
             .map_err(plugin_sqlx_error)?;

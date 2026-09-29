@@ -1048,6 +1048,15 @@ CREATE TABLE IF NOT EXISTS lash_trigger_deliveries (
     subscription_revision BIGINT NOT NULL,
     subscription_snapshot_json TEXT NOT NULL,
     created_at_ms BIGINT NOT NULL,
+    obligation_id TEXT,
+    obligation_state TEXT,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms BIGINT,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms BIGINT,
+    CONSTRAINT ck_trigger_deliveries_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     PRIMARY KEY (occurrence_id, subscription_id)
 );
 CREATE TABLE IF NOT EXISTS lash_trigger_mutation_receipts (
@@ -1063,6 +1072,16 @@ CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_subscription
     ON lash_trigger_deliveries(subscription_id);
 CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_process
     ON lash_trigger_deliveries(process_id);
+-- A reserved delivery owes its start (ADR 0109, ADR 0021): its obligation id,
+-- the relay's due read and the stalled listing.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_id
+    ON lash_trigger_deliveries(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_due
+    ON lash_trigger_deliveries(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_lash_trigger_deliveries_obligation_stalled
+    ON lash_trigger_deliveries(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts (
     namespace TEXT NOT NULL,

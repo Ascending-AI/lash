@@ -185,6 +185,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
+    statements.extend_from_slice(trigger::deliveries::DeliveryObligationStatements::NEUTRAL);
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);
     statements.extend_from_slice(trigger::occurrences::OccurrenceStatements::NEUTRAL);
     statements.extend_from_slice(trigger::subscriptions::SubscriptionStatements::NEUTRAL);

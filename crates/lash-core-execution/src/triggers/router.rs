@@ -590,91 +590,16 @@ impl TriggerRouter {
         process_registry: Arc<dyn crate::ProcessRegistry>,
         effect_controller: &crate::ScopedEffectController<'_>,
     ) -> Result<ProcessId, PluginError> {
+        let DeliveryStart {
+            command,
+            attribution,
+            causal_ref,
+        } = self
+            .prepare_delivery_start(reservation)
+            .await
+            .map_err(DeliveryStartRefusal::into_error)?;
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
-        // Delivery validates against the contract this subscription captured at
-        // registration, never against whatever the live catalog now says. The
-        // reservation carries the subscription snapshot the store pinned when
-        // it reserved, so a catalog edit or a later explicit update cannot
-        // rewrite an already-reserved delivery's contract or route.
-        subscription
-            .payload_schema
-            .validate(&occurrence.payload)
-            .map_err(|err| {
-                PluginError::Session(format!(
-                    "invalid payload for trigger `{}`: {err}",
-                    subscription.subscription_key
-                ))
-            })?;
-        if let Some(source) = occurrence.source.as_ref() {
-            subscription
-                .source_capture
-                .config_schema
-                .validate(source)
-                .map_err(|err| {
-                    PluginError::Session(format!(
-                        "trigger `{}` occurrence source does not match the captured source contract: {err}",
-                        subscription.subscription_key
-                    ))
-                })?;
-        }
-        self.restore_captured_route(&subscription.source_capture)
-            .await?;
-        let args =
-            materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)?;
-        let target = apply_trigger_inputs(subscription.target.clone(), args)?;
-        let trigger_causal_ref = crate::CausalRef::TriggerOccurrence {
-            occurrence_id: occurrence.occurrence_id.clone(),
-            subscription_id: Some(subscription.subscription_id.clone()),
-            subscription_incarnation: Some(subscription.incarnation.clone()),
-            subscription_revision: Some(subscription.revision),
-        };
-        let trigger_occurrence_invocation = crate::runtime::causal::trigger_occurrence_invocation(
-            subscription
-                .registrant_session_id()
-                .cloned()
-                .map(crate::RuntimeAttribution::for_session)
-                .unwrap_or_else(crate::RuntimeAttribution::none),
-            &trigger_causal_ref,
-        );
-        // Engine-admission ruling (FIG-1488): this route deliberately stays
-        // outside the gate. A delivery does not carry a caller-supplied engine
-        // payload — it replays the subscription's own durable target and the
-        // `target_identity` recorded when the subscription was registered, so
-        // the admission decision was made once at registration. Re-gating per
-        // occurrence would make a delivery fail on catalog drift the
-        // subscription already survived, and every delivery for one reservation
-        // must stay deterministic.
-        let registration = crate::ProcessRegistration::new(
-            target.clone(),
-            crate::ProcessProvenance::new(subscription.registrant.clone())
-                .with_caused_by(Some(trigger_causal_ref.clone())),
-            crate::Lifetime::Detached,
-        )
-        .with_start_key(Some(trigger_delivery_start_key(reservation)))
-        .with_admitted_identity(crate::AdmittedProcessIdentity::pinned(
-            subscription.target_identity.clone(),
-        ))
-        .with_extra_event_types(subscription.event_types.clone())
-        .with_execution_env_ref(Some(subscription.env_ref.clone()))
-        .with_wake_session_id(
-            subscription
-                .wake_target
-                .as_ref()
-                .map(|scope| scope.session_id.clone()),
-        );
-        let execution_context = crate::ProcessExecutionContext::default()
-            .with_causal_invocation(Some(trigger_occurrence_invocation));
-        let command = crate::ProcessCommand::Start {
-            registration,
-            observers: subscription
-                .registrant_session_id()
-                .cloned()
-                .into_iter()
-                .collect(),
-            env_spec: None,
-            execution_context: Box::new(execution_context),
-        };
         let effect_id = command.effect_id();
         #[expect(
             clippy::expect_used,
@@ -692,14 +617,10 @@ impl TriggerRouter {
                 ),
             )
             .expect("trigger delivery uses the already admitted controller scope"),
-            subscription
-                .registrant_session_id()
-                .cloned()
-                .map(crate::RuntimeAttribution::for_session)
-                .unwrap_or_else(crate::RuntimeAttribution::none),
+            attribution,
             effect_id.clone(),
         )
-        .with_caused_by(Some(trigger_causal_ref));
+        .with_caused_by(Some(causal_ref));
         let outcome = effect_controller
             .execute_effect(
                 crate::RuntimeEffectEnvelope::new(
@@ -732,7 +653,8 @@ impl TriggerRouter {
                 // The delivery owns exactly the process its key minted: bind
                 // it before the delivery is reported, so recovery resumes an
                 // unbound reservation and never starts a second process for a
-                // bound one (ADR 0107).
+                // bound one (ADR 0107). The bind delivers the reservation's
+                // `TriggerDelivery` obligation in the same write.
                 self.store
                     .bind_delivery_process(
                         &occurrence.occurrence_id,
@@ -746,6 +668,255 @@ impl TriggerRouter {
                 "trigger process start returned the wrong outcome: {}",
                 other.kind().as_str()
             ))),
+        }
+    }
+
+    /// Recover the reserved delivery of `occurrence_id` to `subscription_id`
+    /// into its one bound process: the `TriggerDelivery` obligation's delivery
+    /// (ADR 0109, ADR 0021's FIG-4090 amendment).
+    ///
+    /// A crash between the reservation and its start leaves the row reserved
+    /// and unbound, and nothing re-emits the occurrence: a replayed emit finds
+    /// the reservation already held. Recovery therefore starts from the
+    /// reservation the store holds, never from the occurrence. It registers
+    /// the same process a first attempt registers — the start key is the
+    /// delivery's identity, so a registration that already landed is found
+    /// again rather than doubled — and binds it, which delivers the
+    /// obligation. A reservation already bound is bound again to the same
+    /// process, which answers at once.
+    ///
+    /// # Errors
+    ///
+    /// [`TriggerDeliveryRecoveryError::Refused`] when the reservation can never
+    /// start as reserved: it is gone, its payload or source fails the captured
+    /// contract, its route was revoked, its target is no engine process, or
+    /// its registration was refused terminally. Anything else is
+    /// [`TriggerDeliveryRecoveryError::Retryable`] under the same identity.
+    pub async fn recover_delivery(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+    ) -> Result<ProcessId, TriggerDeliveryRecoveryError> {
+        let reservation = self
+            .store
+            .list_deliveries_by_occurrence_id(occurrence_id)
+            .await
+            .map_err(TriggerDeliveryRecoveryError::classified)?
+            .into_iter()
+            .find(|reservation| reservation.subscription.subscription_id == subscription_id)
+            .ok_or_else(|| {
+                TriggerDeliveryRecoveryError::Refused(PluginError::Session(format!(
+                    "trigger delivery `{occurrence_id}`/`{subscription_id}` is no longer reserved"
+                )))
+            })?;
+        let process_id = match reservation.process_id.clone() {
+            Some(process_id) => process_id,
+            None => self.register_recovered_delivery(&reservation).await?,
+        };
+        self.store
+            .bind_delivery_process(occurrence_id, subscription_id, &process_id)
+            .await
+            .map_err(TriggerDeliveryRecoveryError::classified)?;
+        Ok(process_id)
+    }
+
+    /// Register the process `reservation` starts, outside any journal: the
+    /// relay has no caller whose journal could record it, and the start key
+    /// makes the registration idempotent on its own.
+    async fn register_recovered_delivery(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+    ) -> Result<ProcessId, TriggerDeliveryRecoveryError> {
+        let DeliveryStart { command, .. } = self
+            .prepare_delivery_start(reservation)
+            .await
+            .map_err(|refusal| match refusal {
+                DeliveryStartRefusal::Refused(error) => {
+                    TriggerDeliveryRecoveryError::Refused(error)
+                }
+                DeliveryStartRefusal::Retryable(error) => {
+                    TriggerDeliveryRecoveryError::Retryable(error)
+                }
+            })?;
+        let registry = Arc::clone(self.process_work.registry());
+        let port = Arc::clone(self.process_work.port());
+        let execution = crate::runtime::effect::executor::ProcessLocalExecution {
+            process_starts: self.process_starts.as_ref().map(|(ledger, clock)| {
+                Arc::new(crate::runtime::process_start::ProcessStartRelay::new(
+                    Arc::clone(ledger),
+                    Arc::clone(&registry),
+                    Arc::clone(&port),
+                    Arc::clone(clock),
+                ))
+            }),
+            registry,
+            process_work: port,
+            process_env_store: self.process_env_store.clone(),
+            process_engines: self.process_engines.clone(),
+            turn_cancellation: None,
+            effect_controller: None,
+            outcome_observer: None,
+        };
+        match execution.execute(command).await {
+            Ok(crate::ProcessEffectOutcome::Start { record, .. }) => Ok(record.id),
+            Ok(_) => Err(TriggerDeliveryRecoveryError::Refused(PluginError::Session(
+                "trigger process start returned an outcome other than a start".to_string(),
+            ))),
+            Err(error) => Err(TriggerDeliveryRecoveryError::classified(PluginError::from(
+                error,
+            ))),
+        }
+    }
+
+    /// Everything one delivery's start needs, derived only from the
+    /// reservation, so the first attempt and every recovery register the
+    /// identical process.
+    async fn prepare_delivery_start(
+        &self,
+        reservation: &TriggerDeliveryReservation,
+    ) -> Result<DeliveryStart, DeliveryStartRefusal> {
+        let subscription = &reservation.subscription;
+        let occurrence = &reservation.occurrence;
+        // Delivery validates against the contract this subscription captured at
+        // registration, never against whatever the live catalog now says. The
+        // reservation carries the subscription snapshot the store pinned when
+        // it reserved, so a catalog edit or a later explicit update cannot
+        // rewrite an already-reserved delivery's contract or route.
+        subscription
+            .payload_schema
+            .validate(&occurrence.payload)
+            .map_err(|err| {
+                DeliveryStartRefusal::Refused(PluginError::Session(format!(
+                    "invalid payload for trigger `{}`: {err}",
+                    subscription.subscription_key
+                )))
+            })?;
+        if let Some(source) = occurrence.source.as_ref() {
+            subscription
+                .source_capture
+                .config_schema
+                .validate(source)
+                .map_err(|err| {
+                    DeliveryStartRefusal::Refused(PluginError::Session(format!(
+                        "trigger `{}` occurrence source does not match the captured source contract: {err}",
+                        subscription.subscription_key
+                    )))
+                })?;
+        }
+        self.restore_captured_route(&subscription.source_capture)
+            .await
+            .map_err(|refusal| {
+                if refusal.is_retryable() {
+                    DeliveryStartRefusal::Retryable(refusal.into())
+                } else {
+                    DeliveryStartRefusal::Refused(refusal.into())
+                }
+            })?;
+        let args =
+            materialize_trigger_process_args(&subscription.input_template, &occurrence.payload)
+                .map_err(DeliveryStartRefusal::Refused)?;
+        let target = apply_trigger_inputs(subscription.target.clone(), args)
+            .map_err(DeliveryStartRefusal::Refused)?;
+        let causal_ref = crate::CausalRef::TriggerOccurrence {
+            occurrence_id: occurrence.occurrence_id.clone(),
+            subscription_id: Some(subscription.subscription_id.clone()),
+            subscription_incarnation: Some(subscription.incarnation.clone()),
+            subscription_revision: Some(subscription.revision),
+        };
+        let attribution = subscription
+            .registrant_session_id()
+            .cloned()
+            .map(crate::RuntimeAttribution::for_session)
+            .unwrap_or_else(crate::RuntimeAttribution::none);
+        let trigger_occurrence_invocation =
+            crate::runtime::causal::trigger_occurrence_invocation(attribution.clone(), &causal_ref);
+        // Engine-admission ruling (FIG-1488): this route deliberately stays
+        // outside the gate. A delivery does not carry a caller-supplied engine
+        // payload — it replays the subscription's own durable target and the
+        // `target_identity` recorded when the subscription was registered, so
+        // the admission decision was made once at registration. Re-gating per
+        // occurrence would make a delivery fail on catalog drift the
+        // subscription already survived, and every delivery for one reservation
+        // must stay deterministic.
+        let registration = crate::ProcessRegistration::new(
+            target,
+            crate::ProcessProvenance::new(subscription.registrant.clone())
+                .with_caused_by(Some(causal_ref.clone())),
+            crate::Lifetime::Detached,
+        )
+        .with_start_key(Some(trigger_delivery_start_key(reservation)))
+        .with_admitted_identity(crate::AdmittedProcessIdentity::pinned(
+            subscription.target_identity.clone(),
+        ))
+        .with_extra_event_types(subscription.event_types.clone())
+        .with_execution_env_ref(Some(subscription.env_ref.clone()))
+        .with_wake_session_id(
+            subscription
+                .wake_target
+                .as_ref()
+                .map(|scope| scope.session_id.clone()),
+        );
+        let execution_context = crate::ProcessExecutionContext::default()
+            .with_causal_invocation(Some(trigger_occurrence_invocation));
+        Ok(DeliveryStart {
+            command: crate::ProcessCommand::Start {
+                registration,
+                observers: subscription
+                    .registrant_session_id()
+                    .cloned()
+                    .into_iter()
+                    .collect(),
+                env_spec: None,
+                execution_context: Box::new(execution_context),
+            },
+            attribution,
+            causal_ref,
+        })
+    }
+}
+
+/// One delivery's prepared start: the process command, and the attribution
+/// and cause a journaled attempt records it under.
+struct DeliveryStart {
+    command: crate::ProcessCommand,
+    attribution: crate::RuntimeAttribution,
+    causal_ref: crate::CausalRef,
+}
+
+/// Why a delivery's start could not be prepared.
+enum DeliveryStartRefusal {
+    /// The reservation can never start as reserved.
+    Refused(PluginError),
+    /// A captured provider route is unavailable right now.
+    Retryable(PluginError),
+}
+
+impl DeliveryStartRefusal {
+    fn into_error(self) -> PluginError {
+        match self {
+            Self::Refused(error) | Self::Retryable(error) => error,
+        }
+    }
+}
+
+/// Why [`TriggerRouter::recover_delivery`] did not bind a process.
+#[derive(Debug, thiserror::Error)]
+pub enum TriggerDeliveryRecoveryError {
+    /// The reservation can never start as reserved; the obligation stalls.
+    #[error("{0}")]
+    Refused(PluginError),
+    /// A later attempt may start it under the same identity.
+    #[error("{0}")]
+    Retryable(PluginError),
+}
+
+impl TriggerDeliveryRecoveryError {
+    /// A store or registration failure: refused when terminal, else retried.
+    fn classified(error: PluginError) -> Self {
+        if error.is_terminal() {
+            Self::Refused(error)
+        } else {
+            Self::Retryable(error)
         }
     }
 }
@@ -762,14 +933,14 @@ impl TriggerRouter {
     async fn restore_captured_route(
         &self,
         capture: &TriggerSourceCapture,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), TriggerRouteRefusal> {
         if matches!(capture.route, TriggerProviderRoute::Resident) {
             return Ok(());
         }
         let Some(restorer) = self.route_restorer.as_ref() else {
             return Ok(());
         };
-        restorer.restore(capture).await.map_err(PluginError::from)
+        restorer.restore(capture).await
     }
 }
 
