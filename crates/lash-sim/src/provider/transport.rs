@@ -68,12 +68,19 @@ pub struct ScriptedProviderEventRelease {
     pub release_sequence: usize,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct ScriptedTransportEventGate {
-    opened: AtomicBool,
-    blocked: AtomicBool,
-    blocked_notify: tokio::sync::Notify,
-    opened_notify: tokio::sync::Notify,
+    opened: tokio::sync::watch::Sender<bool>,
+    blocked: tokio::sync::watch::Sender<bool>,
+}
+
+impl Default for ScriptedTransportEventGate {
+    fn default() -> Self {
+        Self {
+            opened: tokio::sync::watch::channel(false).0,
+            blocked: tokio::sync::watch::channel(false).0,
+        }
+    }
 }
 
 impl ScriptedTransportSchedule {
@@ -155,29 +162,24 @@ impl ScriptedTransportSchedule {
 
 impl ScriptedTransportEventGate {
     fn open(&self) {
-        self.opened.store(true, Ordering::SeqCst);
-        self.opened_notify.notify_waiters();
+        self.opened.send_replace(true);
     }
 
     fn is_blocked(&self) -> bool {
-        self.blocked.load(Ordering::SeqCst)
+        *self.blocked.borrow()
     }
 
     async fn wait_until_blocked(&self) {
-        while !self.blocked.load(Ordering::SeqCst) {
-            self.blocked_notify.notified().await;
-        }
+        let _ = self.blocked.subscribe().wait_for(|blocked| *blocked).await;
     }
 
     async fn wait_for_release(&self) {
-        if self.opened.load(Ordering::SeqCst) {
+        let mut opened = self.opened.subscribe();
+        if *opened.borrow() {
             return;
         }
-        self.blocked.store(true, Ordering::SeqCst);
-        self.blocked_notify.notify_waiters();
-        while !self.opened.load(Ordering::SeqCst) {
-            self.opened_notify.notified().await;
-        }
+        self.blocked.send_replace(true);
+        let _ = opened.wait_for(|opened| *opened).await;
     }
 }
 
@@ -949,6 +951,185 @@ fn script_match_error(message: String) -> LlmTransportError {
     LlmTransportError::new(message)
         .with_kind(ProviderFailureKind::Validation)
         .with_lash_code(TurnFailureCode::from_wire("provider_wire_script_mismatch"))
+}
+
+#[cfg(test)]
+mod event_gate_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// Bound on a gate wait that must complete: converts a lost wake into a
+    /// failure instead of a hung test.
+    const WAIT: Duration = Duration::from_secs(5);
+
+    #[tokio::test]
+    async fn release_before_any_waiter_is_retained() {
+        let gate = ScriptedTransportEventGate::default();
+        gate.open();
+        tokio::time::timeout(WAIT, gate.wait_for_release())
+            .await
+            .expect("a release published before the first waiter must be retained");
+        assert!(
+            !gate.is_blocked(),
+            "an early release must not invent a blocked observation"
+        );
+    }
+
+    #[tokio::test]
+    async fn blocked_observer_reading_state_before_publication_still_wakes() {
+        let gate = ScriptedTransportEventGate::default();
+        // Controlled interleaving of the former check-then-register order: the
+        // observer samples the state, a parked provider publishes `blocked`,
+        // and only then does the observer wait on it.
+        let mut blocked = gate.blocked.subscribe();
+        let observed_blocked = *blocked.borrow();
+        assert!(!observed_blocked);
+        gate.blocked.send_replace(true);
+        if !observed_blocked {
+            tokio::time::timeout(WAIT, blocked.wait_for(|blocked| *blocked))
+                .await
+                .expect(
+                    "a blocked publication between the state read and the wait must still wake the observer",
+                )
+                .expect("the gate state channel stays open while the gate is alive");
+        }
+    }
+
+    #[tokio::test]
+    async fn release_waiter_reading_state_before_open_still_wakes() {
+        let gate = ScriptedTransportEventGate::default();
+        // Same stale-observation interleaving on the release side: the waiter
+        // samples `opened` before `open` publishes it, then waits.
+        let mut opened = gate.opened.subscribe();
+        let observed_opened = *opened.borrow();
+        assert!(!observed_opened);
+        gate.open();
+        if !observed_opened {
+            tokio::time::timeout(WAIT, opened.wait_for(|opened| *opened))
+                .await
+                .expect("a release between the state read and the wait must still wake the waiter")
+                .expect("the gate state channel stays open while the gate is alive");
+        }
+    }
+
+    #[tokio::test]
+    async fn blocked_publication_wakes_every_observer() {
+        let gate = Arc::new(ScriptedTransportEventGate::default());
+        let observers: Vec<_> = (0..4)
+            .map(|_| {
+                let gate = gate.clone();
+                tokio::spawn(async move { gate.wait_until_blocked().await })
+            })
+            .collect();
+        let parked = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.wait_for_release().await })
+        };
+        tokio::time::timeout(WAIT, async move {
+            for observer in observers {
+                observer.await.expect("observer task");
+            }
+        })
+        .await
+        .expect("one blocked publication must wake every concurrent observer");
+        assert!(gate.is_blocked());
+        gate.open();
+        tokio::time::timeout(WAIT, parked)
+            .await
+            .expect("the parked provider must wake on release")
+            .expect("parked provider task");
+    }
+
+    #[tokio::test]
+    async fn release_wakes_every_parked_waiter() {
+        let gate = Arc::new(ScriptedTransportEventGate::default());
+        let parked: Vec<_> = (0..3)
+            .map(|_| {
+                let gate = gate.clone();
+                tokio::spawn(async move { gate.wait_for_release().await })
+            })
+            .collect();
+        tokio::time::timeout(WAIT, gate.wait_until_blocked())
+            .await
+            .expect("a parked provider must publish blocked");
+        gate.open();
+        tokio::time::timeout(WAIT, async move {
+            for waiter in parked {
+                waiter.await.expect("parked provider task");
+            }
+        })
+        .await
+        .expect("one release must wake every parked waiter");
+    }
+
+    #[tokio::test]
+    async fn repeat_release_keeps_the_gate_open() {
+        let gate = ScriptedTransportEventGate::default();
+        gate.open();
+        gate.open();
+        tokio::time::timeout(WAIT, gate.wait_for_release())
+            .await
+            .expect("repeat release must stay idempotent");
+        assert!(!gate.is_blocked());
+    }
+
+    #[tokio::test]
+    async fn new_observer_after_dropped_waiter_still_observes_blocked() {
+        let gate = Arc::new(ScriptedTransportEventGate::default());
+        let dropped = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.wait_until_blocked().await })
+        };
+        tokio::task::yield_now().await;
+        dropped.abort();
+        let _ = dropped.await;
+
+        let observer = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.wait_until_blocked().await })
+        };
+        let parked = {
+            let gate = gate.clone();
+            tokio::spawn(async move { gate.wait_for_release().await })
+        };
+        tokio::time::timeout(WAIT, observer)
+            .await
+            .expect("a fresh observer must observe blocked after an earlier waiter was dropped")
+            .expect("observer task");
+        gate.open();
+        tokio::time::timeout(WAIT, parked)
+            .await
+            .expect("the parked provider must wake on release")
+            .expect("parked provider task");
+    }
+
+    #[tokio::test]
+    async fn schedule_release_reports_blocked_only_after_a_park() {
+        let schedule = ScriptedTransportSchedule::new();
+        let early = schedule.release(0, 0, "response_start", 0);
+        assert!(
+            !early.blocked_before_release,
+            "a release before any park must report blocked_before_release=false"
+        );
+
+        let schedule = ScriptedTransportSchedule::new();
+        let parked = {
+            let schedule = schedule.clone();
+            tokio::spawn(async move { schedule.wait_for_release(0, 0).await })
+        };
+        tokio::time::timeout(WAIT, schedule.wait_until_blocked(0, 0))
+            .await
+            .expect("the schedule must observe the parked provider as blocked");
+        let release = schedule.release(0, 0, "response_start", 0);
+        assert!(
+            release.blocked_before_release,
+            "a release while a provider is parked must report blocked_before_release=true"
+        );
+        tokio::time::timeout(WAIT, parked)
+            .await
+            .expect("the parked provider must wake on release")
+            .expect("parked provider task");
+    }
 }
 
 #[cfg(test)]
