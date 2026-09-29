@@ -75,7 +75,21 @@ impl<'run> RuntimeTurnDriver<'run> {
             )
             .map(|context| {
                 self.register_live_opener(context.dispatch(), event_tx);
+                let turn_capture = self.session.history_store().map(|store| {
+                    let capture: Arc<dyn lash_core_execution::TurnToolCapture> =
+                        Arc::new(super::capture_writer::TurnToolCaptureHost::new(
+                            store,
+                            crate::TurnAddress::new(self.session_id.clone(), self.turn_id.clone()),
+                            self.scoped_effect_controller
+                                .execution_scope()
+                                .logical_root()
+                                .unwrap_or_else(|| self.turn_id.clone()),
+                            Arc::new(event_tx.clone()),
+                        ));
+                    capture
+                });
                 context
+                    .with_turn_capture(turn_capture)
                     .with_recorded_turn_cancel(
                         self.turn_cancel.is_some(),
                         Arc::clone(&self.turn_control),

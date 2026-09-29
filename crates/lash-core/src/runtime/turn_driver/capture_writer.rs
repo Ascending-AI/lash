@@ -158,3 +158,125 @@ pub(in crate::runtime) fn capture_write_fault(
         "turn capture write failed: {error}"
     ))
 }
+
+/// A turn's capture as its tool step bodies open it (ADR 0114 §2.2).
+pub(in crate::runtime) struct TurnToolCaptureHost {
+    store: Arc<dyn crate::RuntimePersistence>,
+    turn: crate::TurnAddress,
+    root: crate::TurnId,
+    /// Where persisted progress chunks publish.
+    observer: Arc<dyn crate::engine::ObservationSink>,
+}
+
+impl TurnToolCaptureHost {
+    pub(in crate::runtime) fn new(
+        store: Arc<dyn crate::RuntimePersistence>,
+        turn: crate::TurnAddress,
+        root: crate::TurnId,
+        observer: Arc<dyn crate::engine::ObservationSink>,
+    ) -> Self {
+        Self {
+            store,
+            turn,
+            root,
+            observer,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
+    async fn open_attempt(
+        &self,
+        invocation: &str,
+        call_id: &str,
+    ) -> Result<Arc<dyn lash_core_execution::ToolAttemptCapture>, crate::RuntimeEffectControllerError>
+    {
+        let mut writer = CaptureWriter::open(
+            Arc::clone(&self.store),
+            self.turn.clone(),
+            self.root.clone(),
+            CaptureInvocationKey(invocation.to_string()),
+        )
+        .await
+        .map_err(capture_write_fault)?;
+        writer.push(CaptureFrame::ToolExecutionStarted {
+            call_id: call_id.to_string(),
+        });
+        writer.flush().await.map_err(capture_write_fault)?;
+        Ok(Arc::new(ToolAttemptWriter {
+            writer: futures_util::lock::Mutex::new(writer),
+            observer: Arc::clone(&self.observer),
+            cursor: std::sync::Mutex::new(crate::engine::ObservationCursor::new(
+                crate::engine::ReplayKey::new(format!("{invocation}:progress")),
+            )),
+        }))
+    }
+}
+
+/// One tool attempt's writer: its progress chunks and its settlement.
+struct ToolAttemptWriter {
+    /// One append at a time: a report waits for the one before it.
+    writer: futures_util::lock::Mutex<CaptureWriter>,
+    observer: Arc<dyn crate::engine::ObservationSink>,
+    cursor: std::sync::Mutex<crate::engine::ObservationCursor>,
+}
+
+fn progress_refused(error: StoreError) -> lash_core_execution::ProgressRefused {
+    match error {
+        StoreError::CaptureWriterFenced { .. } | StoreError::CaptureSealed { .. } => {
+            lash_core_execution::ProgressRefused::Fenced
+        }
+        error => lash_core_execution::ProgressRefused::Store(error.to_string()),
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ToolProgressReporter for ToolAttemptWriter {
+    async fn report(
+        &self,
+        call_id: &str,
+        chunk: lash_sansio::ToolOutputChunk,
+    ) -> Result<(), lash_core_execution::ProgressRefused> {
+        {
+            let mut writer = self.writer.lock().await;
+            writer.push(CaptureFrame::ToolOutputProgress {
+                call_id: call_id.to_string(),
+                chunk: chunk.clone(),
+            });
+            writer.flush().await.map_err(progress_refused)?;
+        }
+        use lash_sansio::sync::MutexExt as _;
+        self.cursor.lock_recover().observe(
+            self.observer.as_ref(),
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(crate::TurnActivityId::new(format!("tool:{call_id}"))),
+                event: crate::TurnEvent::ToolOutputProgress {
+                    call_id: call_id.to_string(),
+                    chunk,
+                },
+            },
+        );
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core_execution::ToolAttemptCapture for ToolAttemptWriter {
+    async fn settled(
+        &self,
+        call_id: &str,
+        output: &crate::ToolCallOutput,
+    ) -> Result<(), lash_core_execution::ProgressRefused> {
+        let mut writer = self.writer.lock().await;
+        writer.push(CaptureFrame::ToolSettled {
+            call_id: call_id.to_string(),
+            output: output.clone(),
+        });
+        writer.flush().await.map_err(progress_refused)
+    }
+
+    fn watermark(&self) -> Option<lash_core_execution::runtime::CaptureWatermark> {
+        self.writer.try_lock().and_then(|writer| writer.watermark())
+    }
+}

@@ -67,6 +67,9 @@ pub struct RuntimeExecutionContext<'run> {
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    /// The turn's capture, which this execution's tool attempts write
+    /// (ADR 0114 §2.2). `None` outside a turn or without a durable store.
+    turn_capture: Option<Arc<dyn crate::TurnToolCapture>>,
     pub(super) cancellation_token: Option<CancellationToken>,
     /// Whether `cancellation_token` is only a stop lent to this execution's
     /// step bodies (a process drive's, FIG-3673): then no drive decision reads
@@ -526,6 +529,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,
+            turn_capture: None,
             cancellation_token: None,
             token_is_lent_stop: false,
             turn_cancel: RecordedTurnCancel::default(),
@@ -558,6 +562,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
+            turn_capture: self.turn_capture.clone(),
             cancellation_token: self.cancellation_token.clone(),
             token_is_lent_stop: self.token_is_lent_stop,
             turn_cancel: self.turn_cancel.clone(),
@@ -914,6 +919,16 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         self.turn_phase_probe = probe;
         self
+    }
+
+    /// Install the turn capture this execution's tool attempts write.
+    pub fn with_turn_capture(mut self, capture: Option<Arc<dyn crate::TurnToolCapture>>) -> Self {
+        self.turn_capture = capture;
+        self
+    }
+
+    pub(crate) fn turn_capture(&self) -> Option<&Arc<dyn crate::TurnToolCapture>> {
+        self.turn_capture.as_ref()
     }
 
     pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {

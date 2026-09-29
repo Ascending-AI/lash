@@ -166,9 +166,21 @@ pub struct AttemptContext<'run> {
     completion_support: AttemptCompletionSupport,
     phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
     tool_execution_route: ToolExecutionRoute,
+    /// Where this attempt's progress chunks are persisted (ADR 0114 §2.2);
+    /// `None` outside a turn's capture.
+    progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
 impl<'run> AttemptContext<'run> {
+    /// This call's progress sink. A tool that never calls `report` is
+    /// captured as `ToolOutputCapture::Unavailable`.
+    pub fn progress(&self) -> ToolProgressSink {
+        ToolProgressSink {
+            reporter: self.progress_reporter.clone(),
+            call_id: self.tool_call_id.clone(),
+        }
+    }
+
     /// The logical root this attempt runs under, read from the admitted
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
@@ -233,6 +245,7 @@ impl<'run> AttemptContext<'run> {
             completion_support,
             phase_probe,
             tool_execution_route: context.tool_execution_route.clone(),
+            progress_reporter: context.progress_reporter.clone(),
         }
     }
 
@@ -488,6 +501,36 @@ impl std::fmt::Debug for ToolProgressSink {
     }
 }
 
+/// The turn capture a tool attempt's step body writes (ADR 0114 §2.2,
+/// §4.1): the attempt's start, the chunks it reports, and its settlement,
+/// each persisted before it is published.
+#[async_trait::async_trait]
+pub trait ToolAttemptCapture: ToolProgressReporter {
+    /// Persist the attempt's settled output for call `call_id`.
+    async fn settled(
+        &self,
+        call_id: &str,
+        output: &crate::ToolCallOutput,
+    ) -> Result<(), ProgressRefused>;
+
+    /// Where the attempt's writer stood: the reference its recorded outcome
+    /// carries.
+    fn watermark(&self) -> Option<crate::runtime::CaptureWatermark>;
+}
+
+/// A turn's capture, as the tool step bodies of that turn open it. The
+/// runtime installs one on a turn's execution context; a process has none.
+#[async_trait::async_trait]
+pub trait TurnToolCapture: Send + Sync {
+    /// Open the writer of one tool attempt, keyed by its invocation's
+    /// replay key, and persist that the attempt started for `call_id`.
+    async fn open_attempt(
+        &self,
+        invocation: &str,
+        call_id: &str,
+    ) -> Result<Arc<dyn ToolAttemptCapture>, crate::RuntimeEffectControllerError>;
+}
+
 /// Why a [`ToolProgressSink::report`] was not persisted.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum ProgressRefused {
@@ -716,8 +759,8 @@ impl<'run> ToolContextBuilder<'run> {
 
     /// Installs the turn capture writer that persists this call's progress
     /// (ADR 0114 §2.2). Only the runtime's tool step body sets one.
-    pub fn progress_reporter(mut self, reporter: Arc<dyn ToolProgressReporter>) -> Self {
-        self.progress_reporter = Some(reporter);
+    pub fn progress_reporter(mut self, reporter: Option<Arc<dyn ToolProgressReporter>>) -> Self {
+        self.progress_reporter = reporter;
         self
     }
 
@@ -755,15 +798,6 @@ impl<'run> ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContext<'run> {
-    /// This call's progress sink. A tool that never calls `report` is
-    /// captured as `ToolOutputCapture::Unavailable`.
-    pub fn progress(&self) -> ToolProgressSink {
-        ToolProgressSink {
-            reporter: self.progress_reporter.clone(),
-            call_id: self.tool_call_id.clone(),
-        }
-    }
-
     /// The lineage of the process this tool call runs inside (FIG-3607 R1):
     /// the runtime context's when the call has one, else the dispatch's.
     pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
