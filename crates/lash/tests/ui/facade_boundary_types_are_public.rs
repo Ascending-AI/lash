@@ -12,16 +12,11 @@ use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
     AdmissionId, AdmitRootRequest, CheckpointAdmission, CheckpointAdmissionRequest, DriveEpochSeal,
-    DriveEpochStore, DriveFence, GcReport, GraphAppend, IngressSettlement, IngressStore,
-    MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId, PendingFollowOn,
-    PendingTurnInputBatch, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome, RealizedNodeTimestamp, RootAdmission,
-    RootStore, RootTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimeSessionState,
-    RuntimeStore, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SessionCheckpoint, SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
-    SessionNodeRecord, StoreError, StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary,
-    TurnInputIngress, TurnInputState, VacuumReport, commit_runtime_state_verified,
-    load_persisted_session_state,
+    GraphAppend, IngressSettlement, OperationId, PersistedSessionConfig, RealizedNodeTimestamp,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCommitStore, SessionHeadMeta,
+    SessionHeadPayload, StoreError, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
+    commit_runtime_state_verified,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -35,311 +30,6 @@ use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::{TokenLedgerEntry, TokenUsage};
 use lash::{ModelLimits, ModelSpec};
-
-struct FacadeStore;
-
-impl lash::persistence::FleetFormatStore for FacadeStore {
-    fn fleet_format(&self) -> lash::persistence::FleetFormat {
-        lash::persistence::FleetFormat::current()
-    }
-}
-
-lash_core::impl_noop_attachment_manifest!(FacadeStore);
-
-#[async_trait]
-impl SessionCommitStore for FacadeStore {
-    async fn admit_and_bind_session(
-        &self,
-        _binding: &lash::persistence::SessionBinding,
-    ) -> Result<lash::persistence::SessionAdmission, StoreError> {
-        Ok(lash::persistence::SessionAdmission::Created)
-    }
-
-    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        Ok(None)
-    }
-
-    async fn raise_pending_follow_on_attempts(
-        &self,
-        _fence: &DriveFence,
-        follow_on_turn_id: &TurnId,
-    ) -> Result<PendingFollowOn, StoreError> {
-        Err(StoreError::FollowOnNotPending {
-            session_id: SessionId::from("facade"),
-            follow_on_turn_id: follow_on_turn_id.clone(),
-        })
-    }
-
-    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        Ok(None)
-    }
-
-    async fn load_node(&self, _node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
-        Ok(None)
-    }
-
-    async fn commit_runtime_state(
-        &self,
-        commit: RuntimeCommit,
-    ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let realized_node_timestamps = commit
-            .graph
-            .appended_nodes()
-            .map(|node| RealizedNodeTimestamp {
-                node_id: node.node_id.clone(),
-                timestamp: node.timestamp.clone(),
-            })
-            .collect();
-        let manifest: SessionCheckpoint = commit
-            .checkpoint
-            .manifest(lash::persistence::FleetFormat::current())?;
-        Ok(RuntimeCommitReceipt {
-            schema_version: lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
-            head_revision: commit.expected_head_revision + 1,
-            checkpoint_ref: "checkpoint".to_string().into(),
-            manifest,
-            committed_leaf_node_id: commit.graph.leaf_node_id().cloned(),
-            realized_node_timestamps,
-            committed_usage_delta_identities: commit
-                .usage_deltas
-                .iter()
-                .map(|delta| delta.identity.clone())
-                .collect(),
-            failure_evidence: commit.failure_evidence.clone(),
-            pending_follow_on: None,
-            turn_input_applications: Vec::new(),
-            turn_cancel_input_outcome: Default::default(),
-            receipt_replayed: false,
-        })
-    }
-
-    async fn save_session_meta(&self, _meta: SessionMeta) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        Ok(None)
-    }
-}
-
-// Compile-only store: these segments exist to prove every capability trait
-// (and its signature vocabulary) is nameable through the facade.
-#[async_trait]
-impl IngressStore for FacadeStore {
-    async fn validate_turn_cancellation_binding(
-        &self,
-        _session_id: &SessionId,
-        _fence: &DriveFence,
-        _binding_id: &str,
-        _admitted_scope: &lash::runtime::ExecutionScope,
-    ) -> Result<(), StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn authorize_turn_cancel_closure(
-        &self,
-        _fence: &DriveFence,
-        _authorization: &lash::TurnCancelClosureAuthorization,
-    ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn pending_turn_cancel_closures(
-        &self,
-        _session_id: &SessionId,
-        _fence: &DriveFence,
-        _binding_id: &str,
-        _admitted_scope: &lash::runtime::ExecutionScope,
-    ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn turn_is_committed(&self, _address: &lash::TurnAddress) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-
-    async fn enqueue_pending_turn_inputs(
-        &self,
-        _batch: PendingTurnInputBatch,
-    ) -> Result<Vec<lash::PendingTurnInput>, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn admit_pending_turn_inputs(
-        &self,
-        _batch: PendingTurnInputBatch,
-        _ingress_claim_ttl_ms: u64,
-    ) -> Result<lash::persistence::TurnInputAdmission, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn list_pending_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<lash::PendingTurnInputRead>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn cancel_pending_turn_inputs(
-        &self,
-        _session_id: &SessionId,
-        _targets: &[lash::PendingTurnInputCancelTarget],
-    ) -> Result<Vec<lash::PendingTurnInputCancelReceipt>, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn cancel_pending_turn_input_suffix(
-        &self,
-        _session_id: &SessionId,
-        _anchor: &lash::PendingTurnInputCancelTarget,
-    ) -> Result<lash::PendingTurnInputSuffixCancelOutcome, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        _batch: QueuedWorkBatchDraft,
-    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn open_session_command_run(
-        &self,
-        _fence: &DriveFence,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn cancel_queued_work_batch(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        Ok(None)
-    }
-
-    async fn queued_work_batch_completed(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-
-    async fn pending_session_work_ordering(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
-        Ok(lash_core::store::PendingSessionWorkOrdering {
-            session_command: None,
-            turn_input: None,
-        })
-    }
-
-    async fn list_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn list_open_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        Ok(Vec::new())
-    }
-}
-
-#[async_trait]
-impl DriveEpochStore for FacadeStore {
-    async fn seal_drive_epoch(
-        &self,
-        _session_id: &SessionId,
-        _admission: &AdmissionId,
-        _observed_epoch: u64,
-        _root_start: &lash::persistence::RootStartNonce,
-    ) -> Result<DriveEpochSeal, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn drive_epoch(&self, _session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-}
-
-#[async_trait]
-impl RootStore for FacadeStore {
-    async fn unfinished_root(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Option<lash::persistence::UnfinishedRoot>, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn admit_root(
-        &self,
-        _request: &AdmitRootRequest,
-    ) -> Result<Option<RootAdmission>, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn admit_at_checkpoint(
-        &self,
-        _request: &CheckpointAdmissionRequest,
-    ) -> Result<CheckpointAdmission, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn root_terminal(
-        &self,
-        _session_id: &SessionId,
-        _root: &lash::TurnId,
-    ) -> Result<Option<RootTerminal>, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn root_of_input(
-        &self,
-        _session_id: &SessionId,
-        _input: &lash::InputId,
-    ) -> Result<Option<lash::TurnId>, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn root_binding(
-        &self,
-        _session_id: &SessionId,
-        _input: &lash::InputId,
-    ) -> Result<Option<lash::TurnId>, StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-
-    async fn bind_root_inputs(
-        &self,
-        _session_id: &SessionId,
-        _root: &lash::TurnId,
-        _inputs: &[lash::InputId],
-    ) -> Result<(), StoreError> {
-        unreachable!("fixture runs no session drive")
-    }
-}
-
-#[async_trait]
-impl StoreMaintenance for FacadeStore {
-    async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
-        Ok(VacuumReport::default())
-    }
-
-    async fn gc_unreachable(&self) -> MaintenanceResult<GcReport> {
-        Err(MaintenanceFailure::refused(
-            MaintenanceRefusal::UnwitnessedScope {
-                scope: "facade boundary fixture",
-            },
-            GcReport::default(),
-        ))
-    }
-}
 
 fn persistence_types_are_nameable(
     graph: GraphAppend,
@@ -375,6 +65,7 @@ fn persistence_types_are_nameable(
         failure_evidence: Vec::new(),
         turn_commit: RuntimeTurnCommitStamp::new(operation),
         ingress: None::<IngressSettlement>,
+        outcome: None,
         applied_commands: None,
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
@@ -566,9 +257,14 @@ fn trigger_types_are_homed_in_triggers(
 }
 
 async fn persistence_load_helpers_are_nameable(
-    store: &dyn RuntimeStore,
+    store: &lash::persistence::SessionStore,
 ) -> Result<Option<RuntimeSessionState>, StoreError> {
-    load_persisted_session_state(store).await
+    Ok(lash::persistence::load_session_window_state(
+        store,
+        lash::persistence::WindowSelector::Current,
+    )
+    .await?
+    .map(|loaded| loaded.state))
 }
 
 async fn verified_commit_chokepoint_is_nameable(
@@ -624,10 +320,10 @@ fn leaked_signature_types_are_homed(
     );
 }
 
-fn assert_store_object(_: Arc<dyn RuntimeStore>) {}
+fn assert_store_object(_: &dyn RuntimeStore) {}
 
 fn main() {
-    assert_store_object(Arc::new(FacadeStore));
+    let _ = assert_store_object;
     let _ = SessionHeadMeta::assemble(
         &SessionId::from("facade"),
         SessionHeadPayload {
