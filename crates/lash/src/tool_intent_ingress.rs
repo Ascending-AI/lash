@@ -1141,7 +1141,7 @@ impl ToolIntentIngress {
         let store: std::sync::Arc<dyn lash_core::TriggerStore> =
             std::sync::Arc::new(lash_core::triggers::RevisionReferrerTriggerStore::new(
                 store,
-                self.core.env.core.process_engines.clone(),
+                self.core.host_process_engines.clone(),
                 creator.clone(),
             ));
         let mut draft = intent.draft;
@@ -1230,7 +1230,7 @@ impl ToolIntentIngress {
             std::sync::Arc::new(
                 lash_core::process_registry::RevisionReferrerDefinitionRegistry::new(
                     self.core.env.core.process_definitions(),
-                    self.core.env.core.process_engines.clone(),
+                    self.core.host_process_engines.clone(),
                     creator.clone(),
                 ),
             );
@@ -1259,9 +1259,7 @@ impl ToolIntentIngress {
             })?;
             let ports = self
                 .core
-                .env
-                .core
-                .process_engines
+                .host_process_engines
                 .artifact_ports()
                 .ok_or_else(|| {
                     crate::EmbedError::Plugin(lash_core::PluginError::Session(format!(
@@ -1302,9 +1300,7 @@ impl ToolIntentIngress {
         };
         let resolution = self
             .core
-            .env
-            .core
-            .process_engines
+            .host_process_engines
             .resolve(&pinned)
             .await
             .map_err(|error| {
