@@ -80,6 +80,7 @@
 //! invocation suspended on a v2 workflow address is unreachable from v4
 //! resolutions, so it never self-terminates; an operator cancels it.
 
+mod compat;
 mod controller;
 mod durable_wait;
 mod effect_group;
@@ -102,6 +103,10 @@ mod turn;
 mod turn_handler;
 
 pub use restate_sdk;
+
+pub use compat::{
+    COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply, VersionRange,
+};
 
 pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,

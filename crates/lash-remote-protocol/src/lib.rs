@@ -9,6 +9,7 @@
 //! [`REMOTE_PROTOCOL_VERSION`]) lives at the root itself.
 
 pub mod llm;
+pub mod negotiation;
 pub mod observations;
 pub mod processes;
 pub mod prompt;
@@ -22,6 +23,7 @@ pub mod turn_result;
 pub mod usage_activity;
 
 pub use llm::*;
+pub use negotiation::{Negotiated, Negotiation, REMOTE_PROTOCOL, VersionRange, answer};
 pub use observations::*;
 pub use processes::*;
 pub use prompt::*;

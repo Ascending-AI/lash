@@ -20,6 +20,7 @@ use super::{
     ensure_supported_record_schema_version, ensure_supported_schema_version, record_schema_version,
 };
 use crate::StoreError;
+use crate::compat::{CompatRefusal, VersionRange};
 
 /// The fleet format every writer this build runs emits — the only `F` this
 /// build's writable range admits.
@@ -29,6 +30,16 @@ use crate::StoreError;
 /// upgrade introduces `min_F`/`max_F` and widens the range; until then a store
 /// recording any other value is refused at open.
 pub const FLEET_FORMAT_VERSION: u32 = 1;
+
+/// The fleet epochs this build writes under: `[F_prev, F_self]` (ADR 0115
+/// §2.1).
+///
+/// `F` is the release compatibility epoch. A compatibility release declares
+/// the epoch of the release before it and its own, and its finalize moves `F`
+/// to its own even when no format changed, because moving it is what fences
+/// the old release's writers. 1.0 is the first release, so its range is the
+/// one epoch it introduces.
+pub const FLEET_WRITABLE_RANGE: VersionRange = VersionRange::exactly(FLEET_FORMAT_VERSION);
 
 /// The fleet format a store records, as the fleet-format row reports it.
 ///
@@ -93,8 +104,50 @@ impl FleetFormat {
         Self { pins, ..self }
     }
 
+    /// The fleet epochs this build writes under, [`FLEET_WRITABLE_RANGE`]
+    /// (ADR 0115 §2.1).
+    pub const fn writable() -> VersionRange {
+        FLEET_WRITABLE_RANGE
+    }
+
+    /// The epoch a store records, admitted at open against the writable
+    /// range `writable` of the build doing the opening (ADR 0115 §2.1).
+    ///
+    /// Below the range a compatibility release was skipped; above it the
+    /// fleet is newer. Both refuse with
+    /// [`CompatRefusal::FleetOutsideWritable`], before the store takes
+    /// traffic.
+    pub fn admit(recorded: u32, writable: VersionRange) -> Result<Self, StoreError> {
+        if writable.contains(recorded) {
+            Ok(Self::from_version(recorded))
+        } else {
+            Err(StoreError::Incompatible {
+                refusal: CompatRefusal::FleetOutsideWritable { recorded, writable },
+            })
+        }
+    }
+
+    /// The epoch the writer fence read inside a mutating transaction,
+    /// checked against the writable range (ADR 0115 §2.4).
+    ///
+    /// Outside the range a newer release has finalized: the answer is the
+    /// terminal [`StoreError::WriterFenced`], and the transaction must roll
+    /// back having written nothing. Whether an epoch inside the range differs
+    /// from the one a commit's payloads were encoded under is the caller's
+    /// comparison, because only it knows the encoding epoch.
+    pub fn fence(recorded: u32, writable: VersionRange) -> Result<Self, StoreError> {
+        if writable.contains(recorded) {
+            Ok(Self::from_version(recorded))
+        } else {
+            Err(StoreError::WriterFenced { recorded, writable })
+        }
+    }
+
     /// The fleet-format versions this build can write under — the
     /// `[min_F, max_F]` writable range of ADR 0106 §1.
+    ///
+    /// Superseded by [`FleetFormat::writable`]; it stays until the store
+    /// lanes move their opens onto [`FleetFormat::admit`].
     ///
     /// Before the first format upgrade the range is one version wide. The
     /// build that introduces the next durable format widens it here, and an
@@ -111,6 +164,9 @@ impl FleetFormat {
     /// contain means the fleet writes a generation this build cannot emit, and
     /// the open is refused with the typed error an operator can route rather
     /// than allowed to stamp retired formats.
+    ///
+    /// Superseded by [`FleetFormat::admit`]; it stays until the store lanes
+    /// move their opens onto it.
     pub fn admit_recorded(
         version: u32,
         writable: RangeInclusive<u32>,
@@ -153,20 +209,35 @@ impl FleetFormat {
     /// `F`'s older version climbs to the newest through the surface's
     /// [`RecordUpcaster`] hooks before it decodes. Anything outside the pair
     /// is refused exactly as an exact-version decoder refuses it.
+    ///
+    /// Immutable history is read through a permanent floor instead (ADR 0115
+    /// §5): a surface [`HISTORY_FLOORS`] names admits every version from its
+    /// floor to the newest, whatever `F` says, so history written before a
+    /// finalize stays readable after it. The floor is fail-closed: it reaches
+    /// down only as far as the surface's [`RecordUpcaster`] chain lifts a
+    /// payload to the newest, so no reader admits a version it cannot
+    /// transform.
     pub fn read_window(self, surface: SurfaceFormat) -> ReadWindow {
+        let newest = surface.build_newest();
         ReadWindow {
-            newest: surface.build_newest(),
+            newest,
             recorded: self.writer_version(surface),
+            oldest: history_floor(surface)
+                .map_or(newest, |floor| oldest_upcastable(surface, floor, newest)),
         }
     }
 }
 
-/// The `{recorded, newest}` pair a reader admits for one surface — what the
-/// fleet writes now and what this build decodes natively.
+/// The versions a reader admits for one surface: what the fleet writes now,
+/// what this build decodes natively, and, for immutable history, every
+/// version from the surface's permanent floor up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReadWindow {
     newest: u32,
     recorded: u32,
+    /// The oldest version admitted below `newest`: `newest` itself for a
+    /// surface without a history floor.
+    oldest: u32,
 }
 
 impl ReadWindow {
@@ -181,11 +252,94 @@ impl ReadWindow {
         self.recorded
     }
 
-    /// Whether a reader admits `version`: the build's newest, or `F`'s
-    /// recorded version for the surface (FIG-3796).
-    pub fn admits(self, version: u32) -> bool {
-        version == self.newest || version == self.recorded
+    /// The oldest version the window admits through a history floor; the
+    /// newest version when the surface has none.
+    pub const fn oldest(self) -> u32 {
+        self.oldest
     }
+
+    /// Whether a reader admits `version`: `F`'s recorded version for the
+    /// surface (FIG-3796), or any version in `[oldest, newest]`, which is the
+    /// build's newest alone unless the surface has a history floor.
+    pub fn admits(self, version: u32) -> bool {
+        version == self.recorded || (self.oldest <= version && version <= self.newest)
+    }
+}
+
+/// One immutable-history surface and its permanent read floor (ADR 0115 §5):
+/// the oldest version of the surface any build of this line still reads.
+/// `F` never moves it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryFloor {
+    /// The name the surface registers under in `scripts/versioned-surfaces.toml`.
+    pub constant: &'static str,
+    /// The oldest version readers admit, lifted to the newest through the
+    /// surface's [`RecordUpcaster`] chain.
+    pub floor: u32,
+}
+
+/// The surfaces whose records are immutable history: preserved byte for
+/// byte, never rewritten, and read through a permanent floor rather than
+/// `F`'s `{recorded, newest}` pair (ADR 0115 §5).
+///
+/// Every floor is 1, the first version at the cut; the upcasters that let a
+/// later build read below its newest are FIG-3802's.
+pub const HISTORY_FLOORS: &[HistoryFloor] = &[
+    HistoryFloor {
+        constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "SESSION_CHECKPOINT_SCHEMA_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "CHECKPOINT_COMPONENT_ENCODING_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "RLM_SNAPSHOT_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "LASHLANG_SNAPSHOT_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "HEAP_SIZE_SCHEDULE_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "NATIVE_TRANSPORT_VERSION",
+        floor: 1,
+    },
+    HistoryFloor {
+        constant: "PROCESS_EVENT_VOCABULARY_VERSION",
+        floor: 1,
+    },
+];
+
+/// The permanent floor of `surface`, when it is immutable history.
+pub fn history_floor(surface: SurfaceFormat) -> Option<u32> {
+    let constant = surface.constant_name();
+    HISTORY_FLOORS
+        .iter()
+        .find(|entry| entry.constant == constant)
+        .map(|entry| entry.floor)
+}
+
+/// The oldest version at or above `floor` from which the surface's upcaster
+/// chain reaches `newest` unbroken.
+fn oldest_upcastable(surface: SurfaceFormat, floor: u32, newest: u32) -> u32 {
+    let mut oldest = newest;
+    while oldest > floor && upcast_chain_covers(surface, oldest - 1, newest) {
+        oldest -= 1;
+    }
+    oldest
 }
 
 /// One registered transform lifting a registered surface's recorded payload
@@ -514,4 +668,72 @@ where
         record_kind,
         message: format!("failed to decode {record_kind}: {err}"),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{FLEET_WRITABLE_RANGE, FleetFormat, SurfaceFormat, history_floor};
+    use crate::StoreError;
+    use crate::compat::{CompatRefusal, VersionRange};
+
+    #[test]
+    fn fleet_epoch_is_admitted_at_open_and_fenced_in_a_transaction() {
+        assert_eq!(FleetFormat::writable(), FLEET_WRITABLE_RANGE);
+        assert_eq!(FLEET_WRITABLE_RANGE, VersionRange::exactly(1));
+        let writable = VersionRange::new(2, 3).expect("range");
+
+        assert_eq!(
+            FleetFormat::admit(3, writable).expect("inside").version(),
+            3
+        );
+        for recorded in [1, 4] {
+            let Err(StoreError::Incompatible {
+                refusal:
+                    CompatRefusal::FleetOutsideWritable {
+                        recorded: r,
+                        writable: w,
+                    },
+            }) = FleetFormat::admit(recorded, writable)
+            else {
+                panic!("F {recorded} outside {writable} must refuse at open");
+            };
+            assert_eq!((r, w), (recorded, writable));
+        }
+
+        assert_eq!(
+            FleetFormat::fence(2, writable).expect("inside").version(),
+            2
+        );
+        let Err(StoreError::WriterFenced {
+            recorded,
+            writable: w,
+        }) = FleetFormat::fence(4, writable)
+        else {
+            panic!("F 4 outside {writable} must fence the writer");
+        };
+        assert_eq!((recorded, w), (4, writable));
+    }
+
+    #[test]
+    fn history_is_read_through_its_permanent_floor() {
+        let history = SurfaceFormat::of("SESSION_NODE_BODY_SCHEMA_VERSION", 1);
+        assert_eq!(history_floor(history), Some(1));
+        let window = FleetFormat::current().read_window(history);
+        assert_eq!((window.oldest(), window.newest()), (1, 1));
+        assert!(window.admits(1) && !window.admits(2));
+
+        // Fail-closed: without an upcaster chain the floor reaches no lower
+        // than the newest version.
+        let unlifted = SurfaceFormat::of("crate::SESSION_CHECKPOINT_SCHEMA_VERSION", 4);
+        let window = FleetFormat::current().read_window(unlifted);
+        assert_eq!(window.oldest(), 4);
+        assert!(window.admits(4) && !window.admits(1));
+
+        // A surface that is not history keeps `F`'s `{recorded, newest}` pair.
+        let mutable = SurfaceFormat::of("SESSION_HEAD_META_SCHEMA_VERSION", 3);
+        assert_eq!(history_floor(mutable), None);
+        let window = FleetFormat::current().read_window(mutable);
+        assert_eq!(window.oldest(), 3);
+        assert!(window.admits(3) && !window.admits(2));
+    }
 }

@@ -99,11 +99,12 @@ pub use fencing::{
     wake_delivery_claim_verdict,
 };
 pub use fleet_format::{
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, RECORD_UPCASTERS, ReadWindow,
-    RecordUpcaster, SurfaceFormat, WriterPin, decode_versioned_json_record,
-    decode_versioned_json_record_for_fleet, decode_versioned_msgpack_record_for_fleet,
-    ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
-    upcast_chain_covers, upcast_json_record,
+    FLEET_FORMAT_VERSION, FLEET_WRITABLE_RANGE, FleetFormat, FleetFormatState, HISTORY_FLOORS,
+    HistoryFloor, RECORD_UPCASTERS, ReadWindow, RecordUpcaster, SurfaceFormat, WriterPin,
+    decode_versioned_json_record, decode_versioned_json_record_for_fleet,
+    decode_versioned_msgpack_record_for_fleet, ensure_supported_record_schema_version_for_fleet,
+    ensure_supported_schema_version_for_fleet, history_floor, upcast_chain_covers,
+    upcast_json_record,
 };
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_owner::LeaseOwnerIdentity;

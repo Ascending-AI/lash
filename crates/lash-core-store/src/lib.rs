@@ -23,6 +23,7 @@ pub mod attachments;
 pub mod await_event_identity;
 pub mod build_generation;
 pub mod chronological;
+pub mod compat;
 pub mod effect_identity;
 pub mod effect_opener;
 pub mod executable_generation;

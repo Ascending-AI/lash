@@ -148,6 +148,24 @@ pub enum StoreError {
         "store records fleet format {recorded}, outside this build's writable range ending at {current}; run `lash admin finalize-upgrade` from a build whose range contains {recorded}, or upgrade this build"
     )]
     FleetFormatOutsideWritableRange { recorded: u32, current: u32 },
+    /// A store, an epoch or a stored label this build cannot admit
+    /// (ADR 0115 §1.5). The refusal names its remedy.
+    #[error("{refusal}")]
+    Incompatible {
+        refusal: crate::compat::CompatRefusal,
+    },
+    /// The writer fence read `F` outside this build's writable range inside a
+    /// mutating transaction (ADR 0115 §2.4): a newer release finalized, and
+    /// this deployment takes no more work. The transaction wrote nothing.
+    #[error(
+        "writer fenced: the fleet epoch is {recorded}, outside this build's writable range \
+         {writable}; this deployment takes no more work. Roll forward to a build whose writable \
+         range contains {recorded}; `lashctl version` prints a build's range"
+    )]
+    WriterFenced {
+        recorded: u32,
+        writable: crate::compat::VersionRange,
+    },
     #[error("invalid session id: {reason}")]
     InvalidSessionId { reason: &'static str },
     #[error(
@@ -753,6 +771,8 @@ impl StoreError {
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
             Self::FleetFormatOutsideWritableRange { .. } => "FleetFormatOutsideWritableRange",
+            Self::Incompatible { .. } => "Incompatible",
+            Self::WriterFenced { .. } => "WriterFenced",
             Self::SessionStateVersionNewerThanRuntime { .. } => {
                 "SessionStateVersionNewerThanRuntime"
             }
