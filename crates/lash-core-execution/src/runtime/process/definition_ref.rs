@@ -296,6 +296,12 @@ pub enum ProcessDefinitionRefusal {
         claimed: ProcessSignature,
         authoritative: ProcessSignature,
     },
+    /// The descriptor presented for a definition value is not the one its id
+    /// was derived from.
+    DefinitionIdMismatch {
+        claimed: lash_sansio::ProcessDefinitionId,
+        derived: lash_sansio::ProcessDefinitionId,
+    },
 }
 
 impl std::fmt::Display for ProcessDefinitionRefusal {
@@ -324,6 +330,11 @@ impl std::fmt::Display for ProcessDefinitionRefusal {
                 formatter,
                 "process definition signature claim `{claimed}` disagrees with the `{engine_kind}` \
                  artifact signature `{authoritative}`"
+            ),
+            Self::DefinitionIdMismatch { claimed, derived } => write!(
+                formatter,
+                "process definition `{claimed}` is not the definition presented for it, \
+                 which is `{derived}`"
             ),
         }
     }

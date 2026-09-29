@@ -8,12 +8,22 @@ Status: Accepted (FIG-2990, 2026-09-13). Supersedes
 [ADR 0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md) and
 [ADR 0090](0090-named-process-signatures-are-authoritative.md).
 
+Amended 2026-09-29 (FIG-4174, FIG-4175): process definitions are immutable
+values named by a content-derived `ProcessDefinitionId`, and the named
+definition registry is withdrawn. *One definition reference, one codec* and
+*Names are tool input only* below are superseded in place by
+*Definitions are immutable values*; the introduction's tool list is corrected
+to match.
+
 Amended 2026-09-24 (FIG-3016): [ADR 0096](0096-typescript-is-the-sole-rlm-dialect.md)
 made TypeScript the sole RLM dialect. The Lashlang `process (…) { }` literal
 and the other "both dialects" wording below are historical; the process
-literal is the TypeScript async arrow. The shipped process-control tools are
-`processes.start`, `await`, `emit`, `signal`, `cancel`, `list` and `register`;
-there is no `create` tool. `triggers.register` is a declaring leaf tool
+literal is the TypeScript async arrow. The process-control tools are
+`processes.create`, `get`, `start`, `await`, `emit`, `signal`, `cancel` and
+`list`. There is no `register` tool, and no model operation replaces or deletes
+a definition or lists a definition catalog (FIG-4174; an earlier revision of
+this paragraph said `register` shipped and `create` did not, which was stale
+once `processes.create` landed). `triggers.register` is a declaring leaf tool
 (`tool:register_trigger`) on the same pattern: it validates the registration
 and declares `ToolIntent::RegisterTrigger`, and the subscription installs when
 the intent is realized. The other trigger operations (`list`, `update`,
@@ -56,7 +66,8 @@ reference and codec), FIG-2993 (`x-lash`), FIG-2994 (intents), FIG-2995
 
 A process definition is a value of type `Process<(params), out>`, carried by
 tool contracts like any other value. Every process control — start, await,
-emit, signal, cancel, list, register, trigger register, create — is an ordinary
+emit, signal, cancel, list, get, trigger register, create (FIG-4174 replaced
+register with get) — is an ordinary
 leaf plugin tool that takes and returns those values. The only constructs that
 remain in the language are the ones that read or write the running VM's own
 control state: `waitSignal`, `sleep`, `finish`.
@@ -81,6 +92,11 @@ signature type-checks a cell and still starts no process.
 
 ### One definition reference, one codec
 
+*Superseded by FIG-4174: see* Definitions are immutable values *below. The
+single-codec rule stands and now applies to `ProcessDefinitionId`; the
+`ProcessDefinitionRef` it describes, and its fingerprint, are replaced by the
+id.*
+
 `ProcessDefinitionRef` — engine kind, engine-owned definition value, claimed
 signature, with a fingerprint derived over engine kind and definition —
 replaces the optional untyped definition on process identity. One encoder and
@@ -101,6 +117,11 @@ position was reading a coincidence.
 
 ### Names are tool input only
 
+*Superseded by FIG-4174: there is no named-definition registry. See*
+Definitions are immutable values *below. The rule that no catalog name crosses
+a durable boundary survives, strengthened: no catalog name reaches Lash at
+all.*
+
 A named-definition registry (`process_definitions`) is modelled on
 `trigger_subscriptions`: owner scope, name, revision, definition fingerprint,
 tombstone, change sequence, unique on owner scope and name, written by a
@@ -114,6 +135,111 @@ either a reference or a name, and it is tool input only; every durable record
 and every draft pins a `ProcessDefinitionRef`. A trigger delivery therefore
 fires the definition pinned at registration and never re-resolves a name at
 delivery time.
+
+### Definitions are immutable values
+
+*Added by FIG-4174 and FIG-4175, 2026-09-29, under Sam's rulings of that date:
+definitions are immutable and identified by a unique content-derived
+`ProcessDefinitionId`; Lash has no names, revisions, compare-and-swap or
+replace; hosts own names and versions; equal canonical definitions share one
+id; an id alone retains nothing, and a host pin retains.*
+
+**The id.** A definition is the descriptor
+`ProcessDefinitionDraft {engine_kind, value, artifacts}`: the owning engine's
+kind, its canonical engine value, and the artifacts it reads, sorted and
+deduplicated. Its id is spelled
+
+```text
+lash.definition:sha256:<64 lowercase hexadecimal digits>
+```
+
+and is the SHA-256 of a preimage in its own owned identity domain,
+`lash.process-definition-id` family version 1. No existing family or format
+version moves.
+
+```text
+"lash-stable-identity" || salt:u8 || 1:u8 || len:u64 || "lash.process-definition-id"
+|| len:u64 || engine kind
+|| len:u64 || identity_json::payload_leaf(value)
+|| count:u64 || for each artifact leaf, sorted by its bytes, deduplicated:
+     len:u64 || tag:u8 (1 process_env, 2 lashlang_module, 3 engine)
+                [|| len:u64 || engine kind, for tag 3] || len:u64 || artifact reference
+```
+
+Lengths and counts are big-endian. The value goes through the existing
+canonical JSON encoder, so object key order and signed zero are not content;
+`1` and `1.0` are. Sorting by leaf bytes keeps the order independent of any
+Rust declaration. Golden preimages computed by an independent implementation
+freeze the grammar
+(`crates/lash-core-execution/src/runtime/process/definition_tests.rs`); a
+change is a new family, never an edit. Module references participate; module
+bytes stay content-addressed in their own store.
+
+**One encoding.** `lash-sansio` owns the spelling, as it owns the handle
+codec. Wherever an id sits in a JSON value — a model value, process arguments
+and results, a journal entry, a trigger target, a remote DTO — it is the
+tagged record `{"$lash_definition_id": "<spelling>"}` and never a bare string,
+so any walker can tell an id from text. A SQL column or a log line holds the
+spelling. There is no other encoding.
+
+**The signature is derived, not hashed.** It is what the owning engine's
+resolution of the descriptor says, so it is not in the preimage and a claim
+cannot move an id. A definition value carries it as a claim. An unknown claim
+asserts nothing and adopts the derivation. A known claim that disagrees is
+refused before any durable row exists, and so is a descriptor whose id is not
+the one claimed. ADR 0090's authority is unchanged.
+
+**Model contract.** Every object refuses unknown fields.
+
+```typescript
+type DefinitionId = { $lash_definition_id: string };
+type ProcessSignature = { signature: "unknown" } | { signature: "known"; encoding: unknown };
+type Definition = { id: DefinitionId; signature: ProcessSignature };
+type ProcessHandle = { __handle__: "lash"; id: string; process_id: string };
+type Target = { definition: Definition } | { definition_id: DefinitionId };
+processes.create({ source: string, dialect: "typescript" }): Promise<Definition>;
+processes.start(Target & { args?: Record<string, unknown>; label?: string }): Promise<ProcessHandle>;
+processes.get({ definition_id: DefinitionId }): Promise<Definition>;
+```
+
+Exactly one target field is required, and `args` defaults to `{}`. There is
+no engine argument, because the descriptor supplies it. Lifted literals and
+module exports publish through the same immutable path. Get and start answer
+typed `DefinitionMissing`, corruption, unavailable-engine or
+signature-mismatch failures; missing is not an empty success. The run list's
+definition filter takes a `DefinitionId`, and trigger targets use the same
+`Target` union. There is no model register, replace, definition delete or
+catalog list.
+
+**Host contract.**
+
+```text
+publish_definition(pin: HostArtifactPin, draft: ProcessDefinitionDraft) -> Result<ProcessDefinition>
+pin_definition(pin: HostArtifactPin, id: ProcessDefinitionId) -> Result<()>
+get_definition(id: ProcessDefinitionId) -> Result<Option<ProcessDefinition>>
+release(pin: HostArtifactPin) -> Result<()>
+start(request: ProcessStartRequest, controller: ScopedEffectController) -> Result<ProcessStartReceipt>
+```
+
+A host publishes the module bytes a draft names under the same pin before it
+publishes the draft. `ProcessStartRequest`'s input gains
+`Definition {definition_id, args}`; its other fields and the receipt are
+unchanged. `get_definition` acquires no lasting pin. A host that wants names
+or versions keeps `(tenant, workflow, host revision, definition id, pin)` in
+its own database: it publishes or pins first, moves its pointer under its own
+concurrency rule, and releases the old pin when its policy allows. Lash
+supplies the mechanics, not that policy.
+
+**Retention.** An id is data. The frame, process record, subscription
+revision, start, journal or host pin that holds a definition's artifacts
+retains it (ADR 0113 §3.6). `d` and `d.id` both retain across cells, and
+`continue_as` carries either in its seed. Without a carry, the new frame has
+neither.
+
+**Laws.** `equal_definitions_share_one_id`, `changed_content_changes_the_id`,
+`forged_signature_claim_is_refused`, `one_definition_id_encoding_everywhere`
+and `definition_id_golden_vectors_are_frozen`
+(`crates/lash-core-execution/src/runtime/process/definition_tests.rs`).
 
 ### Literals lift syntactically, and are accepted type-directed
 

@@ -9,6 +9,18 @@ it landed on main in one integration. Two acceptance pieces are follow-ups:
 the PostgreSQL leg of the RLM evidence suite (FIG-4066) and the by-name start
 and CAS halves of case 12 (FIG-4067).
 
+**Amended 2026-09-29 (FIG-4174, FIG-4175): definitions are immutable.** Sam's
+rulings of 2026-09-29 on FIG-4174 supersede the named definition registry this
+record kept alive. A process definition is immutable content named by a
+content-derived `ProcessDefinitionId` (ADR 0095, *Definitions are immutable
+values*). Lash has no definition names, revisions, compare-and-swap or
+replace; hosts own names and versions. Equal canonical definitions share one
+id. An id alone retains nothing: a host pin retains. The `definition_revision`
+referrer kind, `DefinitionRevisionId`, the `AwaitDefinitionRevision` guard and
+the old §3.6 are withdrawn, leaving six kinds; §3.6 now says how definition
+artifacts are held. Case 12 is replaced, and FIG-4067 is moot. The code follows
+in FIG-4174's lanes: until they land, the tree still carries the withdrawn kind.
+
 It supersedes the ownership half of
 [ADR 0093](0093-artifact-lifetimes-use-exact-owner-edges.md): the
 `ArtifactOwner` enum, host/process/execution owners, transfer, release and
@@ -155,7 +167,8 @@ checkpoint built from resident state (`:979-995`,
 execution state (`crates/lash-core-store/src/session_state.rs:1676-1720`), and
 the glossary says so (`CONTEXT.md:47`). Sam's rule requires the clear.
 
-**Named definitions.** A registry row pins a definition reference
+**Named definitions** (superseded by the FIG-4174 amendment; §3.6). A
+registry row pins a definition reference
 (`crates/lash-core-execution/src/process_registry.rs:55-72`), and resolution
 loads its module (`crates/lash-lashlang-runtime/src/lib.rs:1231-1241`). The
 registry trait has a CAS write and a list, and no delete
@@ -167,7 +180,9 @@ named definition's module alive.
 ### 1. Referrers and their canonical ids
 
 An artifact has one exact edge per (artifact, referrer) pair. A referrer is a
-durable reader. There are seven kinds, and no other way to keep bytes alive.
+durable reader. There are six kinds, and no other way to keep bytes alive.
+(This record first had a seventh, `definition_revision`, for the named
+definition registry. The FIG-4174 amendment withdraws it with the registry.)
 
 ```rust
 // crates/lash-core-store/src/artifact_referrer.rs  (new)
@@ -179,13 +194,12 @@ pub enum ArtifactReferrerKind {
     Start,
     Execution,
     HostPin,
-    DefinitionRevision,
 }
 
 impl ArtifactReferrerKind {
-    pub const ALL: [Self; 7];
+    pub const ALL: [Self; 6];
     /// `frame_environment`, `process_record`, `subscription_revision`,
-    /// `start`, `execution`, `host_pin`, `definition_revision`.
+    /// `start`, `execution`, `host_pin`.
     pub const fn as_str(self) -> &'static str;
     pub fn parse(text: &str) -> Result<Self, ArtifactReferrerError>;
 }
@@ -198,7 +212,6 @@ pub enum ArtifactReferrer {
     Start(StartKey),
     Execution(lash_sansio::EffectJournalIdentity),
     HostPin(HostArtifactPin),
-    DefinitionRevision(DefinitionRevisionId),
 }
 
 impl ArtifactReferrer {
@@ -228,16 +241,6 @@ impl SubscriptionRevisionId {
     /// Refuses an empty id or incarnation and revision 0.
     pub fn new(subscription_id: String, incarnation: String, revision: u64)
         -> Result<Self, ArtifactReferrerError>;
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DefinitionRevisionId { definition_id: String, revision: u64 }
-impl DefinitionRevisionId {
-    /// `definition_id` is the registry's primary key
-    /// (`lash.process-definition:<owner namespace>:<name>`,
-    /// `crates/lash-sqlite-store/src/process_definitions.rs:117`). Refuses
-    /// an empty id and revision 0.
-    pub fn new(definition_id: String, revision: u64) -> Result<Self, ArtifactReferrerError>;
 }
 
 /// An opaque, releasable host referrer. Only `mint` makes a new one. Once
@@ -286,7 +289,6 @@ text:
 | `start` | the start key (`process-start-key:v1:…`) |
 | `execution` | `EffectJournalIdentity::key()`, the journal's existing versioned JSON (`crates/lash-sansio/src/effect_identity.rs:277`) |
 | `host_pin` | the pin text |
-| `definition_revision` | compact JSON array `["<definition id>",<revision>]` |
 
 JSON arrays are rendered by `serde_json::to_string` of the tuple, so
 re-encoding a decoded id reproduces it byte for byte.
@@ -307,8 +309,6 @@ re-encoding a decoded id reproduces it byte for byte.
 - `start`: the start key. This replaces the `process-start:` execution-owner
   convention.
 - `execution`: the journal identity of the scope that ran the work.
-- `definition_revision`: the registry row's id and the revision the CAS
-  writes (`expected_revision + 1`, or 1 for a new slot).
 
 **Storage, SQLite** (durable core, `crates/lash-sqlite-store/src/schema.rs`).
 The two tables are renamed in place, so a catalog from before the cutover
@@ -321,8 +321,7 @@ CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
     artifact_ref  TEXT NOT NULL,
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind
         CHECK (referrer_kind IN ('frame_environment', 'process_record',
-            'subscription_revision', 'start', 'execution', 'host_pin',
-            'definition_revision')),
+            'subscription_revision', 'start', 'execution', 'host_pin')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id
         CHECK (length(referrer_id) > 0),
     PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
@@ -336,8 +335,7 @@ CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
 CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
     referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind
         CHECK (referrer_kind IN ('frame_environment', 'process_record',
-            'subscription_revision', 'start', 'execution', 'host_pin',
-            'definition_revision')),
+            'subscription_revision', 'start', 'execution', 'host_pin')),
     referrer_id   TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id
         CHECK (length(referrer_id) > 0),
     ended_at_ms   INTEGER NOT NULL,
@@ -376,9 +374,8 @@ impl ReferrerClaim {
     /// Unguarded kinds: `frame_environment`, `process_record`, `host_pin`.
     pub fn unguarded(referrer: ArtifactReferrer) -> Result<Self, ArtifactReferrerError>;
     /// `Execution` with `AwaitJournal`, `Start` with `AwaitStart`,
-    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`,
-    /// `DefinitionRevision` with `AwaitDefinitionRevision`. Any other pairing,
-    /// and every `Ended` plan, is refused.
+    /// `SubscriptionRevision` with `AwaitSubscriptionRevision`. Any other
+    /// pairing, and every `Ended` plan, is refused.
     pub fn guarded(referrer: ArtifactReferrer, guard: ArtifactCleanupPlan)
         -> Result<Self, ArtifactReferrerError>;
     pub fn referrer(&self) -> &ArtifactReferrer;
@@ -511,8 +508,6 @@ pub enum ArtifactCleanupPlan {
     AwaitStart { starter: lash_sansio::EffectJournalIdentity },
     /// Guard of a subscription revision acquired before its mutation commits.
     AwaitSubscriptionRevision { creator: lash_sansio::EffectJournalIdentity },
-    /// Guard of a definition revision acquired before its CAS commits.
-    AwaitDefinitionRevision { creator: lash_sansio::EffectJournalIdentity },
 }
 
 /// What one store applies once the executor has resolved the plan.
@@ -556,7 +551,7 @@ obligation columns and CHECK (`ck_artifact_cleanup_obligations_obligation`,
 §1.1 of that record), its three indexes, and:
 
 ```sql
-referrer_kind TEXT NOT NULL CHECK (referrer_kind IN (<the seven kinds>)),
+referrer_kind TEXT NOT NULL CHECK (referrer_kind IN (<the six kinds>)),
 referrer_id   TEXT NOT NULL CHECK (length(referrer_id) > 0),  -- char_length on PostgreSQL
 cleanup_json  TEXT NOT NULL,   -- ArtifactCleanup, serde JSON
 PRIMARY KEY (referrer_kind, referrer_id)
@@ -576,8 +571,8 @@ A record arises in one of two ways.
   hook's transaction is in the artifact store's database, it also inserts the
   fence (and, for a frame switch, the carried edges) in that transaction.
 - **A guard** is armed by the first acquisition of a referrer whose record may
-  never commit: `execution`, `start`, and a `subscription_revision` or
-  `definition_revision` acquired before its mutation commits. Publish and
+  never commit: `execution`, `start`, and a `subscription_revision`
+  acquired before its mutation commits. Publish and
   acquire insert the guard row (if absent) in the artifact store's own
   transaction, before the bytes are durable. This is the operation-owned
   publication record the report asks for: no edge of a guarded kind exists
@@ -659,7 +654,6 @@ own transaction. Its `deliver`:
      `ProcessRecord(record.id)`. No record means no carries once `starter` is
      `Settled`.
    - `AwaitSubscriptionRevision { creator }`: see §3.4.
-   - `AwaitDefinitionRevision { creator }`: see §3.6.
 4. Call `end_process_env_referrer`, `end_module_referrer` and
    `ProcessEngineRegistry::end_artifact_referrer`, each with the carries for
    its store.
@@ -946,30 +940,48 @@ after its last binding.
 upserts `Ended { carries: [] }`. An unreleased pin keeps its edges
 indefinitely, by design.
 
-#### 3.6 `definition_revision`: definition-registry CAS and deletion
+#### 3.6 Definition artifacts: immutable, held by the six kinds
 
-**Acquisition.** The `RegisterProcessDefinition` executor
-(`crates/lash-core-execution/src/tool_dispatch/intent_executor.rs:393`)
-acquires the pre-computed `DefinitionRevision` on the definition's artifacts
-before the CAS, which arms `AwaitDefinitionRevision { creator }`. It gets the
-artifacts from `ProcessEngine::start_artifacts` over the definition's payload.
-`ProcessDefinitionRegistry` gains
-`definition_state(&self, definition_id: &str) -> Result<Option<ProcessDefinitionRecord>, PluginError>`
-(required) for the guard to read.
+*Amended by FIG-4174. This section replaces `definition_revision`, the
+definition-registry referrer that was acquired before a CAS and ended by
+replacement. There is no registry, no CAS and no replacement to end one.*
 
-**End.** A revision ends when it is not the slot's current resolvable
-revision, and its creator's journal is `Settled`. That covers CAS
-replacement, a tombstone, a never-committed CAS, and a slot removed with its
-session under the ADR 0049 frontier. After a successful CAS, the executor
-nudges the replaced revision. Today no code deletes a slot
-(`crates/lash-core-execution/src/process_registry.rs:163-187`); this record
-adds no delete verb.
+**The artifact.** A published definition is an immutable descriptor — engine
+kind, canonical engine value and its sorted, deduplicated artifact manifest —
+in a definition-artifact store keyed by its `ProcessDefinitionId` (ADR 0095).
+It is a new collectible artifact kind, `ArtifactStoreId::ProcessDefinition`,
+not a new referrer kind, and its rows have no owner, name, revision or
+lifecycle. A descriptor's existence roots nothing: not itself, and not the
+modules its manifest names. Publishing equal content again verifies the
+canonical bytes and changes nothing; conflicting bytes under an existing id
+are an immutable-content refusal.
 
-**Consumers.** A process started by name, or a subscription registered by
-name, acquires its own `Start(key)` or `SubscriptionRevision` on the module
-before it relies on it. If the revision was replaced and severed in between,
-the acquisition fails `ArtifactMissing`, and the intent refuses typed rather
-than pinning bytes that are gone.
+**Acquisition.** Every reader of a definition holds exact edges to its
+descriptor and to its complete manifest under the same referrer, including
+definition values nested in arguments or results. A frame acquires them at
+the cell's end for the ids reachable from its globals; a start under
+`Start(key)` and then `ProcessRecord(id)`; a subscription under its revision;
+a journal under `Execution`; a host under `HostPin` through
+`publish_definition` or `pin_definition`. Acquisition checks fences and pins
+the descriptor and its dependencies before a usable result is exposed:
+atomically within one store, and across stores by this record's
+prepare/acknowledge/activate/sever protocol. A partial acquisition stays
+guarded and recoverable. Model `processes.get` acquires `Execution` edges
+before it answers; host `get_definition` answers a snapshot and promises
+nothing about retention.
+
+**End.** Each referrer ends by its own section's rule. The descriptor and its
+modules are reclaimed after the last effective edge is severed by cleanup,
+and not while any edge, replay gate or carry obligation remains. That is
+eventual, not synchronous with the last release. A module shared by several
+definitions survives until every reader of every one of them has released it.
+An ended referrer's fence stays permanent; publishing the same content under
+a fresh referrer is allowed.
+
+**What an id is not.** An id is data. A copied digest string, or an id a host
+keeps in its own tables, holds nothing; an id rebuilt by hand resolves only
+while some referrer still holds its artifacts. Availability between starts
+with no other durable reader needs an explicit host pin.
 
 #### 3.7 `execution`: replay settlement
 
@@ -1180,33 +1192,36 @@ These go in the cutover, with no shim.
 `processes.create({ source, dialect })` is an ordinary leaf tool on the
 lashlang engine's tool surface, beside `triggers.register`
 (`crates/lash-lashlang-runtime/src/process_create_tool.rs`, registered by the
-RLM plugins). It returns a definition value, the same `ProcessDefinitionRef`
-shape `processes.start` takes. Under ADR 0116 its body drives nothing, so the
-two writes move from the body to realization:
+RLM plugins). It returns a `Definition {id, signature}` (ADR 0095), the value
+`processes.start` takes as `{definition}`. *(Amended by FIG-4174: it returned
+a `ProcessDefinitionRef` value and declared an unnamed
+`RegisterProcessDefinition`; both are replaced as below.)* Under ADR 0116 its
+body drives nothing, so the two writes move from the body to realization:
 
 1. The attempt compiles the module (pure, ADR 0093): the dialect lowers the
    source, and it links against the catalog the attempt was dispatched with.
-   It answers the definition value of the module's one process and declares a
-   `RegisterProcessDefinition` intent with no name that carries the module's
-   store bytes.
-2. Realization publishes those bytes under `Execution(the realizing
-   execution's journal)`, which arms that guard, and resolves the definition
-   through its engine. No registry slot is written. A redrive publishes the
+   It answers the definition of the module's one process and declares a
+   `PublishDefinition` intent that carries the module's store bytes and the
+   descriptor.
+2. Realization publishes those bytes and the descriptor under
+   `Execution(the realizing execution's journal)`, which arms that guard,
+   and derives the signature through its engine. A redrive publishes the
    same content-addressed bytes again and changes nothing.
 3. The cell that binds the value acquires `FrameEnvironment(S, F)` for its
    module at the cell's end (§3.1). Intents drain before the call's output
    reaches the cell, so the module is published by then.
 
 There is no lifetime argument, no plugin lifetime policy, and no new referrer
-kind. A host front door has no frame to hold a created definition, so it
-refuses an unnamed registration.
+kind. A host front door has no frame to hold a created definition; a host
+publishes with `publish_definition` under its own pin instead.
 
 The value then lives in the frame's globals and holds F's edge (I-frame). It
 survives a switch only when a `continue_as` seed passes it, because
-`frame_switch_carries` finds its module, and session deletion ends F and
-reclaims it. Starting it acquires `Start(key)`
-and then `ProcessRecord(id)` (§3.3) and consumes nothing. Registering it by
-name acquires a `DefinitionRevision` (§3.6). Start lifetime stays ADR 0108's.
+`frame_switch_carries` finds its descriptor and modules, and session deletion
+ends F and reclaims it. Starting it acquires `Start(key)`
+and then `ProcessRecord(id)` (§3.3) and consumes nothing. Nothing registers it
+by name: a host that wants a name keeps one in its own tables and pins the id
+(§3.6). Start lifetime stays ADR 0108's.
 FIG-3116's `triggers.register` half rides §3.4 unchanged.
 
 ### 7. Acceptance tests
@@ -1257,7 +1272,7 @@ after the relay drains, and that a second relay pass changes nothing.
    `Start(key)` and kill before registration. The guard row exists. With the
    starter's journal `MayReplay`, the relay defers. Once it is `Settled`, the
    staged bytes are reclaimed and the key is fenced. The same holds for a
-   trigger mutation that never commits and for a losing definition CAS.
+   trigger mutation that never commits.
 7. **Crash between acknowledgements** (conformance). Fault the engine store's
    `end_artifact_referrer` after the environment store applied. The record
    stays due with the environment store fenced. The retry applies both and
@@ -1278,13 +1293,19 @@ after the relay drains, and that a second relay pass changes nothing.
 11. **Cancellation still reading** (conformance). The parent scope closes and
     the child is cancelled but still running. Its record and execution edges
     stay, and its environment loads until it is terminal and pruned.
-12. **Named-definition survival** (lash). Register a created definition by
-    name, then `continue_as` without carrying it. The frame edge goes after
-    the gate. The `DefinitionRevision` edge keeps the module, and a new turn
-    starts it by name. Replacing the name ends the old revision after its
-    creator settles. At integration the suite proves the first two sentences
-    and that the name still resolves to the kept module; no public path starts
-    a process by name or replaces a name by CAS yet, so FIG-4067 adds the rest.
+12. **Definition ids and host pins** (lash; replaced by the FIG-4174
+    amendment, which makes FIG-4067's by-name and CAS halves moot).
+    - *Id carry.* A cell binds a created definition and `continue_as` passes
+      its id in the seed. The descriptor and module gain an F2 edge before F1
+      is severed, and a new turn starts it by id.
+    - *Host-pin survival across an uncarried switch.* A host publishes a
+      definition under its pin, a cell binds it, and `continue_as` does not
+      carry it. After the gate, F1's edges are severed and the old variable is
+      undefined, but the pin's edges keep the descriptor and module, and a
+      start by id succeeds.
+    - *Last-pin reclamation.* Releasing that pin, with no other reader left,
+      reclaims the descriptor and the module after the relay drains; a later
+      start by the same id refuses `DefinitionMissing`.
 13. **Fork of a live and an ended frame** (conformance). A fork inside a live
     frame copies the frame's edges to the fork's own id. A fork at a pinned
     point whose frame was switched inherits no execution-state components.
@@ -1473,10 +1494,9 @@ orchestrator.
   re-publishes a referenced `env_ref` under the staging owner), and §3.3
   keeps that as an acquisition of `Start(key)`. The revision can therefore
   end at its last binding with no carries.
-- **Definition consumers do not hold up the revision's end.** A consumer
-  acquires first and refuses typed if it lost the race (§3.6). The report's
-  "until admitted consumers finish acquiring" is met without the registry
-  knowing its consumers.
+- **Definition consumers do not hold up the revision's end.** *(Withdrawn by
+  the FIG-4174 amendment with the revision itself: an immutable definition
+  has no revision to end, and each consumer holds its own edges, §3.6.)*
 - **FIG-4028's fix is superseded.** It landed on main (`7fa4b56045`) and made
   PostgreSQL's prune carry the start key to the drain. Here prune no longer
   ends the start, so that plumbing goes with the cleanup record, and its law

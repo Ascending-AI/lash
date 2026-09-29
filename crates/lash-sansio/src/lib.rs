@@ -2,6 +2,7 @@ pub mod attachment;
 pub mod causal;
 mod compat;
 pub mod core_support;
+pub mod definition_id;
 mod effect_group;
 mod effect_identity;
 mod frame_key;
@@ -80,6 +81,9 @@ pub use attachment::{
 };
 pub use causal::CausalRef;
 pub use compat::{VersionRange, VersionRangeError};
+pub use definition_id::{
+    DEFINITION_ID_FIELD, DEFINITION_ID_PREFIX, InvalidProcessDefinitionId, ProcessDefinitionId,
+};
 pub use effect_group::GroupWakePolicy;
 pub use effect_identity::{
     EffectAddress, EffectIdentityError, EffectJournalIdentity, ExecutionScope,

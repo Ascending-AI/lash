@@ -24,6 +24,17 @@ registry, modelled on `trigger_subscriptions` and covered by the same
 ownership axiom. Session-scoped names follow the ADR 0049 frontier;
 host- and platform-scoped tombstones are never collected.
 
+Amended 2026-09-29 (FIG-4174, FIG-4175): the `process_definitions` name
+registry the FIG-2990 amendment added is withdrawn. Process definitions are
+immutable, content-addressed artifacts named by a `ProcessDefinitionId`
+([ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md),
+*Definitions are immutable values*). Its two rows leave the ownership map
+below. A definition descriptor has no owner field, name, revision or
+tombstone: like every artifact, its owners are the referrers holding its edges
+and its reclaim trigger is cleanup after the last edge is severed
+([ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) §3.6).
+Hosts keep names and versions in their own databases.
+
 Amended 2026-09-14 (FIG-2367): non-fired trigger occurrences gain a host-invoked
 audit-retention cutoff, `TriggerStore::prune_non_fired_occurrences`. Their
 reclaim trigger in the ownership map below is no longer "never": it is that
@@ -277,8 +288,7 @@ terminal frontier, so its name fence remains durable.
 
 | Row class and scope | Owner | Reclaim trigger |
 |---|---|---|
-| Session process-definition registry slot | Registering session | The ADR 0049 deleted-session frontier, like a session subscription. The registry has no delivery fan-out, so the frontier reconcile deletes enabled and tombstoned session slots once the owning session is deleted. |
-| Host or platform process-definition registry tombstone | Host or platform namespace | Never. Like a host subscription tombstone, the slot is the permanent take-over fence for its name. |
+| Process definition descriptor (artifact store; replaces the withdrawn session registry slot and host or platform registry tombstone, FIG-4174) | The referrers holding its edges: frame, process record, subscription revision, start, execution or host pin (ADR 0113) | Artifact cleanup after its last referrer edge is severed. An id held anywhere, including a host's own tables, holds nothing. |
 | Session subscription | Registering session | The ADR 0049 deleted-session frontier. Delivery-retention reconciliation deletes the row in its trigger-store transaction only after witnessing zero remaining deliveries for the subscription. This applies to enabled and tombstoned rows; a tombstone remains the `Revive` CAS fence while its session could still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
 | Session mutation receipt | Registering session's replay eligibility | Retained after session deletion under [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md). Only the host's retention decision permits pruning through the internal trigger-store primitive. |

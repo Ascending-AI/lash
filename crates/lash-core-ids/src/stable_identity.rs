@@ -61,6 +61,10 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     // FIG-4080: the request a tool call's identity is bound to when the call
     // is recorded (ADR 0117 §7).
     "lash.tool-call-request",
+    // FIG-4175: the content-derived id of one immutable process definition,
+    // `lash.definition:sha256:<hex>` (ADR 0095). Its own owned domain; no
+    // existing family's version moves.
+    "lash.process-definition-id",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

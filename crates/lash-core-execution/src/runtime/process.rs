@@ -1,4 +1,5 @@
 mod awaiter;
+mod definition;
 mod definition_ref;
 mod effect_summary;
 mod engine;
@@ -30,6 +31,10 @@ mod wake;
 pub use awaiter::{
     ProcessChangeHub, ProcessEventSink, ProcessEventSinkRegistration, WatchedRegistry,
     watch_process_registry, watch_process_registry_with_sink,
+};
+pub use definition::{
+    InvalidProcessDefinitionId, ProcessDefinition, ProcessDefinitionDraft,
+    ProcessDefinitionDraftError, ProcessDefinitionId, ProcessDefinitionTarget,
 };
 pub use definition_ref::{
     ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
