@@ -74,23 +74,22 @@ use lash_core::runtime::{
     publish_process_execution_env,
 };
 use lash_core::{
-    AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, ExecutionScope,
-    LashSchema, MessageOrigin, MessageRole, OperationId, PartKind, PendingTurnInputDraft,
-    PersistedSegmentHandover, PluginNamespaceState, PluginState, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessCompletionAuthority, ProcessContinuationStore,
-    ProcessEventAppendRequest, ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec,
-    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
-    ProtocolTurnOptions, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SegmentHandover,
-    SessionAppendNode, SessionNodePayload, SessionPolicy, SessionRelation, SessionScope,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage,
-    TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
-    TriggerDeliveryReservationOutcome, TriggerInputBinding, TriggerMutationOutcome,
-    TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
-    TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress, WaitKind,
-    WaitState,
+    AttachmentId, AttachmentIntent, AttachmentManifest, BoundaryReason, Clock, DeploymentStore,
+    ExecutionScope, LashSchema, MessageOrigin, MessageRole, OperationId, PartKind,
+    PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
+    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
+    ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SegmentHandover, SessionAppendNode,
+    SessionNodePayload, SessionPolicy, SessionRelation, SessionScope, SessionStoreCreateRequest,
+    StoreError, TokenLedgerEntry, TokenUsage, TriggerCommand, TriggerCommandOutcome,
+    TriggerDeliveryReservation, TriggerDeliveryReservationOutcome, TriggerInputBinding,
+    TriggerMutationOutcome, TriggerOccurrenceFilter, TriggerOccurrenceRequest, TriggerOwnerScope,
+    TriggerStore, TriggerSubscriptionDraft, TriggerSubscriptionFilter, TurnInput, TurnInputIngress,
+    WaitKind, WaitState,
 };
 use serde::{Deserialize, Serialize};
 
@@ -218,12 +217,41 @@ fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
 
 pub struct FixtureHandles {
     pub clock: Arc<dyn Clock>,
-    pub runtime: Arc<dyn RuntimePersistence>,
-    pub session_factory: Arc<dyn SessionStoreFactory>,
+    /// The deployment's catalog store; the fixture session is a view of it.
+    pub store: Arc<dyn DeploymentStore>,
     pub processes: Arc<dyn lash_core::ConformanceProcessRegistry>,
     pub continuations: Arc<dyn ProcessContinuationStore>,
     pub process_envs: Arc<dyn ProcessExecutionEnvStore>,
     pub triggers: Arc<dyn TriggerStore>,
+}
+
+impl FixtureHandles {
+    /// The fixture session's view of the catalog.
+    fn session(&self) -> lash_core::store::SessionStore {
+        let runtime: Arc<dyn lash_core::store::RuntimeStore> = self.store.clone();
+        lash_core::store::SessionStore::new(runtime, SessionId::from(SESSION_ID))
+            .expect("the fixture session id is valid")
+    }
+}
+
+/// The fixture session's durable state at its current window.
+async fn load_fixture_state(session: &lash_core::store::SessionStore) -> RuntimeSessionState {
+    lash_core::store::load_session_window_state(session, lash_core::store::WindowSelector::Current)
+        .await
+        .expect("load fixture session state")
+        .expect("fixture session exists")
+        .state
+}
+
+/// The fixture session's current window.
+async fn load_fixture_window(
+    session: &lash_core::store::SessionStore,
+) -> lash_core::store::SessionWindowRead {
+    session
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await
+        .expect("durable fixture drift: public session read failed")
+        .expect("durable fixture drift: session disappeared")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -260,6 +288,12 @@ fn assert_fixture_schema_version(found: u32) {
 }
 
 pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
+    handles
+        .store
+        .admit_session(&fixture_session_request(&SessionId::from(SESSION_ID)))
+        .await
+        .expect("admit the fixture session");
+    let session = handles.session();
     let mut state = fixture_state();
     let append_nodes = fixture_append_nodes();
     let current_append_retry = lash_core::store::append_request_commit_with_clock_for_testing(
@@ -270,8 +304,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         handles.clock.as_ref(),
     )
     .expect("build identity-bearing fixture append");
-    handles
-        .runtime
+    session
         .commit_runtime_state(current_append_retry.clone())
         .await
         .expect("commit identity-bearing fixture append");
@@ -284,24 +317,19 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         intent_at_epoch_ms: 100,
         owner: None,
     };
-    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = handles
-        .runtime
+    let lash_core::AttachmentWriteFence::Granted(attachment_permit) = session
         .begin_attachment_write(attachment_intent.clone())
         .await
         .expect("begin fixture attachment write")
     else {
         panic!("the fixture digest must grant its writer");
     };
-    handles
-        .runtime
+    session
         .complete_attachment_write(&attachment_intent, attachment_permit)
         .await
         .expect("stamp fixture attachment upload");
 
-    let mut loaded = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
-        .await
-        .expect("load fixture state before legacy commit")
-        .expect("fixture session exists before legacy commit");
+    let mut loaded = load_fixture_state(&session).await;
     loaded.turn_index = 7;
     loaded.token_usage = TokenUsage {
         input_tokens: 13,
@@ -338,17 +366,12 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         legacy_operation,
     );
     legacy_commit_retry = legacy_commit_retry.with_committed_attachments([attachment_id.clone()]);
-    handles
-        .runtime
+    session
         .commit_runtime_state(legacy_commit_retry.clone())
         .await
         .expect("commit supported NULL-identity legacy-shaped receipt");
 
-    let record_config_state =
-        lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
-            .await
-            .expect("load fixture state before semantic-boundary commit")
-            .expect("fixture session exists before semantic-boundary commit");
+    let record_config_state = load_fixture_state(&session).await;
     let mut record_config_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
         &record_config_state,
         &[],
@@ -357,49 +380,41 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     record_config_retry
         .stamp_semantic_boundary()
         .expect("stamp fixture semantic-boundary identity");
-    handles
-        .runtime
+    session
         .commit_runtime_state(record_config_retry.clone())
         .await
         .expect("commit fixture semantic-boundary receipt");
 
-    let committed = handles
-        .runtime
-        .load_session()
-        .await
-        .expect("load fixture before pin")
-        .expect("fixture exists before pin");
+    let committed = load_fixture_window(&session).await;
     handles
-        .session_factory
+        .store
         .pin(
             committed
-                .graph
+                .window
                 .leaf_node_id
-                .as_deref()
+                .as_ref()
                 .expect("fixture graph has a leaf"),
         )
         .await
-        .expect("pin fixture leaf through session factory");
+        .expect("pin fixture leaf through the catalog");
 
     let deleted_request = fixture_session_request(&SessionId::from(DELETED_SESSION_ID));
     handles
-        .session_factory
-        .create_store(&deleted_request)
+        .store
+        .admit_session(&deleted_request)
         .await
-        .expect("create fixture session that will be retired");
+        .expect("admit fixture session that will be retired");
     handles
-        .session_factory
+        .store
         .delete_session(&SessionId::from(DELETED_SESSION_ID))
         .await
-        .expect("retire fixture session through session factory");
+        .expect("retire fixture session through the catalog");
 
-    let queued = handles
-        .runtime
+    let queued = session
         .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(fixture_wake()))
         .await
         .expect("enqueue fixture queued work");
-    let pending = handles
-        .runtime
+    let pending = session
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
                 SESSION_ID,
@@ -573,21 +588,17 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .await
         .expect("ingest fixture occurrence");
 
-    let wake_batch = handles
-        .runtime
+    let wake_batch = session
         .enqueue_queued_work(process_wake_batch_draft(wake_delivery.clone()))
         .await
         .expect("enqueue fixture process wake at receiver");
     let queue_admission = lash_core::store::AdmissionId::new("durable-read-queue-admission");
-    let queue_epoch = handles
-        .runtime
-        .drive_epoch(&SessionId::from(SESSION_ID))
+    let queue_epoch = session
+        .drive_epoch()
         .await
         .expect("read fixture drive epoch");
-    match handles
-        .runtime
+    match session
         .seal_drive_epoch(
-            &SessionId::from(SESSION_ID),
             &queue_admission,
             queue_epoch.epoch,
             &lash_core::store::RootStartNonce::new(queue_admission.as_str()),
@@ -601,38 +612,30 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     // The receiver wake sits behind the fixture's queued work, which stays
     // pending, so the turn lane never reaches it: its host cancel is the
     // terminal transition that persists the redelivery fence (FIG-3545).
-    handles
-        .runtime
-        .cancel_queued_work_batch(&SessionId::from(SESSION_ID), &wake_batch.batch_id)
+    session
+        .cancel_queued_work_batch(&wake_batch.batch_id)
         .await
         .expect("cancel fixture receiver wake")
         .expect("fixture receiver wake is open");
-    let wake_state = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
-        .await
-        .expect("load fixture state before wake settlement")
-        .expect("fixture exists before wake settlement");
+    let wake_state = load_fixture_state(&session).await;
     let wake_operation = OperationId::new(
         ExecutionScope::runtime_operation("durable-read-wake-settlement"),
         "commit",
     );
     let wake_commit =
         RuntimeCommit::persisted_state_with_operation_for_testing(&wake_state, &[], wake_operation);
-    handles
-        .runtime
+    session
         .commit_runtime_state(wake_commit)
         .await
         .expect("commit the fixture head after the receiver wake's cancel");
     let retained_admission = lash_core::store::AdmissionId::new("durable-read-retained-admission");
-    let retained_epoch = handles
-        .runtime
-        .drive_epoch(&SessionId::from(SESSION_ID))
+    let retained_epoch = session
+        .drive_epoch()
         .await
         .expect("read fixture drive epoch");
     assert!(matches!(
-        handles
-            .runtime
+        session
             .seal_drive_epoch(
-                &SessionId::from(SESSION_ID),
                 &retained_admission,
                 retained_epoch.epoch,
                 &lash_core::store::RootStartNonce::new(retained_admission.as_str()),
@@ -642,12 +645,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         lash_core::store::DriveEpochSeal::Sealed(_)
     ));
 
-    let read = handles
-        .runtime
-        .load_session()
-        .await
-        .expect("load seeded fixture session")
-        .expect("seeded fixture session exists");
+    let read = load_fixture_window(&session).await;
     let seeded_occurrences = handles
         .triggers
         .list_occurrences(TriggerOccurrenceFilter::default())
@@ -674,7 +672,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         fixture_schema_version: DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         head_revision: read.head_revision,
         node_ids_in_read_order: read
-            .graph
+            .window
             .nodes
             .iter()
             .map(|node| node.node_id.to_string())
@@ -693,18 +691,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
 pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixture) {
     assert_fixture_schema_version(expected.fixture_schema_version);
-    let read = handles
-        .runtime
-        .load_session()
-        .await
-        .expect("durable fixture drift: public session read failed")
-        .expect("durable fixture drift: session disappeared");
+    let session = handles.session();
+    let read = load_fixture_window(&session).await;
     assert_eq!(
         read.head_revision, expected.head_revision,
         "durable fixture semantic drift: head revision changed"
     );
     let node_ids = read
-        .graph
+        .window
         .nodes
         .iter()
         .map(|node| node.node_id.clone())
@@ -713,7 +707,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         node_ids, expected.node_ids_in_read_order,
         "durable fixture semantic drift: graph node ids or order changed"
     );
-    assert_graph_payloads(&read.graph.nodes);
+    assert_graph_payloads(&read.window.nodes);
     let checkpoint = read
         .checkpoint
         .expect("durable fixture semantic drift: checkpoint disappeared");
@@ -765,9 +759,14 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(&[0x46, 0x49, 0x47, 0x38, 0x38, 0x37][..]),
         "durable fixture semantic drift: execution-state component changed"
     );
-    assert_eq!(read.token_ledger.len(), 1);
+    let usage_rows = session
+        .load_usage_ledger_page(None, std::num::NonZeroU32::new(10).expect("a nonzero page"))
+        .await
+        .expect("durable fixture drift: usage ledger read failed");
+    assert_eq!(usage_rows.rows.len(), 1);
+    assert!(usage_rows.next.is_none());
     assert_eq!(
-        read.token_ledger[0].usage,
+        usage_rows.rows[0].entry.usage,
         TokenUsage {
             input_tokens: 21,
             output_tokens: 12,
@@ -778,7 +777,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture semantic drift: usage ledger totals changed"
     );
     assert!(
-        AttachmentManifest::list_all_refs(handles.runtime.as_ref())
+        AttachmentManifest::list_all_refs(handles.store.as_ref())
             .await
             .expect("read fixture attachment manifest")
             .contains(&AttachmentId::parse(FIXTURE_ATTACHMENT_ID).expect("valid attachment id")),
@@ -786,7 +785,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
 
     let pinned = handles
-        .session_factory
+        .store
         .fork_points()
         .await
         .expect("durable fixture drift: node-anchor read failed");
@@ -801,16 +800,19 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(pinned[0].source_session_id, SESSION_ID);
     assert!(pinned[0].pinned);
     assert!(
-        handles
-            .session_factory
-            .session_was_deleted(&SessionId::from(DELETED_SESSION_ID))
-            .await
-            .expect("durable fixture drift: deleted-session probe failed"),
+        matches!(
+            handles
+                .store
+                .lookup_session(&SessionId::from(DELETED_SESSION_ID))
+                .await
+                .expect("durable fixture drift: deleted-session probe failed"),
+            lash_core::store::SessionLookup::Deleted
+        ),
         "durable fixture semantic drift: session tombstone disappeared"
     );
     match handles
-        .session_factory
-        .create_store(&fixture_session_request(&SessionId::from(
+        .store
+        .admit_session(&fixture_session_request(&SessionId::from(
             DELETED_SESSION_ID,
         )))
         .await
@@ -824,9 +826,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         ),
     }
 
-    let stored_epoch = handles
-        .runtime
-        .drive_epoch(&SessionId::from(SESSION_ID))
+    let stored_epoch = session
+        .drive_epoch()
         .await
         .expect("durable fixture drive epoch read");
     assert_eq!(stored_epoch.epoch, 2);
@@ -835,8 +836,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some("durable-read-retained-admission")
     );
 
-    let current_replay = handles
-        .runtime
+    let current_replay = session
         .commit_runtime_state(expected.current_append_retry.clone())
         .await
         .expect("durable fixture identity drift: current append receipt no longer replays");
@@ -844,8 +844,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         current_replay.receipt_replayed,
         "durable fixture identity drift: current append receipt was applied instead of replayed"
     );
-    let legacy_replay = handles
-        .runtime
+    let legacy_replay = session
         .commit_runtime_state(expected.legacy_commit_retry.clone())
         .await
         .expect("durable fixture identity drift: NULL-identity legacy receipt no longer replays");
@@ -862,8 +861,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         ],
         "durable fixture identity drift: usage receipt identity changed"
     );
-    let semantic_replay = handles
-        .runtime
+    let semantic_replay = session
         .commit_runtime_state(expected.record_config_retry.clone())
         .await
         .expect("durable fixture identity drift: semantic-boundary receipt no longer replays");
@@ -874,10 +872,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     // FIG-2480: a same-request retry REBUILT at today's (advanced) head must be
     // answered from the durable receipt evidence, not refused for its moved
     // whole-commit hash.
-    let rebuilt_state = lash_core::store::load_persisted_session_state(handles.runtime.as_ref())
-        .await
-        .expect("durable fixture drift: reload for semantic-boundary rebuild failed")
-        .expect("durable fixture drift: session disappeared before semantic-boundary rebuild");
+    let rebuilt_state = load_fixture_state(&session).await;
     let mut rebuilt_retry = RuntimeCommit::persisted_state_with_operation_for_testing(
         &rebuilt_state,
         &[],
@@ -886,13 +881,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     rebuilt_retry
         .stamp_semantic_boundary()
         .expect("stamp rebuilt fixture semantic-boundary identity");
-    let rebuilt_replay = handles
-        .runtime
-        .commit_runtime_state(rebuilt_retry)
-        .await
-        .expect(
-            "durable fixture identity drift: rebuilt semantic-boundary retry no longer replays",
-        );
+    let rebuilt_replay = session.commit_runtime_state(rebuilt_retry).await.expect(
+        "durable fixture identity drift: rebuilt semantic-boundary retry no longer replays",
+    );
     assert!(
         rebuilt_replay.receipt_replayed,
         "durable fixture identity drift: rebuilt semantic-boundary retry was applied instead of \
@@ -907,7 +898,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     changed_retry
         .stamp_semantic_boundary()
         .expect("stamp changed fixture semantic-boundary identity");
-    let refused = handles.runtime.commit_runtime_state(changed_retry).await;
+    let refused = session.commit_runtime_state(changed_retry).await;
     assert!(
         matches!(
             refused,
@@ -917,9 +908,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
          {refused:?}"
     );
 
-    let queued = handles
-        .runtime
-        .list_queued_work(&SessionId::from(SESSION_ID))
+    let queued = session
+        .list_queued_work()
         .await
         .expect("durable fixture drift: queued-work read failed");
     assert_eq!(queued.len(), 1);
@@ -941,9 +931,8 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         ),
         "durable fixture semantic drift: queued-work payload changed"
     );
-    let pending = handles
-        .runtime
-        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
+    let pending = session
+        .list_pending_turn_inputs()
         .await
         .expect("durable fixture drift: pending-input read failed");
     assert_eq!(pending.len(), 1);
@@ -1102,8 +1091,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         Some(1),
         "durable fixture semantic drift: sender wake allocation floor changed"
     );
-    let redelivery = handles
-        .runtime
+    let redelivery = session
         .enqueue_queued_work(process_wake_batch_draft(expected.wake_delivery.clone()))
         .await
         .expect_err("durable fixture drift: settled process wake was redelivered");
