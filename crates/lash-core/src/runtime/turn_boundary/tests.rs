@@ -167,6 +167,7 @@ fn outcome_switch(
         operation_id: operation_id.to_string(),
         frame_key,
         task: "continue in the next frame".to_string(),
+        reason: AgentFrameReason::continue_as(),
         initial_nodes,
     }
 }

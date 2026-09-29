@@ -512,8 +512,10 @@ never as bare signals.
 - **Hooks get read-only services.** A hook reads recorded state through
   read-only views. Every write, including a graph append, a frame switch, a
   session create and a tool-state apply, is a recorded command whose outcome
-  is folded. Standard compaction's frame switch is the recorded outcome of its
-  checkpoint step.
+  is folded. A context-pressure hook (ADR 0001, amended) returns a decision
+  over recorded facts and core writes it: the frame it opens is its own fenced
+  commit before the turn's model call, and a redrive decides again over the
+  root's admitted head and meets that commit's receipt.
 - **A group child's graph append is its own recorded command.** Its outcome
   rides the child's settlement, and the opener incorporates it at its rank. A
   child that settles after the opener has released has its append refused

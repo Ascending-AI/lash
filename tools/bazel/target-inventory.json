@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 189,
+  "cargo_target_count": 190,
   "feature_lane_units": [
     {
       "features": [
@@ -9457,6 +9457,15 @@
       "kind": "test",
       "label": "//crates/lash-postgres-store:schema_drift__test__fv_ee02aefc",
       "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_75c6d3f0",
+      "package": "lash-internal-protocol-rlm"
     },
     {
       "features": [
@@ -19204,7 +19213,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 250,
+  "generated_label_count": 251,
   "packages": [
     {
       "declared_features": [
@@ -20312,6 +20321,12 @@
           "tags": []
         },
         {
+          "cargo": "frame_open_redrive",
+          "kind": "test",
+          "label": "//crates/lash-protocol-rlm:frame_open_redrive__test",
+          "tags": []
+        },
+        {
           "cargo": "protocol_drivers",
           "kind": "test",
           "label": "//crates/lash-protocol-rlm:protocol_drivers__test",
@@ -20327,6 +20342,7 @@
       "test_batch": {
         "label": "//crates/lash-protocol-rlm:test_batch",
         "members": [
+          "//crates/lash-protocol-rlm:frame_open_redrive__test",
           "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test",
           "//crates/lash-protocol-rlm:protocol_drivers__test",
           "//crates/lash-protocol-rlm:tool_batch_parallelism__test"

@@ -1,6 +1,6 @@
 //! The session drive's laws on the in-process server double: the drive
 //! admission laws (FIG-3600, ADR 0105), the root start marker (L-S8) and the
-//! queued, frame-switch and pressure-compaction redrives (FIG-3748,
+//! queued, frame-switch and frame-open redrives (FIG-3748,
 //! FIG-3788, FIG-4110). Each runs through
 //! the endpoint's real handlers with the Restate server simulated in process.
 
@@ -72,17 +72,17 @@ lash_conformance::frame_switch_redrive_tests!({
     (harness, prefix, effect_host, stores, turn_runner)
 });
 
-// FIG-4110: a context-pressure compaction opens one frame with one
-// summarizer call; a drive crashed after its commit and redelivered replays
-// the summary and the frame from the journal instead of redoing them.
-lash_conformance::pressure_compaction_redrive_tests!({
+// FIG-4110: every frame open (a context-pressure frame, a pressure frame
+// followed by `continue_as`, `/compact`) killed at each crash point and
+// redelivered opens once, chained in order, with one summarizer call.
+lash_conformance::frame_open_redrive_tests!({
     let harness =
         LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
     let effect_host = harness.endpoint_host();
     let turn_runner = harness.turn_runner();
     let stores = harness.law_stores();
     let prefix: &'static str =
-        Box::leak(format!("restate-pressure-compaction-{}", harness.run_nonce()).into_boxed_str());
+        Box::leak(format!("restate-frame-open-{}", harness.run_nonce()).into_boxed_str());
     (harness, prefix, effect_host, stores, turn_runner)
 });
 

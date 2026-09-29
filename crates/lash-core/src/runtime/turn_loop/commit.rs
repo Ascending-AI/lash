@@ -850,29 +850,13 @@ impl LashRuntime {
         )
         .await;
         if matches!(delivery.turn.outcome, TurnOutcome::AgentFrameSwitch { .. })
-            && let Some(session) = self.session.as_mut()
+            && let Err(err) = self.restore_protocol_session_after_frame_open().await
         {
-            let protocol_session = Arc::clone(session.plugins().protocol_session());
-            let session_id = self.state.session_id.clone();
-            let restore_result = match crate::plugin::ProtocolSessionRestoreView::new(&self.state) {
-                Ok(view) => {
-                    protocol_session
-                        .restore_session(
-                            crate::plugin::ProtocolSessionContext::new(session, &session_id),
-                            view,
-                        )
-                        .await
-                }
-                Err(error) => Err(crate::SessionError::Protocol(error.to_string())),
-            };
-            if let Err(err) = restore_result {
-                delivery.turn.errors.push(post_commit_delivery_issue(
-                    crate::TurnFailureCode::ProtocolRestoreSession.into(),
-                    err.to_string(),
-                ));
-                delivery.post_commit_delivery_failed = true;
-                self.invalidate_resident_session_state();
-            }
+            delivery.turn.errors.push(post_commit_delivery_issue(
+                crate::TurnFailureCode::ProtocolRestoreSession.into(),
+                err.to_string(),
+            ));
+            delivery.post_commit_delivery_failed = true;
         }
         if let Some(settlement) = settlement_trace.filter(|settlement| !settlement.is_empty()) {
             crate::trace::emit_trace(

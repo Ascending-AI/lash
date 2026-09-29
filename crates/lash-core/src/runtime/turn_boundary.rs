@@ -3,6 +3,7 @@ use super::{
     RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft,
 };
 use crate::TurnId;
+use crate::facade_support::AgentFrameReasonFacadeOps as _;
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
@@ -506,11 +507,11 @@ impl TurnBoundary {
     /// Records a protocol `AgentFrameSwitch` outcome into the turn's one
     /// frame-transition slot (FIG-3303).
     ///
-    /// The outcome is one author of the turn's one switch: a second author
-    /// naming another frame, a context-pressure frame opened before the turn
-    /// ran included, refuses the commit instead of opening two frames (see
-    /// [`TurnGraphAppendDraft::record_outcome_frame_switch`]). Recording the
-    /// same outcome twice is a replay and answers the first record.
+    /// The slot holds only this outcome: a context-pressure frame committed
+    /// on its own before the turn ran. Recording the same outcome twice is a
+    /// replay and answers the first record; any differing second request
+    /// refuses the commit typed (see
+    /// [`TurnGraphAppendDraft::record_outcome_frame_switch`]).
     fn record_outcome_frame_switch(&mut self, outcome: &TurnOutcome) -> Result<(), StoreError> {
         let TurnOutcome::AgentFrameSwitch {
             frame_key,
@@ -524,6 +525,7 @@ impl TurnBoundary {
             operation_id: format!("{}:turn-outcome-frame-switch", self.operation_scope.id()),
             frame_key: frame_key.clone(),
             task: task.clone(),
+            reason: crate::AgentFrameReason::continue_as(),
             initial_nodes: initial_nodes.clone(),
         };
         let session_id = self.state().session_id.clone();
@@ -545,7 +547,7 @@ impl TurnBoundary {
             .is_some_and(|recorded| {
                 materialize::agent_frame_switch_materializes(
                     &self.state().session_id,
-                    &recorded.frame_key,
+                    &recorded.request.frame_key,
                     self.state().current_frame_node_id.as_deref(),
                 )
             })
@@ -622,7 +624,7 @@ impl TurnBoundary {
                 .pending_frame_switch()
                 .is_some_and(|recorded| materialize::agent_frame_switch_materializes(
                     &state.session_id,
-                    &recorded.frame_key,
+                    &recorded.request.frame_key,
                     state.current_frame_node_id.as_deref(),
                 ))
         );
