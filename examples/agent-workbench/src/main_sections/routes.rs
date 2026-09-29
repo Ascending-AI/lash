@@ -59,31 +59,32 @@ pub(crate) async fn app_state(
         .collect::<BTreeSet<_>>();
     let mut committed_input_turn_ids = BTreeSet::new();
     let mut anchor = lash::persistence::HistoryAnchor::Head;
-    while has_durable_head {
-        let page = history_store
-            .load_ancestors(
-                anchor,
-                lash::persistence::HistoryBudget {
-                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
-                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
-                        .expect("positive byte limit"),
-                },
-            )
-            .await
-            .map_err(AppError::internal)?;
-        for node in page.nodes {
-            if let lash::persistence::SessionNodePayload::Event {
-                event: lash::persistence::SessionHistoryRecord::Conversation(message),
-            } = node.record.payload
-                && let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
-                    message.origin
-            {
-                committed_input_turn_ids.insert(turn_id);
+    if has_durable_head {
+        loop {
+            let page = history_store
+                .load_ancestors(
+                    anchor,
+                    lash::persistence::HistoryBudget {
+                        max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
+                        max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
+                    },
+                )
+                .await
+                .map_err(AppError::internal)?;
+            for node in page.nodes {
+                if let lash::persistence::SessionNodePayload::Event {
+                    event: lash::persistence::SessionHistoryRecord::Conversation(message),
+                } = node.record.payload
+                    && let Some(lash::messages::MessageOrigin::TurnInput { turn_id, .. }) =
+                        message.origin
+                {
+                    committed_input_turn_ids.insert(turn_id);
+                }
             }
-        }
-        match page.next {
-            Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
-            None => break,
+            match page.next {
+                Some(next) => anchor = lash::persistence::HistoryAnchor::Cursor(next),
+                None => break,
+            }
         }
     }
     state.event_tx.reconcile_settled(

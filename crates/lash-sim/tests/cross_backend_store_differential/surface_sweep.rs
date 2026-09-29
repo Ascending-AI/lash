@@ -996,9 +996,8 @@ impl BackendRunner {
                         &session_id,
                         lash_core::store::HistoryAnchor::Node(node_id.into()),
                         lash_core::store::HistoryBudget {
-                            max_nodes: std::num::NonZeroU32::new(1).expect("nonzero node limit"),
-                            max_bytes: std::num::NonZeroU64::new(1024 * 1024)
-                                .expect("nonzero byte limit"),
+                            max_nodes: std::num::NonZeroU32::MIN,
+                            max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
                         },
                     )
                     .await?;
@@ -1012,9 +1011,8 @@ impl BackendRunner {
                             "fig-2841-unknown-node",
                         )),
                         lash_core::store::HistoryBudget {
-                            max_nodes: std::num::NonZeroU32::new(1).expect("nonzero node limit"),
-                            max_bytes: std::num::NonZeroU64::new(1024 * 1024)
-                                .expect("nonzero byte limit"),
+                            max_nodes: std::num::NonZeroU32::MIN,
+                            max_bytes: std::num::NonZeroU64::MIN.saturating_add(1024 * 1024 - 1),
                         },
                     )
                     .await?;

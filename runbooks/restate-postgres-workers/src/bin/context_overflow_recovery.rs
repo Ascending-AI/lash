@@ -100,9 +100,9 @@ async fn durable_messages(session: &lash::LashSession) -> Result<Vec<lash_core::
             .history(
                 anchor,
                 lash::persistence::HistoryBudget {
-                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
+                    max_nodes: std::num::NonZeroU32::new(128).context("positive page limit")?,
                     max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
-                        .expect("positive byte limit"),
+                        .context("positive byte limit")?,
                 },
             )
             .await?;

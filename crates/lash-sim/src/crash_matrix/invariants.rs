@@ -520,9 +520,8 @@ pub(crate) async fn transcript(
                 session,
                 anchor,
                 HistoryBudget {
-                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
-                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
-                        .expect("positive byte limit"),
+                    max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
+                    max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
                 },
             )
             .await

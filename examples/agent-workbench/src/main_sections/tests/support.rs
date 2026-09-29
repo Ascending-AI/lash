@@ -17,9 +17,8 @@ pub(crate) async fn durable_history_messages(
             .load_ancestors(
                 anchor,
                 lash::persistence::HistoryBudget {
-                    max_nodes: std::num::NonZeroU32::new(128).expect("positive node budget"),
-                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
-                        .expect("positive byte budget"),
+                    max_nodes: std::num::NonZeroU32::MIN.saturating_add(128 - 1),
+                    max_bytes: std::num::NonZeroU64::MIN.saturating_add(32 * 1024 * 1024 - 1),
                 },
             )
             .await

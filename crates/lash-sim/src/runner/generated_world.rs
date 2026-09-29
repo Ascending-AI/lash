@@ -1200,10 +1200,6 @@ impl GeneratedRuntimeWorld {
     /// turn to completion. The observed masquerades as the matching runtime
     /// boundary (tool/exec/durable) for the abstract store, with suspend/resume
     /// evidence in a normalized-away field.
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-    )]
     async fn resolve_suspended_turn(
         &mut self,
         event: &BoundaryEvent,
@@ -1379,10 +1375,6 @@ fn set_runtime_completion_ready_at(event: &mut BoundaryEvent, ready_at: u64) {
     }
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 async fn run_provider_turn_task(
     engine: crate::backend::SimEngine,
     session: lash::LashSession,

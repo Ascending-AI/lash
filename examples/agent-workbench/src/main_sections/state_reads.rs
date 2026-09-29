@@ -188,18 +188,20 @@ pub(crate) async fn read_state_projection(
     let usage = persisted.usage_report();
     let mut turn_failure_settlements = Vec::new();
     let mut after = None;
-    while !catalog_absent {
-        let page = store
-            .load_failure_evidence_page(
-                after.as_ref(),
-                std::num::NonZeroU32::new(128).expect("positive page limit"),
-            )
-            .await
-            .map_err(AppError::internal)?;
-        turn_failure_settlements.extend(page.settlements);
-        match page.next {
-            Some(next) => after = Some(next),
-            None => break,
+    if !catalog_absent {
+        loop {
+            let page = store
+                .load_failure_evidence_page(
+                    after.as_ref(),
+                    std::num::NonZeroU32::MIN.saturating_add(128 - 1),
+                )
+                .await
+                .map_err(AppError::internal)?;
+            turn_failure_settlements.extend(page.settlements);
+            match page.next {
+                Some(next) => after = Some(next),
+                None => break,
+            }
         }
     }
     Ok(StateProjectionReads {
