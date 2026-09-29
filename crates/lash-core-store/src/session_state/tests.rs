@@ -860,3 +860,131 @@ fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
         original.turn_commit_hash().expect("original identity"),
     );
 }
+
+fn projection_text(id: &str) -> crate::Message {
+    crate::Message {
+        id: id.to_string(),
+        role: crate::MessageRole::User,
+        parts: crate::shared_parts(vec![crate::Part::text(
+            format!("{id}.p0"),
+            id.to_string(),
+            None,
+        )]),
+        origin: None,
+    }
+}
+
+/// ADR 0112 §9, §14 test 7: the state's read model and every read view built
+/// from it hand out the same `Arc`s, until an append folds once.
+#[test]
+fn the_state_and_its_read_views_share_one_projection() {
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("shared-projection"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.append_active_conversation_messages(&[projection_text("m1")]);
+
+    let model = state.read_model();
+    let again = state.read_model();
+    assert!(std::sync::Arc::ptr_eq(&model.messages, &again.messages));
+    assert!(std::sync::Arc::ptr_eq(
+        &model.active_events,
+        &again.active_events
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &model.prompt_render_cache,
+        &again.prompt_render_cache
+    ));
+
+    let view = crate::SessionReadView::from_persisted_state(&state);
+    let relation_view = crate::SessionReadView::from_persisted_state_with_relation(
+        &state,
+        crate::SessionRelation::Root,
+    );
+    for read in [&view, &relation_view, &state.read_view()] {
+        assert!(std::ptr::eq(read.messages(), model.messages.as_slice()));
+        assert!(std::ptr::eq(
+            read.active_events(),
+            model.active_events.as_slice()
+        ));
+    }
+
+    state.append_active_conversation_messages(&[projection_text("m2")]);
+    let folded = state.read_model();
+    assert!(!std::sync::Arc::ptr_eq(&model.messages, &folded.messages));
+    assert_eq!(folded.messages.len(), 2);
+    assert!(std::sync::Arc::ptr_eq(
+        &folded.messages,
+        &state.read_model().messages
+    ));
+}
+
+/// ADR 0112 §9, §14 test 6: once a frame switch is durable, the resident
+/// graph is the new frame. The window base is the new `FrameOpen`,
+/// `persisted_node_ids` stays a subset of the resident ids, and one frame
+/// record remains, continuing from the old frame.
+#[test]
+fn a_durable_frame_switch_leaves_only_the_new_frame_resident() {
+    use crate::facade_support::AgentFrameReasonFacadeOps as _;
+    let clock = crate::SystemClock;
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("frame-residency"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.append_active_conversation_messages(&[projection_text("a1"), projection_text("a2")]);
+    let old_frame = state.current_frame_node_id.clone().expect("initial frame");
+    let durable = state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    state.mark_node_ids_persisted(durable);
+    assert_eq!(state.session_graph.nodes.len(), 3, "nothing retires in one frame");
+
+    let opened = open_agent_frame_in_state_with_clock(
+        &mut state,
+        crate::OpenAgentFrameRequest::new(
+            crate::FrameKey::from_caller_material("continued").expect("frame material"),
+            crate::AgentFrameReason::continue_as(),
+        ),
+        &clock,
+    )
+    .expect("open the new frame");
+    assert!(opened.opened);
+    assert!(
+        state.read_model().messages.is_empty(),
+        "the pending frame already owns the projection"
+    );
+    state.append_active_conversation_messages(&[projection_text("b1")]);
+    assert_eq!(state.session_graph.nodes.len(), 5, "pending nodes stay resident");
+
+    let new_frame = state.current_frame_node_id.clone().expect("new frame");
+    let committed = state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    state.mark_node_ids_persisted(committed);
+
+    assert_eq!(state.current_frame_node_id.as_ref(), Some(&new_frame));
+    let anchor = state.session_graph.anchor().expect("re-anchored").clone();
+    assert_eq!(anchor.frame_node_id, new_frame);
+    assert_eq!(anchor.previous_frame_node_id.as_ref(), Some(&old_frame));
+    assert_eq!(anchor.generation, 3);
+    assert_eq!(state.session_graph.nodes.len(), 2);
+    assert!(state.persisted_node_ids.iter().all(|id| {
+        state
+            .session_graph
+            .nodes
+            .iter()
+            .any(|node| &node.node_id == id)
+    }));
+    assert_eq!(state.agent_frames.len(), 1);
+    assert_eq!(
+        state.agent_frames[0].previous_frame_node_id.as_ref(),
+        Some(&old_frame)
+    );
+    assert_eq!(state.read_model().messages.len(), 1);
+}
