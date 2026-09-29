@@ -1966,6 +1966,10 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// dialect-neutral `lashlang-ir` atom where `typescript` stood. The `language`
 /// key left the IR and the module ref moved with it; the host-requirement
 /// hash, the lifted name, the component hash and the compiled program did not.
+///
+/// FIG-4050 wrapped stored module artifacts in a versioned envelope. The
+/// capture now pins that envelope around the same artifact; its IR, identities,
+/// exports, compiled program, registration draft and retired source are unchanged.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
