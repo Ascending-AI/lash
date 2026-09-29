@@ -139,11 +139,8 @@ fn assert_resident_in_fresh_compaction_frame(
 }
 
 /// The frame the durable head's leaf belongs to.
-fn sqlite_leaf_frame(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
-    session_id: &str,
-) -> String {
-    rusqlite::Connection::open(store_factory.catalog_uri())
+fn sqlite_leaf_frame(stores: &lash_sqlite_store::SqliteStoreSet, session_id: &str) -> String {
+    rusqlite::Connection::open(stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore))
         .expect("open SQLite session catalog")
         .query_row(
             "SELECT g.frame_node_id FROM session_head h
@@ -162,10 +159,11 @@ fn sqlite_leaf_frame(
 async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Result<()> {
     let session_id = "standard-compaction-pressure-frame";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let (provider, requests) = standard_compaction_provider_recorded(vec![
         // 20,000 prompt tokens reach the 20,000-token threshold of a 40,000-token window.
         response_with_usage("first response", 20_000),
@@ -375,11 +373,13 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
 }
 
 fn sqlite_head_and_max_generation(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> (String, i64) {
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
     let leaf = conn
         .query_row(
             "SELECT leaf_node_id FROM session_head WHERE session_id = ?1",
@@ -399,11 +399,13 @@ fn sqlite_head_and_max_generation(
 }
 
 fn sqlite_nodes(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> Vec<lash_core::SessionNodeRecord> {
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, node_json FROM graph_nodes
@@ -427,10 +429,10 @@ fn sqlite_nodes(
 }
 
 fn sqlite_messages(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> Vec<lash_core::Message> {
-    sqlite_nodes(store_factory, session_id)
+    sqlite_nodes(stores, session_id)
         .iter()
         .filter_map(|node| node.message())
         .collect()
@@ -555,10 +557,11 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     let session_id = "standard-compaction-durable-parent";
     let trace_path = dir.path().join("trace.jsonl");
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let provider = standard_compaction_provider(vec![
         response_with_usage("first response", 20_000),
         response_with_usage("threshold summary", 1),
@@ -592,8 +595,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .output()
         .await?;
 
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
     let first_threshold_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -687,8 +692,10 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         .id("standard-compaction-reopened")
         .output()
         .await?;
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("reopen SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("reopen SQLite session catalog");
     let reopened_first_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -847,10 +854,11 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let session_id = "standard-compaction-attachment-prune";
     let trace_path = dir.path().join("trace.jsonl");
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
@@ -939,10 +947,11 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
     const THRESHOLD_TURNS: usize = 3;
     let session_id = "standard-compaction-plugin-message-ids";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let next_injection = Arc::new(AtomicUsize::new(0));
     let injection_hook = {
         let next_injection = Arc::clone(&next_injection);
@@ -1027,10 +1036,11 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
 async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<()> {
     let session_id = "standard-compaction-continue-as-parent";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let provider = standard_compaction_provider(vec![
         response_with_usage(&typescript_block(r#"finish("primed");"#), 20_000),
         response_with_usage(
@@ -1066,8 +1076,10 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
         Some(&serde_json::json!("continued"))
     );
 
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
     let first_switch_parent = conn
         .query_row(
             "SELECT parent_node_id FROM graph_nodes
@@ -1085,11 +1097,13 @@ async fn threshold_continue_as_extends_the_pre_switch_durable_leaf() -> Result<(
 }
 
 fn sqlite_node_rows(
-    store_factory: &lash_sqlite_store::SqliteSessionStoreFactory,
+    stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
 ) -> Vec<(String, Option<String>, i64)> {
-    let conn = rusqlite::Connection::open(store_factory.catalog_uri())
-        .expect("open SQLite session catalog");
+    let conn = rusqlite::Connection::open(
+        stores.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
     let mut stmt = conn
         .prepare(
             "SELECT node_id, parent_node_id, generation FROM graph_nodes
@@ -1131,10 +1145,11 @@ fn synthetic_replacement_ids(persisted_ids: &[String]) -> std::collections::Hash
 async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Result<()> {
     let session_id = "after-turn-enqueue-resident";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let plugin = crate::plugins::StaticPluginFactory::new(
         "after-turn-injection",
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
@@ -1233,10 +1248,11 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
 async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Result<()> {
     let session_id = "mid-turn-graph-append";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let appended = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let hook_appended = Arc::clone(&appended);
     let completions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -1368,10 +1384,11 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
 async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -> Result<()> {
     let session_id = "same-turn-graph-append";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let draft_node_ids = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let hook_draft_node_ids = Arc::clone(&draft_node_ids);
     let visible_in_turn = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -1526,10 +1543,11 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
 async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     let session_id = "after-turn-enqueue-single-reply";
     let backend = double_backend().await;
-    let store_factory = latest_double()
-        .expect("the backend runs on its held double")
-        .stores()
-        .session_store_factory();
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let plugin = crate::plugins::StaticPluginFactory::new(
         "after-turn-injection",
         lash_core::facade_support::PluginSpec::new().with_after_turn(Arc::new(|_| {
@@ -1602,14 +1620,16 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
 /// Fails `commit_runtime_state` while armed so a test can inject the
 /// settlement-commit failure that used to leave a compacted resident state
 /// advanced with its usage merely staged (FIG-3374 review).
-struct FailArmedCommitStore {
-    inner: lash_core::store::SessionStore,
+struct FailArmedCommitFactory {
+    inner: Arc<dyn lash_core::DeploymentStore>,
     armed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for FailArmedCommitStore {
-    fn inner(&self) -> &lash_core::store::SessionStore {
+impl lash_core::store::RuntimeStoreDecorator for FailArmedCommitFactory {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -1626,153 +1646,7 @@ impl lash_core::store::RuntimePersistenceDecorator for FailArmedCommitStore {
     }
 }
 
-struct FailArmedCommitFactory {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-    armed: Arc<std::sync::atomic::AtomicBool>,
-}
-
-#[async_trait]
-impl lash_core::DeploymentStore for FailArmedCommitFactory {
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
-        self.inner.open_existing_store_by_id(session_id).await
-    }
-
-    async fn session_was_deleted(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, String> {
-        self.inner.session_was_deleted(session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash_core::store::MaintenanceResult<lash_core::store::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    async fn create_store(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
-        Ok(Arc::new(FailArmedCommitStore {
-            inner: self.inner.create_store(request).await?,
-            armed: Arc::clone(&self.armed),
-        }))
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<
-        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
-        lash_core::StoreError,
-    > {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        self.inner.compact_turn_park_feed(through).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for FailArmedCommitFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.load_intent(id).await
-    }
-}
-
-#[async_trait]
-impl lash_core::AttachmentRootSet for FailArmedCommitFactory {
-    async fn live_attachment_refs(
-        &self,
-        cutoff: u64,
-    ) -> std::result::Result<
-        std::collections::BTreeSet<lash_core::AttachmentId>,
-        lash_core::StoreError,
-    > {
-        self.inner.live_attachment_refs(cutoff).await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &lash_core::AttachmentId,
-        cutoff: u64,
-    ) -> std::result::Result<bool, lash_core::StoreError> {
-        self.inner.has_live_attachment_ref(id, cutoff).await
-    }
-}
+impl lash_core::DeploymentStoreDecorator for FailArmedCommitFactory {}
 
 #[tokio::test]
 async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_on_retry()

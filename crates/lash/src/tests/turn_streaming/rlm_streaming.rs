@@ -244,11 +244,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         .output()
         .await?;
 
-    let read_view = result
-        .result
-        .state
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let read_view = result.result.state.read_view();
     let stored_assistant = read_view
         .messages()
         .iter()
@@ -562,7 +558,6 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
                 .result
                 .state
                 .read_view()
-                .expect("test runtime frame scope resolves")
                 .messages()
                 .iter()
                 .any(|message| {
@@ -944,10 +939,7 @@ finish("done");"#,
     assert_eq!(tool_completed_graph_key, started_graph_key);
     assert_eq!(tool_started_parent, &None);
     assert_eq!(tool_completed_parent, &None);
-    let read_view = result
-        .state
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let read_view = result.state.read_view();
     assert!(
         read_view.messages().iter().all(|message| message
             .parts

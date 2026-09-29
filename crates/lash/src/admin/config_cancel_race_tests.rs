@@ -130,9 +130,7 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = SessionId::from("cancelled-config-before-ask");
     let session = core.session(&session_id).open().await?;
-    let store = core
-        .store_factory
-        .open_existing_store_by_id(&session_id)
+    let store = lash_core::runtime::live_session_view(&core.store_factory, &session_id)
         .await?
         .expect("open session store");
     armed.store(true, Ordering::SeqCst);
@@ -152,22 +150,18 @@ async fn cancelled_config_command_before_current_ask_is_typed() -> Result<()> {
     });
     entered.notified().await;
     let batch = store
-        .list_queued_work(&session_id)
+        .list_queued_work()
         .await?
         .into_iter()
         .find(lash_core::runtime::QueuedWorkBatch::is_session_command_work)
         .expect("config setter enqueued its command");
     assert!(
         store
-            .cancel_queued_work_batch(&session_id, &batch.batch_id)
+            .cancel_queued_work_batch(&batch.batch_id)
             .await?
             .is_some()
     );
-    assert!(
-        !store
-            .queued_work_batch_completed(&session_id, &batch.batch_id)
-            .await?
-    );
+    assert!(!store.queued_work_batch_completed(&batch.batch_id).await?);
     release.notify_one();
     let error = setter
         .await

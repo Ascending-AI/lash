@@ -392,18 +392,14 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
         let head_revision = || {
             let store_factory = Arc::clone(&store_factory);
             async move {
-                let store = DeploymentStore::open_existing_store_by_id(
+                lash_core::SessionCommitStore::load_session_head_meta(
                     store_factory.as_ref(),
                     &SessionId::from(session_id),
                 )
                 .await
-                .expect("open settled store")
-                .expect("session exists");
-                <dyn lash_core::store::RuntimePersistence>::load_session(store.as_ref())
-                    .await
-                    .expect("read settled head")
-                    .expect("session exists")
-                    .head_revision
+                .expect("read settled head")
+                .expect("session exists")
+                .head_revision
             }
         };
 

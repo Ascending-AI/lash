@@ -125,11 +125,7 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
         "incremental chunks stay distinct, their completed snapshot is not republished, and a completed-only summary remains visible",
     );
 
-    let read_view = output
-        .result
-        .state
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let read_view = output.result.state.read_view();
     let durable_reasoning = read_view
         .messages()
         .iter()
@@ -645,7 +641,6 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
             .result
             .state
             .read_view()
-            .expect("test runtime frame scope resolves")
             .active_events()
             .iter()
             .filter(|record| match record {

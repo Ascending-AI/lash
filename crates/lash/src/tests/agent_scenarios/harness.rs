@@ -416,8 +416,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         // evidence a store keeps is per digest, not per session, so a
         // dedicated seeding session records it exactly as a peer writer would.
         let seed_session_id = SessionId::from(format!("{}-attachment-seed", case.session_id));
-        let seed_store = lash_core::DeploymentStore::create_store(
-            runtime.store_factory.as_ref(),
+        let seed_store = lash_core::runtime::admit_session_view(
+            &runtime.store_factory,
             &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
@@ -437,7 +437,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
             };
             let lash_core::AttachmentWriteFence::Granted(permit) =
                 lash_core::AttachmentManifest::begin_attachment_write(
-                    seed_store.as_ref(),
+                    seed_store.store().as_ref(),
                     intent.clone(),
                 )
                 .await?
@@ -445,7 +445,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 panic!("a seeded attachment write must be granted");
             };
             lash_core::AttachmentManifest::complete_attachment_write(
-                seed_store.as_ref(),
+                seed_store.store().as_ref(),
                 &intent,
                 permit,
             )

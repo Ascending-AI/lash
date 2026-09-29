@@ -74,10 +74,7 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Resul
     .await?;
     let session = fixture.core.session("send-root-budget").open().await?;
     let session_id = lash_core::SessionId::from("send-root-budget");
-    let store = fixture
-        .core
-        .store_factory
-        .open_existing_store_by_id(&session_id)
+    let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?
         .expect("an opened session has a store");
     for index in 0..INPUTS {
@@ -205,7 +202,7 @@ impl HeldDriveFixture {
             .and_then(|catalog| catalog.store_for(&session_id))
             .expect("the open created the session's store");
         for index in 0..inputs {
-            lash_core::IngressStore::enqueue_pending_turn_input(
+            lash_core::TurnInputStore::enqueue_pending_turn_input(
                 store.as_ref(),
                 lash_core::PendingTurnInputDraft::new(
                     session_id.clone(),
@@ -349,10 +346,7 @@ async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
     let fixture = fixture(1).await?;
     let session = fixture.core.session("send-drain-sweep").open().await?;
     let session_id = lash_core::SessionId::from("send-drain-sweep");
-    let store = fixture
-        .core
-        .store_factory
-        .open_existing_store_by_id(&session_id)
+    let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?
         .expect("an opened session has a store");
     store
@@ -387,16 +381,17 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
     let session_id = lash_core::SessionId::from("send-boot-sweep");
-    let store = backend
-        .session_store_factory()
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let store = lash_core::runtime::admit_session_view(
+        &backend.session_store_factory(),
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        })
-        .await?;
+        },
+    )
+    .await?;
     store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
             session_id.clone(),
@@ -417,7 +412,7 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             if store
-                .list_pending_turn_inputs(&session_id)
+                .list_pending_turn_inputs()
                 .await
                 .expect("list pending")
                 .is_empty()
@@ -570,10 +565,7 @@ async fn a_root_replayed_after_its_session_was_deleted_replays_its_journal() -> 
         }
     })));
 
-    let store = fixture
-        .core
-        .store_factory
-        .open_existing_store_by_id(&session_id)
+    let store = lash_core::runtime::live_session_view(&fixture.core.store_factory, &session_id)
         .await?
         .expect("an opened session has a store");
     store

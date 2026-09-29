@@ -443,125 +443,6 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
 }
 
 #[tokio::test]
-pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_admissibility()
--> Result<()> {
-    // The engine's bounded retry of a drive whose runtime did not open.
-    const MAX_TRANSIENT_HYDRATIONS_PER_NOTIFICATION: usize = 8;
-
-    let builds = Arc::new(AtomicUsize::new(0));
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let provider = crate::testing::TestProvider::builder()
-        .kind("embed-test")
-        .complete({
-            let provider_calls = Arc::clone(&provider_calls);
-            move |_request| {
-                let provider_calls = Arc::clone(&provider_calls);
-                async move {
-                    provider_calls.fetch_add(1, Ordering::SeqCst);
-                    Ok(text_response("create-only queued work complete"))
-                }
-            }
-        })
-        .build()
-        .into_handle();
-    let double = restate_double(SEED).await;
-    let inner = double.lash_backend();
-    let catalog = inner.session_store_factory();
-    let backend = DecoratedBackend::over(inner)
-        .session_store_factory(|inner| Arc::new(CreateOnlySessionStoreFactory { inner }));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(provider)
-    .model(mock_model_spec())
-    .plugin(Arc::new(QueuedWorkHydrationProbeFactory {
-        builds: Arc::clone(&builds),
-    }))
-    .build(crate::testing::runtime_lease_owner())?;
-    let baseline_builds = builds.load(Ordering::SeqCst);
-
-    crate::tests::create_catalog_session(&core, "create-only-factory-idles").await?;
-    core.session("create-only-factory-idles")
-        .durable()
-        .await?
-        .send(TurnInput::text("queued through create-only factory"))
-        .ingress(lash_core::TurnInputIngress::NextTurn)
-        .id("create-only-idle")
-        .accepted()
-        .await?;
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while provider_calls.load(Ordering::SeqCst) != 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the conservatively admitted queued turn reaches the provider");
-
-    let request = lash_core::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from("create-only-factory-idles"),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-    };
-    let store = lash_core::DeploymentStore::open_existing_store(catalog.as_ref(), &request)
-        .await
-        .expect("open the create-only factory's inner store")
-        .expect("the queued session exists");
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            // The head appears with the first commit; until then the
-            // session holds only its catalog entry.
-            let read = store.load_session().await.expect("load the queued session");
-            if read.is_some_and(|read| {
-                read.checkpoint
-                    .as_ref()
-                    .is_some_and(|checkpoint| checkpoint.turn_state.turn_index >= 1)
-            }) {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("the queued turn commits durably");
-
-    let first_settled_builds = wait_for_stable_build_count(&builds).await;
-    let first_hydrations = first_settled_builds.saturating_sub(baseline_builds);
-    assert!(
-        (1..=MAX_TRANSIENT_HYDRATIONS_PER_NOTIFICATION).contains(&first_hydrations),
-        "one conservative notification must use one bounded hydration ladder, got {first_hydrations}"
-    );
-
-    core.session("create-only-factory-idles")
-        .durable()
-        .await?
-        .send(TurnInput::text(
-            "queued after the create-only factory idled",
-        ))
-        .ingress(lash_core::TurnInputIngress::NextTurn)
-        .id("create-only-rearm")
-        .accepted()
-        .await?;
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        while provider_calls.load(Ordering::SeqCst) != 2 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("enqueue and notify re-arm the idled create-only factory");
-
-    let second_settled_builds = wait_for_stable_build_count(&builds).await;
-    let second_hydrations = second_settled_builds.saturating_sub(first_settled_builds);
-    assert!(
-        (1..=MAX_TRANSIENT_HYDRATIONS_PER_NOTIFICATION).contains(&second_hydrations),
-        "the re-armed notification must use one fresh bounded hydration ladder, got {second_hydrations}"
-    );
-    Ok(())
-}
-
-#[tokio::test]
 pub(super) async fn cancelling_both_sends_stops_the_running_root_and_withdraws_the_queued_one()
 -> Result<()> {
     // One session drives one root at a time, so a second send waits queued
@@ -821,11 +702,6 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     assert_eq!(affected.input_id, undelivered_id);
     assert_eq!(affected.disposition, disposition);
 
-    let store =
-        lash_core::DeploymentStore::open_existing_store_by_id(store_factory.as_ref(), session_id)
-            .await
-            .expect("read the opened session\'s store")
-            .expect("opened session retains its in-memory store");
     match disposition {
         lash_core::facade_support::TurnCancelDisposition::Drop => {
             let pending = session.durable().pending_turn_inputs().await?;
@@ -861,8 +737,8 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             );
         }
     }
-    let record = lash_core::store::IngressStore::turn_cancel_request(
-        store.as_ref(),
+    let record = lash_core::TurnInputStore::turn_cancel_request(
+        store_factory.as_ref(),
         &lash_core::facade_support::TurnAddress::new(session_id, turn_id),
     )
     .await?

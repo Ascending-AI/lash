@@ -116,8 +116,8 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     .build(crate::testing::runtime_lease_owner())?;
     let mut policy = core.policy.clone();
     policy.session_id = Some(lash_core::SessionId::from("seeded-reopen"));
-    let store = lash_core::DeploymentStore::create_store(
-        factory.as_ref(),
+    let store = lash_core::runtime::admit_session_view(
+        &factory,
         &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             session_id: lash_core::SessionId::from("seeded-reopen"),

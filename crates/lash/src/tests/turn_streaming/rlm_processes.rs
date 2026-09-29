@@ -57,15 +57,10 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
                 if required_node_id == "inactive-ancestor"
         ));
         assert!(
-            runtime
-                .read_view()
-                .expect("test runtime frame scope resolves")
-                .messages()
+            runtime.read_view().messages().iter().all(|message| message
+                .parts
                 .iter()
-                .all(|message| message
-                    .parts
-                    .iter()
-                    .all(|part| part.content() != ROLLED_BACK_MARKER)),
+                .all(|part| part.content() != ROLLED_BACK_MARKER)),
             "the stale append must be absent from the reconciled RLM history projection"
         );
         session.runtime.publish_from(&runtime);
@@ -233,24 +228,13 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     drop(switched);
     let switch_turn_index = 1;
     // The switch commit is the durable head while the follow-on call is held.
-    let store_request = lash_core::SessionStoreCreateRequest {
-        owning_process_id: None,
-        pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(session_id.to_string()),
-        relation: lash_core::SessionRelation::Root,
-        policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
-    };
-    let store = lash_core::DeploymentStore::open_existing_store(
+    let durable = lash_core::SessionHistoryStore::load_session_window(
         sqlite_store_factory.as_ref(),
-        &store_request,
+        &SessionId::from(session_id.to_string()),
+        lash_core::store::WindowSelector::Current,
     )
-    .await
-    .expect("open durable session store")
-    .expect("frame-switch session is durable");
-    let durable = store
-        .load_session()
-        .await?
-        .expect("frame-switch session has a durable head");
+    .await?
+    .expect("frame-switch session has a durable head");
     let checkpoint = durable
         .checkpoint
         .as_ref()
@@ -275,7 +259,6 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .runtime_commit_budget(session_id, switch_writes[0].revision_before)
         .expect("observe the accepted frame-switch RuntimeCommit before its transaction")
         .checkpoint_bytes;
-    drop(store);
     drop(durable);
 
     // The attempt dies while the follow-on model call is held; the engine
@@ -770,10 +753,7 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
         TurnEvent::FinalValue { .. } | TurnEvent::ToolValue { .. }
     )));
     assert_eq!(assistant_prose(&events), "done in prose");
-    let read_view = result
-        .state
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let read_view = result.state.read_view();
     let assistant_messages = read_view
         .messages()
         .iter()

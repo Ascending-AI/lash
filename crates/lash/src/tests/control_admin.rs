@@ -275,17 +275,18 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
         current.protocol_turn_options.payload,
         before.agent_frames[0].protocol_turn_options.payload
     );
+    // The prior frame is no longer resident; it stays durable, and the
+    // history reader pages it from the head's ancestry.
     assert!(
-        after.session_graph.nodes.iter().any(|node| {
-            after
-                .session_graph
-                .nearest_frame_node_id(Some(&node.node_id))
-                .map(lash_core::NodeId::as_str)
-                == previous_frame_node_id.as_deref()
-                && node.message().is_some_and(|message| {
-                    message.parts[0].content().contains("old durable request")
-                })
-        }),
+        crate::tests::durable_history(&session.durable())
+            .await?
+            .iter()
+            .any(|node| {
+                Some(node.frame_node_id.as_str()) == previous_frame_node_id.as_deref()
+                    && node.record.message().is_some_and(|message| {
+                        message.parts[0].content().contains("old durable request")
+                    })
+            }),
         "previous frame content should remain durable after compaction"
     );
     assert!(
@@ -1327,8 +1328,8 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 
     Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
 
-    let store = lash_core::DeploymentStore::open_existing_store_by_id(
-        store_factory.as_ref(),
+    let store = lash_core::runtime::live_session_view(
+        &store_factory,
         &SessionId::from("config-admin-tool-access"),
     )
     .await
@@ -1375,8 +1376,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
     assert_eq!(child.policy_snapshot().recorded_provider_id(), "embed-test");
     child.send(TurnInput::text("child turn")).output().await?;
     assert!(
-        store_factory
-            .open_existing_store_by_id(&SessionId::from("child-control"))
+        lash_core::runtime::live_session_view(&store_factory, &SessionId::from("child-control"))
             .await
             .expect("read session catalog")
             .is_some(),
@@ -1439,8 +1439,9 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
             .await?
             .id;
 
-        store_factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        lash_core::runtime::admit_session_view(
+            &store_factory,
+            &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
@@ -1457,8 +1458,9 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                     model: mock_model_spec(),
                     ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
                 },
-            })
-            .await?;
+            },
+        )
+        .await?;
 
         let child = core
             .session(&child_session_id)
@@ -1482,14 +1484,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                         "operation_id": format!("session-create:{child_session_id}")
                     })
         }));
-        let child_store = store_factory
-            .open_existing_store(&lash_core::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: child_session_id.clone(),
-                relation: lash_core::SessionRelation::Root,
-                policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            })
+        let child_store = lash_core::runtime::live_session_view(&store_factory, &child_session_id)
             .await
             .expect("open child store")
             .expect("child store exists");

@@ -559,20 +559,24 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
 
     let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
     policy.session_id = Some(session_id.clone());
-    let store = fixture
-        .core
-        .store_factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let store = lash_core::runtime::admit_session_view(
+        &fixture.core.store_factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             policy,
-        })
-        .await?;
-    let state = crate::persistence::load_persisted_session_state(store.as_ref())
-        .await?
-        .expect("the first turn committed a head");
+        },
+    )
+    .await?;
+    let state = lash_core::store::load_session_window_state(
+        &store,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("the first turn committed a head")
+    .state;
     let observer = fixture
         .core
         .session(session_id.clone())
@@ -708,10 +712,7 @@ async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
     let input_id = third.input_id().clone();
     let parts = session.durable().send_parts().await?;
     assert_eq!(
-        parts
-            .store
-            .root_binding(&session.session_id(), &input_id)
-            .await?,
+        parts.store.root_binding(&input_id).await?,
         Some(lash_core::TurnId::from("consuming-root")),
         "the controlled barrier must hold after binding"
     );
@@ -1007,17 +1008,14 @@ async fn a_send_under_an_unservable_route_is_refused_before_acceptance() -> Resu
             if runtime.code == lash_core::RuntimeErrorCode::ProviderRouteUnknown),
         "the refusal is the typed route refusal: {error:?}"
     );
-    let store = fixture
-        .core
-        .store_factory
-        .open_existing_store_by_id(&lash_core::SessionId::from("send-bad-route"))
-        .await?
-        .expect("the opened session has a store");
+    let store = lash_core::runtime::live_session_view(
+        &fixture.core.store_factory,
+        &lash_core::SessionId::from("send-bad-route"),
+    )
+    .await?
+    .expect("the opened session has a store");
     assert!(
-        store
-            .list_pending_turn_inputs(&lash_core::SessionId::from("send-bad-route"))
-            .await?
-            .is_empty(),
+        store.list_pending_turn_inputs().await?.is_empty(),
         "the refused send accepted nothing"
     );
     // The refusal changed nothing: the session's recorded route still serves.

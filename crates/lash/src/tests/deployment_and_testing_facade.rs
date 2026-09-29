@@ -87,16 +87,18 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         let session_id = lash_core::SessionId::from("drain-parked-turn");
         let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
         policy.session_id = Some(session_id.clone());
-        let store = factory
-            .create_store(&lash_core::SessionStoreCreateRequest {
+        let store = lash_core::runtime::admit_session_view(
+            &factory,
+            &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::default(),
                 policy,
-            })
-            .await
-            .expect("create the session store");
+            },
+        )
+        .await
+        .expect("create the session store");
         let stored = store
             .record_turn_park(&lash_core::store::TurnParkWrite {
                 session_id: session_id.clone(),
@@ -144,7 +146,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
             ),
         );
         lash_core::testing::store_fixtures::commit_runtime_state_for_test(
-            &store,
+            store.store(),
             commit,
             "drain-settler",
         )
@@ -225,16 +227,18 @@ async fn parked_work_merges_parked_turns_and_processes() {
     let session_id = lash_core::SessionId::from("parked-work-turn");
     let mut policy = lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded);
     policy.session_id = Some(session_id.clone());
-    let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let store = lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
             policy,
-        })
-        .await
-        .expect("create the session store");
+        },
+    )
+    .await
+    .expect("create the session store");
     // Parked at epoch 1, so the turn is the older park.
     let turn_park = store
         .record_turn_park(&lash_core::store::TurnParkWrite {
@@ -486,18 +490,18 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
     // FIG-3884, FIG-3927 N8: a root the retired generation's drive admitted
     // counts as its in-flight turn until the root ends.
     let turn_session = lash_core::SessionId::from("generation-drain-status-turn");
-    let session_store = core
-        .backend()
-        .session_store_factory()
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let session_store = lash_core::runtime::admit_session_view(
+        &core.backend().session_store_factory(),
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: turn_session.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create the in-flight turn's session");
+        },
+    )
+    .await
+    .expect("create the in-flight turn's session");
     let head = session_store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
             &turn_session,
@@ -508,7 +512,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .expect("accept the root's input")
         .input_id;
     let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
-        &(session_store.clone() as lash_core::store::SessionStore),
+        session_store.store(),
         &turn_session,
         "generation-drain-status",
     )
@@ -652,16 +656,18 @@ async fn a_closing_session_holds_a_generation_drain_until_its_physical_delete() 
     let retired = lash_core::engine::BuildGeneration::for_test("fig-3873-s4-retired");
     assert!(core.drain_generation(&retired).await.expect("mark"));
     let session = lash_core::SessionId::from("fig-3873-s4-closing");
-    factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create the session");
+        },
+    )
+    .await
+    .expect("create the session");
     let open = core
         .generation_drain_status(&retired)
         .await

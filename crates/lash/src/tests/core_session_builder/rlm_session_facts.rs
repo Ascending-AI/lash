@@ -202,35 +202,36 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     // the row never settles.
     drop(session);
     let session_id = lash_core::SessionId::from("rlm-typescript-queued-session-command");
-    let durable_store =
-        lash_core::DeploymentStore::open_existing_store_by_id(store_factory.as_ref(), &session_id)
-            .await
-            .expect("resolve the queued session's store")
-            .expect("the queued session exists");
+    let durable_store = lash_core::runtime::live_session_view(&store_factory, &session_id)
+        .await
+        .expect("resolve the queued session's store")
+        .expect("the queued session exists");
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
-            let recorded = lash_core::store::load_persisted_session_state(durable_store.as_ref())
-                .await
-                .expect("load the durable head")
-                .and_then(|state| {
-                    state.tool_state_snapshot().map(|snapshot| {
-                        snapshot.contains(&lash_core::ToolId::from("tool:after_refresh"))
-                    })
+            let recorded = lash_core::store::load_session_window_state(
+                &durable_store,
+                lash_core::store::WindowSelector::Current,
+            )
+            .await
+            .expect("load the durable head")
+            .and_then(|loaded| {
+                let state = loaded.state;
+                state.tool_state_snapshot().map(|snapshot| {
+                    snapshot.contains(&lash_core::ToolId::from("tool:after_refresh"))
                 })
-                .unwrap_or(false);
+            })
+            .unwrap_or(false);
             // `list_queued_work`, not the pending view: the pending view hides
             // a claimed row and does not show an `AfterCurrentTurnCommit` row
             // before its delivery condition, so its emptiness is not evidence
             // that anything ran. The full listing keeps the batch until the
             // drain settles it (SPEC-PRELUDE, FIG-2875).
-            let drained = !lash_core::store::IngressStore::list_queued_work(
-                durable_store.as_ref(),
-                &session_id,
-            )
-            .await
-            .expect("read every queued-work row, including claimed ones")
-            .iter()
-            .any(|batch| batch.batch_id == receipt.batch_id);
+            let drained = !durable_store
+                .list_queued_work()
+                .await
+                .expect("read every queued-work row, including claimed ones")
+                .iter()
+                .any(|batch| batch.batch_id == receipt.batch_id);
             if recorded && drained {
                 return;
             }

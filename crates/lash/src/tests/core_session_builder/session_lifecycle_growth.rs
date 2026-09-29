@@ -1,11 +1,6 @@
 use super::*;
 use crate::rlm::RlmSendBuilderExt as _;
-use lash_core::store::{
-    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimePersistenceDecorator,
-};
-use lash_core::{AttachmentId, AttachmentRootSet, DeploymentStore, SessionStoreCreateRequest};
-use lash_sansio::SessionId;
-use std::collections::BTreeSet;
+use lash_core::store::{RuntimeCommit, RuntimeCommitReceipt};
 use std::sync::Mutex;
 
 #[derive(Clone, Debug)]
@@ -14,14 +9,16 @@ struct CommitSample {
     rewritten_leaves: Vec<String>,
 }
 
-struct GrowthStore {
-    inner: lash_core::store::SessionStore,
+struct GrowthFactory {
+    inner: Arc<dyn lash_core::DeploymentStore>,
     samples: Arc<Mutex<Vec<CommitSample>>>,
 }
 
 #[async_trait]
-impl RuntimePersistenceDecorator for GrowthStore {
-    fn inner(&self) -> &lash_core::store::SessionStore {
+impl lash_core::store::RuntimeStoreDecorator for GrowthFactory {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -47,152 +44,7 @@ impl RuntimePersistenceDecorator for GrowthStore {
     }
 }
 
-struct GrowthFactory {
-    inner: Arc<dyn lash_core::DeploymentStore>,
-    samples: Arc<Mutex<Vec<CommitSample>>>,
-}
-
-#[async_trait]
-impl DeploymentStore for GrowthFactory {
-    // A decorator forwards the non-creating by-id seam to the catalog it
-    // wraps.
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::SessionStore>, StoreError> {
-        lash_core::DeploymentStore::open_existing_store_by_id(self.inner.as_ref(), session_id).await
-    }
-
-    async fn session_was_deleted(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, String> {
-        self.inner.session_was_deleted(session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash_core::store::MaintenanceResult<lash_core::store::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    async fn create_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> std::result::Result<lash_core::store::SessionStore, StoreError> {
-        Ok(Arc::new(GrowthStore {
-            inner: self.inner.create_store(request).await?,
-            samples: Arc::clone(&self.samples),
-        }))
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        lash_core::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        lash_core::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<
-        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
-        lash_core::StoreError,
-    > {
-        lash_core::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        lash_core::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        lash_core::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for GrowthFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        self.inner.load_intent(id).await
-    }
-}
-
-#[async_trait]
-impl AttachmentRootSet for GrowthFactory {
-    async fn live_attachment_refs(
-        &self,
-        cutoff: u64,
-    ) -> std::result::Result<BTreeSet<AttachmentId>, StoreError> {
-        self.inner.live_attachment_refs(cutoff).await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &AttachmentId,
-        cutoff: u64,
-    ) -> std::result::Result<bool, StoreError> {
-        self.inner.has_live_attachment_ref(id, cutoff).await
-    }
-}
+impl lash_core::DeploymentStoreDecorator for GrowthFactory {}
 
 fn assert_flat_checkpoint_sizes(peaks: &[usize]) {
     let min = peaks.iter().min().expect("checkpoint samples");

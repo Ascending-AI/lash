@@ -8,9 +8,9 @@ use super::*;
 /// not silently discarded and deferred to the first turn.
 #[tokio::test]
 async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()> {
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::default());
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -72,9 +72,16 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
 /// `conflicting_provider_at_open_is_refused_before_any_turn` above.
 #[tokio::test]
 async fn related_session_open_records_the_provider_pin() -> Result<()> {
-    let factory = Arc::new(RecordingStoreFactory::default());
+    let mut recorded = None;
+    let backend = backend_with_catalog(|inner| {
+        let (layer, requests) = RecordingAdmissions::over(inner);
+        recorded = Some(requests);
+        layer
+    })
+    .await;
+    let requests = recorded.expect("the catalog is decorated");
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_with_catalog(factory.clone()).await.into(),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -87,7 +94,11 @@ async fn related_session_open_records_the_provider_pin() -> Result<()> {
         .open()
         .await?;
     assert_eq!(
-        factory.provider_ids(),
+        requests
+            .lock_recover()
+            .iter()
+            .map(|request| request.policy.recorded_provider_id().to_string())
+            .collect::<Vec<_>>(),
         vec!["embed-test".to_string(), "embed-test".to_string()],
         "a related session opened through the ordinary path carries the \
          recorded provider pin"

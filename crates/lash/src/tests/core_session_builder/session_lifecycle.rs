@@ -1306,12 +1306,11 @@ async fn cold_open_surfaces_v5_execution_snapshot_rejection_with_operator_remedy
         ))
     };
     state.set_execution_state_snapshot(Some(old_version_snapshot.into()));
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
-    let core =
-        explicit_ephemeral_facets(rlm_core_builder_over(backend_serving(store).await.into()))
-            .provider(mock_provider())
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())?;
+    let (backend, _) = backend_seeded(state).await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(mock_provider())
+        .model(mock_model_spec())
+        .build(crate::testing::runtime_lease_owner())?;
 
     let error = match core.session(session_id).open().await {
         Ok(_) => panic!("cold open must reject the persisted v5 execution snapshot"),
@@ -1348,9 +1347,9 @@ async fn store_factory_reopens_persisted_session_state() -> Result<()> {
         lash_core::MessageRole::User,
         "already stored",
     )]);
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
+    let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1382,9 +1381,9 @@ async fn cold_reopen_restores_its_committed_prompt_layer() -> Result<()> {
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(persisted));
+    let (backend, _) = backend_seeded(persisted).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1567,9 +1566,9 @@ async fn persisted_provider_id_rebinds_to_live_provider_on_open() -> Result<()> 
         lash_core::MessageRole::User,
         "stored",
     )]);
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
+    let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1605,9 +1604,9 @@ async fn persisted_provider_id_mismatch_is_refused_at_open_not_deferred_to_a_tur
         ))
     };
     state.ensure_agent_frame_initialized();
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
+    let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1668,9 +1667,9 @@ async fn agent_frame_provider_id_mismatch_is_reconciled_on_open() -> Result<()> 
     state.session_graph = lash_core::SessionGraph::from_shared_nodes(nodes, leaf_node_id)
         .expect("session lifecycle fixture graph is valid");
     state.agent_frames = state.session_graph.agent_frame_records(&state.session_id);
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
+    let (backend, _) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1714,9 +1713,9 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
         ))
     };
     state.ensure_agent_frame_initialized();
-    let store = Arc::new(SnapshotStore::with_state(state));
+    let (backend, store) = backend_seeded(state).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1724,7 +1723,7 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("refresh-provider-mismatch").open().await?;
 
-    store.set_head_provider_id("other-provider");
+    set_head_provider_id(&store, "other-provider").await;
     let waiter = tokio::spawn({
         let session = session.clone();
         async move {
@@ -1764,9 +1763,9 @@ async fn refreshed_head_provider_id_overrides_the_resident_copy() -> Result<()> 
 
 #[tokio::test]
 async fn explicit_provider_persists_reopens_and_runs_second_turn() -> Result<()> {
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::default());
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2004,44 +2003,6 @@ async fn public_session_state_appends_preserve_concurrent_retirement_refusals() 
 }
 
 #[tokio::test]
-async fn store_session_id_mismatch_is_rejected() -> Result<()> {
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("actual-session"),
-        policy: lash_core::SessionPolicy {
-            provider_id: mock_provider().kind().to_string(),
-            model: mock_model_spec(),
-            ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
-        },
-        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-            lash_core::TurnBudget::Unbounded,
-        ))
-    };
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-
-    let err = match core.session("requested-session").open().await {
-        Ok(_) => panic!("mismatched store should fail"),
-        Err(err) => err,
-    };
-
-    // Admission refuses the foreign store before any state is loaded from it.
-    assert!(matches!(
-        err,
-        EmbedError::Store(lash_core::StoreError::SessionBindingMismatch {
-            bound_session_id,
-            attempted_session_id,
-        }) if bound_session_id == "actual-session" && attempted_session_id == "requested-session"
-    ));
-    Ok(())
-}
-
-#[tokio::test]
 async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<()> {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("manual-state"),
@@ -2058,9 +2019,9 @@ async fn open_with_state_uses_manual_state_and_persists_tool_state() -> Result<(
         lash_core::MessageRole::User,
         "manual input",
     )]);
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::default());
+    let backend = double_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store.clone()).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2117,7 +2078,7 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
     let builder_model = model_spec("builder-model", None, 77_777);
     let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(persisted));
+    let (backend, _) = backend_seeded(persisted).await;
     let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
     let request_probe = Arc::clone(&requests);
     let provider = crate::testing::TestProvider::builder()
@@ -2149,13 +2110,11 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         observations: Arc::clone(&transform_observations),
     });
     let probe_factory = Arc::new(ReconciliationProbeFactory { transform });
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(
-        backend_serving(Arc::clone(&store)).await.into(),
-    ))
-    .provider(provider)
-    .model(builder_model.clone())
-    .plugin(probe_factory)
-    .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(provider)
+        .model(builder_model.clone())
+        .plugin(probe_factory)
+        .build(crate::testing::runtime_lease_owner())?;
     let session = core
         .session(session_id)
         .session_spec(crate::SessionSpec::new().model(builder_model.clone()))
@@ -2202,8 +2161,13 @@ async fn reopen_reconciles_builder_model_across_all_runtime_consumers() -> Resul
         .await
         .expect("export persisted state");
     drop(runtime);
-    let historical = state
-        .agent_frames
+    // The historical frame is durable, not resident: read it from the
+    // session's ancestry.
+    let durable_frames = crate::tests::history_frames(
+        crate::tests::durable_history(&session.durable()).await?,
+        &state.session_id,
+    );
+    let historical = durable_frames
         .iter()
         .find(|frame| frame.frame_node_id == historical_frame_id)
         .expect("historical frame remains");
@@ -2313,7 +2277,7 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
     let persisted = conflicting_reopen_state(&SessionId::from(session_id));
     let durable_model = persisted.policy.model.clone();
     let historical_frame_id = persisted.agent_frames[0].frame_node_id.clone();
-    let store = SnapshotStore::with_state(persisted);
+    let (_backend, store) = backend_seeded(persisted).await;
     let policy = lash_core::SessionPolicy {
         provider_id: "embed-test".to_string(),
         model: model_spec("builder-model", None, 77_777),
@@ -2337,16 +2301,20 @@ async fn queued_worker_state_load_keeps_durable_policy_without_rewriting_history
             .id,
         "current-frame-model"
     );
+    // The load does not rewrite history: the historical frame's durable
+    // record keeps its own model.
     assert_eq!(
-        state
-            .agent_frames
-            .iter()
-            .find(|frame| frame.frame_node_id == historical_frame_id)
-            .expect("historical frame")
-            .assignment
-            .policy
-            .model
-            .id,
+        crate::tests::history_frames(
+            crate::tests::store_history(&store).await?,
+            &state.session_id
+        )
+        .iter()
+        .find(|frame| frame.frame_node_id == historical_frame_id)
+        .expect("historical frame")
+        .assignment
+        .policy
+        .model
+        .id,
         "historical-model"
     );
     Ok(())
@@ -2383,35 +2351,5 @@ async fn core_store_factory_is_used_for_sessions_created_from_a_running_session(
         ],
         "both sessions live in the backend's one catalog"
     );
-    Ok(())
-}
-
-#[tokio::test]
-async fn reused_exact_store_factory_reports_session_creation_guidance() -> Result<()> {
-    let reused_store: lash_core::store::SessionStore = Arc::new(BoundSessionStore {
-        session_id: SessionId::from("root-store"),
-        drive_epochs: Default::default(),
-    });
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(reused_store).await.into(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let _session = core.session("root-store").open().await?;
-
-    let err = match core
-        .session("child-needs-own-store")
-        .parent("root-store")
-        .open()
-        .await
-    {
-        Ok(_) => panic!("reused root store should not open a child session"),
-        Err(error) => error,
-    };
-    let message = err.to_string();
-
-    assert!(message.contains("child-needs-own-store"));
     Ok(())
 }

@@ -264,9 +264,9 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state));
-    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
+    let (backend, _) = backend_seeded(state).await;
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await.into(),
+        backend.clone(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

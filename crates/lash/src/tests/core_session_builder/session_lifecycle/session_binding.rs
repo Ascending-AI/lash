@@ -118,8 +118,8 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         crate::CancelReceipt::Requested { .. }
     ));
 
-    let store = lash_core::DeploymentStore::open_existing_store_by_id(
-        source_catalog.as_ref(),
+    let store = lash_core::runtime::live_session_view(
+        &source_catalog,
         &lash_core::SessionId::from("owner-preserved"),
     )
     .await
@@ -128,7 +128,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let source_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         source_host,
         lash_core::SessionId::from("owner-preserved"),
-        store,
+        Arc::clone(store.store()),
     );
     let duplicate = source_driver
         .request_cancel(crate::TurnCancelRequest::new(

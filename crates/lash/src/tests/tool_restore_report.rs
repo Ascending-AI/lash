@@ -95,13 +95,8 @@ async fn durable_head_revision(
     factory: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<u64> {
-    let store = factory
-        .open_existing_store_by_id(session_id)
-        .await
-        .expect("open the persisted store")
-        .expect("the session exists");
     Ok(
-        lash_core::store::load_persisted_session_state(store.as_ref())
+        lash_core::SessionCommitStore::load_session_head_meta(factory, session_id)
             .await?
             .expect("persisted state")
             .head_revision,

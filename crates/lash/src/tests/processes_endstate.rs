@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 
 use lashlang::testing::ast_builders as b;
 
@@ -636,16 +636,19 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
 
     let session_id = lash_core::SessionId::from("process-prune-closure-session");
     let factory = &core.store_factory;
-    let store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let store = lash_core::runtime::admit_session_view(
+        factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await?;
+        },
+    )
+    .await?;
     let lease = store
+        .store()
         .seal_drive_epoch_for_test(
             &session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
@@ -670,7 +673,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         &physical_scope,
     )?;
     store
-        .validate_turn_cancellation_binding(&session_id, &lease, &binding_id, &physical_scope)
+        .validate_turn_cancellation_binding(&lease, &binding_id, &physical_scope)
         .await?;
     let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
     let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
@@ -749,16 +752,19 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     assert_eq!(report.pruned_processes, 1);
 
     let late_session_id = lash_core::SessionId::from("process-prune-closure-late-session");
-    let late_store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let late_store = lash_core::runtime::admit_session_view(
+        factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: late_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await?;
+        },
+    )
+    .await?;
     let late_lease = late_store
+        .store()
         .seal_drive_epoch_for_test(
             &late_session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
@@ -778,12 +784,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         &late_scope,
     )?;
     late_store
-        .validate_turn_cancellation_binding(
-            &late_session_id,
-            &late_lease,
-            &late_binding_id,
-            &late_scope,
-        )
+        .validate_turn_cancellation_binding(&late_lease, &late_binding_id, &late_scope)
         .await?;
     let late_address = lash_core::facade_support::TurnAddress::new(
         &late_session_id,

@@ -38,11 +38,11 @@ use lash_core::plugin::{
     PluginFactory, PromptHookContext, RecordedSessionConfig, RuntimeServices, SessionStateService,
     StaticPluginFactory,
 };
-use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
+use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
     AppendSessionNodesRequest, CommitBudget, DeploymentStore, LlmOutputPart, LlmResponse,
     ModelSpec, PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig,
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionAppendNode, SessionPolicy,
+    RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionAppendNode, SessionPolicy,
     SessionRelation, SessionStoreCreateRequest, StoreError, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
@@ -64,13 +64,31 @@ enum CommitFault {
 }
 
 struct FaultStore {
-    inner: lash_core::store::SessionStore,
+    inner: Arc<dyn RuntimeStore>,
+    /// The session's view on the undecorated store.
+    base: lash_core::store::SessionStore,
     fault: Mutex<CommitFault>,
     /// Every commit handed to the store, faulted or not, in order.
     commits: Mutex<Vec<RuntimeCommit>>,
 }
 
 impl FaultStore {
+    fn over(base: lash_core::store::SessionStore) -> Arc<Self> {
+        Arc::new(Self {
+            inner: Arc::clone(base.store()),
+            base,
+            fault: Mutex::new(CommitFault::None),
+            commits: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// The session's view through this store's faults.
+    fn view(self: &Arc<Self>) -> lash_core::store::SessionStore {
+        let store: Arc<dyn RuntimeStore> = Arc::clone(self) as Arc<dyn RuntimeStore>;
+        lash_core::store::SessionStore::new(store, self.base.session_id().clone())
+            .expect("the faulted view names a valid session")
+    }
+
     fn arm(&self, fault: CommitFault) {
         *self.fault.lock_recover() = fault;
     }
@@ -81,8 +99,10 @@ impl FaultStore {
 }
 
 #[async_trait::async_trait]
-impl RuntimePersistenceDecorator for FaultStore {
-    fn inner(&self) -> &lash_core::store::SessionStore {
+impl RuntimeStoreDecorator for FaultStore {
+    type Inner = dyn RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -201,12 +221,16 @@ fn snapshot_globals(
 async fn durable_execution_state(
     store: &FaultStore,
 ) -> Option<lash_core::plugin::HydratedExecutionState> {
-    lash_core::store::load_persisted_session_state(store.inner.as_ref())
-        .await
-        .expect("load the durable head")
-        .expect("the session is persisted")
-        .execution_state_hydration()
-        .expect("hydrate the durable execution state")
+    lash_core::store::load_session_window_state(
+        &store.base,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .expect("load the durable head")
+    .expect("the session is persisted")
+    .state
+    .execution_state_hydration()
+    .expect("hydrate the durable execution state")
 }
 
 /// The global names and `baton`'s rendered value in the durable checkpoint.
@@ -313,7 +337,7 @@ async fn open_with_plugins(
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = PersistentRuntimeServices::new(
         plugins.clone(),
-        store as lash_core::store::SessionStore,
+        store.view(),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -339,16 +363,9 @@ async fn open_with_plugins(
 async fn projected_prompt(runtime: &LashRuntime, plugins: &PluginSession) -> String {
     let contributions = plugins
         .collect_prompt_contributions(PromptHookContext {
-            session_id: SessionId::from(
-                runtime
-                    .read_view()
-                    .expect("test runtime frame scope resolves")
-                    .session_id(),
-            ),
+            session_id: SessionId::from(runtime.read_view().session_id()),
             sessions: Arc::new(NoSessions),
-            state: runtime
-                .read_view()
-                .expect("test runtime frame scope resolves"),
+            state: runtime.read_view(),
             protocol_turn_options: ProtocolTurnOptions::default(),
             turn_context: Default::default(),
         })
@@ -384,9 +401,7 @@ async fn open_turn_handler(
     runtime: &LashRuntime,
     turn_id: &TurnId,
 ) -> lash_restate_test::OpenHandler {
-    let view = runtime
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let view = runtime.read_view();
     let session_id = SessionId::from(view.session_id());
     let double = SESSION_ENGINES
         .get()
@@ -486,16 +501,10 @@ impl Backend {
             relation: SessionRelation::Root,
             policy: policy(),
         };
-        let base = self
-            .factory
-            .create_store(&request)
+        let base = lash_core::runtime::admit_session_view(&self.factory, &request)
             .await
             .expect("create store");
-        let store = Arc::new(FaultStore {
-            inner: base.clone(),
-            fault: Mutex::new(CommitFault::None),
-            commits: Mutex::new(Vec::new()),
-        });
+        let store = FaultStore::over(base.clone());
         let initial = RuntimeSessionState {
             session_id: session_id.clone(),
             protocol_turn_options: ProtocolTurnOptions::typed(
@@ -535,10 +544,14 @@ impl Backend {
         Box::pin(runtime.park()).await.expect("park");
         drop(plugins);
 
-        let durable = lash_core::store::load_persisted_session_state(base.as_ref())
-            .await
-            .expect("load")
-            .expect("persisted state");
+        let durable = lash_core::store::load_session_window_state(
+            &base,
+            lash_core::store::WindowSelector::Current,
+        )
+        .await
+        .expect("load")
+        .expect("persisted state")
+        .state;
         let (mut runtime, plugins) = open_with_plugins(
             &self.backend,
             Arc::clone(&store),
@@ -1113,21 +1126,20 @@ async fn storeless_runtime(
     let backend = double.lash_backend();
     // The provider arms faults on a store; a storeless session has none, so it
     // gets a detached one that nothing commits to.
-    let detached = Arc::new(FaultStore {
-        inner: backend
-            .session_store_factory()
-            .create_store(&SessionStoreCreateRequest {
+    let detached = FaultStore::over(
+        lash_core::runtime::admit_session_view(
+            &backend.session_store_factory(),
+            &SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("fig2521-detached"),
                 relation: SessionRelation::Root,
                 policy: policy(),
-            })
-            .await
-            .expect("detached store"),
-        fault: Mutex::new(CommitFault::None),
-        commits: Mutex::new(Vec::new()),
-    });
+            },
+        )
+        .await
+        .expect("detached store"),
+    );
     let state = RuntimeSessionState {
         session_id: SessionId::from(format!(
             "fig2521-storeless-{}",

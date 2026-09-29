@@ -9,7 +9,7 @@ const SEED: u64 = 0xd0a4_b1e5;
 /// Catalog wrapper that counts which seam a caller reached for.
 ///
 /// A Durable Session must resolve through the non-creating by-id seam exactly
-/// once per handle and must never reach `create_store`; these counters are what
+/// once per handle and must never reach `admit_session`; these counters are what
 /// makes that a test rather than a claim.
 struct CountingSessionStoreFactory {
     inner: Arc<dyn DeploymentStore>,
@@ -31,172 +31,34 @@ impl CountingSessionStoreFactory {
 }
 
 #[async_trait]
-impl lash_core::AttachmentRootSet for CountingSessionStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> std::result::Result<
-        std::collections::BTreeSet<lash_core::AttachmentId>,
-        lash_core::StoreError,
-    > {
-        lash_core::AttachmentRootSet::live_attachment_refs(
-            self.inner.as_ref(),
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+impl lash_core::store::RuntimeStoreDecorator for CountingSessionStoreFactory {
+    type Inner = dyn DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &lash_core::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> std::result::Result<bool, lash_core::StoreError> {
-        lash_core::AttachmentRootSet::has_live_attachment_ref(
-            self.inner.as_ref(),
-            id,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
-    }
-}
-
-#[async_trait]
-impl DeploymentStore for CountingSessionStoreFactory {
-    async fn create_store(
+    async fn admit_session(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionAdmission, lash_core::StoreError> {
         self.creates.fetch_add(1, Ordering::SeqCst);
-        self.inner.create_store(request).await
+        self.inner.admit_session(request).await
     }
 
-    async fn open_existing_store(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Option<lash_core::store::SessionStore>, String> {
-        self.inner.open_existing_store(request).await
-    }
-
-    async fn open_existing_store_by_id(
+    async fn lookup_session(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionLookup, lash_core::StoreError> {
         self.by_id_opens.fetch_add(1, Ordering::SeqCst);
         if self.open_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(self.open_delay_ms)).await;
         }
-        self.inner.open_existing_store_by_id(session_id).await
-    }
-
-    async fn read_session(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::SessionReadView>, lash_core::StoreError> {
-        self.inner.read_session(session_id).await
-    }
-
-    async fn session_was_deleted(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, String> {
-        lash_core::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<
-        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
-        lash_core::StoreError,
-    > {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        self.inner.compact_turn_park_feed(through).await
+        self.inner.lookup_session(session_id).await
     }
 }
 
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.load_intent(id).await
-    }
-}
+impl lash_core::DeploymentStoreDecorator for CountingSessionStoreFactory {}
 
 /// A counting catalog over `inner`'s own.
 fn counting_factory(
@@ -295,14 +157,16 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
         "a refused enqueue must not materialise session metadata"
     );
     assert!(
-        lash_core::DeploymentStore::open_existing_store_by_id(
-            factory.as_ref(),
-            &SessionId::from("never-created"),
-        )
-        .await
-        .expect("probe the catalog")
-        .is_none(),
-        "the refused enqueue left no store behind"
+        matches!(
+            lash_core::SessionCatalogStore::lookup_session(
+                factory.as_ref(),
+                &SessionId::from("never-created"),
+            )
+            .await
+            .expect("probe the catalog"),
+            lash_core::store::SessionLookup::Absent
+        ),
+        "the refused enqueue left no session behind"
     );
     // The settled reads answer about the id instead of failing.
     assert!(!durable.exists().await?);
@@ -317,7 +181,7 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
     drop(core.session("deleted-durable").open().await?);
-    lash_core::DeploymentStore::delete_session(
+    lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("deleted-durable"),
     )
@@ -358,25 +222,25 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     // stay pending for the read, so it is written through the store port
     // instead (the send path's enqueue event is not under test here), parked
     // on a turn that never runs so the engine cannot claim it either.
-    let accepted = double
-        .lash_backend()
-        .session_store_factory()
-        .open_existing_store_by_id(&SessionId::from("metadata-only"))
-        .await?
-        .expect("the created session has a store")
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("metadata-only-input".to_string()),
-            ..lash_core::PendingTurnInputDraft::new(
-                SessionId::from("metadata-only"),
-                lash_core::TurnInputIngress::active_turn(
-                    lash_core::TurnId::from("metadata-only-parked-turn"),
-                    lash_core::TurnInputCheckpointBoundary::AfterWork,
-                ),
-                TurnInput::text("queued against metadata-only"),
-            )
-        })
-        .await
-        .expect("enqueue the pending input");
+    let accepted = lash_core::runtime::live_session_view(
+        &double.lash_backend().session_store_factory(),
+        &SessionId::from("metadata-only"),
+    )
+    .await?
+    .expect("the created session has a store")
+    .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+        input_id: Some("metadata-only-input".to_string()),
+        ..lash_core::PendingTurnInputDraft::new(
+            SessionId::from("metadata-only"),
+            lash_core::TurnInputIngress::active_turn(
+                lash_core::TurnId::from("metadata-only-parked-turn"),
+                lash_core::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            TurnInput::text("queued against metadata-only"),
+        )
+    })
+    .await
+    .expect("enqueue the pending input");
     assert_eq!(
         metadata_only
             .pending_turn_inputs()
@@ -407,25 +271,25 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
     let checkpointed = core.session("checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
     assert!(checkpointed.read().await?.is_some());
-    double
-        .lash_backend()
-        .session_store_factory()
-        .open_existing_store_by_id(&SessionId::from("checkpointed"))
-        .await?
-        .expect("the committed session has a store")
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("checkpointed-input".to_string()),
-            ..lash_core::PendingTurnInputDraft::new(
-                SessionId::from("checkpointed"),
-                lash_core::TurnInputIngress::active_turn(
-                    lash_core::TurnId::from("checkpointed-parked-turn"),
-                    lash_core::TurnInputCheckpointBoundary::AfterWork,
-                ),
-                TurnInput::text("queued against a checkpointed head"),
-            )
-        })
-        .await
-        .expect("enqueue the pending input");
+    lash_core::runtime::live_session_view(
+        &double.lash_backend().session_store_factory(),
+        &SessionId::from("checkpointed"),
+    )
+    .await?
+    .expect("the committed session has a store")
+    .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+        input_id: Some("checkpointed-input".to_string()),
+        ..lash_core::PendingTurnInputDraft::new(
+            SessionId::from("checkpointed"),
+            lash_core::TurnInputIngress::active_turn(
+                lash_core::TurnId::from("checkpointed-parked-turn"),
+                lash_core::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            TurnInput::text("queued against a checkpointed head"),
+        )
+    })
+    .await
+    .expect("enqueue the pending input");
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
     Ok(())
 }
@@ -487,7 +351,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
 
-    lash_core::DeploymentStore::delete_session(
+    lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("sqlite-checkpointed"),
     )
@@ -830,15 +694,14 @@ async fn persisted_tool_state_bytes(
     factory: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<Vec<u8>> {
-    let store = factory
-        .open_existing_store_by_id(session_id)
-        .await
-        .expect("open the persisted session store")
-        .expect("the session exists");
-    let read = lash_core::SessionCommitStore::load_session(store.as_ref())
-        .await?
-        .expect("the session has committed state");
-    let checkpoint = read.checkpoint.expect("the session has a checkpoint");
+    let window = lash_core::SessionHistoryStore::load_session_window(
+        factory,
+        session_id,
+        lash_core::store::WindowSelector::Current,
+    )
+    .await?
+    .expect("the session has committed state");
+    let checkpoint = window.checkpoint.expect("the session has a checkpoint");
     let component = checkpoint
         .component(lash_core::store::TOOL_STATE_CHECKPOINT_COMPONENT)
         .expect("the checkpoint carries tool state");
@@ -956,8 +819,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // a facade send would ask the engine to drive, and a next-turn row the
     // engine could claim would race the pending reads below.
     let durable = grantless_core.session(session_id.clone()).durable().await?;
-    let queued = factory
-        .open_existing_store_by_id(&session_id)
+    let queued = lash_core::runtime::live_session_view(&factory, &session_id)
         .await?
         .expect("the persisted session has a store")
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
@@ -1009,165 +871,33 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
 /// A catalog that creates and deletes but cannot resolve a session by id.
 ///
 /// This is the shape a backend without a by-id lookup has to take now that
-/// `open_existing_store_by_id` is required: it states the missing capability
-/// instead of inheriting `Ok(None)`, which would have reported every existing
-/// session as absent.
+/// `lookup_session` is required: it states the missing capability instead of
+/// answering `Absent`, which would report every existing session as unknown.
 struct NoByIdLookupFactory {
     inner: Arc<dyn DeploymentStore>,
 }
 
-const NO_BY_ID_LOOKUP_OPERATION: &str = "DeploymentStore::open_existing_store_by_id";
+const NO_BY_ID_LOOKUP_OPERATION: &str = "SessionCatalogStore::lookup_session";
 
 #[async_trait]
-impl lash_core::AttachmentRootSet for NoByIdLookupFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> std::result::Result<
-        std::collections::BTreeSet<lash_core::AttachmentId>,
-        lash_core::StoreError,
-    > {
-        lash_core::AttachmentRootSet::live_attachment_refs(
-            self.inner.as_ref(),
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
+impl lash_core::store::RuntimeStoreDecorator for NoByIdLookupFactory {
+    type Inner = dyn DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
     }
 
-    async fn has_live_attachment_ref(
-        &self,
-        id: &lash_core::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> std::result::Result<bool, lash_core::StoreError> {
-        lash_core::AttachmentRootSet::has_live_attachment_ref(
-            self.inner.as_ref(),
-            id,
-            intent_grace_cutoff_epoch_ms,
-        )
-        .await
-    }
-}
-
-#[async_trait]
-impl DeploymentStore for NoByIdLookupFactory {
-    async fn create_store(
-        &self,
-        request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
-        self.inner.create_store(request).await
-    }
-
-    async fn open_existing_store_by_id(
+    async fn lookup_session(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionLookup, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: NO_BY_ID_LOOKUP_OPERATION,
         })
     }
-
-    async fn session_was_deleted(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, String> {
-        lash_core::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    // A decorator forwards the deployment turn count to the catalog it wraps.
-    async fn count_unsettled_turns(
-        &self,
-    ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> std::result::Result<
-        lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
-        lash_core::StoreError,
-    > {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> std::result::Result<(), lash_core::StoreError> {
-        self.inner.compact_turn_park_feed(through).await
-    }
 }
 
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, lash_core::StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        self.inner.load_intent(id).await
-    }
-}
+impl lash_core::DeploymentStoreDecorator for NoByIdLookupFactory {}
 
 /// A catalog without the by-id seam must not make an existing session look
 /// absent. Before the seam was required, its inherited `Ok(None)` did exactly
@@ -1367,21 +1097,22 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // engine to drive, racing the pending read below. A store-seeded row is
     // never scheduled, so nothing claims it before the drive core below.
     let durable = idle.session("created-then-queued").create().await?;
-    let accepted = idle
-        .store_factory
-        .open_existing_store_by_id(&SessionId::from("created-then-queued"))
-        .await?
-        .expect("the created session has a store")
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("created-then-queued-input".to_string()),
-            ..lash_core::PendingTurnInputDraft::new(
-                SessionId::from("created-then-queued"),
-                lash_core::TurnInputIngress::NextTurn,
-                TurnInput::text("queued before the first turn"),
-            )
-        })
-        .await
-        .expect("enqueue the pending input");
+    let accepted = lash_core::runtime::live_session_view(
+        &idle.store_factory,
+        &SessionId::from("created-then-queued"),
+    )
+    .await?
+    .expect("the created session has a store")
+    .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+        input_id: Some("created-then-queued-input".to_string()),
+        ..lash_core::PendingTurnInputDraft::new(
+            SessionId::from("created-then-queued"),
+            lash_core::TurnInputIngress::NextTurn,
+            TurnInput::text("queued before the first turn"),
+        )
+    })
+    .await
+    .expect("enqueue the pending input");
     assert_eq!(durable.pending_turn_inputs().await?.len(), 1);
     assert!(durable.exists().await?);
 
@@ -1447,21 +1178,22 @@ async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()
     // Seeded through the store port: a facade send would ask the engine to
     // drive, racing the pending read after the second create. A store-seeded
     // row is never scheduled, so nothing claims it before the drive below.
-    let accepted = core
-        .store_factory
-        .open_existing_store_by_id(&SessionId::from("create-idempotent"))
-        .await?
-        .expect("the created session has a store")
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("idempotent-input".to_string()),
-            ..lash_core::PendingTurnInputDraft::new(
-                SessionId::from("create-idempotent"),
-                lash_core::TurnInputIngress::NextTurn,
-                TurnInput::text("survives the second create"),
-            )
-        })
-        .await
-        .expect("enqueue the pending input");
+    let accepted = lash_core::runtime::live_session_view(
+        &core.store_factory,
+        &SessionId::from("create-idempotent"),
+    )
+    .await?
+    .expect("the created session has a store")
+    .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
+        input_id: Some("idempotent-input".to_string()),
+        ..lash_core::PendingTurnInputDraft::new(
+            SessionId::from("create-idempotent"),
+            lash_core::TurnInputIngress::NextTurn,
+            TurnInput::text("survives the second create"),
+        )
+    })
+    .await
+    .expect("enqueue the pending input");
 
     // A second create, naming no parent, must not rewrite the relation or drop
     // the queue.
@@ -1501,7 +1233,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-deleted").create().await?);
-    lash_core::DeploymentStore::delete_session(
+    lash_core::SessionCatalogStore::delete_session(
         factory.as_ref(),
         &SessionId::from("create-deleted"),
     )
