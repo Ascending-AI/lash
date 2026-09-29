@@ -24,6 +24,21 @@ pub(crate) async fn drive_epoch_tx(
     read_drive_epoch(tx, session_id, session_sql().meta.select_drive_epoch.sql()).await
 }
 
+/// The session's stored drive epoch, read inside the caller's transaction and
+/// row-locked until it ends: a seal in flight is waited for, and a later seal
+/// waits for the write the read decides (FIG-4200).
+pub(crate) async fn drive_epoch_locked_tx(
+    tx: &mut PgTx<'_>,
+    session_id: &SessionId,
+) -> Result<StoredDriveEpoch, StoreError> {
+    read_drive_epoch(
+        tx,
+        session_id,
+        session_sql().meta_postgres.select_drive_epoch_locked.sql(),
+    )
+    .await
+}
+
 /// The session's stored drive epoch, read by `statement`: the plain read or
 /// its row-locked fork.
 async fn read_drive_epoch(

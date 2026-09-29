@@ -12,7 +12,7 @@
 //!
 //! The root's claim body repairs orphaned inputs before it claims the admitted
 //! head. A separate `InspectAdmittedHead` step records whether that head is
-//! ready, ceded, or divergent. A redrive reads both outcomes from its journal
+//! ready, overtaken, or divergent. A redrive reads both outcomes from its journal
 //! and issues no second repair. The inspection's body is the drive's one live
 //! head check, and it runs only when that step is the attempt's live
 //! frontier; a redrive honours the recorded verdict at every position
@@ -839,11 +839,9 @@ impl LashRuntime {
     /// attempt or a host's read, finds it as a redrive in a fresh process
     /// would (FIG-3982).
     ///
-    /// An attempt that ends with a refusal no retry changes ends its root in
-    /// the store before it returns (FIG-4018): the engine records that
-    /// refusal as the run's outcome and never runs the root again, so
-    /// nothing else would end it, and the session's next admission would
-    /// name it again instead of the work behind it.
+    /// A root that ends with a refusal no retry changes is ended in the
+    /// store by [`Self::run_admitted_root_step`], as on every drive path
+    /// (FIG-4018, FIG-4200).
     async fn run_engine_root(
         &mut self,
         controller: &ScopedEffectController<'_>,
@@ -851,7 +849,6 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         close: RootClose<'_>,
     ) -> Result<RootRun, DriveAbort> {
-        let root = evidence_root(&admitted);
         let mut attempt = EngineAttempt::enter(self);
         let run = Box::pin(
             attempt
@@ -860,55 +857,99 @@ impl LashRuntime {
         )
         .await;
         attempt.returned = true;
-        drop(attempt);
-        let run = run.map_err(|abort| match abort {
-            DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
-            abort => abort,
-        });
-        if let Err(DriveAbort::Refused(error)) = &run
-            && !error.is_retryable()
-        {
-            self.end_refused_root(&root, error).await?;
-        }
         run
     }
 
-    /// Write the end of `root`, whose run met `refusal`, to the store.
+    /// Settle a sealed root whose run ended with `abort`, on every drive
+    /// path (FIG-4018, FIG-4200): the answer the run returns, with the root
+    /// ended in the store when that answer is a refusal no retry changes.
     ///
-    /// The write is the refused run's own, made before the engine records
-    /// the run's outcome, so the recorded outcome always has its terminal
-    /// behind it and the engine's lost-root recovery, which ends only runs
-    /// that recorded nothing, never writes a second one. It is an
-    /// idempotent store write rather than a recorded step, like the commit
-    /// and the park (ADR 0105 §9): a root that already has terminal
-    /// evidence is left as it is, so a replay that meets the refusal again
-    /// writes nothing more. A store that cannot write it fails the attempt
-    /// as a live fault, and the engine's retry meets the refusal again.
+    /// A superseded commit is such a refusal wherever it is met, whether the
+    /// commit or the recorded inspection met it: a redrive replays the
+    /// admission base and drive fence its journal recorded (FIG-3682), so it
+    /// meets the same moved head and can never commit (FIG-4010). It is
+    /// answered `Refused`, as is any other abort an engine would not retry
+    /// ([`engine_retries`]). A live fault, a park, and a retryable refusal
+    /// are answered as they are, and nothing ends the root: a seal that
+    /// ceded never reaches here, and a commit whose outcome is unknown is a
+    /// live fault its redrive answers.
+    async fn settle_root_abort(&self, run: &mut DriveRootRun, abort: DriveAbort) -> DriveAbort {
+        let abort = match abort {
+            DriveAbort::Retry(error) if !engine_retries(&error) => DriveAbort::Refused(error),
+            abort => abort,
+        };
+        let DriveAbort::Refused(refusal) = &abort else {
+            return abort;
+        };
+        if refusal.is_retryable() {
+            return abort;
+        }
+        match Box::pin(self.end_refused_root(run, refusal)).await {
+            Ok(()) => abort,
+            Err(fault) => fault,
+        }
+    }
+
+    /// Write the end of `run`'s root, whose run met `refusal`, to the store.
+    ///
+    /// The write is the refused run's own, made before the run returns, so
+    /// an engine's recorded outcome always has its terminal behind it and
+    /// the engine's lost-root recovery, which ends only runs that recorded
+    /// nothing, never writes a second one. The run's evidence root is the
+    /// one ended: a follow-on recovery's is the root that owed the
+    /// follow-on. It is an idempotent store write rather than a recorded
+    /// step, like the commit and the park (ADR 0105 §9): a root that already
+    /// has terminal evidence is left as it is, so a replay that meets the
+    /// refusal again writes nothing more.
+    ///
+    /// The write presents the run's drive fence, and the store ends the root
+    /// only while the run still owns it: a run a later admission superseded
+    /// leaves the root to that admission's execution, which may be running
+    /// it. A root whose terminal evidence is durable, written now or before,
+    /// is marked so, and its scope close follows as a committed root's does.
+    /// A store that cannot write it fails the attempt as a live fault, and a
+    /// retry meets the refusal again.
     async fn end_refused_root(
         &self,
-        root: &TurnId,
+        run: &mut DriveRootRun,
         refusal: &RuntimeError,
     ) -> Result<(), DriveAbort> {
         let store = self.drive_store()?;
-        match store
-            .end_refused_root(root, refusal, self.host.core.clock.timestamp_ms())
+        let end = store
+            .end_refused_root(
+                &run.fence,
+                &run.root,
+                refusal,
+                self.host.core.clock.timestamp_ms(),
+            )
             .await
-        {
-            Ok(Some(_)) => {
+            .map_err(|error| {
+                DriveAbort::Retry(crate::runtime::runtime_error_from_store_commit(error))
+            })?;
+        match end {
+            crate::store::RefusedRootEnd::Ended(_) => {
                 tracing::info!(
                     session_id = %self.state.session_id,
-                    root = %root,
+                    root = %run.root,
                     code = %refusal.code,
                     event = "root.refused_ended",
                     "a root whose run met a refusal no retry changes is ended"
                 );
-                Ok(())
+                run.mark_terminal_written();
             }
-            Ok(None) => Ok(()),
-            Err(error) => Err(DriveAbort::Retry(
-                crate::runtime::runtime_error_from_store_commit(error),
-            )),
+            crate::store::RefusedRootEnd::AlreadyEnded(_) => run.mark_terminal_written(),
+            crate::store::RefusedRootEnd::Superseded => {
+                tracing::info!(
+                    session_id = %self.state.session_id,
+                    root = %run.root,
+                    code = %refusal.code,
+                    event = "root.refused_superseded",
+                    "a refused run a later admission superseded leaves its root to that admission"
+                );
+            }
+            crate::store::RefusedRootEnd::Unknown => {}
         }
+        Ok(())
     }
 
     /// Discard what an earlier root's attempt left on this runtime (its
@@ -928,6 +969,13 @@ impl LashRuntime {
     }
 
     /// Seal `admitted`, then run its root.
+    ///
+    /// Every drive path runs a root through here: the drive loop
+    /// ([`Self::drive_until`]: a session drive, a queued drain, a direct
+    /// turn's accept, a child session's turn) and an engine's own attempt
+    /// ([`Self::run_engine_root`]). A sealed root whose run ends with a
+    /// refusal no retry changes is ended here, typed, before its scope-close
+    /// bookkeeping ([`Self::settle_root_abort`]).
     ///
     /// `live` carries the live `TurnContext` of an in-process caller whose
     /// accepted input the root may drive (a child session turn's process
@@ -1019,7 +1067,13 @@ impl LashRuntime {
                 .await
             }
         };
-        let ran = std::mem::replace(&mut self.drive_root, outer);
+        let mut ran = std::mem::replace(&mut self.drive_root, outer);
+        // A refused root ends here, on every drive path, before the close
+        // bookkeeping below reads whether its terminal is durable.
+        let result = match (result, ran.as_deref_mut()) {
+            (Err(abort), Some(run)) => Err(Box::pin(self.settle_root_abort(run, abort)).await),
+            (result, _) => result,
+        };
         // A committed root's report is handed over before its scope closes
         // (FIG-3979): the close is a recorded step, and the terminal
         // transaction armed its `ScopeClose` obligation, so an execution
@@ -1041,9 +1095,12 @@ impl LashRuntime {
                 )
                 .await;
         }
-        // The root ended here: its final commit wrote its evidence, so its
-        // scope closes (FIG-3607 item 7). A root that did not end holds its
-        // scope open, and a host that owns no scopes has nothing to close.
+        // The root ended here: its final commit, or the end of its refused
+        // run, wrote its evidence, so its scope closes (FIG-3607 item 7). A
+        // root that did not end holds its scope open, and a host that owns no
+        // scopes has nothing to close. The close runs under the root's own
+        // controller, so a process-backed child's root closes in the process
+        // scope it was admitted under.
         if ran.is_some_and(|ran| ran.terminal_written)
             && self.host.core.control.scope_close.owns_scopes()
         {

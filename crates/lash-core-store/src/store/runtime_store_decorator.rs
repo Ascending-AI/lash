@@ -127,7 +127,7 @@ macro_rules! runtime_store_operations {
                 [carried request] fn admit_root(&self, request: &AdmitRootRequest) -> Result<Option<RootAdmission>, StoreError>;
                 [carried request] fn admit_at_checkpoint(&self, request: &CheckpointAdmissionRequest) -> Result<CheckpointAdmission, StoreError>;
                 [session] fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
-                [session] fn end_refused_root(&self, session_id: &SessionId, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<Option<RootTerminal>, StoreError>;
+                [carried fence] fn end_refused_root(&self, fence: &DriveFence, root: &crate::TurnId, refusal: &crate::RuntimeError, at_ms: u64) -> Result<RefusedRootEnd, StoreError>;
                 [session] fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 [session] fn bound_turn_scopes(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;

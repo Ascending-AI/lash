@@ -734,12 +734,14 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         "the head moved under the root's commit",
     );
     let at_ms = stores.clock().timestamp_ms();
-    let terminal = parts
+    let crate::store::RefusedRootEnd::Ended(terminal) = parts
         .store
-        .end_refused_root(&parts.session_id, &root, &refusal, at_ms)
+        .end_refused_root(&fence, &root, &refusal, at_ms)
         .await
         .expect("end the refused root")
-        .expect("the root had no terminal");
+    else {
+        panic!("the root had no terminal");
+    };
     assert_eq!(terminal.kind, RootTerminalKind::Failed);
     assert_eq!(
         terminal.cause,
@@ -777,13 +779,13 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         "the refused root no longer holds its session"
     );
 
-    assert!(
+    assert_eq!(
         parts
             .store
-            .end_refused_root(&parts.session_id, &root, &refusal, at_ms + 1)
+            .end_refused_root(&fence, &root, &refusal, at_ms + 1)
             .await
-            .expect("a second end")
-            .is_none(),
+            .expect("a second end"),
+        crate::store::RefusedRootEnd::AlreadyEnded(terminal.clone()),
         "a second end writes nothing"
     );
     let factory = stores.session_store_factory();
@@ -830,12 +832,17 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
     .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
         session_id: parts.session_id.clone(),
     });
-    parts
-        .store
-        .end_refused_root(&parts.session_id, &next_root, &retirement, at_ms + 3)
-        .await
-        .expect("end the retired root")
-        .expect("the next root had no terminal");
+    assert!(
+        matches!(
+            parts
+                .store
+                .end_refused_root(&fence, &next_root, &retirement, at_ms + 3)
+                .await
+                .expect("end the retired root"),
+            crate::store::RefusedRootEnd::Ended(_)
+        ),
+        "the next root had no terminal"
+    );
     let stored = parts
         .store
         .root_terminal(&parts.session_id, &next_root)

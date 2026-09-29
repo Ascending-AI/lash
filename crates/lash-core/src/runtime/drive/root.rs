@@ -113,9 +113,11 @@ impl LashRuntime {
             .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
         let admission = match answer {
             Ok(RootAdmissionAnswer::Admitted { admission }) => {
-                let head_moved = self.state.head_revision != admission.base.revision
-                    || self.state.session_graph.leaf_node_id != admission.base.leaf
-                    || self.state.checkpoint_ref != admission.base.checkpoint;
+                let live = ResidentHead {
+                    revision: self.state.head_revision,
+                    leaf: self.state.session_graph.leaf_node_id.clone(),
+                    checkpoint: self.state.checkpoint_ref.clone(),
+                };
                 let inspection = crate::RuntimeEffectInvocation::new(
                     crate::EffectAddress::new(
                         root_controller.execution_scope().clone(),
@@ -142,8 +144,8 @@ impl LashRuntime {
                                 store: store.clone(),
                                 root: root.clone(),
                                 head: head.clone(),
-                                head_moved,
-                                live_revision: self.state.head_revision,
+                                base: admission.base.clone(),
+                                live,
                             }),
                             None,
                         ),
@@ -329,8 +331,9 @@ impl LashRuntime {
     /// turn index for the prepare phase (FIG-3682).
     ///
     /// The recorded inspection alone decides whether the resident head may
-    /// be rebuilt from the admission's base: a `Diverged` verdict parks the
-    /// root, and a `Ready` one is honoured whatever the live head is now.
+    /// be rebuilt from the admission's base: an `Overtaken` verdict ends the
+    /// root typed `StoreCommitSuperseded`, a `Diverged` one parks it, and a
+    /// `Ready` one is honoured whatever the live head is now.
     ///
     /// A base the store no longer retains parks the root too.
     async fn adopt_admitted_turn(
@@ -363,13 +366,28 @@ impl LashRuntime {
         // refusal, never re-decided here at a recorded position.
         match verdict {
             AdmittedHeadVerdict::Ready => {}
+            // Ordinary head overtaking: another writer committed past the
+            // base, so every commit of the root meets the moved head. The
+            // root ends with the refusal its commit would meet (FIG-4200).
+            AdmittedHeadVerdict::Overtaken { live_revision } => {
+                return Err(RuntimeError::new(
+                    RuntimeErrorCode::StoreCommitSuperseded,
+                    format!(
+                        "another writer moved the session head from revision {} to {} under \
+                         root `{turn_id}` before it committed; the root can never commit on the \
+                         head it was admitted on",
+                        base.revision, live_revision
+                    ),
+                ));
+            }
             AdmittedHeadVerdict::Diverged { live_revision } => {
                 return Err(RuntimeError::new(
                     RuntimeErrorCode::EffectReplayDivergence,
                     format!(
-                        "the session head moved from revision {} to {} under root `{turn_id}` before \
-                         it committed; the root is not driven on a head it was not admitted on",
-                        base.revision, live_revision
+                        "the session head at revision {live_revision} is inconsistent with the \
+                         revision {} root `{turn_id}` was admitted on; the root is not driven on a \
+                         head it was not admitted on",
+                        base.revision
                     ),
                 ));
             }
@@ -397,20 +415,51 @@ struct AdmittedTurn<'a> {
     root: &'a TurnId,
 }
 
+/// The resident head an attempt refreshed before its root's inspection.
+struct ResidentHead {
+    revision: u64,
+    leaf: Option<crate::NodeId>,
+    checkpoint: Option<crate::store::BlobRef>,
+}
+
 /// The body of a root's `drive-head` step: the drive's one live head check.
 ///
 /// It runs only when the step is not recorded yet, so at the attempt's live
 /// frontier before any turn effect, and decides from the resident head this
-/// attempt refreshed: a head that moved from the admission's base with no
-/// commit of the root behind it is `Diverged`, and the root parks before it
-/// drives a head it was not admitted on. A replay serves the recorded
-/// verdict and never runs it.
+/// attempt refreshed. A head that moved from the admission's base with no
+/// commit of the root behind it is decided by its components (FIG-4200): a
+/// higher revision is another writer overtaking the head, `Overtaken`, and
+/// the root ends typed; a lower revision, or the same revision with another
+/// leaf or checkpoint, is an inconsistent head, `Diverged`, and the root
+/// parks before it drives a head it was not admitted on. A replay serves the
+/// recorded verdict and never runs it.
 struct InspectAdmittedHeadRunner {
     store: crate::store::SessionStore,
     root: TurnId,
     head: AdmittedHead,
-    head_moved: bool,
-    live_revision: u64,
+    /// The head the root's admission recorded.
+    base: crate::store::SessionHeadRef,
+    live: ResidentHead,
+}
+
+impl InspectAdmittedHeadRunner {
+    /// Whether the live head is the admission's base.
+    fn head_is_base(&self) -> bool {
+        self.live.revision == self.base.revision
+            && self.live.leaf == self.base.leaf
+            && self.live.checkpoint == self.base.checkpoint
+    }
+
+    /// The verdict on a head that moved from the base with no commit of the
+    /// root behind it.
+    fn moved_head_verdict(&self) -> AdmittedHeadVerdict {
+        let live_revision = self.live.revision;
+        if live_revision > self.base.revision {
+            AdmittedHeadVerdict::Overtaken { live_revision }
+        } else {
+            AdmittedHeadVerdict::Diverged { live_revision }
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -438,7 +487,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
             )
             .retryable_uncommitted_derivation()
         };
-        let verdict = if !self.head_moved
+        let verdict = if self.head_is_base()
             || self
                 .store
                 .committed_turn_exists(&self.root)
@@ -447,9 +496,7 @@ impl RuntimeEffectLocalRunner for InspectAdmittedHeadRunner {
         {
             AdmittedHeadVerdict::Ready
         } else {
-            AdmittedHeadVerdict::Diverged {
-                live_revision: self.live_revision,
-            }
+            self.moved_head_verdict()
         };
         Ok(crate::RuntimeEffectOutcome::InspectAdmittedHead { verdict })
     }

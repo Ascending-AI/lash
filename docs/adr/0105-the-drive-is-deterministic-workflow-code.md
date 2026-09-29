@@ -115,13 +115,16 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   with the claims under FIG-3927, because a root's terminal write releases
   its rows, so there is nothing to repair. A replay serves its admission
   outcome. After the admission,
-  `InspectAdmittedHead` records `Ready` or `Diverged` from the refreshed
+  `InspectAdmittedHead` records `Ready`, `Overtaken` or `Diverged` from the refreshed
   resident head, committed-root evidence and pending input rows: `Ceded` is
   no longer reachable after admission (FIG-3927), because
   an admitted head row is bound to the root and only the root's own commit or
   terminal settles it. Replay serves that verdict.
   The inspection's body is the drive's one live head check: a head that moved
-  from the admission's base with no commit of this root behind it is
+  from the admission's base with no commit of this root behind it is decided
+  by its components (FIG-4200). A higher revision is `Overtaken`, and the
+  root ends typed `StoreCommitSuperseded` before any turn effect; a lower
+  revision, or the same revision with another leaf or checkpoint, is
   `Diverged`, and the root parks before any turn effect. The body runs only
   when `drive-head` is the attempt's live frontier, so it protects an attempt
   that reaches `drive-head` after another writer moved the head, including
@@ -164,6 +167,25 @@ so the seal rechecks it in the same transaction. A child never mints an epoch.
   of the write honours the recorded `Ready` (FIG-4058) and retraces its
   journal to the same refusal, writing the end if the first attempt did
   not.
+- **Implemented (FIG-4200): every drive path ends a superseded root, and
+  only its owner ends it.** The end is written where every drive path runs a
+  root, after its seal and before its scope-close bookkeeping: the drive loop
+  (a session drive, a queued drain, a direct turn's accept, a child session's
+  turn) and an engine's own root attempt alike. A superseded commit is a
+  refusal no retry changes whether it arrives as a refusal or as a live
+  fault. The end presents the refused run's drive fence, and the store ends
+  the root only while that fence is current (or the session is closing, when
+  no admission can seal again): a run a later admission superseded leaves the
+  root to that admission's execution, which may be running it. A seal that
+  ceded, a commit whose outcome is unknown and any other live fault end
+  nothing. A root whose refused end is durable closes its scope as a
+  committed root does, under the root's own controller. `Overtaken` narrows
+  FIG-3824's park to real inconsistency: a head another writer overtook can
+  never be committed on, so the root ends typed and the next admission is a
+  new root at the live head; a head inconsistent with the base, a missing
+  base, a journal-envelope mismatch, a generation mismatch and lost history
+  still park or refuse as before. Earlier effects of the ended root are not
+  retracted: its committed frames and receipts stand.
 
 A sealed verdict carries a `DriveFence` that the store checks on
 head-changing writes and ingress settlement. `DriveFence` and `AdmissionId`

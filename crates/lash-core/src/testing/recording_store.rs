@@ -41,6 +41,7 @@ pub struct RecordingStore {
     list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
     fail_next_end_refused_root: Mutex<Option<StoreError>>,
+    before_next_end_refused_root: Mutex<Option<EndRefusedRootHook>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
@@ -52,6 +53,11 @@ pub struct RecordingStore {
 
 /// A hook a test runs as the next admission reaches the store.
 pub type AdmissionHook = Arc<dyn Fn() + Send + Sync>;
+
+/// A hook a test awaits as the next refused run's root-end write reaches the
+/// store, before the wrapped store sees it.
+pub type EndRefusedRootHook =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
 impl RecordingStore {
     /// Record over `inner`, a store the test's backend opened.
@@ -67,6 +73,7 @@ impl RecordingStore {
             list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
             fail_next_end_refused_root: Mutex::new(None),
+            before_next_end_refused_root: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
@@ -163,6 +170,14 @@ impl RecordingStore {
     /// refusal and writing its end.
     pub fn fail_next_end_refused_root(&self, error: StoreError) {
         *self.fail_next_end_refused_root.lock_recover() = Some(error);
+    }
+
+    /// Await `hook` as the next refused run's root-end write reaches the
+    /// store, before the wrapped store sees it: whatever the hook does lands
+    /// between the run meeting its refusal and its end. A hook that panics
+    /// crashes the run there.
+    pub fn before_next_end_refused_root(&self, hook: EndRefusedRootHook) {
+        *self.before_next_end_refused_root.lock_recover() = Some(hook);
     }
 
     /// Record `request` on the wrapped store immediately before the next
@@ -294,17 +309,21 @@ impl RuntimeStoreDecorator for RecordingStore {
 
     async fn end_refused_root(
         &self,
-        session_id: &SessionId,
+        fence: &crate::store::DriveFence,
         root: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
+    ) -> Result<crate::store::RefusedRootEnd, StoreError> {
+        let hook = self.before_next_end_refused_root.lock_recover().take();
+        if let Some(hook) = hook {
+            hook().await;
+        }
         let injected_failure = self.fail_next_end_refused_root.lock_recover().take();
         if let Some(error) = injected_failure {
             return Err(error);
         }
         self.inner
-            .end_refused_root(session_id, root, refusal, at_ms)
+            .end_refused_root(fence, root, refusal, at_ms)
             .await
     }
 
@@ -481,13 +500,13 @@ impl RuntimeStoreDecorator for RecordingDeploymentStore {
 
     async fn end_refused_root(
         &self,
-        session_id: &SessionId,
+        fence: &crate::store::DriveFence,
         root: &crate::TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
-        self.record(session_id)
-            .end_refused_root(session_id, root, refusal, at_ms)
+    ) -> Result<crate::store::RefusedRootEnd, StoreError> {
+        self.record(fence.session())
+            .end_refused_root(fence, root, refusal, at_ms)
             .await
     }
 

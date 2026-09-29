@@ -11,9 +11,10 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, UnfinishedRoot, close_admission, decide_root_terminal_write,
-    root_binding_conflict, scope_close_obligation_id, stored_intent_kind, stored_intent_state,
+    RefusedRootEnd, RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
+    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
+    scope_close_obligation_id, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -321,44 +322,71 @@ fn release_root_rows_conn(
 /// The engine proved the root's workflow run ended without an outcome. This
 /// transaction makes its inputs and root terminal together, so the existing
 /// scope-close obligation takes over before recovery acknowledges the loss.
+/// A root that already has terminal evidence, or no row, is left as it is.
 pub(crate) fn end_lost_root_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
-    end_unanswered_root_conn(tx, target, at_ms, |cancelled_by| {
-        RootTerminalCause::SubstrateLost { cancelled_by }
-    })
+    match unanswered_root_conn(tx, target)? {
+        UnansweredRoot::Open => write_unanswered_root_end_conn(tx, target, at_ms, |cancelled_by| {
+            RootTerminalCause::SubstrateLost { cancelled_by }
+        })
+        .map(Some),
+        UnansweredRoot::Ended(_) | UnansweredRoot::Unknown => Ok(None),
+    }
 }
 
-/// The root's run met a typed refusal no retry can change (FIG-4018): the
-/// same transaction as a lost root's, ending it with the refusal.
+/// The root's run under `fence` met a typed refusal no retry can change
+/// (FIG-4018): the same transaction as a lost root's, ending it with the
+/// refusal, once the run is shown to still own the root (FIG-4200).
 pub(crate) fn end_refused_root_conn(
     tx: &Connection,
-    target: &lash_core_execution::engine::RootRef,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
-) -> Result<Option<RootTerminal>, StoreError> {
-    end_unanswered_root_conn(tx, target, at_ms, |_| RootTerminalCause::Refused {
-        code: refusal.code.clone(),
-        message: refusal.message.clone(),
-        refusal_cause: refusal.cause.clone(),
-    })
+) -> Result<RefusedRootEnd, StoreError> {
+    let target = lash_core_execution::engine::RootRef {
+        session: fence.session().clone(),
+        root: root.clone(),
+    };
+    match unanswered_root_conn(tx, &target)? {
+        UnansweredRoot::Ended(terminal) => Ok(RefusedRootEnd::AlreadyEnded(*terminal)),
+        UnansweredRoot::Unknown => Ok(RefusedRootEnd::Unknown),
+        UnansweredRoot::Open => {
+            let current = crate::persistence::drive_epoch_conn(tx, &target.session)?;
+            if !refused_run_owns_root(&target.session, fence, &current)? {
+                return Ok(RefusedRootEnd::Superseded);
+            }
+            write_unanswered_root_end_conn(tx, &target, at_ms, |_| RootTerminalCause::Refused {
+                code: refusal.code.clone(),
+                message: refusal.message.clone(),
+                refusal_cause: refusal.cause.clone(),
+            })
+            .map(RefusedRootEnd::Ended)
+        }
+    }
 }
 
-/// End a root no commit answered, with the cause `cause` makes of the
-/// root's recorded cancellation request, if any. A root that already has
-/// terminal evidence, or no row, is left as it is.
-fn end_unanswered_root_conn(
+/// Where a root no commit answered stands.
+enum UnansweredRoot {
+    /// It has terminal evidence.
+    Ended(Box<RootTerminal>),
+    /// The store holds no row for it.
+    Unknown,
+    /// It is admitted and has not ended.
+    Open,
+}
+
+fn unanswered_root_conn(
     tx: &Connection,
     target: &lash_core_execution::engine::RootRef,
-    at_ms: u64,
-    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
-) -> Result<Option<RootTerminal>, StoreError> {
+) -> Result<UnansweredRoot, StoreError> {
     let session = &target.session;
     let root = &target.root;
-    if root_terminal_conn(tx, session, root)?.is_some() {
-        return Ok(None);
+    if let Some(terminal) = root_terminal_conn(tx, session, root)? {
+        return Ok(UnansweredRoot::Ended(Box::new(terminal)));
     }
     let exists: bool = tx
         .query_row(
@@ -369,9 +397,23 @@ fn end_unanswered_root_conn(
         .optional()
         .map_err(sqlite_error)?
         .unwrap_or(false);
-    if !exists {
-        return Ok(None);
-    }
+    Ok(if exists {
+        UnansweredRoot::Open
+    } else {
+        UnansweredRoot::Unknown
+    })
+}
+
+/// End an open root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any.
+fn write_unanswered_root_end_conn(
+    tx: &Connection,
+    target: &lash_core_execution::engine::RootRef,
+    at_ms: u64,
+    cause: impl FnOnce(Option<String>) -> RootTerminalCause,
+) -> Result<RootTerminal, StoreError> {
+    let session = &target.session;
+    let root = &target.root;
     let record = crate::persistence::turn_cancel::load_turn_cancel_request_conn(tx, session, root)?;
     let cause = cause(
         record
@@ -431,7 +473,7 @@ fn end_unanswered_root_conn(
     // disposition to open input addressed to a turn the root ends
     // (FIG-3927 §2.4, FIG-3946).
     write_root_terminal_conn(tx, &terminal)?;
-    Ok(Some(terminal))
+    Ok(terminal)
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).
@@ -1020,19 +1062,17 @@ impl RootStore for crate::SqliteStore {
 
     async fn end_refused_root(
         &self,
-        session_id: &SessionId,
+        fence: &lash_core_execution::store::DriveFence,
         root: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
-    ) -> Result<Option<RootTerminal>, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
-        let target = lash_core_execution::engine::RootRef {
-            session: session_id.clone(),
-            root: root.clone(),
-        };
+    ) -> Result<RefusedRootEnd, StoreError> {
+        lash_core_execution::store::validate_session_id(fence.session())?;
+        let fence = fence.clone();
+        let root = root.clone();
         let refusal = refusal.clone();
         self.conn
-            .write_flow(move |tx| commit(end_refused_root_conn(tx, &target, &refusal, at_ms)))
+            .write_flow(move |tx| commit(end_refused_root_conn(tx, &fence, &root, &refusal, at_ms)))
             .await
             .map_err(sqlite_error)?
     }

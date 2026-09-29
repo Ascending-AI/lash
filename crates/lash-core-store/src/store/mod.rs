@@ -161,10 +161,10 @@ pub use retention::{
 };
 pub use root::{
     AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
-    InMemoryRootLedger, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal, RootEndedTurns,
-    RootStore, RootTerminal, RootTerminalCause, RootTerminalKind, RootTerminalWrite,
-    RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId, UnfinishedRoot,
-    decide_root_terminal_write, root_binding_conflict,
+    InMemoryRootLedger, RefusedRootEnd, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
+    RootEndedTurns, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId, UnfinishedRoot,
+    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,

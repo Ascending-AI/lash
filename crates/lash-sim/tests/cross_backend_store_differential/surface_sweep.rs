@@ -1363,11 +1363,17 @@ impl BackendRunner {
                     "the head moved under the root's commit",
                 );
                 match store
-                    .end_refused_root(&session_id, &root, &refusal, 1)
+                    .end_refused_root(&lease_fence, &root, &refusal, 1)
                     .await?
                 {
-                    Some(terminal) => format!("ended={:?}", terminal.kind),
-                    None => "ended=none".to_string(),
+                    lash_core::store::RefusedRootEnd::Ended(terminal) => {
+                        format!("ended={:?}", terminal.kind)
+                    }
+                    lash_core::store::RefusedRootEnd::AlreadyEnded(terminal) => {
+                        format!("already_ended={:?}", terminal.kind)
+                    }
+                    lash_core::store::RefusedRootEnd::Superseded => "superseded".to_string(),
+                    lash_core::store::RefusedRootEnd::Unknown => "ended=none".to_string(),
                 }
             }
             SurfaceMethod::RootBinding => {

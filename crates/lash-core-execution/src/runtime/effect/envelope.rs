@@ -1091,14 +1091,23 @@ pub type RuntimeDirectLlmOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
-/// The first execution's decision about the head a root admitted: drive it,
-/// or park because the session head moved under the root before it
-/// committed. The head is bound to the root alone (FIG-3927), so no other
-/// driver can have answered it.
+/// The first execution's decision about the head a root admitted, by how
+/// the live head stands against the admission's base when no commit of the
+/// root is behind it (FIG-3824, FIG-4200). The head is bound to the root
+/// alone (FIG-3927), so no other driver can have answered it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdmittedHeadVerdict {
+    /// The head is the admission's base, or a commit of the root moved it:
+    /// drive the root.
     Ready,
+    /// Another writer committed past the admission's base, to a higher
+    /// revision: ordinary head overtaking. The root can never commit on the
+    /// base it was admitted on, so it ends typed `StoreCommitSuperseded`.
+    Overtaken { live_revision: u64 },
+    /// The live head is inconsistent with the admission's base: a lower
+    /// revision, or the same revision with another leaf or checkpoint. The
+    /// root parks for an operator.
     Diverged { live_revision: u64 },
 }
 

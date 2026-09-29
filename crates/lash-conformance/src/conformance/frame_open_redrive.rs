@@ -70,6 +70,8 @@ mod adversarial;
 pub use adversarial::*;
 mod followup;
 pub use followup::*;
+mod superseded_root;
+pub use superseded_root::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -1021,7 +1023,7 @@ impl LawSession {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn enqueue(&self, text: &str) {
+    async fn enqueue(&self, text: &str) -> crate::InputId {
         self.store
             .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
                 self.session_id.clone(),
@@ -1029,7 +1031,8 @@ impl LawSession {
                 crate::TurnInput::text(text),
             ))
             .await
-            .expect("accept a queued input");
+            .expect("accept a queued input")
+            .input_id
     }
 
     async fn head(&self) -> LawHead {
@@ -1512,9 +1515,12 @@ macro_rules! frame_open_execution_state_tests {
 /// production standard compactor and its overflow recovery across the crash
 /// matrix, an administrative compaction superseded by a newer admission or
 /// by a pressure frame, a session deleted and a fork made during an open, an
-/// empty seed, a refused frame commit, and pressure hooks sharing an id. The
-/// fixture hands back a guard, a prefix, the tier's effect host, the store
-/// set under test and its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+/// empty seed, a refused frame commit, and pressure hooks sharing an id; and
+/// FIG-4200's root whose held pressure frame another runtime overtakes,
+/// ending typed on the drive loop and the engine path, uninterrupted, across
+/// a crash before its end and on a fresh journal. The fixture hands back a
+/// guard, a prefix, the tier's effect host, the store set under test and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 #[macro_export]
 macro_rules! frame_open_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -1564,6 +1570,17 @@ macro_rules! frame_open_redrive_tests {
                 an_empty_pressure_seed_opens_one_frame, AfterTurnCommit),
             (pressure_hooks_sharing_an_id_crashed_after_the_turns_commit_keep_their_records_apart,
                 pressure_hooks_sharing_an_id_keep_their_records_apart, AfterTurnCommit));
+        $crate::frame_open_redrive_tests!(@superseded [$(#[$attr])*] $fixture;
+            (a_superseded_root_ends_typed_on_the_drive_loop, DriveLoop, None),
+            (a_superseded_root_ends_typed_on_the_drive_loop_across_a_crash_before_its_end,
+                DriveLoop, CrashBeforeEnd),
+            (a_superseded_root_ends_typed_on_the_drive_loop_on_a_fresh_journal,
+                DriveLoop, FreshJournal),
+            (a_superseded_root_ends_typed_on_the_engine_path, Engine, None),
+            (a_superseded_root_ends_typed_on_the_engine_path_across_a_crash_before_its_end,
+                Engine, CrashBeforeEnd),
+            (a_superseded_root_ends_typed_on_the_engine_path_on_a_fresh_journal,
+                Engine, FreshJournal));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
             redrive_after_commit_with_sealed_admission_reports_opened,
             compact_with_production_compactor_crash_matrix,
@@ -1590,6 +1607,24 @@ macro_rules! frame_open_redrive_tests {
         $crate::frame_open_redrive_tests!(@crashed [$($attrs)*] $fixture; $($rest),*);
     };
     (@crashed [$($attrs:tt)*] $fixture:block;) => {};
+    (@superseded [$($attrs:tt)*] $fixture:block; ($name:ident, $path:ident, $recovery:ident) $(, $rest:tt)*) => {
+        $($attrs)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $name() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::a_superseded_root_ends_typed_on_every_drive_path(
+                prefix,
+                host,
+                stores,
+                runner,
+                $crate::registration_macro_support::SupersededRootPath::$path,
+                $crate::registration_macro_support::SupersededRootRecovery::$recovery,
+            )
+            .await;
+        }
+        $crate::frame_open_redrive_tests!(@superseded [$($attrs)*] $fixture; $($rest),*);
+    };
+    (@superseded [$($attrs:tt)*] $fixture:block;) => {};
     (@once [$($attrs:tt)*] $fixture:block; $law:ident $(, $rest:ident)*) => {
         $($attrs)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

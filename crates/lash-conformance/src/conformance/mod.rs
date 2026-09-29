@@ -88,6 +88,7 @@ mod retention;
 mod root_answers_its_rows;
 mod root_control;
 mod root_start_marker;
+mod root_supersession;
 mod root_terminal;
 mod run_shape;
 mod run_spec_drive;

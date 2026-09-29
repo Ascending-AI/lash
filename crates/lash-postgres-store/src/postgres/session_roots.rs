@@ -11,9 +11,10 @@ use std::sync::LazyLock;
 use lash_core_execution::store::{
     CONTROL_INTENT_FORMAT, ClaimToken, ControlIntent, ControlIntentId, ControlIntentKind,
     ControlIntentState, EnginePark, IntentSettle, ObligationKey, ParkCancelCause, ParkEventKind,
-    RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWriteDecision, UnfinishedRoot, close_admission, decide_root_terminal_write,
-    root_binding_conflict, stored_intent_kind, stored_intent_state,
+    RefusedRootEnd, RootAdmission, RootEndedTurns, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWriteDecision, UnfinishedRoot, close_admission,
+    decide_root_terminal_write, refused_run_owns_root, root_binding_conflict, stored_intent_kind,
+    stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
@@ -308,59 +309,116 @@ async fn release_root_rows_conn(
 
 /// Store half of recovery after the engine proves a root run failed without
 /// an outcome. The terminal, ingress settlement and scope-close arm commit
-/// together under the session history lock.
+/// together under the session history lock. A root that already has
+/// terminal evidence, or no row, is left as it is.
 pub(crate) async fn end_lost_root_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
 ) -> Result<Option<RootTerminal>, StoreError> {
-    end_unanswered_root_tx(tx, target, at_ms, |cancelled_by| {
-        RootTerminalCause::SubstrateLost { cancelled_by }
-    })
-    .await
+    match unanswered_root_tx(tx, target).await? {
+        UnansweredRoot::Open => write_unanswered_root_end_tx(tx, target, at_ms, |cancelled_by| {
+            RootTerminalCause::SubstrateLost { cancelled_by }
+        })
+        .await
+        .map(Some),
+        UnansweredRoot::Ended(_) | UnansweredRoot::Unknown => Ok(None),
+    }
 }
 
-/// The root's run met a typed refusal no retry can change (FIG-4018): the
-/// same transaction as a lost root's, ending it with the refusal.
+/// The root's run under `fence` met a typed refusal no retry can change
+/// (FIG-4018): the same transaction as a lost root's, ending it with the
+/// refusal, once the run is shown to still own the root (FIG-4200).
 pub(crate) async fn end_refused_root_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    target: &lash_core_execution::engine::RootRef,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &TurnId,
     refusal: &lash_core_execution::RuntimeError,
     at_ms: u64,
-) -> Result<Option<RootTerminal>, StoreError> {
-    end_unanswered_root_tx(tx, target, at_ms, |_| RootTerminalCause::Refused {
-        code: refusal.code.clone(),
-        message: refusal.message.clone(),
-        refusal_cause: refusal.cause.clone(),
-    })
-    .await
+) -> Result<RefusedRootEnd, StoreError> {
+    let target = lash_core_execution::engine::RootRef {
+        session: fence.session().clone(),
+        root: root.clone(),
+    };
+    // The drive epoch's row lock is taken before the session history lock,
+    // in the order a fenced commit takes them, so the two never deadlock. A
+    // session whose row is gone holds no open root.
+    let current =
+        match crate::runtime_persistence::drive_epoch::drive_epoch_locked_tx(tx, &target.session)
+            .await
+        {
+            Ok(current) => Some(current),
+            Err(StoreError::DriveEpochUnavailable { .. }) => None,
+            Err(error) => return Err(error),
+        };
+    match unanswered_root_tx(tx, &target).await? {
+        UnansweredRoot::Ended(terminal) => Ok(RefusedRootEnd::AlreadyEnded(*terminal)),
+        UnansweredRoot::Unknown => Ok(RefusedRootEnd::Unknown),
+        UnansweredRoot::Open => {
+            let current = current.ok_or_else(|| StoreError::DriveEpochUnavailable {
+                session_id: target.session.clone(),
+            })?;
+            if !refused_run_owns_root(&target.session, fence, &current)? {
+                return Ok(RefusedRootEnd::Superseded);
+            }
+            write_unanswered_root_end_tx(tx, &target, at_ms, |_| RootTerminalCause::Refused {
+                code: refusal.code.clone(),
+                message: refusal.message.clone(),
+                refusal_cause: refusal.cause.clone(),
+            })
+            .await
+            .map(RefusedRootEnd::Ended)
+        }
+    }
 }
 
-/// End a root no commit answered, with the cause `cause` makes of the
-/// root's recorded cancellation request, if any. A root that already has
-/// terminal evidence, or no row, is left as it is.
-async fn end_unanswered_root_tx(
+/// Where a root no commit answered stands.
+enum UnansweredRoot {
+    /// It has terminal evidence.
+    Ended(Box<RootTerminal>),
+    /// The store holds no row for it.
+    Unknown,
+    /// It is admitted and has not ended.
+    Open,
+}
+
+/// Where `target` stands, read under the session history lock.
+async fn unanswered_root_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target: &lash_core_execution::engine::RootRef,
+) -> Result<UnansweredRoot, StoreError> {
+    let session = &target.session;
+    let root = &target.root;
+    crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
+    if let Some(terminal) = root_terminal_conn(&mut *tx, session, root).await? {
+        return Ok(UnansweredRoot::Ended(Box::new(terminal)));
+    }
+    Ok(
+        if sqlx::query(session_roots_sql().roots.select_terminal.sql())
+            .bind(session.as_str())
+            .bind(root.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .is_some()
+        {
+            UnansweredRoot::Open
+        } else {
+            UnansweredRoot::Unknown
+        },
+    )
+}
+
+/// End an open root no commit answered, with the cause `cause` makes of the
+/// root's recorded cancellation request, if any.
+async fn write_unanswered_root_end_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target: &lash_core_execution::engine::RootRef,
     at_ms: u64,
     cause: impl FnOnce(Option<String>) -> RootTerminalCause,
-) -> Result<Option<RootTerminal>, StoreError> {
+) -> Result<RootTerminal, StoreError> {
     let session = &target.session;
     let root = &target.root;
-    crate::runtime_persistence::lock_session_history_mutation_tx(tx, session).await?;
-    if root_terminal_conn(&mut *tx, session, root).await?.is_some() {
-        return Ok(None);
-    }
-    if sqlx::query(session_roots_sql().roots.select_terminal.sql())
-        .bind(session.as_str())
-        .bind(root.as_str())
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(store_sqlx_error)?
-        .is_none()
-    {
-        return Ok(None);
-    }
     // `select_request` yields request_id, origin, reason, disposition, mode.
     let request: Option<crate::runtime_persistence::turn_cancel::TurnCancelRequestRow> =
         sqlx::query_as(
@@ -432,7 +490,7 @@ async fn end_unanswered_root_tx(
     // disposition to open input addressed to a turn the root ends
     // (FIG-3927 §2.4, FIG-3946).
     write_root_terminal_conn(&mut *tx, &terminal).await?;
-    Ok(Some(terminal))
+    Ok(terminal)
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).
@@ -962,21 +1020,17 @@ impl RootStore for PostgresStore {
 
     async fn end_refused_root(
         &self,
-        session_id: &SessionId,
+        fence: &lash_core_execution::store::DriveFence,
         root: &TurnId,
         refusal: &lash_core_execution::RuntimeError,
         at_ms: u64,
-    ) -> Result<Option<RootTerminal>, StoreError> {
-        lash_core_execution::store::validate_session_id(session_id)?;
-        let target = lash_core_execution::engine::RootRef {
-            session: session_id.clone(),
-            root: root.clone(),
-        };
+    ) -> Result<RefusedRootEnd, StoreError> {
+        lash_core_execution::store::validate_session_id(fence.session())?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = crate::begin_guarded(&mut *connection, &self.fence).await?;
-        let terminal = end_refused_root_tx(&mut tx, &target, refusal, at_ms).await?;
+        let end = end_refused_root_tx(&mut tx, fence, root, refusal, at_ms).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(terminal)
+        Ok(end)
     }
 
     async fn root_of_input(

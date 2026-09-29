@@ -84,3 +84,4 @@ pub fn effect_group_test_prefix(label: &str) -> String {
 }
 
 pub use super::root_control::*;
+pub use super::root_supersession::*;

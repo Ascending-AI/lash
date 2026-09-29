@@ -276,6 +276,59 @@ pub enum RootTerminalWriteDecision {
     AlreadyWritten,
 }
 
+/// What [`RootStore::end_refused_root`] did (FIG-4018, FIG-4200).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RefusedRootEnd {
+    /// The write ended the root with the refusal.
+    Ended(RootTerminal),
+    /// The root already had terminal evidence, which stands: a replay of the
+    /// run that wrote the end, or whatever else ended the root first. Nothing
+    /// was written.
+    AlreadyEnded(RootTerminal),
+    /// The refused run no longer owns the root: a later admission sealed a
+    /// newer drive epoch, and the root is that execution's to end. Nothing
+    /// was written.
+    Superseded,
+    /// The store holds no row for the root. Nothing was written.
+    Unknown,
+}
+
+impl RefusedRootEnd {
+    /// The root's terminal evidence, when the root has ended.
+    #[must_use]
+    pub fn terminal(&self) -> Option<&RootTerminal> {
+        match self {
+            Self::Ended(terminal) | Self::AlreadyEnded(terminal) => Some(terminal),
+            Self::Superseded | Self::Unknown => None,
+        }
+    }
+}
+
+/// Whether the refused run whose admission sealed `fence` still owns its
+/// root, read from the session's stored drive epoch in the ending
+/// transaction (FIG-4200).
+///
+/// It owns the root while `fence` is the session's current drive fence. A
+/// later admission that sealed a newer epoch may be running the same
+/// unfinished root, so an obsolete run must never end it. A closing session
+/// is the one exception: its close raised the epoch past every admission and
+/// no admission seals after it, so no successor holds the root, and the
+/// refused run still ends it.
+pub fn refused_run_owns_root(
+    session_id: &SessionId,
+    fence: &DriveFence,
+    current: &super::StoredDriveEpoch,
+) -> Result<bool, StoreError> {
+    if current.closing.is_some() {
+        return Ok(true);
+    }
+    match super::require_current_drive_fence(session_id, fence, current) {
+        Ok(()) => Ok(true),
+        Err(StoreError::StaleDriveFence { .. }) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// The stored form of a root's terminal: the columns a backend writes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StoredRootTerminal {
@@ -410,23 +463,29 @@ pub trait RootStore: Send + Sync {
         root: &TurnId,
     ) -> Result<Option<RootTerminal>, StoreError>;
 
-    /// End `root`, whose run met `refusal`, a typed refusal no retry can
-    /// change, with [`RootTerminalCause::Refused`] (FIG-4018).
+    /// End `root`, whose run under `fence` met `refusal`, a typed refusal no
+    /// retry can change, with [`RootTerminalCause::Refused`] (FIG-4018).
     ///
     /// One transaction, as for a lost root: the head's owed follow-on is
     /// cleared, the root's own inputs are cancelled and its batches removed,
     /// and the terminal write releases whatever else it held and arms its
     /// scope close. The session's next admission then drives a new root.
-    /// A root that already has terminal evidence, or no row, is left as it
-    /// is and answers `None`, so a replay of the run that wrote the end
-    /// writes nothing more.
+    ///
+    /// A root that already has terminal evidence is left as it is and
+    /// answers [`RefusedRootEnd::AlreadyEnded`], so a replay of the run that
+    /// wrote the end writes nothing more. A root with no row answers
+    /// [`RefusedRootEnd::Unknown`]. Otherwise the transaction checks that
+    /// the run still owns the root ([`refused_run_owns_root`]) before it
+    /// writes: a run whose fence a later admission superseded answers
+    /// [`RefusedRootEnd::Superseded`] and never ends its successor's root
+    /// (FIG-4200).
     async fn end_refused_root(
         &self,
-        session_id: &SessionId,
+        fence: &DriveFence,
         root: &TurnId,
         refusal: &crate::RuntimeError,
         at_ms: u64,
-    ) -> Result<Option<RootTerminal>, StoreError>;
+    ) -> Result<RefusedRootEnd, StoreError>;
 
     /// The root that took accepted input `input`: the root its admission bound
     /// it to, or for a checkpoint delivery the root whose commit applied it.
