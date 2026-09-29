@@ -1632,6 +1632,11 @@ jobs:
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-artifact-referrers
 
+      - name: Test RLM frame-open replay and live reset on Postgres
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-rlm-frame-open
+
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |

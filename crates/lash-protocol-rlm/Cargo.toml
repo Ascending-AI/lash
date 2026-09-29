@@ -48,6 +48,7 @@ tokio = { workspace = true, features = ["rt", "sync"] }
 # crate: only types from below the cycle cross it.
 lash-restate-test = { workspace = true }
 lash-conformance = { workspace = true }
+lash-postgres-store = { workspace = true }
 lash-core = { workspace = true, features = ["testing"] }
 lash-plugin-process-controls = { workspace = true }
 lashlang = { workspace = true, features = ["testing"] }

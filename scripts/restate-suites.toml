@@ -28,6 +28,9 @@
 [suites.effect-group]
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
+# FIG-4165: pressure CAS loss keeps the old admission bound; the law is ignored
+# until the admission recovery policy is settled.
+skips = ["reverse_compact_pressure_overlap_redrives_once"]
 filters = ["live_effect_group_sdk_preconditions", "tests::conformance_and_poison::"]
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 3

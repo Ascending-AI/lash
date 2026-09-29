@@ -100,6 +100,8 @@ labels() {
 #
 #   bazel label|comma-separated test filters|cargo package|cargo target|cargo runner|flags
 #
+# `skip=<filter>` excludes an explicitly unresolved ignored law from a
+# cargo-test suite that otherwise includes its service-only ignored tests.
 # Each filter runs separately in either dialect. An empty filter runs the
 # whole target.
 #
@@ -114,6 +116,7 @@ labels() {
 # `s3-store` take a generated label file rather than one label. Forcing a shape
 # variation into the table for those buys nothing.
 declare -A uniform_store_suites=(
+  [pg-rlm-frame-open]="//crates/lash-protocol-rlm:frame_open_redrive__test|restate_double_postgres::|lash-internal-protocol-rlm|--test frame_open_redrive|cargo-test|include-ignored,nocapture,skip=reverse_compact_pressure_overlap_redrives_once"
   [pg-artifact-referrers]="//crates/lash:artifact_referrers_evidence__test||lash-runtime|--test artifact_referrers_evidence --features rlm,restate,sqlite,testing|cargo-test|nocapture"
   [pg-pool-wait]="//crates/lash-perf:lash-perf__unit_test|postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads|lash-perf||nextest|"
   [pg-sim-backend-faults]="//crates/lash-sim:lash-sim__unit_test|postgres_backend_fault|lash-sim|--lib|nextest-ci|"
@@ -138,6 +141,14 @@ render_bazel_suite() {
   suite_has_flag "$flags" include-ignored && args+=(--test_arg=--include-ignored)
   suite_has_flag "$flags" single-threaded && args+=(--test_arg=--test-threads=1)
   suite_has_flag "$flags" nocapture && args+=(--test_arg=--nocapture --test_output=all)
+  local flag
+  local -a selections
+  IFS=, read -r -a selections <<< "$flags"
+  for flag in "${selections[@]}"; do
+    if [[ "$flag" == skip=* ]]; then
+      args+=(--test_arg=--skip "--test_arg=${flag#skip=}")
+    fi
+  done
   bazel_test "${args[@]}" "$label"
 }
 
@@ -165,6 +176,14 @@ render_cargo_suite() {
     suite_has_flag "$flags" nocapture && libtest+=(--nocapture)
     suite_has_flag "$flags" include-ignored && libtest+=(--include-ignored)
     suite_has_flag "$flags" single-threaded && libtest+=(--test-threads=1)
+    local flag
+    local -a selections
+    IFS=, read -r -a selections <<< "$flags"
+    for flag in "${selections[@]}"; do
+      if [[ "$flag" == skip=* ]]; then
+        libtest+=(--skip "${flag#skip=}")
+      fi
+    done
     [ "${#libtest[@]}" -gt 0 ] && cmd+=(-- "${libtest[@]}")
   else
     suite_has_flag "$flags" single-threaded && cmd+=(-j1)

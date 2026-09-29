@@ -9349,6 +9349,12 @@
       "package": "lash-internal-postgres-store"
     },
     {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_4b0bbf7a",
+      "package": "lash-internal-postgres-store"
+    },
+    {
       "features": [
         "perf-witness"
       ],
@@ -9550,7 +9556,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_c46a4f89",
+      "label": "//crates/lash-protocol-rlm:frame_open_redrive__test__fv_be8c91cc",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9795,7 +9801,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_c46a4f89",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_be8c91cc",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9804,7 +9810,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_c46a4f89",
+      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_be8c91cc",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9813,7 +9819,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_c46a4f89",
+      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_be8c91cc",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -20257,6 +20263,7 @@
         "lash-internal-lashlang",
         "lash-internal-lashlang-runtime",
         "lash-internal-plugin-process-controls",
+        "lash-internal-postgres-store",
         "lash-internal-render",
         "lash-internal-restate-test",
         "lash-internal-rlm-types",

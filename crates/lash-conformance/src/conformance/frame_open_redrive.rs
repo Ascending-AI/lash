@@ -67,6 +67,8 @@ use crate::plugin::PluginFactory;
 
 mod adversarial;
 pub use adversarial::*;
+mod followup;
+pub use followup::*;
 
 /// The prompt usage at which the laws' pressure hook compacts.
 const PRESSURE_THRESHOLD_TOKENS: i64 = 1_000;
@@ -284,6 +286,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for CrashProbe {
 struct ThresholdCompaction {
     crash_after_summary: bool,
     seed: LawSeed,
+    hold: Option<SummaryHold>,
 }
 
 async fn summarize(
@@ -361,6 +364,9 @@ impl crate::plugin::ContextPressureHook for ThresholdCompaction {
             &ctx.direct_completions,
         )
         .await?;
+        if let Some(hold) = &self.hold {
+            hold.wait().await;
+        }
         if self.crash_after_summary {
             panic!("injected crash after the summary, before the pressure frame's commit");
         }
@@ -655,8 +661,10 @@ impl SummaryHold {
 struct LawCompaction {
     compactor: LawCompactor,
     seed: LawSeed,
-    /// Holds `/compact` after its summary; a pressure hook is never held.
+    /// Holds `/compact` after its summary.
     hold: Option<SummaryHold>,
+    /// Holds the pressure hook after its journaled summary.
+    pressure_hold: Option<SummaryHold>,
     /// The signal a provider-answer crash dies on.
     provider_answered: Option<Arc<tokio::sync::Notify>>,
     /// The runtime keeps no store.
@@ -682,6 +690,17 @@ struct LawParts {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate::LashRuntime {
+    let mut parts = parts.clone();
+    if parts.compaction.compactor == LawCompactor::Standard
+        && matches!(
+            crash,
+            Some(FrameOpenCrash::BeforeSummary | FrameOpenCrash::AfterSummary)
+        )
+    {
+        parts.host.tracing.trace_sink = Some(Arc::new(followup::CompactorCrash {
+            crash: crash.expect("the crash point is present"),
+        }));
+    }
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(parts.session_id.clone());
     let crash_after_summary = crash == Some(FrameOpenCrash::AfterSummary);
@@ -695,6 +714,7 @@ async fn build_runtime(parts: &LawParts, crash: Option<FrameOpenCrash>) -> crate
                     Arc::new(ThresholdCompaction {
                         crash_after_summary,
                         seed: law.seed,
+                        hold: law.pressure_hold.clone(),
                     }),
                 )
                 .with_context_compactor(
@@ -1361,10 +1381,6 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
 /// commit, the redrive loads the moved head, replays the recorded base and
 /// the summary over it, and meets the commit's receipt instead of opening a
 /// second frame from the moved head (FIG-4133).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn a_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -1372,104 +1388,16 @@ pub async fn a_compaction_frame_opens_once_whatever_its_crash(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     crash: FrameOpenCrash,
 ) {
-    let protocol = StandardFrameLawProtocol::shared();
-    let model = law_model(ModelScript {
-        turns: vec![(protocol.answer("answer 1"), 1)],
-    });
-    let mut law = LawSession::open(
+    followup::compaction_crash_case(
         prefix,
-        &format!("compact-{crash:?}").to_lowercase(),
         effect_host,
         stores,
         runner,
-        protocol,
-        model.provider.clone(),
+        crash,
+        LawCompactor::Law,
+        false,
     )
     .await;
-    model.arm(crash, &mut law.parts);
-    law.enqueue("first question").await;
-    law.run_root("root-1").await;
-    let first = law.head().await;
-    let first_frame = first
-        .current_frame_node_id
-        .clone()
-        .expect("the session stands in its first frame");
-
-    let compaction =
-        |crash: Option<FrameOpenCrash>,
-         result_tx: Option<tokio::sync::mpsc::UnboundedSender<bool>>| {
-            let parts = law.parts.clone();
-            let attempt: crate::ConformanceTurnAttempt = Arc::new(move |scope| {
-                let parts = parts.clone();
-                let result_tx = result_tx.clone();
-                Box::pin(async move {
-                    let mut runtime = build_runtime(&parts, crash).await;
-                    let opened = unless_the_provider_answer_is_lost(
-                        &parts,
-                        crash,
-                        Box::pin(runtime.compact_context(None, scope)),
-                    )
-                    .await
-                    .unwrap_or_else(|error| panic!("the compaction runs: {error}"));
-                    match result_tx {
-                        Some(result_tx) => {
-                            let _ = result_tx.send(opened);
-                            crate::ConformanceTurnEnd::Settled
-                        }
-                        None => panic!("injected crash after the compaction's commit"),
-                    }
-                })
-            });
-            attempt
-        };
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(90),
-        law.runner.run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::runtime_operation(format!(
-                "{}-compact",
-                law.prefix
-            ))),
-            // Killed after its commit, the crashing attempt runs the whole
-            // compaction and dies before it reports.
-            compaction(
-                (crash != FrameOpenCrash::AfterFrameCommit).then_some(crash),
-                None,
-            ),
-            compaction(None, Some(tx)),
-        ),
-    )
-    .await
-    .unwrap_or_else(|_| panic!("the compaction's redrive after {crash:?} ends"));
-    assert!(
-        rx.recv()
-            .await
-            .expect("the tier's runner ran the redriven compaction"),
-        "the redriven compaction reports its frame open"
-    );
-
-    assert_eq!(
-        model.summary_calls.load(Ordering::SeqCst),
-        model.expected_summary_calls(1, Some(crash)),
-        "one summarizer call: a redrive reads the summary back from its journal, \
-         and requests only an answer the journal never recorded again"
-    );
-    let head = law.head().await;
-    assert_eq!(
-        head.head_revision,
-        first.head_revision + 1,
-        "the compaction commits once"
-    );
-    let chain = frame_chain(&head, &law.session_id);
-    assert_eq!(chain.len(), 2, "one frame after the first: {chain:?}");
-    assert_eq!(chain[1].0, crate::AgentFrameReason::COMPACTION);
-    assert_eq!(chain[1].1.as_ref(), Some(&first_frame));
-    let path = active_path(&head.graph);
-    assert_eq!(
-        path.iter().filter(|text| *text == SUMMARY_TEXT).count(),
-        1,
-        "{path:?}"
-    );
 }
 
 /// Register the frame-open laws (FIG-4110) over a protocol: a pressure frame
@@ -1481,6 +1409,14 @@ pub async fn a_compaction_frame_opens_once_whatever_its_crash(
 #[macro_export]
 macro_rules! frame_open_protocol_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
+        #[ignore = "FIG-4165: pressure CAS loss leaves the root bound to its old admission; recovery needs an admission policy"]
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn reverse_compact_pressure_overlap_redrives_once() {
+            let (_guard, prefix, host, stores, runner, protocol) = $fixture;
+            $crate::registration_macro_support::reverse_compact_pressure_overlap_redrives_once(
+                prefix, host, stores, runner, protocol,
+            ).await;
+        }
         $crate::frame_open_protocol_redrive_tests!(@law [$(#[$attr])*] $fixture;
             (a_pressure_frame_crashed_after_its_provider_answered_opens_once,
                 a_pressure_frame_opens_once_whatever_its_crash, AfterProviderAnswer),
@@ -1625,6 +1561,8 @@ macro_rules! frame_open_redrive_tests {
             (pressure_hooks_sharing_an_id_crashed_after_the_turns_commit_keep_their_records_apart,
                 pressure_hooks_sharing_an_id_keep_their_records_apart, AfterTurnCommit));
         $crate::frame_open_redrive_tests!(@once [$(#[$attr])*] $fixture;
+            redrive_after_commit_with_sealed_admission_reports_opened,
+            compact_with_production_compactor_crash_matrix,
             a_compaction_superseded_by_a_newer_admission_is_refused,
             a_compaction_overlapping_a_pressure_frame_is_refused,
             a_session_deleted_during_an_open_keeps_nothing_of_it,

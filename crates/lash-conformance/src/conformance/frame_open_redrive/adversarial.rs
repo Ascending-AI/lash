@@ -95,7 +95,7 @@ impl LawSession {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    async fn run_root_to_any_end(
+    pub(super) async fn run_root_to_any_end(
         &self,
         drive: &str,
     ) -> Result<crate::facade_support::QueuedTurnDrain<crate::AssembledTurn>, crate::RuntimeError>

@@ -1,5 +1,5 @@
 //! The RLM registrations of the frame-open laws (FIG-4110) on the Restate
-//! server double this crate opens.
+//! server double over SQLite and PostgreSQL.
 //!
 //! A context-pressure hook is protocol-neutral: an RLM session opens a
 //! pressure frame the way a standard one does, and a root whose turn then
@@ -84,8 +84,8 @@ mod restate_double {
     /// runs inside a handler of the double's deployment, on the scoped
     /// controller the invocation's journal owns, and a crashed attempt is
     /// replayed into the redrive.
-    struct DoubleTurnRunner {
-        backend: lash_restate_test::RestateTestBackend,
+    pub(super) struct DoubleTurnRunner<Stores: lash_core::StoreSet + ?Sized> {
+        pub(super) backend: lash_restate_test::RestateTestBackend<Stores>,
     }
 
     fn into_handler_attempt(
@@ -100,7 +100,9 @@ mod restate_double {
     }
 
     #[async_trait::async_trait]
-    impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
+    impl<Stores: lash_core::StoreSet + ?Sized> lash_conformance::ConformanceTurnRunner
+        for DoubleTurnRunner<Stores>
+    {
         async fn run_turn(
             &self,
             admitted: lash_core::AdmittedScope,
@@ -161,4 +163,77 @@ mod restate_double {
     lash_conformance::frame_open_protocol_redrive_tests!({ fixture().await });
 
     lash_conformance::frame_open_execution_state_tests!({ fixture().await });
+}
+
+mod restate_double_postgres {
+    use super::*;
+
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "service fixture reads its PostgreSQL connection and mints fresh session ids"
+    )]
+    async fn fixture() -> (
+        (
+            tempfile::TempDir,
+            lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+        ),
+        &'static str,
+        Arc<dyn EffectHost>,
+        Arc<dyn lash_core::StoreSet>,
+        Arc<dyn lash_conformance::ConformanceTurnRunner>,
+        Arc<dyn lash_conformance::FrameLawProtocol>,
+    ) {
+        let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+            .expect("the PostgreSQL RLM laws require a provisioned PostgreSQL service");
+        let attachments = tempfile::tempdir().expect("attachment byte store");
+        let bytes = Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        ));
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time after epoch")
+            .as_nanos();
+        let double = lash_restate_test::backend_with_store_set(
+            (nonce & u128::from(u64::MAX)) as u64,
+            lash_restate_test::ServerConfig::default(),
+            move |clock| async move {
+                let storage = lash_postgres_store::PostgresStorage::connect(&url)
+                    .await
+                    .map_err(|error| lash_restate_test::BackendError::Stores(error.to_string()))?;
+                Ok(Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
+                    &storage,
+                    bytes,
+                    lash_core::WakeDeliveryConfig::default(),
+                    clock,
+                )) as Arc<dyn lash_core::StoreSet>)
+            },
+        )
+        .await
+        .expect("start the Restate double over PostgreSQL");
+        let backend = double.lash_backend();
+        let protocol = RlmFrameLawProtocol::shared(&backend);
+        let prefix: &'static str = Box::leak(format!("rlm-frame-open-pg-{nonce}").into_boxed_str());
+        eprintln!("RLM frame-open tier: PostgreSQL, session prefix {prefix}");
+        (
+            (attachments, double.clone()),
+            prefix,
+            backend.effect_host() as Arc<dyn EffectHost>,
+            Arc::clone(double.engine_stores()),
+            Arc::new(restate_double::DoubleTurnRunner { backend: double }),
+            protocol,
+        )
+    }
+
+    lash_conformance::frame_open_protocol_redrive_tests!(
+        #[ignore = "requires PostgreSQL; run scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-rlm-frame-open"]
+        {
+            fixture().await
+        }
+    );
+    lash_conformance::frame_open_execution_state_tests!(
+        #[ignore = "requires PostgreSQL; run scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-rlm-frame-open"]
+        {
+            fixture().await
+        }
+    );
 }
