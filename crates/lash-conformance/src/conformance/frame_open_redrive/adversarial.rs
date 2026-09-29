@@ -4,18 +4,18 @@
 //!   every crash point, replay exactly as the laws' synthetic compactor does:
 //!   the redrive's admitted window hashes to the request identity the first
 //!   execution journaled its summary under, so it reads the summary back.
-//! - `/compact` presents the drive fence current when it starts: an admission
-//!   sealed before its frame commit, or a pressure frame a turn commits meanwhile,
-//!   refuses it typed with nothing of it durable, and the admitted turn
-//!   proceeds.
-//! - A session deleted while `/compact` opens its frame keeps nothing of the open,
-//!   and a fork made meanwhile sees the point it forked from, never a partial
-//!   seed.
+//! - An administrative compaction presents the drive fence current when it
+//!   starts: an admission sealed before its frame commit, or a pressure frame
+//!   a turn commits meanwhile, refuses it typed with nothing of it durable,
+//!   and the admitted turn proceeds.
+//! - A session deleted while an administrative compaction opens its frame
+//!   keeps nothing of the open, and a fork made meanwhile sees the point it
+//!   forked from, never a partial seed.
 //! - An explicit empty pressure seed opens one frame; a pressure frame whose
 //!   commit the store refuses leaves nothing of the open visible.
 //! - Two plugins whose pressure hooks share an id keep their records apart.
-//! - Every open restarts the live interpreter: a staged open, `/compact` with
-//!   a store and `/compact` without one.
+//! - Every open restarts the live interpreter: a staged open, administrative
+//!   compactions with and without a store.
 
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -42,9 +42,9 @@ const OVERFLOW_RECOVERY_COMPLETED: &str =
 type CompactionResult = Result<bool, crate::facade_support::PluginOperationInvokeError>;
 
 impl LawSession {
-    /// Runs `/compact` once on the tier's runner, holding it after its
-    /// journaled summary while `during` runs, and answers what the
-    /// compaction returned.
+    /// Runs an administrative compaction once on the tier's runner, holding
+    /// it after its journaled summary while `during` runs, and answers what
+    /// the compaction returned.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
@@ -354,10 +354,11 @@ pub async fn an_overflow_recovery_frame_opens_once_whatever_its_crash(
     );
 }
 
-/// `/compact` writes beside the drive under the fence current when it
-/// starts. Held after its summary while another worker's admission seals a
-/// newer drive epoch (without moving the head), it is refused typed with
-/// nothing of it durable, and the next root proceeds in the frame it was in.
+/// An administrative compaction writes beside the drive under the fence
+/// current when it starts. Held after its summary while another worker's
+/// admission seals a newer drive epoch (without moving the head), it is
+/// refused typed with nothing of it durable, and the next root proceeds in
+/// the frame it was in.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -438,10 +439,10 @@ pub async fn a_compaction_superseded_by_a_newer_admission_is_refused(
     assert_eq!(count(&path, |text| text == SUMMARY_TEXT), 0, "{path:?}");
 }
 
-/// `/compact` held after its summary while a root's pressure hook opens and
-/// commits its own frame: the root's admission superseded the compaction's
-/// fence, so the compaction is refused typed, and the session holds exactly
-/// the pressure frame.
+/// An administrative compaction held after its summary while a root's
+/// pressure hook opens and commits its own frame: the root's admission
+/// superseded the compaction's fence, so the compaction is refused typed,
+/// and the session holds exactly the pressure frame.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -507,8 +508,8 @@ pub async fn a_compaction_overlapping_a_pressure_frame_is_refused(
     assert!(path.iter().any(|text| text == "answer 2"), "{path:?}");
 }
 
-/// A session deleted while `/compact` opens its frame keeps nothing of the open:
-/// the compaction fails, and the session stays deleted.
+/// A session deleted while an administrative compaction opens its frame keeps
+/// nothing of the open: the compaction fails, and the session stays deleted.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -563,9 +564,9 @@ pub async fn a_session_deleted_during_an_open_keeps_nothing_of_it(
     );
 }
 
-/// A fork made at the head while `/compact` opens its frame sees the point it
-/// forked from: the compaction commits its frame in the source session, and
-/// the fork holds no part of the seed.
+/// A fork made at the head while an administrative compaction opens its
+/// frame sees the point it forked from: the compaction commits its frame in
+/// the source session, and the fork holds no part of the seed.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -801,9 +802,9 @@ pub async fn pressure_hooks_sharing_an_id_keep_their_records_apart(
 pub enum LiveResetPath {
     /// A staged open ([`crate::LashRuntime::open_agent_frame`]).
     Staged,
-    /// `/compact` on a store-backed runtime.
+    /// An administrative compaction on a store-backed runtime.
     Compact,
-    /// `/compact` on a runtime with no store.
+    /// An administrative compaction on a runtime with no store.
     StorelessCompact,
 }
 

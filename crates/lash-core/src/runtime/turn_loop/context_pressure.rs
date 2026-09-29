@@ -8,14 +8,15 @@
 //! - `Record` nodes join the turn's graph-append draft and commit with the
 //!   turn.
 //! - `OpenFrame` commits on its own, before the turn's model call, exactly as
-//!   `/compact`'s frame does: the records every hook decided land in the
-//!   frame being left, the frame opens with its seed through the one
-//!   frame-open primitive (which derives what the seed carries, and resets
-//!   execution state and the prompt usage), and the commit makes all of it
-//!   durable together, carrying the seed's artifacts into the new frame. The
-//!   turn then runs in the new frame on resident state, with no reload
-//!   (ADR 0112 §9), and the protocol restores its live execution state from
-//!   the seed. A later failure of the turn leaves the frame in place.
+//!   an administrative compaction's frame does: the records every hook
+//!   decided land in the frame being left, the frame opens with its seed
+//!   through the one frame-open primitive (which derives what the seed
+//!   carries, and resets execution state and the prompt usage), and the
+//!   commit makes all of it durable together, carrying the seed's artifacts
+//!   into the new frame. The turn then runs in the new frame on resident
+//!   state, with no reload (ADR 0112 §9), and the protocol restores its live
+//!   execution state from the seed. A later failure of the turn leaves the
+//!   frame in place.
 //!
 //! The commit is an idempotent fenced store write under an operation named by
 //! the turn and the hook (ADR 0105 §9), and the frame key is core's, derived

@@ -228,8 +228,9 @@ pub async fn redrive_after_commit_with_sealed_admission_reports_opened(
     .await;
 }
 
-/// Production `/compact` killed before summarization, between the provider and
-/// journal, before its frame commit and after it. Each case opens exactly once.
+/// A production administrative compaction killed before summarization,
+/// between the provider and journal, before its frame commit and after it.
+/// Each case opens exactly once.
 pub async fn compact_with_production_compactor_crash_matrix(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -256,8 +257,8 @@ pub async fn compact_with_production_compactor_crash_matrix(
     }
 }
 
-/// Pressure loses its head CAS to `/compact`, and redrives without a second
-/// frame, stale prompt usage or the old interpreter global.
+/// Pressure loses its head CAS to an administrative compaction, and redrives
+/// without a second frame, stale prompt usage or the old interpreter global.
 #[expect(
     clippy::expect_used,
     reason = "conformance fixture results are established by setup"

@@ -73,8 +73,9 @@ lash_conformance::frame_switch_redrive_tests!({
 });
 
 // FIG-4110: every frame open (a context-pressure frame, a pressure frame
-// followed by `continue_as`, `/compact`) killed at each crash point and
-// redelivered opens once, chained in order, with one summarizer call.
+// followed by `continue_as`, an administrative compaction) killed at each
+// crash point and redelivered opens once, chained in order, with one
+// summarizer call.
 lash_conformance::frame_open_redrive_tests!({
     let harness =
         LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;

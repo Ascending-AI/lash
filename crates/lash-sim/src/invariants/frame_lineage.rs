@@ -1,13 +1,14 @@
 //! Every session's frames form one chain (FIG-4110 F8).
 //!
 //! A frame opens exactly once, through one `FrameOpen` node, whoever authors
-//! it: a context-pressure hook, overflow recovery, `/compact` or a
-//! `continue_as`. For every node a session holds, on its active path or off
-//! it (a fork's branch, an abandoned open): the node belongs to the frame
-//! whose `FrameOpen` is its nearest ancestor, itself included, so every
-//! `FrameOpen` names only itself and hangs off a node of the frame that was
-//! current when it opened; a node with no parent opens the session's first
-//! frame; and a frame a node names has its own `FrameOpen` in the session.
+//! it: a context-pressure hook, overflow recovery, an administrative
+//! compaction or a `continue_as`. For every node a session holds, on its
+//! active path or off it (a fork's branch, an abandoned open): the node
+//! belongs to the frame whose `FrameOpen` is its nearest ancestor, itself
+//! included, so every `FrameOpen` names only itself and hangs off a node of
+//! the frame that was current when it opened; a node with no parent opens
+//! the session's first frame; and a frame a node names has its own
+//! `FrameOpen` in the session.
 //! A frame opened twice would be a `FrameOpen` placed in another frame, and a
 //! path that revisits a node is a parent cycle.
 

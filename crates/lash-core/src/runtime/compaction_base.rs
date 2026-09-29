@@ -1,5 +1,5 @@
-//! The base an administrative compaction (`/compact`) runs over (FIG-4133,
-//! F3).
+//! The base an administrative compaction (`compact_context`) runs over
+//! (FIG-4133, F3).
 //!
 //! A compaction summarizes the frame current when it starts and opens its
 //! frame from that frame, then commits the frame on its own. Before its

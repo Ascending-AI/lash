@@ -78,7 +78,7 @@ impl LashRuntime {
     /// would replace session configuration without a commanded config patch.
     /// Refuses with [`RuntimeErrorCode::ExecutionStateCaptureFailed`], before
     /// anything is opened, a seed that carries artifacts: only an open that
-    /// commits its own frame (a context-pressure hook, `/compact`,
+    /// commits its own frame (a context-pressure hook, `compact_context`,
     /// `continue_as`) can hand them to the new frame, so a staged one would
     /// lose them.
     pub async fn open_agent_frame(
@@ -139,7 +139,7 @@ impl LashRuntime {
                 RuntimeErrorCode::ExecutionStateCaptureFailed,
                 "a staged frame open cannot carry its seed's artifacts into the new frame; \
                  open the frame through a commit that carries them (a context-pressure \
-                 hook, `/compact` or `continue_as`)",
+                 hook, `compact_context` or `continue_as`)",
             ));
         }
         self.open_frame(request).await
@@ -201,8 +201,9 @@ pub(in crate::runtime) enum StagedOpen {
     /// historical frame, which is refused, and the open commits nothing of
     /// its own, so a seed that carries artifacts is refused too.
     Caller,
-    /// `/compact`, whose key core derives from the compaction and the frame
-    /// current at its base, as a pressure frame's is: it names a new frame,
+    /// `compact_context`, whose key core derives from the compaction and the
+    /// frame current at its base, as a pressure frame's is: it names a new
+    /// frame,
     /// or on a redrive the one its own first execution committed, whose
     /// receipt its commit meets (FIG-4133). It commits its frame with the
     /// artifacts its seed carries.

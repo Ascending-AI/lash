@@ -460,8 +460,8 @@ impl LashRuntime {
     }
 
     /// Adopt `base`, the head the running direct turn was admitted on, or the
-    /// one a `/compact` recorded (FIG-4133), as the resident session
-    /// (FIG-3682).
+    /// one an administrative compaction recorded (FIG-4133), as the resident
+    /// session (FIG-3682).
     ///
     /// A replay of an admitted turn rebuilds its input state from here, never
     /// from the live head: the turn's own commit, or a lane service, may have
@@ -780,7 +780,7 @@ impl LashRuntime {
         // own commit moved: a redrive summarizes the same history, reads the
         // summary back from its journal, derives the same frame key and meets
         // the frame commit's receipt (FIG-4133, F3).
-        // `/compact` writes beside the drive: its frame commit presents the
+        // `compact_context` writes beside the drive: its frame commit presents the
         // drive fence its base recorded, as every frame commit presents one,
         // so an admission sealed while it summarizes refuses it typed instead
         // of letting a superseded command publish a frame (FIG-4134).

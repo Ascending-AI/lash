@@ -11,7 +11,7 @@
 //!   then runs in the new frame on resident state.
 //! - **`continue_as`.** The turn's own `AgentFrameSwitch` outcome, opened by
 //!   the turn's commit; the task runs as a follow-on physical turn.
-//! - **`/compact`.** An administrative compaction: core records the head
+//! - **`compact_context`.** An administrative compaction: core records the head
 //!   and frame it compacts as one recorded step, a compactor returns seed
 //!   nodes over that base, and core opens and commits the frame through an
 //!   idempotent fenced write the compaction names. A redrive replays the
@@ -19,7 +19,7 @@
 //!   receipt, even after the commit moved the head.
 //!
 //! Each law kills the execution at one point and redrives it on the tier's
-//! runner: before `/compact`'s summarizer runs, after the summarizer's
+//! runner: before `compact_context`'s summarizer runs, after the summarizer's
 //! provider answered but before its answer is journaled, after the
 //! summarizer's completion is journaled but before the frame's commit, after
 //! the frame's commit, before and after the turn's commit. However the
@@ -42,8 +42,9 @@
 //! Beyond the crash matrix (FIG-4134): the production standard compactor and
 //! its overflow recovery replay exactly as the laws' synthetic compactor does
 //! (a redrive's admitted window hashes to the request identity the first
-//! execution journaled); `/compact` writes under the drive fence current when
-//! it starts, so an admission sealed while it summarizes refuses it typed; a
+//! execution journaled); an administrative compaction writes under the drive
+//! fence current when it starts, so an admission sealed while it summarizes
+//! refuses it typed; a
 //! session deleted while a frame opens takes nothing of the open, and a fork
 //! made meanwhile never sees a partial seed; an empty seed opens a frame; a
 //! frame whose commit the store refuses leaves nothing visible; two plugins
@@ -194,14 +195,15 @@ impl crate::ToolProvider for SwitchTool {
 /// Where a law kills the execution under test.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameOpenCrash {
-    /// `/compact`'s base is recorded; its summarizer has not run.
+    /// An administrative compaction's base is recorded; its summarizer has
+    /// not run.
     BeforeSummary,
     /// The summarizer's provider answered; its answer is not journaled.
     AfterProviderAnswer,
     /// The summarizer's completion is journaled; the frame's commit is not.
     AfterSummary,
     /// The frame's own commit is durable: the pressure frame's, before its
-    /// turn runs, or `/compact`'s, before it reports.
+    /// turn runs, or an administrative compaction's, before it reports.
     AfterFrameCommit,
     /// The turn's model and tool effects are journaled; its commit is not.
     BeforeTurnCommit,
@@ -397,8 +399,9 @@ impl crate::plugin::ContextPressureHook for ThresholdCompaction {
     }
 }
 
-/// `/compact`'s compactor: one direct summarizer completion. Its crashing
-/// copies die right before or right after the completion.
+/// The administrative compaction's compactor: one direct summarizer
+/// completion. Its crashing copies die right before or right after the
+/// completion.
 struct SummaryCompactor {
     crash_before_summary: bool,
     crash_after_summary: bool,
@@ -616,12 +619,13 @@ enum LawCompactor {
     DuplicateHookIds,
 }
 
-/// Holds `/compact` once its summary is journaled, before its frame commit,
-/// until the law releases it. Released, it holds nothing again: a tier that
-/// replays the compaction's handler from the top (Restate's replay leg)
-/// replays every step up to the hold, and must not wait for a second
-/// release. Holding after the last journaled step keeps every re-execution
-/// replaying the same steps, whatever the law does while it holds.
+/// Holds an administrative compaction once its summary is journaled, before
+/// its frame commit, until the law releases it. Released, it holds nothing
+/// again: a tier that replays the compaction's handler from the top
+/// (Restate's replay leg) replays every step up to the hold, and must not
+/// wait for a second release. Holding after the last journaled step keeps
+/// every re-execution replaying the same steps, whatever the law does while
+/// it holds.
 #[derive(Clone)]
 struct SummaryHold {
     reached: Arc<tokio::sync::Notify>,
@@ -661,7 +665,7 @@ impl SummaryHold {
 struct LawCompaction {
     compactor: LawCompactor,
     seed: LawSeed,
-    /// Holds `/compact` after its summary.
+    /// Holds an administrative compaction after its summary.
     hold: Option<SummaryHold>,
     /// Holds the pressure hook after its journaled summary.
     pressure_hold: Option<SummaryHold>,
@@ -1376,11 +1380,11 @@ pub async fn a_pressure_frame_restarts_the_live_execution_state(
     );
 }
 
-/// `/compact`, killed at `crash` and redriven, opens its frame once: one
-/// summarizer call, one compaction frame, one commit. Killed after its
-/// commit, the redrive loads the moved head, replays the recorded base and
-/// the summary over it, and meets the commit's receipt instead of opening a
-/// second frame from the moved head (FIG-4133).
+/// An administrative compaction, killed at `crash` and redriven, opens its
+/// frame once: one summarizer call, one compaction frame, one commit.
+/// Killed after its commit, the redrive loads the moved head, replays the
+/// recorded base and the summary over it, and meets the commit's receipt
+/// instead of opening a second frame from the moved head (FIG-4133).
 pub async fn a_compaction_frame_opens_once_whatever_its_crash(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -1461,8 +1465,8 @@ macro_rules! frame_open_protocol_redrive_tests {
 
 /// Register the execution-state frame-open laws (FIG-4110, F5; FIG-4134)
 /// over a protocol with live execution state: a pressure frame, a staged
-/// open, `/compact` with a store and `/compact` without one each restart the
-/// live interpreter. The fixture hands back what
+/// open and administrative compactions with and without a store each restart
+/// the live interpreter. The fixture hands back what
 /// [`frame_open_protocol_redrive_tests`]'s does.
 #[macro_export]
 macro_rules! frame_open_execution_state_tests {
@@ -1502,15 +1506,15 @@ macro_rules! frame_open_execution_state_tests {
 }
 
 /// Register the frame-open laws (FIG-4110) on the standard protocol: the
-/// protocol laws of [`frame_open_protocol_redrive_tests`]; `/compact`
-/// killed before its summary, after its provider answered, after its summary
-/// and after its commit (FIG-4133); and the FIG-4134 laws: the production
-/// standard compactor and its overflow recovery across the crash matrix,
-/// `/compact` superseded by a newer admission or by a pressure frame, a
-/// session deleted and a fork made during an open, an empty seed, a refused
-/// frame commit, and pressure hooks sharing an id. The fixture hands back a
-/// guard, a prefix, the tier's effect host, the store set under test and its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+/// protocol laws of [`frame_open_protocol_redrive_tests`]; an administrative
+/// compaction killed before its summary, after its provider answered, after
+/// its summary and after its commit (FIG-4133); and the FIG-4134 laws: the
+/// production standard compactor and its overflow recovery across the crash
+/// matrix, an administrative compaction superseded by a newer admission or
+/// by a pressure frame, a session deleted and a fork made during an open, an
+/// empty seed, a refused frame commit, and pressure hooks sharing an id. The
+/// fixture hands back a guard, a prefix, the tier's effect host, the store
+/// set under test and its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
 #[macro_export]
 macro_rules! frame_open_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {

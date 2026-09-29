@@ -455,13 +455,13 @@ pub enum RuntimeEffectCommand {
     ResolveTurnConfig {
         root: crate::TurnId,
     },
-    /// Record the base an administrative compaction (`/compact`) summarizes
-    /// and opens its frame from (FIG-4133): the head and the frame current
-    /// when it starts, before its summarizer runs. Keyed by the compaction's
-    /// ordinal in its run, so a redrive replays the base its first execution
-    /// recorded, even after the compaction's own commit moved the head, and
-    /// a repeated compaction records a base of its own. The envelope names
-    /// only the session: the base is the step's outcome.
+    /// Record the base an administrative compaction (`compact_context`)
+    /// summarizes and opens its frame from (FIG-4133): the head and the frame
+    /// current when it starts, before its summarizer runs. Keyed by the
+    /// compaction's ordinal in its run, so a redrive replays the base its
+    /// first execution recorded, even after the compaction's own commit moved
+    /// the head, and a repeated compaction records a base of its own. The
+    /// envelope names only the session: the base is the step's outcome.
     RecordCompactionBase {
         session: crate::SessionId,
     },
@@ -1249,7 +1249,8 @@ pub enum RuntimeEffectOutcome {
     ResolveTurnConfig {
         resolved: Box<crate::ResolvedRun>,
     },
-    /// The base a `/compact` recorded before its summarizer ran.
+    /// The base an administrative compaction recorded before its summarizer
+    /// ran.
     RecordCompactionBase {
         base: Box<CompactionBase>,
     },

@@ -78,9 +78,10 @@ impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
 }
 
 // FIG-4110: every frame open (a context-pressure frame, a pressure frame
-// followed by `continue_as`, `/compact`) killed at each crash point and
-// redriven opens once, chained in order, with one summarizer call. Each turn
-// runs inside a handler of the Restate double over this substrate's stores.
+// followed by `continue_as`, an administrative compaction) killed at each
+// crash point and redriven opens once, chained in order, with one summarizer
+// call. Each turn runs inside a handler of the Restate double over this
+// substrate's stores.
 lash_conformance::frame_open_redrive_tests!({
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let backend = TestBackend::open(SUBSTRATE).await;

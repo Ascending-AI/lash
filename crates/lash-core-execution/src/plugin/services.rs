@@ -16,8 +16,8 @@ pub enum PluginOperationInvokeError {
     #[error("plugin operation failed: {0}")]
     Failed(String),
     /// The store refused a write the operation made, with its typed answer
-    /// kept whole: a `/compact` whose drive fence a newer admission
-    /// superseded while it ran is refused with
+    /// kept whole: an administrative compaction whose drive fence a newer
+    /// admission superseded while it ran is refused with
     /// [`StoreError::StaleDriveFence`](crate::StoreError::StaleDriveFence)
     /// (FIG-4134).
     #[error("plugin operation's store write was refused: {0}")]

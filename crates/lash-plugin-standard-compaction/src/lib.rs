@@ -1,13 +1,14 @@
 //! Default standard-compaction plugin.
 //!
 //! Owns the standard protocol's context policies: old-attachment pruning in
-//! the prompt view, compaction — explicit `/compact` or at the context-pressure
-//! threshold — and context-overflow recovery. Every compaction starts a fresh
-//! frame seeded with its summary (FIG-4029): a frame is the context window.
+//! the prompt view, compaction — an explicit administrative compaction or at
+//! the context-pressure threshold — and context-overflow recovery. Every
+//! compaction starts a fresh frame seeded with its summary (FIG-4029): a
+//! frame is the context window.
 //!
 //! Pruning is a Prompt View transform and stays ephemeral (ADR 0001). The
-//! durable policies return decisions core writes: `/compact` through the
-//! [`ContextCompactor`], and the pressure threshold and overflow recovery
+//! durable policies return decisions core writes: `compact_context` through
+//! the [`ContextCompactor`], and the pressure threshold and overflow recovery
 //! through the [`ContextPressureHook`], which core calls once per turn before
 //! the transforms (FIG-4110).
 //!

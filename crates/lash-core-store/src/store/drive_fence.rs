@@ -26,13 +26,13 @@ use crate::SessionId;
 /// read of the current fence ([`current_drive_fence`]),
 /// which a writer beside the drive presents so that it never writes over a
 /// later admission; and serde decoding of a recorded step that carries one: a
-/// `SealVerdict::Sealed` from the drive's journal, or the fence a `/compact`
-/// records with its base (FIG-4134). `Deserialize` exists only for those
-/// recorded paths; nothing else may decode a fence. A decoded fence
-/// still authorizes nothing by itself: every fenced store operation checks
-/// its epoch *and* admission against the session's `session_meta` row in its
-/// own transaction. It is never part of an envelope hash (ADR 0105 law
-/// L-S12).
+/// `SealVerdict::Sealed` from the drive's journal, or the fence an
+/// administrative compaction records with its base (FIG-4134).
+/// `Deserialize` exists only for those recorded paths; nothing else may
+/// decode a fence. A decoded fence still authorizes nothing by itself: every
+/// fenced store operation checks its epoch *and* admission against the
+/// session's `session_meta` row in its own transaction. It is never part of
+/// an envelope hash (ADR 0105 law L-S12).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DriveFence {
     session: SessionId,

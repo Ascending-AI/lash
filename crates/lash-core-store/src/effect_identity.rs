@@ -74,9 +74,10 @@ pub enum RuntimeEffectKind {
     /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
     /// of the root runs under the recorded config, never the live head's.
     ResolveTurnConfig,
-    /// The base a `/compact` summarizes and opens its frame from, recorded
-    /// before its summarizer runs (FIG-4133): a redrive replays the recorded
-    /// base, never the head the compaction's own commit moved.
+    /// The base an administrative compaction summarizes and opens its frame
+    /// from, recorded before its summarizer runs (FIG-4133): a redrive
+    /// replays the recorded base, never the head the compaction's own commit
+    /// moved.
     RecordCompactionBase,
     /// The recorded close of a logical root's scope, after its terminal
     /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a root's end

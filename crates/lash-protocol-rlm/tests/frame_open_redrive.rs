@@ -6,8 +6,8 @@
 //! ends in `control.continue_as` commits both frames, in order, each exactly
 //! once, however its execution dies. The live interpreter restarts from the
 //! new frame's seed exactly as the durable execution state does, whichever
-//! path opens the frame: a pressure hook, a staged open, `/compact` with a
-//! store and `/compact` without one (FIG-4134).
+//! path opens the frame: a pressure hook, a staged open, an administrative
+//! compaction with a store and one without (FIG-4134).
 //!
 //! The laws live in lash-conformance; this file supplies the RLM protocol
 //! plugin, how its model answers, switches frames and touches a session
