@@ -41,8 +41,9 @@ use sha2::{Digest, Sha256};
 mod root_retirement;
 
 use self::root_retirement::closed_root_cancel_prefix;
+use crate::compat::{Call, Reply};
 use crate::ingress::RestateAuthorityId;
-use crate::object_state::{self, StoredValueFormats};
+use crate::object_state::{self, FleetView, ObjectFamily, StoredValueFormats, StoredValueWriter};
 
 pub(crate) const LASH_REPLAY_KEY_HEADER: &str = "x-lash-replay-key";
 
@@ -134,22 +135,28 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
 /// The stored format every value the durable-wait index keeps under its
 /// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
-/// metadata, wait, resolution, marker, and membership rows alike. Bump it
-/// when a stored shape under those keys changes; the previous format reads
-/// through the N-1 upcaster slot in [`DURABLE_WAIT_REGISTRY_FORMATS`].
+/// metadata, wait, resolution, marker, and membership rows alike. It is also
+/// the family format of every `LashDurableWaitIndex` object's `_compat`
+/// record (ADR 0115 §3.2). Bump it when a stored shape under those keys
+/// changes; the previous format reads through the N-1 upcaster slot in
+/// [`DURABLE_WAIT_REGISTRY_FORMATS`].
 pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;
-/// The wait registry's stored-format table: the current stamp, plus the N-1
-/// upcaster hooks (empty while the first stamped layout is the baseline).
+/// The wait registry's stored-format table: the family's registered surface
+/// and descriptor, plus the N-1 upcaster hooks (empty while the first
+/// stamped layout is the baseline).
 pub(crate) const DURABLE_WAIT_REGISTRY_FORMATS: StoredValueFormats = StoredValueFormats {
     what: "durable-wait registry",
-    current: DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+    surface: lash_core::surface_format!(DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
     upcast_n1: &[],
 };
+
+/// The object family whose `_compat` record every handler admits first
+/// (ADR 0115 §3.2).
+pub(crate) const DURABLE_WAIT_REGISTRY_FAMILY: ObjectFamily = ObjectFamily {
+    component: lash_core_store::compat::ComponentId::RESTATE_DURABLE_WAIT_REGISTRY,
+    formats: &DURABLE_WAIT_REGISTRY_FORMATS,
+};
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
-/// State keys a pre-stamp deployment wrote that mark the object as one this
-/// build must refuse before any effect — the deleted identity-epoch marker
-/// refuses by name whatever its bytes look like.
-const RETIRED_DURABLE_WAIT_STATE_KEYS: &[&str] = &["wait-index/v2/identity-epoch"];
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
 /// An effect executing under the scope inside a handler, keyed by replay
@@ -272,264 +279,8 @@ pub(crate) fn durable_wait_index_key_for_scope(scope: &ExecutionScope) -> String
     RestateDurableWaitScope::for_scope(scope).index_key("")
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RestateDurableWaitClassification {
-    DurableWait,
-    TurnControl,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RestateDurableWaitAwaitRequest {
-    pub key: AwaitEventKey,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<RestateDurableWaitDeadline>,
-}
-
-/// Decoder for the durable-wait workflow's clean-cutover request boundary.
-///
-/// The predecessor is decoded only so the handler can return the same typed,
-/// actionable incompatibility as an unsupported stamped deadline. It is never
-/// executed or translated into the current absolute-deadline request.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum RestateDurableWaitAwaitInput {
-    Current(RestateDurableWaitAwaitRequest),
-    Predecessor { key: AwaitEventKey, timeout_ms: u64 },
-}
-
-impl From<RestateDurableWaitAwaitRequest> for RestateDurableWaitAwaitInput {
-    fn from(request: RestateDurableWaitAwaitRequest) -> Self {
-        Self::Current(request)
-    }
-}
-
-/// Absolute deadline carried by the version-2 durable-wait request.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RestateDurableWaitDeadline {
-    pub version: u8,
-    pub unix_epoch_ms: u64,
-}
-
-impl RestateDurableWaitDeadline {
-    fn validate(self) -> Result<(), TerminalError> {
-        if self.version != DURABLE_WAIT_REQUEST_VERSION {
-            return Err(incompatible_durable_wait_request(format!(
-                "version {}",
-                self.version
-            )));
-        }
-        Ok(())
-    }
-
-    pub(crate) fn remaining(self, now_ms: u64) -> Result<Duration, TerminalError> {
-        self.validate()?;
-        Ok(Duration::from_millis(
-            self.unix_epoch_ms.saturating_sub(now_ms),
-        ))
-    }
-}
-
-fn incompatible_durable_wait_request(observed: impl std::fmt::Display) -> TerminalError {
-    TerminalError::new(format!(
-        "Lash Restate durable-wait request {observed} is incompatible with version {DURABLE_WAIT_REQUEST_VERSION}; drain deadline-bearing waits before opening this deployment"
-    ))
-}
-
-#[cfg(test)]
-impl RestateDurableWaitAwaitRequest {
-    pub(crate) fn address(&self) -> RestateDurableWaitAddress {
-        RestateDurableWaitAddress::for_key(&self.key)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitResolveRequest {
-    pub key: AwaitEventKey,
-    pub resolution: Resolution,
-}
-
-/// What `LashDurableWaitIndex/resolve` answers: the promise's first-writer
-/// outcome, or the typed refusal a completion delivered to a cancel-decided
-/// group child's key earns (ADR 0099 §4, W17).
-///
-/// The encoding is a superset of [`ResolveOutcome`]'s: an outcome encodes
-/// exactly as before, so a journal that recorded this handler's answer before
-/// the refusal existed still replays, and the refusal is the one further
-/// `status` no outcome carries.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum RestateDurableWaitResolveResponse {
-    Outcome(ResolveOutcome),
-    Refused(RestateDurableWaitResolveRefusal),
-}
-
-/// The refusal arm of [`RestateDurableWaitResolveResponse`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(tag = "status", rename_all = "snake_case")]
-pub enum RestateDurableWaitResolveRefusal {
-    CancelDecided,
-}
-
-impl RestateDurableWaitResolveResponse {
-    /// The host-facing answer: the outcome, or
-    /// `RuntimeEffectGroupChildCancelDecided`.
-    pub fn into_result(self) -> Result<ResolveOutcome, RuntimeError> {
-        match self {
-            Self::Outcome(outcome) => Ok(outcome),
-            Self::Refused(RestateDurableWaitResolveRefusal::CancelDecided) => {
-                Err(lash_core::facade_support::await_event_identity::cancel_decided_refusal())
-            }
-        }
-    }
-}
-
-/// Closes the completion key `scope`/`wait` names, because the group child
-/// that owns it is cancel-decided (ADR 0099 §4, W17). Sent by the group index
-/// that decides the child, to the index object that owns `scope`'s waits.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitCancelDecidedRequest {
-    pub scope: ExecutionScope,
-    pub wait: AwaitEventWaitIdentity,
-}
-
-#[cfg(test)]
-impl RestateDurableWaitResolveRequest {
-    pub(crate) fn address(&self) -> RestateDurableWaitAddress {
-        RestateDurableWaitAddress::for_key(&self.key)
-    }
-}
-
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitIndexRequest {
-    pub key: AwaitEventKey,
-}
-
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitSettleRequest {
-    pub key: AwaitEventKey,
-    pub resolution: Resolution,
-}
-
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitRootRequest {
-    pub session_id: SessionId,
-    pub root: lash_core::TurnId,
-    /// The physical turn whose commit ended the root, when a commit did. That
-    /// commit publishes its turn's terminal one-way after it, so the terminal
-    /// may still be in flight when the root retires; `None` says no commit
-    /// ended the root (FIG-4025).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub committed_turn: Option<lash_core::TurnId>,
-}
-
-/// One executing effect under a scope's index (FIG-2499).
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitEffectRequest {
-    pub replay_key: String,
-}
-
-/// One effect group opened under a scope's index (FIG-2499).
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupRequest {
-    pub group_key: String,
-}
-
-/// One group child's durable membership binding under its own scope's index:
-/// the replay key the §4 boundary names and the group the dispatch admitted
-/// it to. The row is the Restate twin of the SQL tiers' `group_key` column —
-/// who asked carries no weight; the record decides (FIG-3409).
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupChildRequest {
-    pub replay_key: String,
-    pub group_key: String,
-}
-
-/// The membership read [`RestateDurableWaitGroupChildRequest`] records.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitGroupChildMembershipRequest {
-    pub replay_key: String,
-}
-
-/// One session catalog whose durable cancellation closure may still depend on
-/// this physical scope's promises.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateTurnCancelClosureParticipantRequest {
-    pub participant_id: String,
-}
-
-/// One turn-cancel gate entry: the awakeable the index resolves when this
-/// session's turn-control wait settles or the session is revoked.
-#[derive(Clone, Debug, Serialize, serde::Deserialize)]
-pub struct RestateDurableWaitAwakeableRequest {
-    pub key: AwaitEventKey,
-    pub awakeable_id: String,
-}
-
-/// Why a registered turn-cancel gate awakeable fired.
-///
-/// Every gate — sleep, await-event, process await — takes this one payload, so
-/// the index resolves a gate entry without knowing which wait registered it.
-/// The payload is the awakeable's journaled value, so the mode of the request
-/// that settled the gate is part of the journal and replay reads the identical
-/// verdict.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum RestateTurnCancelWake {
-    /// The gate settled with an `Immediate` request: the parked wait unwinds
-    /// now. Journals written before the request mode existed carry this
-    /// value, which is why it keeps its pre-mode name and wire literal.
-    TurnCancelled,
-    /// The gate settled with an `AfterStep` request: the parked wait keeps
-    /// waiting, the iteration finishes, and the turn stops at its step
-    /// boundary. The waiter re-parks on the escalation promise so a later
-    /// `Immediate` request still unwinds it.
-    TurnCancelDeferred,
-    SessionRevoked,
-}
-
-impl RestateTurnCancelWake {
-    /// The wake a settled turn-control resolution owes its parked waiters.
-    ///
-    /// The gate resolution is lash-core's journaled `TurnGateTerminal`; only
-    /// its `cancellation.mode` matters here. Anything that is not a decodable
-    /// after-step request — an immediate request, a pre-mode record, a sealed
-    /// completion, an unexpected shape — wakes as `TurnCancelled`, which is
-    /// the verdict every gate resolution produced before the mode existed.
-    pub(crate) fn for_gate_resolution(resolution: &Resolution) -> Self {
-        let Resolution::Ok(value) = resolution else {
-            return Self::TurnCancelled;
-        };
-        let evidence = value.get("cancellation").cloned().and_then(|cancellation| {
-            serde_json::from_value::<lash_core::facade_support::TurnCancellationEvidence>(
-                cancellation,
-            )
-            .ok()
-        });
-        match evidence {
-            Some(evidence) if !evidence.mode.is_immediate() => Self::TurnCancelDeferred,
-            _ => Self::TurnCancelled,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
-pub enum RestateDurableWaitRegistration {
-    Registered,
-    Resolved(Resolution),
-    Revoked,
-}
-
-/// What a turn cancellation gate's peek reads from its session's index
-/// (FIG-3978).
-#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
-pub enum RestateTurnGatePeek {
-    /// The session was revoked: the gate has nothing left to read.
-    Revoked,
-    /// The gate's terminal, or `None` while the gate is open.
-    Open(Option<Resolution>),
-}
+mod messages;
+pub use messages::*;
 
 #[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub(crate) struct RestateDurableWaitIndexMetadata {
@@ -679,9 +430,9 @@ where
     let replay_key = entry.key.key_id.clone();
     let register = namespace
         .durable_wait_registry(context, session_id)
-        .register_awakeable(Json(entry.clone()))
+        .register_awakeable(entry.clone())
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-    let Json(registration) = register.call().await?;
+    let registration = register.call().await?.into_body();
     Ok(match registration {
         RestateDurableWaitRegistration::Revoked => RestateTurnCancelGate::Revoked,
         RestateDurableWaitRegistration::Registered
@@ -705,9 +456,9 @@ where
     let replay_key = entry.key.key_id.clone();
     let unregister = namespace
         .durable_wait_registry(context, session_id)
-        .unregister_awakeable(Json(entry))
+        .unregister_awakeable(entry)
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-    let Json(()) = unregister.call().await?;
+    unregister.call().await?;
     Ok(())
 }
 
@@ -719,16 +470,16 @@ where
 pub trait LashDurableWaitWorkflow {
     #[shared]
     async fn await_resolution(
-        request: Json<RestateDurableWaitAwaitInput>,
-    ) -> HandlerResult<Json<Resolution>>;
+        call: Call<RestateDurableWaitAwaitInput>,
+    ) -> HandlerResult<Reply<Resolution>>;
 
     #[shared]
-    async fn peek() -> HandlerResult<Json<Option<Resolution>>>;
+    async fn peek(call: Call<()>) -> HandlerResult<Reply<Option<Resolution>>>;
 
     #[shared]
     async fn resolve(
-        request: Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<ResolveOutcome>>;
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<ResolveOutcome>>;
 }
 
 /// [`LashDurableWaitWorkflow`] in one deployment's namespace (FIG-3898).
@@ -747,8 +498,9 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
     async fn await_resolution(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(input): Json<RestateDurableWaitAwaitInput>,
-    ) -> HandlerResult<Json<Resolution>> {
+        call: Call<RestateDurableWaitAwaitInput>,
+    ) -> HandlerResult<Reply<Resolution>> {
+        let (wire, input) = call.open()?;
         let request = match input {
             RestateDurableWaitAwaitInput::Current(request) => request,
             RestateDurableWaitAwaitInput::Predecessor { .. } => {
@@ -766,17 +518,17 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let registration = self
             .namespace
             .durable_wait_registry(&ctx, index_key.clone())
-            .register(Json(RestateDurableWaitIndexRequest {
+            .register(RestateDurableWaitIndexRequest {
                 key: request.key.clone(),
-            }))
+            })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
-        let Json(registration) = registration.call().await?;
+        let registration = registration.call().await?.into_body();
         match registration {
             RestateDurableWaitRegistration::Resolved(resolution) => {
-                return Ok(Json(resolution));
+                return Ok(Reply::at(wire, resolution));
             }
             RestateDurableWaitRegistration::Revoked => {
-                return Ok(Json(Resolution::Cancelled));
+                return Ok(Reply::at(wire, Resolution::Cancelled));
             }
             RestateDurableWaitRegistration::Registered => {}
         }
@@ -823,42 +575,48 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let settle = self
             .namespace
             .durable_wait_registry(&ctx, index_key)
-            .settle(Json(RestateDurableWaitSettleRequest {
+            .settle(RestateDurableWaitSettleRequest {
                 key: request.key,
                 resolution: resolution.clone(),
-            }))
+            })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-        let Json(()) = settle.call().await?;
-        Ok(Json(resolution))
+        settle.call().await?;
+        Ok(Reply::at(wire, resolution))
     }
 
     async fn peek(
         &self,
         ctx: SharedWorkflowContext<'_>,
-    ) -> HandlerResult<Json<Option<Resolution>>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<Option<Resolution>>> {
+        let (wire, ()) = call.open()?;
         let resolution = match ctx.peek_promise::<String>(DURABLE_WAIT_PROMISE_KEY).await? {
             Some(payload) => {
                 Some(serde_json::from_str(&payload).map_err(TerminalError::from_error)?)
             }
             None => None,
         };
-        Ok(Json(resolution))
+        Ok(Reply::at(wire, resolution))
     }
 
     async fn resolve(
         &self,
         ctx: SharedWorkflowContext<'_>,
-        Json(request): Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<ResolveOutcome>> {
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<ResolveOutcome>> {
+        let (wire, request) = call.open()?;
         let _address = verify_durable_wait_workflow_key(ctx.key(), &request.key)?;
         if let Some(payload) = ctx.peek_promise::<String>(DURABLE_WAIT_PROMISE_KEY).await? {
             let terminal = serde_json::from_str(&payload).map_err(TerminalError::from_error)?;
-            return Ok(Json(ResolveOutcome::AlreadyResolved { terminal }));
+            return Ok(Reply::at(
+                wire,
+                ResolveOutcome::AlreadyResolved { terminal },
+            ));
         }
         let payload =
             serde_json::to_string(&request.resolution).map_err(TerminalError::from_error)?;
         ctx.resolve_promise(DURABLE_WAIT_PROMISE_KEY, payload);
-        Ok(Json(ResolveOutcome::Accepted))
+        Ok(Reply::at(wire, ResolveOutcome::Accepted))
     }
 }
 /// Durable session-to-wait index used by cancellation and session deletion.
@@ -871,7 +629,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 #[restate_sdk::object]
 #[name = "LashDurableWaitIndex"]
 pub trait LashDurableWaitRegistry {
-    async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
+    async fn is_revoked(call: Call<()>) -> HandlerResult<Reply<bool>>;
     /// A turn cancellation gate's peek: the session's revocation and the
     /// gate's terminal in one read that never queues on the exclusive
     /// handlers (FIG-3978). Every write to a gate goes through this object's
@@ -879,91 +637,105 @@ pub trait LashDurableWaitRegistry {
     /// `settle` mirrored it here, so the index's copy is the gate's answer.
     #[shared]
     async fn peek_turn_gate(
-        request: Json<RestateDurableWaitIndexRequest>,
-    ) -> HandlerResult<Json<RestateTurnGatePeek>>;
+        call: Call<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Reply<RestateTurnGatePeek>>;
     /// Read registered waits that have no retained terminal.
-    async fn outstanding() -> HandlerResult<Json<Vec<AwaitEventKey>>>;
+    async fn outstanding(call: Call<()>) -> HandlerResult<Reply<Vec<AwaitEventKey>>>;
     async fn register(
-        request: Json<RestateDurableWaitIndexRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitRegistration>>;
-    async fn settle(request: Json<RestateDurableWaitSettleRequest>) -> HandlerResult<Json<()>>;
-    async fn retire_root(request: Json<RestateDurableWaitRootRequest>) -> HandlerResult<Json<()>>;
+        call: Call<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitRegistration>>;
+    async fn settle(call: Call<RestateDurableWaitSettleRequest>) -> HandlerResult<Reply<()>>;
+    async fn retire_root(call: Call<RestateDurableWaitRootRequest>) -> HandlerResult<Reply<()>>;
     async fn register_awakeable(
-        request: Json<RestateDurableWaitAwakeableRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitRegistration>>;
+        call: Call<RestateDurableWaitAwakeableRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitRegistration>>;
     async fn unregister_awakeable(
-        request: Json<RestateDurableWaitAwakeableRequest>,
-    ) -> HandlerResult<Json<()>>;
+        call: Call<RestateDurableWaitAwakeableRequest>,
+    ) -> HandlerResult<Reply<()>>;
     async fn resolve(
-        request: Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitResolveResponse>>;
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitResolveResponse>>;
     /// Close a cancel-decided group child's completion key: every resolve of
     /// it from now on is refused, typed, and writes nothing (ADR 0099 §4,
     /// W17). A waiter that already holds a terminal keeps it; the key is
     /// named by its authority-free identity, because the group index that
     /// decides the child does not hold the minting authority.
     async fn fence_cancel_decided(
-        request: Json<RestateDurableWaitCancelDecidedRequest>,
-    ) -> HandlerResult<Json<()>>;
+        call: Call<RestateDurableWaitCancelDecidedRequest>,
+    ) -> HandlerResult<Reply<()>>;
     /// Wake any current waiter and retain this resolution for every later
     /// registration, even when the wait workflow had an earlier notification.
     async fn retain_resolution(
-        request: Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<()>>;
-    async fn cancel_all() -> HandlerResult<Json<()>>;
-    async fn revoke_all() -> HandlerResult<Json<()>>;
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<()>>;
+    async fn cancel_all(call: Call<()>) -> HandlerResult<Reply<()>>;
+    async fn revoke_all(call: Call<()>) -> HandlerResult<Reply<()>>;
     /// [`revoke_all`](Self::revoke_all) only when no durable wait or awakeable
     /// under this index is still unresolved, answering whether it revoked.
     /// Object serialization makes the proof and the revocation one step.
-    async fn revoke_all_if_quiescent(request: Json<()>) -> HandlerResult<Json<bool>>;
+    async fn revoke_all_if_quiescent(call: Call<()>) -> HandlerResult<Reply<bool>>;
     /// Retire a physical scope under either retirement gate while still
     /// refusing a registered cancellation-closure catalog participant.
-    async fn retire_scope(request: Json<()>) -> HandlerResult<Json<bool>>;
+    async fn retire_scope(call: Call<()>) -> HandlerResult<Reply<bool>>;
     /// Lift a revocation because the scope's owner is registered again: a
     /// pruned process id the host reuses (ADR 0049). State stays cleared; only
     /// the fence goes.
-    async fn reinstate() -> HandlerResult<Json<()>>;
+    async fn reinstate(call: Call<()>) -> HandlerResult<Reply<()>>;
     /// Record an effect starting under this scope inside a handler, answering
     /// whether the scope admits it (`false` once revoked). While recorded,
     /// the scope is not quiescent (FIG-2499).
     async fn begin_effect(
-        request: Json<RestateDurableWaitEffectRequest>,
-    ) -> HandlerResult<Json<bool>>;
-    async fn end_effect(request: Json<RestateDurableWaitEffectRequest>) -> HandlerResult<Json<()>>;
+        call: Call<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Reply<bool>>;
+    async fn end_effect(call: Call<RestateDurableWaitEffectRequest>) -> HandlerResult<Reply<()>>;
     /// Record an effect group opened under this scope, answering whether the
     /// scope admits it (`false` once revoked). The scope is not quiescent
     /// while the group's index still reports an unsettled child.
-    async fn record_group(
-        request: Json<RestateDurableWaitGroupRequest>,
-    ) -> HandlerResult<Json<bool>>;
+    async fn record_group(call: Call<RestateDurableWaitGroupRequest>)
+    -> HandlerResult<Reply<bool>>;
     /// Record one group child's durable membership under this scope,
     /// answering whether the scope admits it (`false` once revoked).
     async fn record_group_child(
-        request: Json<RestateDurableWaitGroupChildRequest>,
-    ) -> HandlerResult<Json<bool>>;
+        call: Call<RestateDurableWaitGroupChildRequest>,
+    ) -> HandlerResult<Reply<bool>>;
     /// The group `replay_key` is a committed member of under this scope, or
     /// `None` when no dispatch admitted one — the §4 boundary's answer to
     /// "which group's index owns this child's final" (FIG-3409).
     async fn group_child_membership(
-        request: Json<RestateDurableWaitGroupChildMembershipRequest>,
-    ) -> HandlerResult<Json<Option<String>>>;
+        call: Call<RestateDurableWaitGroupChildMembershipRequest>,
+    ) -> HandlerResult<Reply<Option<String>>>;
     async fn register_closure_participant(
-        request: Json<RestateTurnCancelClosureParticipantRequest>,
-    ) -> HandlerResult<Json<bool>>;
+        call: Call<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Reply<bool>>;
     async fn release_closure_participant(
-        request: Json<RestateTurnCancelClosureParticipantRequest>,
-    ) -> HandlerResult<Json<()>>;
+        call: Call<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Reply<()>>;
 }
 
 /// [`LashDurableWaitRegistry`] in one deployment's namespace (FIG-3898).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct LashDurableWaitRegistryImpl {
     namespace: crate::RestateNamespace,
+    /// Where the handlers read the fleet epoch their writes are stamped at.
+    fleet: FleetView,
 }
 
 impl LashDurableWaitRegistryImpl {
-    pub(crate) fn new(namespace: crate::RestateNamespace) -> Self {
-        Self { namespace }
+    pub(crate) fn new(namespace: crate::RestateNamespace, fleet: FleetView) -> Self {
+        Self { namespace, fleet }
+    }
+
+    /// The registry's `_compat` gate for a handler that may write.
+    async fn admit(
+        &self,
+        ctx: &ObjectContext<'_>,
+    ) -> Result<object_state::AdmittedObject, TerminalError> {
+        object_state::admit_exclusive(
+            ctx,
+            &DURABLE_WAIT_REGISTRY_FAMILY,
+            self.fleet.fleet_format(),
+        )
+        .await
     }
 }
 
@@ -1046,35 +818,24 @@ pub(crate) fn durable_wait_address_from_state_key(
         .then_some(address)
 }
 
-/// The index's stamped-state gate, answering its metadata row when it has
-/// one. The row is written only once the object passed the full gate, so an
-/// index with one is gated by that row alone. Checking every active value
-/// on each call would make a call's cost depend on their count (FIG-3843).
-async fn gate_durable_wait_index(
-    ctx: &ObjectContext<'_>,
-) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
-    object_state::gate_marked_object_state(
-        ctx,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
-        RETIRED_DURABLE_WAIT_STATE_KEYS,
-        DURABLE_WAIT_INDEX_METADATA_KEY,
-    )
-    .await
-}
-
 /// Load the index's metadata, initializing it for a pristine object.
 ///
 /// Restate object state is not part of an invocation's replayed journal: these
 /// index handlers are short-lived single calls, so changing their command
 /// sequence does not alter an in-flight multi-call journal. Object state does,
-/// however, survive a deployment upgrade, so a pre-stamp object — one holding
-/// the old `wait-index/v2/identity-epoch` marker or any value without the
-/// envelope's format stamp — is refused typed before this write can plant
-/// fresh metadata beside it.
+/// however, survive a deployment upgrade, so every handler has already
+/// admitted the object through its `_compat` record before this reads it.
 async fn load_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
+    writer: StoredValueWriter,
 ) -> Result<RestateDurableWaitIndexMetadata, TerminalError> {
-    if let Some(metadata) = gate_durable_wait_index(ctx).await? {
+    if let Some(metadata) = object_state::get_stamped(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await?
+    {
         return Ok(metadata);
     }
 
@@ -1082,23 +843,34 @@ async fn load_durable_wait_index_metadata(
     object_state::set_stamped(
         ctx,
         DURABLE_WAIT_INDEX_METADATA_KEY,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
+        writer,
         metadata.clone(),
     );
     Ok(metadata)
 }
 
-/// The index's metadata when the object holds any state, `None` when the
-/// object is pristine. State without a metadata row reads as a default one,
-/// the same answer the epoch era gave a marked object whose metadata had not
-/// yet been written.
+/// The index's metadata when the object holds any value, `None` when the
+/// object is pristine: it holds nothing but its `_compat` record. Values
+/// without a metadata row read as a default one, the same answer the epoch
+/// era gave a marked object whose metadata had not yet been written.
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
-    if let Some(metadata) = gate_durable_wait_index(ctx).await? {
+    if let Some(metadata) = object_state::get_stamped(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await?
+    {
         return Ok(Some(metadata));
     }
-    if ctx.get_keys().await?.is_empty() {
+    if !ctx
+        .get_keys()
+        .await?
+        .iter()
+        .any(|key| object_state::is_value_key(key))
+    {
         return Ok(None);
     }
     Ok(Some(RestateDurableWaitIndexMetadata::default()))
@@ -1168,6 +940,7 @@ async fn read_outstanding_waits(
 
 async fn resolve_indexed_waits(
     ctx: &ObjectContext<'_>,
+    writer: StoredValueWriter,
     namespace: &crate::RestateNamespace,
     waits: Vec<AwaitEventKey>,
     mirror_outcomes: bool,
@@ -1179,14 +952,14 @@ async fn resolve_indexed_waits(
         let resolution = Resolution::Cancelled;
         let resolve = namespace
             .durable_wait_workflow(ctx, workflow_key)
-            .resolve(Json(RestateDurableWaitResolveRequest {
+            .resolve(RestateDurableWaitResolveRequest {
                 key: key.clone(),
                 resolution: resolution.clone(),
-            }))
+            })
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-        let Json(outcome) = resolve.call().await?;
+        let outcome = resolve.call().await?.into_body();
         if mirror_outcomes {
-            mirror_resolve_outcome(ctx, &key, &address, resolution, &outcome);
+            mirror_resolve_outcome(ctx, writer, &key, &address, resolution, &outcome);
         }
     }
     Ok(())
@@ -1194,6 +967,7 @@ async fn resolve_indexed_waits(
 
 fn mirror_resolve_outcome(
     ctx: &ObjectContext<'_>,
+    writer: StoredValueWriter,
     key: &AwaitEventKey,
     address: &RestateDurableWaitAddress,
     accepted_terminal: Resolution,
@@ -1204,17 +978,18 @@ fn mirror_resolve_outcome(
         ResolveOutcome::Accepted => accepted_terminal,
         ResolveOutcome::UnknownOrRevoked => return,
     };
-    retain_turn_wait_preimage(ctx, key, address);
+    retain_turn_wait_preimage(ctx, writer, key, address);
     object_state::set_stamped(
         ctx,
         &durable_wait_index_resolution_key(address),
-        &DURABLE_WAIT_REGISTRY_FORMATS,
+        writer,
         terminal,
     );
 }
 
 fn retain_turn_wait_preimage(
     ctx: &ObjectContext<'_>,
+    writer: StoredValueWriter,
     key: &AwaitEventKey,
     address: &RestateDurableWaitAddress,
 ) {
@@ -1222,7 +997,7 @@ fn retain_turn_wait_preimage(
         object_state::set_stamped(
             ctx,
             &durable_wait_index_state_key(address),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            writer,
             key.clone(),
         );
     }
@@ -1233,10 +1008,11 @@ fn retain_turn_wait_preimage(
 /// the index untouched and answers `false`.
 async fn revoke_index(
     ctx: &ObjectContext<'_>,
+    object: object_state::AdmittedObject,
     namespace: &crate::RestateNamespace,
     only_if_quiescent: bool,
-) -> HandlerResult<Json<bool>> {
-    let mut metadata = load_durable_wait_index_metadata(ctx).await?;
+) -> HandlerResult<bool> {
+    let mut metadata = load_durable_wait_index_metadata(ctx, object.writer).await?;
     let waits = load_indexed_waits(ctx).await?;
     let keys = ctx.get_keys().await?;
     if keys
@@ -1247,22 +1023,24 @@ async fn revoke_index(
                 || !metadata.awakeables.is_empty()
                 || !scope_effects_and_groups_are_quiescent(ctx, namespace).await?))
     {
-        return Ok(Json(false));
+        return Ok(false);
     }
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;
-    ctx.clear_all();
+    // A revoked index keeps its `_compat` record: it fences a stale handler
+    // from recreating the state the revocation cleared.
+    object.clear_all(ctx);
     object_state::set_stamped(
         ctx,
         DURABLE_WAIT_INDEX_METADATA_KEY,
-        &DURABLE_WAIT_REGISTRY_FORMATS,
+        object.writer,
         metadata,
     );
     for entry in awakeables {
         revoke_durable_wait_awakeable(ctx, &entry);
     }
-    resolve_indexed_waits(ctx, namespace, waits, false).await?;
-    Ok(Json(true))
+    resolve_indexed_waits(ctx, object.writer, namespace, waits, false).await?;
+    Ok(true)
 }
 
 /// Whether nothing recorded by `begin_effect` or `record_group` is still
@@ -1286,11 +1064,12 @@ async fn scope_effects_and_groups_are_quiescent(
             .strip_prefix(DURABLE_WAIT_INDEX_GROUP_PREFIX)
             .map(|group_key| (state_key, group_key))
     }) {
-        let Json(unsettled) = namespace
+        let unsettled = namespace
             .effect_group_state(ctx, group_key.to_string())
             .unsettled_children()
             .call()
-            .await?;
+            .await?
+            .into_body();
         if unsettled > 0 {
             live = true;
         } else {
@@ -1328,17 +1107,24 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn retire_root(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitRootRequest>,
-    ) -> HandlerResult<Json<()>> {
-        root_retirement::retire_root(ctx, &self.namespace, request).await
+        call: Call<RestateDurableWaitRootRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        root_retirement::retire_root(ctx, object, &self.namespace, request)
+            .await
+            .map(|()| Reply::at(wire, ()))
     }
 
     async fn is_revoked(
         &self,
         ctx: ObjectContext<'_>,
-        Json(()): Json<()>,
-    ) -> HandlerResult<Json<bool>> {
-        Ok(Json(
+        call: Call<()>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_exclusive_read(&ctx, &DURABLE_WAIT_REGISTRY_FAMILY).await?;
+        Ok(Reply::at(
+            wire,
             read_durable_wait_index_metadata(&ctx)
                 .await?
                 .is_some_and(|metadata| metadata.revoked),
@@ -1348,8 +1134,10 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn peek_turn_gate(
         &self,
         ctx: SharedObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitIndexRequest>,
-    ) -> HandlerResult<Json<RestateTurnGatePeek>> {
+        call: Call<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Reply<RestateTurnGatePeek>> {
+        let (wire, request) = call.open()?;
+        object_state::admit_shared(&ctx, &DURABLE_WAIT_REGISTRY_FAMILY).await?;
         if !matches!(
             request.key.wait,
             AwaitEventWaitIdentity::TurnCancelGate | AwaitEventWaitIdentity::TurnCancelEscalation
@@ -1361,35 +1149,48 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             .into());
         }
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let metadata =
-            object_state::gate_marked_object_state_shared::<RestateDurableWaitIndexMetadata>(
-                &ctx,
-                &DURABLE_WAIT_REGISTRY_FORMATS,
-                RETIRED_DURABLE_WAIT_STATE_KEYS,
-                DURABLE_WAIT_INDEX_METADATA_KEY,
-            )
-            .await?;
+        let metadata = object_state::get_stamped_shared::<RestateDurableWaitIndexMetadata>(
+            &ctx,
+            DURABLE_WAIT_INDEX_METADATA_KEY,
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+        )
+        .await?;
         if metadata.is_some_and(|metadata| metadata.revoked) {
-            return Ok(Json(RestateTurnGatePeek::Revoked));
+            return Ok(Reply::at(wire, RestateTurnGatePeek::Revoked));
         }
         let resolution_key = durable_wait_index_resolution_key(&address);
-        Ok(Json(RestateTurnGatePeek::Open(
-            object_state::get_stamped_shared(&ctx, &resolution_key, &DURABLE_WAIT_REGISTRY_FORMATS)
+        Ok(Reply::at(
+            wire,
+            RestateTurnGatePeek::Open(
+                object_state::get_stamped_shared(
+                    &ctx,
+                    &resolution_key,
+                    &DURABLE_WAIT_REGISTRY_FORMATS,
+                )
                 .await?,
-        )))
+            ),
+        ))
     }
 
-    async fn outstanding(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<Vec<AwaitEventKey>>> {
-        Ok(Json(read_outstanding_waits(&ctx).await?))
+    async fn outstanding(
+        &self,
+        ctx: ObjectContext<'_>,
+        call: Call<()>,
+    ) -> HandlerResult<Reply<Vec<AwaitEventKey>>> {
+        let (wire, ()) = call.open()?;
+        object_state::admit_exclusive_read(&ctx, &DURABLE_WAIT_REGISTRY_FAMILY).await?;
+        Ok(Reply::at(wire, read_outstanding_waits(&ctx).await?))
     }
 
     async fn register(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitIndexRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitRegistration>> {
+        call: Call<RestateDurableWaitIndexRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitRegistration>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let registration = if metadata.revoked {
             RestateDurableWaitRegistration::Revoked
         } else if let Some(resolution) = object_state::get_stamped::<Resolution>(
@@ -1404,57 +1205,60 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             object_state::set_stamped(
                 &ctx,
                 &durable_wait_index_state_key(&address),
-                &DURABLE_WAIT_REGISTRY_FORMATS,
+                object.writer,
                 request.key.clone(),
             );
             RestateDurableWaitRegistration::Registered
         };
         #[cfg(test)]
         wait_registration_witness::observe_wait_registration(&request.key, &registration);
-        Ok(Json(registration))
+        Ok(Reply::at(wire, registration))
     }
 
     async fn settle(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitSettleRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateDurableWaitSettleRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
             // A late attach may register after CloseRootScope retired the root.
             // Its workflow promise already owns the terminal; settling the
             // attach must not restore a session-lifetime index row.
             ctx.clear(&durable_wait_index_state_key(&address));
             ctx.clear(&durable_wait_index_resolution_key(&address));
-            return Ok(Json(()));
+            return Ok(Reply::at(wire, ()));
         }
-        retain_turn_wait_preimage(&ctx, &request.key, &address);
+        retain_turn_wait_preimage(&ctx, object.writer, &request.key, &address);
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_resolution_key(&address),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             request.resolution,
         );
         if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
             ctx.clear(&durable_wait_index_state_key(&address));
         }
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn retain_resolution(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let workflow_key = address.workflow_key.clone();
         let replay_key = request.key.key_id.clone();
-        let Json(_) = self
-            .namespace
+        self.namespace
             .durable_wait_workflow(&ctx, workflow_key)
-            .resolve(Json(request.clone()))
+            .resolve(request.clone())
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
             .call()
             .await?;
@@ -1462,28 +1266,30 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         // it in the index even when the workflow promise already held READY,
         // RANK, CANCEL, or ADMIT so a later registration cannot park or revive
         // the pre-retirement terminal.
-        retain_turn_wait_preimage(&ctx, &request.key, &address);
+        retain_turn_wait_preimage(&ctx, object.writer, &request.key, &address);
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_resolution_key(&address),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             request.resolution,
         );
         if !matches!(request.key.scope, ExecutionScope::Turn { .. }) {
             ctx.clear(&durable_wait_index_state_key(&address));
         }
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn register_awakeable(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitAwakeableRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitRegistration>> {
+        call: Call<RestateDurableWaitAwakeableRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitRegistration>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(RestateDurableWaitRegistration::Revoked));
+            return Ok(Reply::at(wire, RestateDurableWaitRegistration::Revoked));
         }
         if let Some(resolution) = object_state::get_stamped::<Resolution>(
             &ctx,
@@ -1493,7 +1299,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         .await?
         {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
-            return Ok(Json(RestateDurableWaitRegistration::Registered));
+            return Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered));
         }
         let peek = self
             .namespace
@@ -1503,7 +1309,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 LASH_REPLAY_KEY_HEADER.to_string(),
                 request.key.key_id.clone(),
             );
-        let Json(resolution) = peek.call().await?;
+        let resolution = peek.call().await?.into_body();
         if let Some(resolution) = resolution {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
         } else if !metadata
@@ -1515,51 +1321,59 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,
-                &DURABLE_WAIT_REGISTRY_FORMATS,
+                object.writer,
                 metadata,
             );
         }
-        Ok(Json(RestateDurableWaitRegistration::Registered))
+        Ok(Reply::at(wire, RestateDurableWaitRegistration::Registered))
     }
 
     async fn unregister_awakeable(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitAwakeableRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateDurableWaitAwakeableRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let _address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         metadata
             .awakeables
             .retain(|entry| entry.key != request.key || entry.awakeable_id != request.awakeable_id);
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             metadata,
         );
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn resolve(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitResolveRequest>,
-    ) -> HandlerResult<Json<RestateDurableWaitResolveResponse>> {
+        call: Call<RestateDurableWaitResolveRequest>,
+    ) -> HandlerResult<Reply<RestateDurableWaitResolveResponse>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(
-                ResolveOutcome::UnknownOrRevoked,
-            )));
+            return Ok(Reply::at(
+                wire,
+                RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::UnknownOrRevoked),
+            ));
         }
         // §4, W17: the owning group child's cancel decision closed this key.
         // Checked before any retained terminal, because the close's own
         // release of the child's wait may have retained one since.
         if metadata.is_cancel_decided(&request.key.scope, &request.key.wait)? {
-            return Ok(Json(RestateDurableWaitResolveResponse::Refused(
-                RestateDurableWaitResolveRefusal::CancelDecided,
-            )));
+            return Ok(Reply::at(
+                wire,
+                RestateDurableWaitResolveResponse::Refused(
+                    RestateDurableWaitResolveRefusal::CancelDecided,
+                ),
+            ));
         }
         let resolution_key = durable_wait_index_resolution_key(&address);
         if let Some(terminal) = object_state::get_stamped::<Resolution>(
@@ -1569,18 +1383,21 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         )
         .await?
         {
-            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(
-                ResolveOutcome::AlreadyResolved { terminal },
-            )));
+            return Ok(Reply::at(
+                wire,
+                RestateDurableWaitResolveResponse::Outcome(ResolveOutcome::AlreadyResolved {
+                    terminal,
+                }),
+            ));
         }
         let resolution = request.resolution.clone();
         let replay_key = request.key.key_id.clone();
         let resolve = self
             .namespace
             .durable_wait_workflow(&ctx, address.workflow_key.clone())
-            .resolve(Json(request.clone()))
+            .resolve(request.clone())
             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-        let Json(outcome) = resolve.call().await?;
+        let outcome = resolve.call().await?.into_body();
         // Wake with the terminal the gate actually holds: a request that lost
         // to an earlier writer must not report its own mode to the waiter.
         let settled = match &outcome {
@@ -1592,10 +1409,20 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         // owns the terminal, as in `settle`; mirroring it would restore a
         // session-lifetime row (FIG-3978).
         if !matches!(request.key.wait, AwaitEventWaitIdentity::TurnTerminal) {
-            mirror_resolve_outcome(&ctx, &request.key, &address, resolution, &outcome);
+            mirror_resolve_outcome(
+                &ctx,
+                object.writer,
+                &request.key,
+                &address,
+                resolution,
+                &outcome,
+            );
         }
         if outcome == ResolveOutcome::UnknownOrRevoked {
-            return Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)));
+            return Ok(Reply::at(
+                wire,
+                RestateDurableWaitResolveResponse::Outcome(outcome),
+            ));
         }
         let mut retained = Vec::with_capacity(metadata.awakeables.len());
         for entry in std::mem::take(&mut metadata.awakeables) {
@@ -1609,17 +1436,22 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
         object_state::set_stamped(
             &ctx,
             DURABLE_WAIT_INDEX_METADATA_KEY,
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             metadata,
         );
-        Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)))
+        Ok(Reply::at(
+            wire,
+            RestateDurableWaitResolveResponse::Outcome(outcome),
+        ))
     }
 
     async fn fence_cancel_decided(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitCancelDecidedRequest>,
-    ) -> HandlerResult<Json<()>> {
+        call: Call<RestateDurableWaitCancelDecidedRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
         let expected = durable_wait_index_key_for_scope(&request.scope);
         if expected != ctx.key() {
             return Err(TerminalError::new(format!(
@@ -1628,7 +1460,7 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             ))
             .into());
         }
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let id = cancel_decided_id(&request.scope, &request.wait)?;
         let id = if let Some(turn_id) = request.scope.turn_id() {
             let root = lash_core::store::PhysicalTurn::split_turn_id(turn_id).0;
@@ -1640,15 +1472,17 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,
-                &DURABLE_WAIT_REGISTRY_FORMATS,
+                object.writer,
                 metadata,
             );
         }
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
-    async fn cancel_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+    async fn cancel_all(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         let (waits, _controls) = split_cancellable_waits(load_indexed_waits(&ctx).await?);
         for key in &waits {
             if !matches!(key.scope, ExecutionScope::Turn { .. }) {
@@ -1657,116 +1491,139 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
                 ));
             }
         }
-        resolve_indexed_waits(&ctx, &self.namespace, waits, true).await?;
-        Ok(Json(()))
+        resolve_indexed_waits(&ctx, object.writer, &self.namespace, waits, true).await?;
+        Ok(Reply::at(wire, ()))
     }
 
-    async fn revoke_all(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        revoke_index(&ctx, &self.namespace, false).await?;
-        Ok(Json(()))
+    async fn revoke_all(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        revoke_index(&ctx, object, &self.namespace, false).await?;
+        Ok(Reply::at(wire, ()))
     }
 
     async fn revoke_all_if_quiescent(
         &self,
         ctx: ObjectContext<'_>,
-        Json(()): Json<()>,
-    ) -> HandlerResult<Json<bool>> {
-        revoke_index(&ctx, &self.namespace, true).await
+        call: Call<()>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        revoke_index(&ctx, object, &self.namespace, true)
+            .await
+            .map(|revoked| Reply::at(wire, revoked))
     }
 
     async fn retire_scope(
         &self,
         ctx: ObjectContext<'_>,
-        Json(()): Json<()>,
-    ) -> HandlerResult<Json<bool>> {
-        revoke_index(&ctx, &self.namespace, false).await
+        call: Call<()>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        revoke_index(&ctx, object, &self.namespace, false)
+            .await
+            .map(|revoked| Reply::at(wire, revoked))
     }
 
-    async fn reinstate(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
+    async fn reinstate(&self, ctx: ObjectContext<'_>, call: Call<()>) -> HandlerResult<Reply<()>> {
+        let (wire, ()) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let mut metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
             metadata.revoked = false;
             object_state::set_stamped(
                 &ctx,
                 DURABLE_WAIT_INDEX_METADATA_KEY,
-                &DURABLE_WAIT_REGISTRY_FORMATS,
+                object.writer,
                 metadata,
             );
         }
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn begin_effect(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitEffectRequest>,
-    ) -> HandlerResult<Json<bool>> {
-        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(false));
+            return Ok(Reply::at(wire, false));
         }
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_effect_key(&request.replay_key),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             true,
         );
-        Ok(Json(true))
+        Ok(Reply::at(wire, true))
     }
 
     async fn end_effect(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitEffectRequest>,
-    ) -> HandlerResult<Json<()>> {
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateDurableWaitEffectRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         ctx.clear(&durable_wait_index_effect_key(&request.replay_key));
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 
     async fn record_group(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitGroupRequest>,
-    ) -> HandlerResult<Json<bool>> {
-        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateDurableWaitGroupRequest>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(false));
+            return Ok(Reply::at(wire, false));
         }
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_group_key(&request.group_key),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             true,
         );
-        Ok(Json(true))
+        Ok(Reply::at(wire, true))
     }
 
     async fn record_group_child(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitGroupChildRequest>,
-    ) -> HandlerResult<Json<bool>> {
-        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateDurableWaitGroupChildRequest>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(false));
+            return Ok(Reply::at(wire, false));
         }
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_group_child_key(&request.replay_key),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             request.group_key,
         );
-        Ok(Json(true))
+        Ok(Reply::at(wire, true))
     }
 
     async fn group_child_membership(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateDurableWaitGroupChildMembershipRequest>,
-    ) -> HandlerResult<Json<Option<String>>> {
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
-        Ok(Json(
+        call: Call<RestateDurableWaitGroupChildMembershipRequest>,
+    ) -> HandlerResult<Reply<Option<String>>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
+        Ok(Reply::at(
+            wire,
             object_state::get_stamped::<String>(
                 &ctx,
                 &durable_wait_index_group_child_key(&request.replay_key),
@@ -1779,30 +1636,34 @@ impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn register_closure_participant(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateTurnCancelClosureParticipantRequest>,
-    ) -> HandlerResult<Json<bool>> {
-        let metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Reply<bool>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         if metadata.revoked {
-            return Ok(Json(false));
+            return Ok(Reply::at(wire, false));
         }
         object_state::set_stamped(
             &ctx,
             &durable_wait_index_closure_participant_key(&request.participant_id),
-            &DURABLE_WAIT_REGISTRY_FORMATS,
+            object.writer,
             request.participant_id,
         );
-        Ok(Json(true))
+        Ok(Reply::at(wire, true))
     }
 
     async fn release_closure_participant(
         &self,
         ctx: ObjectContext<'_>,
-        Json(request): Json<RestateTurnCancelClosureParticipantRequest>,
-    ) -> HandlerResult<Json<()>> {
-        let _metadata = load_durable_wait_index_metadata(&ctx).await?;
+        call: Call<RestateTurnCancelClosureParticipantRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, request) = call.open()?;
+        let object = self.admit(&ctx).await?;
+        let _metadata = load_durable_wait_index_metadata(&ctx, object.writer).await?;
         ctx.clear(&durable_wait_index_closure_participant_key(
             &request.participant_id,
         ));
-        Ok(Json(()))
+        Ok(Reply::at(wire, ()))
     }
 }

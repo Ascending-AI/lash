@@ -21,10 +21,7 @@
 //! The ledger row is keyed `(phase, migration)`, and planning skips ids already
 //! recorded, which is what makes reruns and resumes no-ops.
 
-use crate::schema_shape::{
-    ComponentVersion, Installation, SchemaShape, read_component_version, read_search_path,
-    resolve_installation,
-};
+use crate::schema_shape::{Installation, read_search_path, resolve_installation};
 use crate::*;
 
 /// The DDL that creates `lash_migrations`, byte-for-byte the block
@@ -290,8 +287,9 @@ pub struct MigrationReport {
 struct MigrationState {
     /// The resolved installation, or `None` on an unprovisioned database.
     installation: Option<Installation>,
-    /// The component stamp read.
-    stamp: Option<ComponentVersion>,
+    /// The last DDL step recorded by the migration ledger. Compatibility
+    /// versions are a separate sequence in `lash_schema_versions`.
+    ddl_version: Option<i32>,
     /// Ledger rows already committed.
     applied: Vec<MigrationStep>,
     /// The writing release, when the release stamp could still be read.
@@ -315,13 +313,11 @@ async fn read_state(
     let Some(installation) = resolve_installation(tx, &search_path).await? else {
         return Ok(MigrationState {
             installation: None,
-            stamp: None,
+            ddl_version: None,
             applied: Vec::new(),
             writing_release: None,
         });
     };
-    let expected = SchemaShape::expected();
-    let stamp = read_component_version(tx, &installation, &expected).await?;
     // Probed by OID against the anchored namespace, like every other object
     // read here: a `to_regclass` name lookup would resolve outside the
     // transaction's snapshot.
@@ -383,13 +379,69 @@ async fn read_state(
     } else {
         Vec::new()
     };
+    let ddl_version = if !ledger_present {
+        // A catalog older than the ledger (component 134) recorded its DDL
+        // revision only in its pre-1.0 stamp, so that is the revision the
+        // planner refuses by name.
+        read_legacy_stamp_version(tx, &installation).await?
+    } else if applied.is_empty() {
+        // Hosts may install the published schema.sql directly. Its 1.0
+        // compatibility stamp is not the pre-1.0 DDL migration counter.
+        let report = verify_schema_shape(&mut *tx).await?;
+        report.is_conformant().then_some(SCHEMA_VERSION)
+    } else {
+        applied.iter().map(|step| step.to_version).max()
+    };
+    // Last: on a catalog that predates the release stamp the read fails,
+    // which aborts the snapshot for any statement after it.
     let writing_release = crate::release_stamp::read_release_in_tx(tx).await;
     Ok(MigrationState {
         installation: Some(installation),
-        stamp: Some(stamp),
+        ddl_version,
         applied,
         writing_release,
     })
+}
+
+/// The DDL revision a pre-1.0 stamp records: `lash_schema_versions.version`
+/// on a stamp table without `min_reader`, the shape every catalog had before
+/// the 1.0 compatibility stamp (ADR 0115 §1.2). A stamp that carries
+/// `min_reader` is a compatibility stamp, whose version is no DDL revision,
+/// and a catalog with no stamp table has none; both answer `None`.
+async fn read_legacy_stamp_version(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    installation: &Installation,
+) -> Result<Option<i32>, StoreError> {
+    let (stamp_present, compat_stamp): (bool, bool) = sqlx::query_as(
+        "SELECT EXISTS (
+                 SELECT 1 FROM pg_catalog.pg_class
+                 WHERE relnamespace = $1 AND relname = 'lash_schema_versions'
+                   AND relkind IN ('r', 'p')),
+             EXISTS (
+                 SELECT 1 FROM pg_catalog.pg_class AS relation
+                 JOIN pg_catalog.pg_attribute AS attribute
+                   ON attribute.attrelid = relation.oid
+                 WHERE relation.relnamespace = $1
+                   AND relation.relname = 'lash_schema_versions'
+                   AND relation.relkind IN ('r', 'p')
+                   AND attribute.attname = 'min_reader'
+                   AND NOT attribute.attisdropped)",
+    )
+    .bind(installation.namespace_oid())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    if !stamp_present || compat_stamp {
+        return Ok(None);
+    }
+    sqlx::query_scalar(&format!(
+        "SELECT version FROM {}.lash_schema_versions WHERE component = $1",
+        installation.quoted_namespace()
+    ))
+    .bind(SCHEMA_COMPONENT)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)
 }
 
 /// Turns a read of the database into the ordered steps a run still owes it.
@@ -407,16 +459,10 @@ fn plan(state: &MigrationState) -> Result<Vec<PlannedStep<'_>>, StoreError> {
     };
     let installed = Some(installation.namespace());
     let release = state.writing_release.as_deref();
-    let Some(stamp) = &state.stamp else {
-        return Ok(Vec::new());
-    };
-    let found = match stamp {
-        ComponentVersion::Unreadable | ComponentVersion::Readable(None) => None,
-        ComponentVersion::Readable(Some(version)) => Some(*version),
-    };
-    let Some(mut at) = found else {
+    let Some(mut at) = state.ddl_version else {
         return Err(version_mismatch_error(installed, None, release));
     };
+    let found = Some(at);
     if at > SCHEMA_VERSION {
         // A newer build's catalog: Lash never migrates backwards, and the
         // typed refusal says so.
@@ -540,13 +586,14 @@ async fn apply_step(
             // Moving the stamp is part of the step: a later open sees either
             // the whole committed step or the version it started from.
             sqlx::query(&format!(
-                "INSERT INTO {}.lash_schema_versions (component, version)
-                 VALUES ($1, $2)
-                 ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
+                "INSERT INTO {}.lash_schema_versions (component, version, min_reader)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (component) DO NOTHING",
                 installation.quoted_namespace()
             ))
             .bind(SCHEMA_COMPONENT)
-            .bind(migration.to_version)
+            .bind(1_i32)
+            .bind(1_i32)
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -590,10 +637,7 @@ fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationRepo
             .installation
             .as_ref()
             .map(|installation| installation.namespace().to_string()),
-        found_version: match &state.stamp {
-            Some(ComponentVersion::Readable(version)) => *version,
-            Some(ComponentVersion::Unreadable) | None => None,
-        },
+        found_version: state.ddl_version,
         applied: state.applied.clone(),
         executed,
         planned: Vec::new(),
@@ -832,6 +876,21 @@ mod tests {
             );
             at = migration.from_version;
         }
+    }
+
+    #[test]
+    fn every_expand_step_passes_the_previous_tolerant_check() {
+        // The catalog below predates the 1.0 compatibility stamp. It is the
+        // pre-cut DDL chain, not a compatibility expand from version 1.
+        // There are no post-cut expand steps yet. When one is registered, this
+        // test must apply it to the previous catalog and call the tolerant
+        // checker before admitting the step.
+        assert!(
+            EXPAND_MIGRATIONS
+                .iter()
+                .all(|step| step.from_version < SCHEMA_VERSION),
+            "a post-cut expand needs a previous-catalog tolerant check"
+        );
     }
 
     #[test]

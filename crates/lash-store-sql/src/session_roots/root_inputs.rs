@@ -1,6 +1,7 @@
 //! `session_root_inputs`: the root each accepted input of a session is bound
-//! to. The recorded claim step binds the rows it claimed; a fork rebinds
-//! held inputs to its new root.
+//! to. The recorded admission step binds the rows it admitted, the commit
+//! that applies a checkpoint-admitted input binds it to the root that
+//! applied it, and a fork rebinds held inputs to its new root.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_root_inputs";
@@ -17,6 +18,14 @@ crate::statements! {
 
         /// The root input `?2` of session `?1` is bound to.
         select_root = "SELECT root FROM session_root_inputs WHERE session_id = ?1 AND input_id = ?2";
+
+        /// Turn scopes of inputs admitted to root `?2` of session `?1`.
+        /// The source key names the input's turn; an unkeyed input uses its id.
+        bound_turn_scopes = "SELECT DISTINCT COALESCE(i.source_key, i.input_id)
+             FROM session_root_inputs b
+             JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id
+             WHERE b.session_id = ?1 AND b.root = ?2
+             ORDER BY 1";
 
         /// Every binding of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_root_inputs WHERE session_id = ?1";

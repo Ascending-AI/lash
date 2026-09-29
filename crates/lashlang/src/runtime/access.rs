@@ -1046,52 +1046,6 @@ pub(crate) fn descend_index<'a>(
     }
 }
 
-pub(crate) fn add_assign_index_number(
-    target: &mut Value,
-    index: &Value,
-    right: f64,
-) -> Result<Value, RuntimeError> {
-    match target {
-        Value::List(values) => {
-            let idx = resolve_existing_list_assignment_index(index, values.len())?;
-            add_assign_value_number(&mut values.make_mut()[idx], right)
-        }
-        Value::Tuple(_) => Err(RuntimeError::ImmutableTupleIndexes),
-        Value::Record(record) => {
-            let key = coerce_string(index)?;
-            let record = Arc::make_mut(record);
-            if let Some(value) = record.get_mut(key.as_ref()) {
-                add_assign_value_number(value, right)
-            } else {
-                let value = Value::Number(right);
-                record.insert_str(key.as_ref(), value.clone());
-                Ok(value)
-            }
-        }
-        Value::Image(_) => Err(RuntimeError::ImmutableImageFields),
-        _ => Err(RuntimeError::CannotAssignIndex {
-            actual: value_type_name(target).to_string(),
-        }),
-    }
-}
-
-pub(crate) fn add_assign_value_number(
-    value: &mut Value,
-    right: f64,
-) -> Result<Value, RuntimeError> {
-    match value {
-        Value::Number(left) => {
-            *left += right;
-            Ok(Value::Number(*left))
-        }
-        left => {
-            let value = add_values(left.clone(), Value::Number(right))?;
-            *left = value.clone();
-            Ok(value)
-        }
-    }
-}
-
 pub(crate) fn resolve_index(index: &Value, len: usize) -> Result<Option<usize>, RuntimeError> {
     let index = as_offset(index)?;
     let len = len as isize;

@@ -30,7 +30,7 @@ pub trait FleetFormatDeployment: Send + Sync {
     /// in for a build whose `[min_F, max_F]` differs from this binary's.
     async fn open_admitting(
         &self,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError>;
 
     /// Record `version` in the fleet-format row as an operator or a newer
@@ -108,14 +108,17 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
         .await
         .expect("record a next-generation fleet format");
     let refused = deployment
-        .open_admitting(lash_core::FLEET_FORMAT_VERSION..=lash_core::FLEET_FORMAT_VERSION)
+        .open_admitting(lash_core::compat::VersionRange::exactly(
+            lash_core::FLEET_FORMAT_VERSION,
+        ))
         .await;
     let error = refused.expect_err("a build whose range excludes the row refuses the open");
     assert!(
         matches!(
             error,
-            StoreError::FleetFormatOutsideWritableRange { recorded, current }
-                if recorded == next_generation && current == lash_core::FLEET_FORMAT_VERSION
+            StoreError::Incompatible {
+                refusal: lash_core::compat::CompatRefusal::FleetOutsideWritable { recorded, writable }
+            } if recorded == next_generation && writable == lash_core::compat::VersionRange::exactly(lash_core::FLEET_FORMAT_VERSION)
         ),
         "an out-of-range fleet format must surface the typed refusal: {error}"
     );
@@ -123,7 +126,10 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
     // The build that can still write it preserves the row: the reopen reads
     // the recorded generation rather than winding `F` back to its own.
     let admitted = deployment
-        .open_admitting(lash_core::FLEET_FORMAT_VERSION..=next_generation)
+        .open_admitting(
+            lash_core::compat::VersionRange::new(lash_core::FLEET_FORMAT_VERSION, next_generation)
+                .expect("valid range"),
+        )
         .await
         .expect("a build whose range admits the recorded generation opens");
     assert_eq!(

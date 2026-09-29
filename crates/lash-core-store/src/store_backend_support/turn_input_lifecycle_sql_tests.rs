@@ -74,9 +74,5 @@ fn the_terminal_partition_is_derived_from_the_enum_not_from_a_list_here() {
             },
             if state.is_terminal() { "is" } else { "is not" },
         );
-        assert_eq!(
-            crate::store_backend_support::unclaimed_turn_input_is_settleable(state.as_str()),
-            !state.is_terminal(),
-        );
     }
 }

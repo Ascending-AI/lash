@@ -148,6 +148,18 @@ if ! lash_pg_wait postgres 90 "${compose[@]}" exec -T postgres; then
 fi
 "${compose[@]}" exec -T postgres psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
   < "$repo/crates/lash-postgres-store/schema.sql"
+# The recovery-law witness ledgers (FIG-608) get their own database and
+# account, in plain SQL, before any writer starts: nothing Lash owns creates,
+# migrates or writes them.
+"${compose[@]}" exec -T postgres psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
+  < "$repo/runbooks/restate-postgres-workers/witness.sql"
+# A nemesis row on the witness database's own clock, written as the witness
+# account: the control node's record of the fault it is about to inject.
+witness_nemesis() {
+  "${compose[@]}" exec -T postgres \
+    psql -U lash_witness -d lash_witness -v ON_ERROR_STOP=1 -q \
+    -c "INSERT INTO witness_nemesis (kind, subject) VALUES ('$1', '$2')" >/dev/null
+}
 "${compose[@]}" up -d s3 restate mock-provider worker-a worker-b worker-proxy
 lash_s3_wait "$("${compose[@]}" ps -q s3)" 60
 
@@ -204,26 +216,35 @@ until signal_ready="$(
   sleep 1
 done
 
-echo "engine-restart harness: parked turn observed; stopping only Restate"
-for service in worker-a worker-b worker-proxy mock-provider; do
+# Law 1's restart (FIG-608): both workers die by SIGKILL, from outside, while
+# Restate is live, then Restate stops; everything starts again and the runner
+# reattaches the identical workflow addresses. The provider and the proxy stay
+# up, so what the runner sees after the restart comes from the restarted nodes.
+echo "engine-restart harness: parked turn observed; killing both workers and restarting Restate"
+for service in worker-a worker-b restate worker-proxy mock-provider; do
   [[ "$("${compose[@]}" ps --status running -q "$service")" ]] \
-    || { echo "$service was not running before Restate restart" >&2; exit 1; }
+    || { echo "$service was not running before the cluster restart" >&2; exit 1; }
 done
+witness_nemesis restart-begin cluster
+"${compose[@]}" kill -s SIGKILL worker-a worker-b
 "${compose[@]}" stop restate
 [[ -z "$("${compose[@]}" ps --status running -q restate)" ]] \
   || { echo "Restate remained running after stop" >&2; exit 1; }
 "${compose[@]}" start restate
-for service in worker-a worker-b worker-proxy mock-provider; do
+# `start` also covers a worker the restart policy already brought back.
+"${compose[@]}" start worker-a worker-b
+for service in worker-a worker-b restate worker-proxy mock-provider; do
   [[ "$("${compose[@]}" ps --status running -q "$service")" ]] \
-    || { echo "$service stopped during Restate restart" >&2; exit 1; }
+    || { echo "$service was not running after the cluster restart" >&2; exit 1; }
 done
+witness_nemesis restart-complete cluster
 "${compose[@]}" exec -T postgres \
   psql -U lash -d lash -v ON_ERROR_STOP=1 -c \
   "INSERT INTO lash_e2e_harness_signals (signal_name, created_at_ms)
    VALUES ('engine-restart-complete', (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT)
    ON CONFLICT (signal_name) DO UPDATE SET created_at_ms = EXCLUDED.created_at_ms" \
   >/dev/null
-echo "engine-restart harness: Restate started; workers remained running"
+echo "engine-restart harness: Restate and both workers restarted"
 
 wait "$runner_job"
 if [ -n "$completed_manifest" ] && [ ! -s "$completed_manifest" ]; then

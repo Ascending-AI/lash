@@ -188,6 +188,7 @@ impl SqliteStoreSet {
         options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
     ) -> tokio_rusqlite::Result<Self> {
+        crate::compat::check_set(&location).map_err(tokio_rusqlite::Error::Error)?;
         let database = |database| {
             DatabaseLocation::in_backend(&location, &identity, database, anchors.as_ref())
         };
@@ -202,7 +203,7 @@ impl SqliteStoreSet {
                 Arc::clone(&clock),
                 None,
                 None,
-                lash_core_execution::FleetFormat::writable_range(),
+                lash_core_execution::FleetFormat::writable(),
                 #[cfg(feature = "testing")]
                 None,
             )
@@ -326,7 +327,7 @@ impl SqliteStoreSet {
             Arc::clone(&self.inner.clock),
             None,
             None,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             None,
         )

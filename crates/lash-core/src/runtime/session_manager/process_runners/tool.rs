@@ -129,6 +129,7 @@ impl RuntimeSessionServices {
             .await;
             return Ok(outcome.record.output);
         }
+        let call_id = call.call_id.clone();
         let retry_policy =
             crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch.as_ref(), &call.tool_id)
                 .map(|manifest| manifest.retry_policy)
@@ -158,7 +159,7 @@ impl RuntimeSessionServices {
         let launch = coordinated.launch;
         let output = match launch {
             crate::tool_dispatch::ToolCallLaunch::Done(outcome) => outcome.record.output,
-            crate::tool_dispatch::ToolCallLaunch::Pending(pending) => {
+            crate::tool_dispatch::ToolCallLaunch::Pending(pending) => 'park: {
                 let fallback;
                 #[expect(
                     clippy::expect_used,
@@ -194,14 +195,27 @@ impl RuntimeSessionServices {
                 // Same rule as the session turn path: arm the resolver this
                 // call named before parking on it, on the first park and on
                 // every redrive of the enclosing process.
-                crate::tool_dispatch::arm_pending_resolver(
-                    dispatch.processes.as_ref(),
+                let site = crate::tool_dispatch::ParkSite {
+                    processes: dispatch.processes.as_ref(),
+                    session_id: &dispatch.session_id,
+                    call_id: &call_id,
+                    scope: dispatch.process_scope(),
+                    child_trace_hook: None,
+                };
+                let armed = match crate::tool_dispatch::arm_pending_resolver(
+                    &site,
                     &pending.pending,
                     &pending.key,
-                    dispatch.process_scope(),
                 )
-                .await?;
-                let resolver = pending.pending.resolved_by.clone();
+                .await?
+                {
+                    crate::tool_dispatch::ResolverArming::Armed(armed) => armed,
+                    crate::tool_dispatch::ResolverArming::Settled { failure, .. } => {
+                        break 'park crate::ToolCallOutput::failure(*failure);
+                    }
+                };
+                let completion = pending.pending.clone();
+                let completion_key = pending.key.clone();
                 let resolution = Box::pin(await_pending_process_tool(
                     dispatch.effect_controller.controller(),
                     Arc::clone(&dispatch.clock),
@@ -210,9 +224,17 @@ impl RuntimeSessionServices {
                     &turn_cancel_wait,
                 ))
                 .await?;
+                crate::tool_dispatch::finish_parked_wait(
+                    &site,
+                    &completion,
+                    &armed,
+                    &completion_key,
+                    &resolution,
+                )
+                .await?;
                 crate::tool_result::tool_output_from_completion_resolution(
                     resolution,
-                    resolver.as_ref(),
+                    completion.resolved_by.as_ref(),
                 )
             }
             crate::tool_dispatch::ToolCallLaunch::ControllerAborted(error) => {

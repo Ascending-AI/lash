@@ -18,7 +18,6 @@ struct SqliteDatabaseDefinition {
     /// Shared table sets this database also carries; see
     /// [`SqliteDatabase::fragments`].
     fragments: &'static [&'static str],
-    version: i32,
 }
 
 /// One of the three independently versioned SQLite databases a lash backend
@@ -65,34 +64,37 @@ impl SqliteDatabase {
                 name: "durable core",
                 schema: SCHEMA,
                 fragments: &[SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES],
-                version: SCHEMA_VERSION,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
                 name: "process registry",
                 schema: PROCESS_SCHEMA,
                 fragments: &[],
-                version: PROCESS_SCHEMA_VERSION,
             },
             Self::Triggers => SqliteDatabaseDefinition {
                 name: "trigger store",
                 schema: TRIGGER_SCHEMA,
                 fragments: &[],
-                version: TRIGGER_SCHEMA_VERSION,
             },
         }
     }
 
-    fn schema(self) -> &'static str {
+    pub(crate) fn schema(self) -> &'static str {
         self.definition().schema
     }
 
-    fn schema_version(self) -> i32 {
-        self.definition().version
+    pub(crate) const fn component(self) -> lash_core_execution::compat::ComponentId {
+        use lash_core_execution::compat::ComponentId;
+        match self {
+            Self::DurableCore => ComponentId::SQLITE_CORE,
+            Self::ProcessRegistry => ComponentId::SQLITE_REGISTRY,
+            Self::Triggers => ComponentId::SQLITE_TRIGGERS,
+        }
     }
 
-    /// The `PRAGMA user_version` this build requires of the database.
+    /// This build's compatibility version for this database.
     pub fn expected_version(self) -> i64 {
-        i64::from(self.schema_version())
+        lash_core_execution::compat::descriptor(self.component())
+            .map_or(1, |descriptor| i64::from(descriptor.writes.max()))
     }
 
     /// The operator-facing name used in reports and refusal messages.
@@ -102,7 +104,7 @@ impl SqliteDatabase {
 
     /// Shared DDL fragments applied after `schema` inside the same
     /// initialization transaction; see [`crate::schema_fragments`].
-    fn fragments(self) -> &'static [&'static str] {
+    pub(crate) fn fragments(self) -> &'static [&'static str] {
         self.definition().fragments
     }
 
@@ -309,6 +311,7 @@ CREATE TABLE IF NOT EXISTS runtime_turn_commits (
     turn_id                     TEXT NOT NULL,
     turn_commit_hash            TEXT NOT NULL,
     result_json                 TEXT NOT NULL,
+    outcome_code                TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
     committed_at_ms             INTEGER NOT NULL,
     request_identity_hash       TEXT,
     requested_node_count        INTEGER,
@@ -445,11 +448,8 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     authority_json    TEXT NOT NULL,
     merge_key         TEXT,
     enqueued_at_ms    INTEGER NOT NULL,
-    claim_id          TEXT, -- With claim_token, names a live claim for a nonzero generation.
-    claim_token       TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
-    claim_fencing_token INTEGER NOT NULL DEFAULT 0,
-    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
-    claim_owner_incarnation_id TEXT,
+    admitted_root     TEXT, -- The root whose fenced admission holds the batch; NULL while open.
+    admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     obligation_id     TEXT,
     obligation_state  TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -461,8 +461,7 @@ CREATE TABLE IF NOT EXISTS queued_work_batches (
     CONSTRAINT ck_queued_work_batches_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
-    CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
-    CONSTRAINT ck_queued_work_batches_live_claim_owner CHECK (claim_token IS NULL OR claim_session_lease_generation = 0 OR claim_owner_incarnation_id IS NOT NULL),
+    CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -497,8 +496,9 @@ CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
 CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
     ON queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
-CREATE INDEX IF NOT EXISTS idx_queued_work_claim
-    ON queued_work_batches(session_id, claim_id, claim_token);
+DROP INDEX IF EXISTS idx_queued_work_admitted;
+CREATE INDEX IF NOT EXISTS idx_queued_work_admission_order
+    ON queued_work_batches(session_id, admitted_root, enqueue_seq);
 
 CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     enqueue_seq       INTEGER NOT NULL,
@@ -511,12 +511,8 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     submitted_ingress_json TEXT NOT NULL,
     submission_digest TEXT NOT NULL,
     enqueued_at_ms    INTEGER NOT NULL,
-    claim_id          TEXT,
-    claim_owner_id    TEXT,
-    claim_owner_incarnation_id TEXT,
-    claim_token       TEXT,
-    claim_fencing_token INTEGER NOT NULL DEFAULT 0,
-    claim_session_lease_generation INTEGER NOT NULL DEFAULT 0,
+    admitted_root     TEXT, -- The root whose fenced admission holds the input; NULL while open.
+    admitted_by       TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash     TEXT,
     obligation_id     TEXT,
     obligation_state  TEXT,
@@ -529,7 +525,8 @@ CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((json_extract(ingress_json, '$.scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR (json_extract(ingress_json, '$.scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-    CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_root IS NULL OR state NOT IN ('cancelled', 'completed')),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -545,14 +542,22 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_obligation_stalled
     ON pending_turn_inputs(obligation_id)
     WHERE obligation_state = 'stalled';
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_session
-    ON pending_turn_inputs(session_id, state, enqueue_seq);
+DROP INDEX IF EXISTS idx_pending_turn_inputs_session;
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_input_order
-    ON pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
+DROP INDEX IF EXISTS idx_pending_turn_input_order;
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_claim
-    ON pending_turn_inputs(session_id, claim_id, claim_token);
+-- All undelivered inputs, including ones a root already holds. State is the
+-- partial predicate, so settled rows cannot lengthen an open-input scan.
+-- Enqueue order in the key lets list_undelivered avoid a history scan or sort.
+DROP INDEX IF EXISTS idx_pending_turn_inputs_open;
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open_state
+    ON pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('pending_active', 'deferred_next_turn');
+
+DROP INDEX IF EXISTS idx_pending_turn_inputs_admitted;
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_root
+    ON pending_turn_inputs(session_id, admitted_root)
+    WHERE admitted_root IS NOT NULL;
 
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and
@@ -692,9 +697,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 -- writer in the fleet emits. A single-process SQLite deployment finalizes on
 -- open, so the schema-open transaction pins this row to the build's own
 -- format. PostgreSQL carries the same singleton as `lash_fleet_format`.
-CREATE TABLE IF NOT EXISTS fleet_format (
-    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_fleet_format_singleton CHECK (singleton = 1),
-    format_version      INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS lash_compat (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    component TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    min_reader INTEGER NOT NULL,
+    fleet_format INTEGER NOT NULL,
+    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
 );
 ";
 
@@ -710,9 +719,9 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// operators delete manually.
 ///
 /// Bumped to 11 for claim generation fencing (ADR 0029): queued-work and
-/// pending-turn-input rows replace their per-claim `claim_claimed_at_ms` /
-/// `claim_expires_at_ms` columns with a single `claim_session_lease_generation`
-/// pinning the session-execution-lease generation the claim was taken under.
+/// pending-turn-input rows replace their per-claim claimed-at and expiry
+/// columns with a single column pinning the session-execution-lease generation
+/// the claim was taken under (since replaced by root admission, FIG-3927).
 /// There is no migration chain — pre-11 session databases are rejected at open
 /// and recreated.
 /// Bumped to 12 for FIG-546 owner-bound attachment intents. This is a
@@ -804,15 +813,13 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// deletion tombstones. Older stores cannot reconstruct an honest creation
 /// time and are rejected under the existing recreate-store policy.
 ///
-/// An additive, index-only catalog change does **not** bump this version. Every
-/// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a same-version file written before the index existed self-heals
-/// into the newer index set on first open, and a newer file stays readable by
-/// the older binary — the two are mutually compatible on the same stamp. Bumping instead
-/// would reject-and-recreate live stores for a change that costs nothing to
-/// apply in place. The idle-arbitration ordering indexes
-/// (`idx_queued_work_session_command_order`,
-/// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
+/// An index-only catalog change does **not** bump this version. Every
+/// `CREATE INDEX` above is `IF NOT EXISTS`, obsolete indexes are dropped by
+/// name, and open always runs the whole schema. A same-version file self-heals
+/// into the current index set on first open, and an older binary can still read
+/// the newer file. Bumping would reject-and-recreate live stores for a change
+/// that can be applied in place. The idle-arbitration ordering index
+/// (`idx_queued_work_session_command_order`) was added under exactly this carve-out. It
 /// covers index-only additions and nothing else: any table, column, or
 /// semantic change bumps.
 /// Version 40 persists per-turn cancellation requests and their undelivered
@@ -1070,9 +1077,24 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// session; the queued-run ledger is gone and a queued-work head is admitted
 /// as an ordinary root (FIG-3927). A database written before these changes
 /// has the old shape; recreate it.
-pub(crate) const SCHEMA_VERSION: i32 = 100;
+/// Version 99 also lets tool-intent submissions record process-definition
+/// and trigger registration (FIG-4057, changed in place under the version
+/// freeze): a catalog whose kind CHECK predates them rejects both kinds, so
+/// recreate it. It also holds the turn capture tables and sealed stopped
+/// partials (ADR 0114, FIG-433, changed in place): a catalog without them
+/// fails its first capture query, so recreate it.
+pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS lash_compat (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    component TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    min_reader INTEGER NOT NULL,
+    fleet_format INTEGER NOT NULL,
+    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
+);
+
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
     start_key             TEXT,
@@ -1111,6 +1133,10 @@ CREATE TABLE IF NOT EXISTS processes (
     obligation_stall_reason TEXT,
     obligation_last_error TEXT,
     obligation_settled_at_ms INTEGER,
+    consumer_hold_key     TEXT,
+    consumer_hold_scope_kind TEXT,
+    consumer_hold_scope_id TEXT,
+    CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
@@ -1143,6 +1169,10 @@ CREATE INDEX IF NOT EXISTS idx_processes_status
 -- A start key maps to the one retained process minted for it (ADR 0107).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
     ON processes(start_key) WHERE start_key IS NOT NULL;
+-- A held row names the scope whose close releases it (ADR 0116 §3.6).
+CREATE INDEX IF NOT EXISTS idx_processes_consumer_hold_owner
+    ON processes(consumer_hold_scope_kind, consumer_hold_scope_id)
+    WHERE consumer_hold_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_processes_non_terminal
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
@@ -1364,7 +1394,7 @@ CREATE TABLE IF NOT EXISTS tool_intent_submissions (
     kind                TEXT NOT NULL,
     payload_hash        TEXT NOT NULL,
     submission_json     TEXT NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger'))
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'register_process_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
     ON tool_intent_submissions(session_id, execution_scope_id, intent_index);
@@ -1495,9 +1525,25 @@ CREATE TABLE IF NOT EXISTS draining_generations (
 /// the same freeze): `draining_generations` names each build generation an
 /// operator marked draining. A registry written before the change lacks the
 /// table until it is next opened, which creates it empty.
+///
+/// Version 44 also carries consumer holds (ADR 0116 §3.6, changed in place
+/// under the same freeze): `processes` gains `consumer_hold_key` and the
+/// owning scope's `consumer_hold_scope_kind` and `consumer_hold_scope_id`,
+/// set together or not at all, and indexed by owner. A held row is never
+/// pruned. A registry written before the change lacks the columns; recreate
+/// it.
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
+CREATE TABLE IF NOT EXISTS lash_compat (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    component TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    min_reader INTEGER NOT NULL,
+    fleet_format INTEGER NOT NULL,
+    CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version AND fleet_format >= 1)
+);
+
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
     subscription_id      TEXT PRIMARY KEY,
     owner_scope          TEXT NOT NULL,
@@ -1610,15 +1656,27 @@ pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<(
     .await
 }
 
-/// Apply `schema` if the database is already at `schema_version`, initialise it
-/// (under one transaction stamping `user_version`) if the database is empty, or
-/// reject the open if the on-disk `user_version` is anything else. Runs entirely
-/// on the connection thread so the version check and DDL share one connection.
+/// Admit the compatibility row, provision an empty database and its stamp, or
+/// refuse a populated database that cannot be read by this build. Runs on the
+/// connection thread so admission and DDL share one transaction.
 pub(crate) async fn ensure_versioned_schema(
     conn: &SqliteConnection,
     database: SqliteDatabase,
 ) -> rusqlite::Result<()> {
-    conn.write(move |tx| apply_versioned_schema_tx(tx, database, database.schema_version()))
+    ensure_versioned_schema_with_writable(
+        conn,
+        database,
+        lash_core_execution::FleetFormat::writable(),
+    )
+    .await
+}
+
+pub(crate) async fn ensure_versioned_schema_with_writable(
+    conn: &SqliteConnection,
+    database: SqliteDatabase,
+    writable: lash_core_execution::compat::VersionRange,
+) -> rusqlite::Result<()> {
+    conn.write(move |tx| apply_versioned_schema_tx_with_writable(tx, database, writable))
         .await
 }
 
@@ -1627,34 +1685,27 @@ fn prepare_versioned_schema<'connection>(
     connection: &'connection mut Connection,
     database: SqliteDatabase,
 ) -> rusqlite::Result<Transaction<'connection>> {
-    prepare_versioned_schema_at_version(connection, database, database.schema_version())
-}
-
-#[cfg(test)]
-fn prepare_versioned_schema_at_version<'connection>(
-    connection: &'connection mut Connection,
-    database: SqliteDatabase,
-    schema_version: i32,
-) -> rusqlite::Result<Transaction<'connection>> {
-    // The whole check-then-initialise runs inside one `BEGIN IMMEDIATE`
-    // transaction so the write lock is held across the `user_version` read.
-    // Reading the version outside the transaction and only then upgrading to
-    // a writer races concurrent first-openers into a lock-upgrade deadlock
-    // (SQLite returns "database is locked" immediately, bypassing
-    // `busy_timeout`). Holding the write lock from the first statement makes
-    // every contender serialise on the busy handler instead.
     let tx = connection.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    apply_versioned_schema_tx(&tx, database, schema_version)?;
+    apply_versioned_schema_tx(&tx, database)?;
     Ok(tx)
 }
 
-/// The version check — and, when needed, the schema batch — inside the
-/// caller's write transaction (`conn.write` for opens, the fixture's own
-/// transaction for the versioned-open tests).
+#[cfg(test)]
 fn apply_versioned_schema_tx(
     tx: &Transaction<'_>,
     database: SqliteDatabase,
-    schema_version: i32,
+) -> rusqlite::Result<()> {
+    apply_versioned_schema_tx_with_writable(
+        tx,
+        database,
+        lash_core_execution::FleetFormat::writable(),
+    )
+}
+
+fn apply_versioned_schema_tx_with_writable(
+    tx: &Transaction<'_>,
+    database: SqliteDatabase,
+    writable: lash_core_execution::compat::VersionRange,
 ) -> rusqlite::Result<()> {
     let apply_schema = |conn: &Transaction<'_>| -> rusqlite::Result<()> {
         conn.execute_batch(database.schema())?;
@@ -1663,42 +1714,24 @@ fn apply_versioned_schema_tx(
         }
         Ok(())
     };
-    let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    if user_version == schema_version {
-        // The stamp is authoritative: a database at this version was fully
-        // laid down by the open that stamped it, so the idempotent schema
-        // batch below is skipped rather than re-run on every connection
-        // open (FIG-3975). Only the deployment's own bookkeeping still
-        // writes.
-        stamp_deployment_metadata(tx, database)?;
-        return Ok(());
+    let (admission, _) = crate::compat::admit(tx, database, writable)?;
+    match admission {
+        lash_core_execution::compat::CompatAdmission::Provision => {
+            apply_schema(tx)?;
+            crate::compat::provision(tx, database)?;
+        }
+        lash_core_execution::compat::CompatAdmission::Native => {}
+        lash_core_execution::compat::CompatAdmission::Expanded { .. } => {
+            crate::compat::verify_tolerant(tx, database)?;
+        }
     }
-    if user_version == 0 && !has_user_schema_objects(tx)? {
-        apply_schema(tx)?;
-        tx.pragma_update(None, "user_version", schema_version)?;
-        stamp_deployment_metadata(tx, database)?;
-        return Ok(());
-    }
-    let writing_release = deployment_metadata_holder(database)
-        .then(|| crate::release_stamp::read_release(tx))
-        .flatten();
-    Err(rusqlite::Error::SqliteFailure(
-        rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_MISUSE),
-        Some(unsupported_schema_message(
-            database,
-            schema_version,
-            user_version,
-            writing_release.as_deref(),
-        )),
-    ))
+    stamp_deployment_metadata(tx, database)
 }
 
-/// Whether this database is the one that carries the deployment's own
-/// metadata rows: the release stamp and the fleet-format row.
+/// Whether this database is the one that carries the deployment's release stamp.
 ///
-/// The four SQLite databases share one trust domain and are opened together, so
-/// one stamp describes the deployment. The durable core carries it: it is the
-/// database every deployment has.
+/// All three databases have compatibility rows; only the durable core records
+/// the release that last wrote the store.
 pub(crate) fn deployment_metadata_holder(database: SqliteDatabase) -> bool {
     database == SqliteDatabase::DurableCore
 }
@@ -1709,7 +1742,6 @@ fn stamp_deployment_metadata(
 ) -> rusqlite::Result<()> {
     if deployment_metadata_holder(database) {
         crate::release_stamp::write(tx)?;
-        crate::fleet_format::write(tx)?;
     }
     Ok(())
 }
@@ -1725,33 +1757,88 @@ pub(crate) fn has_user_schema_objects(conn: &Connection) -> rusqlite::Result<boo
     Ok(count > 0)
 }
 
-/// The expected and found `PRAGMA user_version` values are reported accurately.
-/// Every database kind belongs to the one trust domain described by ADR 0049, so a refusal
-/// must prescribe one coordinated reset rather than an independent wipe.
-///
-/// `writing_release` names the lash release that wrote the store when the
-/// release stamp could still be read. It rides as a trailing sentence: every
-/// substring other tests pin — the "supports schema version {n}" clause, the
-/// remedy, the ADR pointer — is produced byte-identically, and a store with no
-/// readable stamp produces the message unchanged rather than a hedge about an
-/// unknown release.
-pub(crate) fn unsupported_schema_message(
-    database: SqliteDatabase,
-    expected_version: i32,
-    found_version: i32,
-    writing_release: Option<&str>,
-) -> String {
-    let release_clause = match writing_release {
-        Some(release) => format!(" This store was last written by lash release {release}."),
-        None => String::new(),
-    };
-    format!(
-        "Unsupported lash {} schema: this binary supports schema version {expected_version}, but \
-         the database reports version {found_version}. There is no \
-         migration chain — drain affected sessions and recreate the whole Lash trust domain with \
-         this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.{release_clause}",
-        database.name()
-    )
+#[cfg(test)]
+mod compat_tests {
+    use super::*;
+    use lash_core_execution::compat::CompatRefusal;
+
+    fn provision(connection: &mut Connection, database: SqliteDatabase) {
+        connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .and_then(|tx| {
+                apply_versioned_schema_tx(&tx, database)?;
+                tx.commit()
+            })
+            .expect("provision SQLite database");
+    }
+
+    #[test]
+    fn sqlite_opens_each_expanded_database_under_its_floor() {
+        for database in SqliteDatabase::ALL {
+            let mut connection = Connection::open_in_memory().expect("open database");
+            provision(&mut connection, database);
+            connection
+                .execute_batch(
+                    "CREATE TABLE next_release_table (id INTEGER PRIMARY KEY); \
+                     ALTER TABLE lash_compat ADD COLUMN next_release_note TEXT; \
+                     UPDATE lash_compat SET version = 2, min_reader = 1",
+                )
+                .expect("expand catalog");
+            provision(&mut connection, database);
+        }
+    }
+
+    #[test]
+    fn sqlite_refuses_a_raised_floor_typed() {
+        for database in SqliteDatabase::ALL {
+            let mut connection = Connection::open_in_memory().expect("open database");
+            provision(&mut connection, database);
+            connection
+                .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
+                .expect("raise floor");
+            let error = crate::sqlite_error(
+                apply_versioned_schema_tx(
+                    &connection
+                        .unchecked_transaction()
+                        .expect("start transaction"),
+                    database,
+                )
+                .expect_err("old reader must refuse"),
+            );
+            assert!(matches!(
+                error,
+                StoreError::Incompatible {
+                    refusal: CompatRefusal::ReaderFloorAbove { min_reader: 2, .. }
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn sqlite_refuses_a_partially_advanced_set() {
+        let root = tempfile::tempdir().expect("database root");
+        let location = crate::location::SqliteLocation::File {
+            root: root.path().to_path_buf(),
+        };
+        for database in SqliteDatabase::ALL {
+            let mut connection =
+                Connection::open(root.path().join(database.file_name())).expect("open database");
+            provision(&mut connection, database);
+        }
+        let connection = Connection::open(root.path().join(SqliteDatabase::Triggers.file_name()))
+            .expect("open trigger database");
+        connection
+            .execute("UPDATE lash_compat SET version = 2", [])
+            .expect("advance one database");
+        let error =
+            crate::sqlite_error(crate::compat::check_set(&location).expect_err("set must refuse"));
+        assert!(matches!(
+            error,
+            StoreError::Incompatible {
+                refusal: CompatRefusal::PartiallyAdvanced { .. }
+            }
+        ));
+    }
 }
 
 #[cfg(test)]
@@ -1797,32 +1884,31 @@ mod observer_intent_migration_tests {
                  INSERT INTO session_meta_fork_pending_observer_processes VALUES
                      ('fold-session', 0, 'shared-process'),
                      ('fold-session', 1, 'fork-only-process');
-                 PRAGMA user_version = 43;",
+                 UPDATE lash_compat SET version = 43, min_reader = 43;",
             )
             .expect("build component-43 observer-intent fixture");
 
-        let retired_seam =
-            prepare_versioned_schema_at_version(&mut connection, SqliteDatabase::DurableCore, 44)
-                .expect_err("the retired 43-to-44 arm must not accept its old source");
-        assert!(
-            retired_seam
-                .to_string()
-                .contains("supports schema version 44, but the database reports version 43"),
-            "the retired seam must refuse with the recreate message: {retired_seam}"
-        );
         let production = prepare_versioned_schema(&mut connection, SqliteDatabase::DurableCore)
             .expect_err("a component-43 stamp is refused at the current version");
+        let verdict = crate::sqlite_error(production);
         assert!(
-            production.to_string().contains(&format!(
-                "supports schema version {}, but the database reports version 43",
-                SCHEMA_VERSION
-            )),
-            "open must refuse a pre-cutover stamp: {production}"
+            matches!(
+                &verdict,
+                StoreError::Incompatible {
+                    refusal: lash_core_execution::compat::CompatRefusal::ReaderFloorAbove {
+                        found: 43,
+                        min_reader: 43,
+                        ..
+                    }
+                }
+            ),
+            "open must refuse a pre-cutover stamp: {verdict}"
         );
 
         assert_eq!(
             connection
-                .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
+                .query_row("SELECT version FROM lash_compat", [], |row| row
+                    .get::<_, i32>(0))
                 .expect("read refused version"),
             43,
             "a refused open must not relabel the old catalog"
@@ -1845,7 +1931,7 @@ mod observer_intent_migration_tests {
 mod schema_version_tests {
     use super::*;
 
-    /// FIG-3975: the `user_version` stamp is authoritative — a database
+    /// FIG-3975: the compatibility stamp is authoritative. A database
     /// stamped at this build's version was fully laid down by the open that
     /// stamped it, so reopening does not re-run the schema batch. Dropping a
     /// stamped table proves the skip: the open leaves it absent rather than
@@ -1875,32 +1961,6 @@ mod schema_version_tests {
             )
             .expect("check the dropped table");
         assert_eq!(present, 0, "the schema batch re-ran over a current stamp");
-    }
-}
-
-#[cfg(test)]
-mod schema_metadata_tests {
-    use super::*;
-
-    #[test]
-    fn every_database_kind_prescribes_the_coordinated_trust_domain_reset() {
-        let cases = [
-            (SqliteDatabase::DurableCore, "durable core"),
-            (SqliteDatabase::ProcessRegistry, "process registry"),
-            (SqliteDatabase::Triggers, "trigger store"),
-        ];
-        for (database, name) in cases {
-            assert_eq!(database.name(), name);
-            assert_eq!(
-                unsupported_schema_message(database, 123, 45, None),
-                format!(
-                    "Unsupported lash {name} schema: this binary supports schema version 123, but \
-                     the database reports version 45. There is no migration chain — drain affected \
-                     sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state \
-                     together; see docs/adr/0049-session-ids-are-used-once.md."
-                )
-            );
-        }
     }
 }
 

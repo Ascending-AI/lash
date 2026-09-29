@@ -1,7 +1,7 @@
 //! Cross-layer attachment owner / cold effect-replay conformance.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
@@ -568,7 +568,7 @@ async fn commit_with_lease(
 ) -> crate::store::RuntimeCommitReceipt {
     let owner = crate::LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"));
     let _lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &commit.session_id,
             &owner,
             "commit-with-lease-executor",

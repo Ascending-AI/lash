@@ -1,11 +1,11 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl TurnInputStore for PostgresSessionStore {
+impl IngressStore for PostgresSessionStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -33,7 +33,7 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+        super::drive_epoch::require_fence_tx(&mut tx, session_id, fence).await?;
         let existing: Option<(String, Option<String>)> = sqlx::query_as(
             crate::turn_ingress::turn_ingress_sql()
                 .bindings_postgres
@@ -101,7 +101,7 @@ impl TurnInputStore for PostgresSessionStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         authorization: &lash_core_execution::TurnCancelClosureAuthorization,
     ) -> Result<lash_core_execution::TurnCancelClosureAuthorizationOutcome, StoreError> {
         authorization
@@ -139,8 +139,8 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, authorization.session_id()).await?;
-        if authorization.session_id() != session_execution_lease.session_id
-            || authorization.authorizing_fencing_token() != session_execution_lease.fencing_token
+        if authorization.session_id() != fence.session()
+            || authorization.authorizing_fencing_token() != fence.epoch()
         {
             return Err(StoreError::SessionExecutionLeaseExpired {
                 session_id: authorization.session_id().clone(),
@@ -265,17 +265,12 @@ impl TurnInputStore for PostgresSessionStore {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
+        fence: &lash_core_execution::store::DriveFence,
         binding_id: &str,
         admitted_scope: &ExecutionScope,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
-        self.validate_turn_cancellation_binding(
-            session_id,
-            session_execution_lease,
-            binding_id,
-            admitted_scope,
-        )
-        .await?;
+        self.validate_turn_cancellation_binding(session_id, fence, binding_id, admitted_scope)
+            .await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let rows: Vec<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
@@ -638,25 +633,61 @@ impl TurnInputStore for PostgresSessionStore {
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        // Open and admitted rows, and the rows a checkpoint accepted into a
+        // running root, read in one snapshot and listed in `enqueue_seq`
+        // order (FIG-4044). The isolation level must precede every other
+        // statement in the transaction.
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let rows = sqlx::query(
+        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+        let mut inputs = Vec::new();
+        for sql in [
+            statements.list_undelivered.sql(),
+            statements.list_accepted.sql(),
+        ] {
+            let rows = sqlx::query(sql)
+                .bind(session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            for row in rows {
+                inputs.push(pending_turn_input_read_from_row(row)?);
+            }
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        inputs.sort_by_key(|read| read.input.enqueue_seq);
+        Ok(inputs)
+    }
+
+    async fn pending_turn_input(
+        &self,
+        session_id: &SessionId,
+        input_id: &lash_core_execution::InputId,
+    ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
+        // One point read by primary key; the list's lifecycle filter is
+        // applied to the one row here: a row is listed until it is completed
+        // or cancelled, open or admitted to its root alike.
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
-                .list_undelivered
+                .select_by_id
                 .sql(),
         )
         .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
+        .bind(input_id.as_str())
+        .fetch_optional(&mut *connection)
         .await
         .map_err(store_sqlx_error)?;
-        let inputs = rows
-            .into_iter()
+        Ok(row
             .map(pending_turn_input_read_from_row)
-            .collect::<Result<Vec<_>, StoreError>>()?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(inputs)
+            .transpose()?
+            .filter(|read| !read.input.state.is_terminal()))
     }
 
     async fn list_turn_input_applications(
@@ -725,7 +756,7 @@ impl TurnInputStore for PostgresSessionStore {
                 match load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &target, true)
                     .await?
                 {
-                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
+                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row).await?,
                     None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
@@ -801,7 +832,7 @@ impl TurnInputStore for PostgresSessionStore {
         .collect::<Result<Vec<_>, StoreError>>()?;
         let mut outcomes = Vec::with_capacity(rows.len());
         for row in rows {
-            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now).await?);
+            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row).await?);
         }
         let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -832,239 +863,63 @@ impl TurnInputStore for PostgresSessionStore {
         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }
 
-    async fn claim_active_turn_inputs(
+    async fn enqueue_queued_work(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkBatch, StoreError> {
+        self.enqueue_queued_work_pg(batch).await
+    }
+
+    async fn enqueue_queued_work_with_outcome(
+        &self,
+        batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        self.enqueue_queued_work_with_outcome_pg(batch).await
+    }
+
+    async fn open_session_command_run(
+        &self,
+        fence: &lash_core_execution::store::DriveFence,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        super::open_session_command_run_postgres(self, fence).await
+    }
+
+    async fn cancel_queued_work_batch(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        turn_id: &lash_core_execution::TurnId,
-        checkpoint: lash_core_execution::CheckpointKind,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
-        claim_pending_turn_inputs_postgres(
-            &self.pool,
-            #[cfg(any(test, feature = "testing"))]
-            self.lease_clock_for_testing.as_ref(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-            lash_core_execution::TurnInputClaimMode::ActiveTurn {
-                turn_id: turn_id.clone(),
-                checkpoint,
-            },
-        )
-        .await
+        batch_id: &str,
+    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
+        self.cancel_queued_work_batch_pg(session_id, batch_id).await
     }
 
-    async fn claim_next_turn_inputs(
+    async fn queued_work_batch_completed(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<lash_core_execution::TurnInputClaim>, StoreError> {
-        claim_pending_turn_inputs_postgres(
-            &self.pool,
-            #[cfg(any(test, feature = "testing"))]
-            self.lease_clock_for_testing.as_ref(),
-            session_id,
-            session_execution_lease,
-            owner,
-            max_inputs,
-            lash_core_execution::TurnInputClaimMode::NextTurn,
-        )
-        .await
-    }
-
-    async fn abandon_turn_input_claim(
-        &self,
-        claim: &lash_core_execution::TurnInputClaim,
-    ) -> Result<(), StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .pending_inputs_postgres
-                .abandon_claim
-                .sql(),
-        )
-        .bind(claim.session_id.as_str())
-        .bind(&claim.claim_id)
-        .bind(&claim.lease_token)
-        .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
-        .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
-        .execute(&mut *connection)
-        .await
-        .map_err(store_sqlx_error)?;
-        Ok(())
-    }
-
-    async fn abandon_turn_input_claims(
-        &self,
-        claims: &[lash_core_execution::TurnInputClaim],
-    ) -> Result<(), StoreError> {
-        if claims.is_empty() {
-            return Ok(());
-        }
-        // FIG-1573: restore each row to the open spelling its own `ingress_json`
-        // carries, exactly as the singular sibling does — a next-turn row goes
-        // back to `deferred_next_turn`, never `pending_active`. The whole batch
-        // runs in ONE statement inside ONE transaction: a batch abandon is one
-        // caller giving up one set of rows, and a failure between two
-        // statements would leave half the batch claimed by a claim id the
-        // caller has already dropped.
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        {
-            // The claims a batch abandon gives up are bound as three parallel
-            // arrays, so the statement's own text is fixed however many there
-            // are; it used to be built one tuple at a time.
-            let session_ids = claims
-                .iter()
-                .map(|claim| claim.session_id.as_str().to_string())
-                .collect::<Vec<_>>();
-            let claim_ids = claims
-                .iter()
-                .map(|claim| claim.claim_id.clone())
-                .collect::<Vec<_>>();
-            let claim_tokens = claims
-                .iter()
-                .map(|claim| claim.lease_token.clone())
-                .collect::<Vec<_>>();
-            sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .pending_inputs_postgres
-                    .abandon_claims
-                    .sql(),
-            )
-            .bind(&session_ids)
-            .bind(&claim_ids)
-            .bind(&claim_tokens)
-            .bind(lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str())
-            .bind(lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str())
-            .execute(&mut *tx)
+        batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        self.queued_work_batch_completed_pg(session_id, batch_id)
             .await
-            .map_err(store_sqlx_error)?;
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
     }
 
-    async fn orphaned_active_turn_ids(
+    async fn pending_session_work_ordering(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        scope: lash_core_execution::OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<lash_core_execution::TurnId>, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        // Re-validated inside this transaction, not upstream: the lane can be
-        // displaced between an upstream check and this write, and a
-        // stale-generation repair would clear the new holder's claim columns.
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        let turn_ids = orphaned_active_turn_ids_tx(
-            &mut tx,
-            session_id,
-            session_execution_lease.fencing_token,
-            scope,
-        )
-        .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(turn_ids)
+    ) -> Result<lash_core_execution::store::PendingSessionWorkOrdering, StoreError> {
+        self.pending_session_work_ordering_pg(session_id).await
     }
 
-    async fn repair_orphaned_active_turn_inputs(
+    async fn list_queued_work(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        turn_id: &lash_core_execution::TurnId,
-        observed: &lash_core_execution::TurnCancelIntentSnapshot,
-        settlement: Option<&lash_core_execution::TurnCancelClosureSettlement>,
-    ) -> Result<lash_core_execution::TurnCancelRepairResult, StoreError> {
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
-        let closure =
-            settlement.map(lash_core_execution::TurnCancelClosureSettlement::authorization);
-        let stored: Option<String> = sqlx::query_scalar(
-            crate::turn_ingress::turn_ingress_sql()
-                .closures_postgres
-                .select_by_turn
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .bind(turn_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let closure_required = stored.is_some()
-            || !matches!(
-                observed,
-                lash_core_execution::TurnCancelIntentSnapshot::Absent
-            );
-        if closure_required != settlement.is_some()
-            || closure.is_some_and(|authorization| {
-                authorization.session_id() != session_id || authorization.turn_id() != turn_id
-            })
-        {
-            return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                session_id: session_id.clone(),
-                turn_id: turn_id.clone(),
-            });
-        }
-        if let Some(closure) = closure {
-            let expected = serde_json::to_string(closure).map_err(|error| {
-                StoreError::RecordEncodingFailed {
-                    record_kind: "TurnCancelClosureAuthorization".to_string(),
-                    message: error.to_string(),
-                }
-            })?;
-            if stored.as_deref() != Some(expected.as_str()) {
-                return Err(StoreError::TurnCancelClosureAuthorizationMismatch {
-                    session_id: session_id.clone(),
-                    turn_id: turn_id.clone(),
-                });
-            }
-        }
-        let repaired = repair_orphaned_active_turn_inputs_tx(
-            &mut tx,
-            session_id,
-            session_execution_lease.fencing_token,
-            turn_id,
-            observed,
-            settlement,
-        )
-        .await?;
-        if settlement.is_some()
-            && matches!(
-                repaired,
-                lash_core_execution::TurnCancelRepairResult::Applied(_)
-            )
-        {
-            sqlx::query(
-                crate::turn_ingress::turn_ingress_sql()
-                    .closures
-                    .delete_by_turn
-                    .sql(),
-            )
-            .bind(session_id.as_str())
-            .bind(turn_id.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        }
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(repaired)
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.list_queued_work_pg(session_id).await
+    }
+
+    async fn list_open_queued_work(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        self.list_open_queued_work_pg(session_id).await
     }
 }
 

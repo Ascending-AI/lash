@@ -29,6 +29,7 @@ pub use super::process_scheduling::ProcessWorkflowStartFailure;
 
 use serde::{Serialize, de::DeserializeOwned};
 
+use crate::compat::Reply;
 use crate::durable_wait::{
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitDeadline,
     RestateDurableWaitEffectRequest, RestateDurableWaitGroupChildMembershipRequest,
@@ -1058,7 +1059,7 @@ macro_rules! impl_restate_controller_context {
                     )
                     .call();
                     Box::pin(async move {
-                        let Json(()) = call.await?;
+                        call.await?;
                         Ok(())
                     })
                 }
@@ -1078,24 +1079,23 @@ macro_rules! impl_restate_controller_context {
                         let start = namespace.durable_wait_workflow(self,
                                 address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request.clone().into()))
+                            .await_resolution(request.clone().into())
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
                         let call = start.call();
                         restate_sdk::select! {
                             result = call => {
-                                let Json(resolution) = result?;
-                                Ok(resolution)
+                                Ok(result?.into_body())
                             },
                             on_cancel => {
                                 let resolve_request = namespace.durable_wait_registry(self,
                                         durable_wait_index_object_key(&address),
                                     )
-                                    .resolve(Json(RestateDurableWaitResolveRequest {
+                                    .resolve(RestateDurableWaitResolveRequest {
                                         key: request.key,
                                         resolution: Resolution::Cancelled,
-                                    }))
+                                    })
                                     .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                let Json(response) = resolve_request.call().await?;
+                                let response = resolve_request.call().await?.into_body();
                                 // A cancel-decided child's key refuses the
                                 // release (ADR 0099 §4): the waiter was
                                 // cancelled either way.
@@ -1143,7 +1143,7 @@ macro_rules! impl_restate_controller_context {
                             let event = namespace.durable_wait_workflow(self,
                                     event_address.workflow_key.clone(),
                                 )
-                                .await_resolution(Json(request.into()))
+                                .await_resolution(request.into())
                                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
                             let event = erase_gate_wait(event.call());
                             let Some(promise) =
@@ -1161,15 +1161,15 @@ macro_rules! impl_restate_controller_context {
                                     let resolve = namespace.durable_wait_registry(self,
                                             durable_wait_index_object_key(&event_address),
                                         )
-                                        .resolve(Json(RestateDurableWaitResolveRequest {
+                                        .resolve(RestateDurableWaitResolveRequest {
                                             key: event_key,
                                             resolution: Resolution::Cancelled,
-                                        }))
+                                        })
                                         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                    let Json(_) = resolve.call().await?;
+                                    resolve.call().await?;
                                     Ok(RestateTurnCancelRaceOutcome::ProcessCancelled)
                                 }
-                                outcome => Ok(outcome.map(|Json(resolution)| resolution)),
+                                outcome => Ok(outcome.map(Reply::into_body)),
                             };
                         };
 
@@ -1187,7 +1187,7 @@ macro_rules! impl_restate_controller_context {
                         let event = namespace.durable_wait_workflow(self,
                                 event_address.workflow_key.clone(),
                             )
-                            .await_resolution(Json(request.into()))
+                            .await_resolution(request.into())
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key.clone());
                         let event = erase_gate_wait(event.call());
                         match race_turn_cancel_gate(
@@ -1200,8 +1200,8 @@ macro_rules! impl_restate_controller_context {
                         )
                         .await?
                         {
-                            RestateTurnCancelRaceOutcome::Completed(Json(resolution)) => {
-                                Ok(RestateTurnCancelRaceOutcome::Completed(resolution))
+                            RestateTurnCancelRaceOutcome::Completed(reply) => {
+                                Ok(RestateTurnCancelRaceOutcome::Completed(reply.into_body()))
                             }
                             RestateTurnCancelRaceOutcome::TurnCancelled => {
                                 // Release the losing event wait. The retired
@@ -1212,17 +1212,17 @@ macro_rules! impl_restate_controller_context {
                                 let resolve = namespace.durable_wait_registry(self,
                                         durable_wait_index_object_key(&event_address),
                                     )
-                                    .resolve(Json(RestateDurableWaitResolveRequest {
+                                    .resolve(RestateDurableWaitResolveRequest {
                                         key: event_key,
                                         resolution: Resolution::Cancelled,
-                                    }))
+                                    })
                                     .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
-                                let Json(_) = resolve.call().await?;
+                                resolve.call().await?;
                                 Ok(RestateTurnCancelRaceOutcome::TurnCancelled)
                             }
                             outcome @ (RestateTurnCancelRaceOutcome::SessionRevoked { .. }
                             | RestateTurnCancelRaceOutcome::ProcessCancelled) => {
-                                Ok(outcome.map(|Json(resolution)| resolution))
+                                Ok(outcome.map(Reply::into_body))
                             }
                         }
                     })
@@ -1243,7 +1243,7 @@ macro_rules! impl_restate_controller_context {
                     let send = namespace.process_attach(self,
                             crate::process_attach::process_attach_workflow_key(&request.key),
                         )
-                        .run(Json(request))
+                        .run(request)
                         .send();
                     Box::pin(async move {
                         send.await?;
@@ -1261,7 +1261,7 @@ macro_rules! impl_restate_controller_context {
                 {
                     let call = crate::process::await_terminal_on_stable_root(self, namespace, process_id).call();
                     Box::pin(async move {
-                        let Json(output) = call.await?;
+                        let output = call.await?.into_body();
                         Ok(output)
                     })
                 }
@@ -1288,7 +1288,7 @@ macro_rules! impl_restate_controller_context {
                                 ProcessCancelRace::NotRaced => None,
                             };
                             let Some(promise) = promise else {
-                                let Json(output) = terminal.await?;
+                                let output = terminal.await?.into_body();
                                 return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
                             };
                             // The terminal call's command, then the promise's.
@@ -1302,7 +1302,7 @@ macro_rules! impl_restate_controller_context {
                                     .cancel();
                                 return Ok(RestateTurnCancelRaceOutcome::ProcessCancelled);
                             }
-                            let Json(output) = terminal.await?;
+                            let output = terminal.await?.into_body();
                             return Ok(RestateTurnCancelRaceOutcome::Completed(Box::new(output)));
                         };
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
@@ -1345,7 +1345,7 @@ macro_rules! impl_restate_controller_context {
                             winning_branch,
                             "Restate process-await adjudication"
                         );
-                        Ok(outcome.map(|Json(output)| Box::new(output)))
+                        Ok(outcome.map(|reply| Box::new(reply.into_body())))
                     })
                 }
 
@@ -1359,13 +1359,13 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.durable_wait_registry(self, index_key)
-                        .begin_effect(Json(RestateDurableWaitEffectRequest {
+                        .begin_effect(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
-                        }))
+                        })
                         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
                     Box::pin(async move {
-                        let Json(admitted) = call.await?;
+                        let admitted = call.await?.into_body();
                         Ok(admitted)
                     })
                 }
@@ -1379,13 +1379,13 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.durable_wait_registry(self, index_key)
-                        .end_effect(Json(RestateDurableWaitEffectRequest {
+                        .end_effect(RestateDurableWaitEffectRequest {
                             replay_key: replay_key.clone(),
-                        }))
+                        })
                         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
                     Box::pin(async move {
-                        let Json(()) = call.await?;
+                        call.await?;
                         Ok(())
                     })
                 }
@@ -1399,10 +1399,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.durable_wait_registry(self, index_key)
-                        .record_group(Json(RestateDurableWaitGroupRequest { group_key }))
+                        .record_group(RestateDurableWaitGroupRequest { group_key })
                         .call();
                     Box::pin(async move {
-                        let Json(admitted) = call.await?;
+                        let admitted = call.await?.into_body();
                         Ok(admitted)
                     })
                 }
@@ -1419,7 +1419,7 @@ macro_rules! impl_restate_controller_context {
                         .probe()
                         .call();
                     Box::pin(async move {
-                        let Json(response) = call.await?;
+                        let response = call.await?.into_body();
                         Ok(response)
                     })
                 }
@@ -1434,17 +1434,14 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = self
-                        .request::<Json<Vec<lash_core::RuntimeEffectEnvelope>>, Json<Option<usize>>>(
+                        .request::<crate::Call<Vec<lash_core::RuntimeEffectEnvelope>>, Reply<Option<usize>>>(
                             restate_sdk::context::RequestTarget::workflow(
                                 route, group_key, "preflight",
                             ),
-                            Json(children),
+                            crate::Call::new(children),
                         )
                         .call();
-                    Box::pin(async move {
-                        let Json(response) = call.await?;
-                        Ok(response)
-                    })
+                    Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
                 fn effect_group_open<'run>(
@@ -1457,10 +1454,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .open(Json(request))
+                        .open(request)
                         .call();
                     Box::pin(async move {
-                        let Json(response) = call.await?;
+                        let response = call.await?.into_body();
                         Ok(response)
                     })
                 }
@@ -1474,13 +1471,13 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let handle = self
-                        .request::<Json<EffectGroupDispatchRequest>, Json<()>>(
+                        .request::<crate::Call<EffectGroupDispatchRequest>, Reply<()>>(
                             restate_sdk::context::RequestTarget::workflow(
                                 route,
                                 request.group_key.clone(),
                                 "run",
                             ),
-                            Json(request),
+                            crate::Call::new(request),
                         )
                         .send();
                     Box::pin(async move {
@@ -1499,10 +1496,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .read_rank(Json(request))
+                        .read_rank(request)
                         .call();
                     Box::pin(async move {
-                        let Json(response) = call.await?;
+                        let response = call.await?.into_body();
                         Ok(response)
                     })
                 }
@@ -1519,7 +1516,7 @@ macro_rules! impl_restate_controller_context {
                         .get()
                         .call();
                     Box::pin(async move {
-                        let Json(response) = call.await?;
+                        let response = call.await?.into_body();
                         Ok(response)
                     })
                 }
@@ -1534,10 +1531,10 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .close(Json(request))
+                        .close(request)
                         .call();
                     Box::pin(async move {
-                        let Json(response) = call.await?;
+                        let response = call.await?.into_body();
                         Ok(response)
                     })
                 }
@@ -1551,14 +1548,14 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.durable_wait_registry(self, index_key)
-                        .group_child_membership(Json(
+                        .group_child_membership(
                             RestateDurableWaitGroupChildMembershipRequest {
                                 replay_key: replay_key.clone(),
                             },
-                        ))
+                        )
                         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                         .call();
-                    Box::pin(async move { call.await.map(|Json(group_key)| group_key) })
+                    Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
                 fn effect_group_commit_child<'run>(
@@ -1571,9 +1568,9 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .commit_child(Json(request))
+                        .commit_child(request)
                         .call();
-                    Box::pin(async move { call.await.map(|Json(response)| response) })
+                    Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
                 fn effect_group_admit_semantic<'run>(
@@ -1586,9 +1583,9 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .admit_semantic(Json(request))
+                        .admit_semantic(request)
                         .call();
-                    Box::pin(async move { call.await.map(|Json(response)| response) })
+                    Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
                 fn effect_group_drain_blockers<'run>(
@@ -1601,9 +1598,9 @@ macro_rules! impl_restate_controller_context {
                     'ctx: 'run,
                 {
                     let call = namespace.effect_group_state(self, group_key)
-                        .drain_blockers(Json(EffectGroupDrainBlockersRequest { commit_seq }))
+                        .drain_blockers(EffectGroupDrainBlockersRequest { commit_seq })
                         .call();
-                    Box::pin(async move { call.await.map(|Json(response)| response) })
+                    Box::pin(async move { call.await.map(Reply::into_body) })
                 }
 
                 fn await_effect_group_wait<'run>(
@@ -1620,7 +1617,7 @@ macro_rules! impl_restate_controller_context {
                     Box::pin(async move {
                         let address = RestateDurableWaitAddress::for_key(&request.key);
                         let call = namespace.durable_wait_workflow(self, address.workflow_key)
-                            .await_resolution(Json(request.into()))
+                            .await_resolution(request.into())
                             .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                         let Some(turn_cancel) = turn_cancel else {
                             // The rank wait's CallCommand, then the promise's.
@@ -1635,7 +1632,7 @@ macro_rules! impl_restate_controller_context {
                                 Some(promise) => race_process_cancel(promise, wait).await?,
                                 None => RestateTurnCancelRaceOutcome::Completed(wait.await?),
                             };
-                            return Ok(outcome.map(|Json(resolution)| resolution));
+                            return Ok(outcome.map(Reply::into_body));
                         };
                         let Some(session_id) = turn_cancel.key.scope.session_id().cloned()
                         else {
@@ -1656,7 +1653,7 @@ macro_rules! impl_restate_controller_context {
                             move || wait,
                         )
                         .await?
-                        .map(|Json(resolution)| resolution))
+                        .map(Reply::into_body))
                     })
                 }
 

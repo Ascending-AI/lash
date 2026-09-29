@@ -1,6 +1,7 @@
 use super::*;
 
-trait ClaimRows {
+/// The rows of one admitted set, keyed by row id.
+trait AdmittedRows {
     type Row;
 
     fn rows(&self) -> &[Self::Row];
@@ -8,7 +9,7 @@ trait ClaimRows {
     fn retain_rows(&mut self, overlapping: &std::collections::BTreeSet<String>);
 }
 
-impl ClaimRows for crate::QueuedWorkClaimData {
+impl AdmittedRows for crate::AdmittedQueuedWork {
     type Row = crate::QueuedWorkBatch;
 
     fn rows(&self) -> &[Self::Row] {
@@ -25,7 +26,7 @@ impl ClaimRows for crate::QueuedWorkClaimData {
     }
 }
 
-impl ClaimRows for crate::TurnInputClaimData {
+impl AdmittedRows for crate::AdmittedTurnInputs {
     type Row = crate::PendingTurnInput;
 
     fn rows(&self) -> &[Self::Row] {
@@ -44,78 +45,43 @@ impl ClaimRows for crate::TurnInputClaimData {
     }
 }
 
-fn compare_claim_authority<C>(
-    left: &crate::WorkClaim<C>,
-    right: &crate::WorkClaim<C>,
-) -> std::cmp::Ordering {
-    (left.session_lease_generation, left.fencing_token)
-        .cmp(&(right.session_lease_generation, right.fencing_token))
-}
-
-fn merge_pending_claim_authority<C: ClaimRows>(
-    pending_claims: &mut [&mut crate::WorkClaim<C>],
-    incoming: &mut crate::WorkClaim<C>,
-    row_kind: &str,
-    mut on_lower_authority: impl FnMut(
-        &mut crate::WorkClaim<C>,
-        &mut crate::WorkClaim<C>,
-        &std::collections::BTreeSet<String>,
-    ),
-) -> Result<(), RuntimeError> {
-    for pending in pending_claims.iter_mut() {
-        let overlapping = pending
-            .data
-            .rows()
-            .iter()
-            .filter(|pending_row| {
-                incoming
-                    .data
-                    .rows()
-                    .iter()
-                    .any(|incoming_row| C::row_key(incoming_row) == C::row_key(pending_row))
-            })
-            .map(|row| C::row_key(row).to_string())
-            .collect::<std::collections::BTreeSet<_>>();
-        if overlapping.is_empty() {
-            continue;
-        }
-
-        match compare_claim_authority(*pending, incoming) {
-            std::cmp::Ordering::Less => {
-                on_lower_authority(pending, incoming, &overlapping);
-                pending.data.retain_rows(&overlapping);
-            }
-            std::cmp::Ordering::Greater => incoming.data.retain_rows(&overlapping),
-            std::cmp::Ordering::Equal
-                if pending.claim_id == incoming.claim_id
-                    && pending.lease_token == incoming.lease_token =>
-            {
-                incoming.data.retain_rows(&overlapping);
-            }
-            std::cmp::Ordering::Equal => {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::StoreCommitFailed,
-                    format!(
-                        "{row_kind} rows {overlapping:?} have conflicting claim authorities `{}` and `{}` at session generation {} and fencing token {}",
-                        pending.claim_id,
-                        incoming.claim_id,
-                        incoming.session_lease_generation,
-                        incoming.fencing_token,
-                    ),
-                ));
-            }
-        }
+/// Drop from `incoming` every row one of `held` already names, and answer
+/// those rows' ids.
+///
+/// A row is admitted to one root once (FIG-3927), so a row two admitted sets
+/// both name is the same binding reported twice — a replayed checkpoint
+/// outcome re-delivering the rows its turn already drives — never a second
+/// authority over it. The set that already holds it keeps it.
+fn drop_held_rows<C: AdmittedRows>(
+    held: &[C],
+    incoming: &mut C,
+) -> std::collections::BTreeSet<String> {
+    let overlapping = held
+        .iter()
+        .flat_map(|held| held.rows().iter())
+        .map(|row| C::row_key(row))
+        .filter(|key| {
+            incoming
+                .rows()
+                .iter()
+                .any(|incoming_row| C::row_key(incoming_row) == *key)
+        })
+        .map(str::to_string)
+        .collect::<std::collections::BTreeSet<_>>();
+    if !overlapping.is_empty() {
+        incoming.retain_rows(&overlapping);
     }
-    Ok(())
+    overlapping
 }
 
-/// Whether an incoming queued-work claim names a batch this turn already
-/// drives, which marks it as a superseded replay rather than new work.
-fn claim_shares_queued_batches(
-    pending_claims: &[crate::QueuedWorkClaim],
-    incoming: &crate::QueuedWorkClaim,
+/// Whether an incoming queued-work admission names a batch this turn already
+/// drives, which marks it as a replay of the turn's own work rather than new
+/// work.
+fn shares_queued_batches(
+    pending: &[crate::AdmittedQueuedWork],
+    incoming: &crate::AdmittedQueuedWork,
 ) -> bool {
-    pending_claims.iter().any(|pending| {
+    pending.iter().any(|pending| {
         pending.batches.iter().any(|pending_batch| {
             incoming
                 .batches
@@ -125,13 +91,14 @@ fn claim_shares_queued_batches(
     })
 }
 
-/// Whether an incoming turn-input claim names a row this turn already drives.
-fn claim_shares_turn_input_rows(
-    pending_drives: &[crate::TurnInputClaim],
-    incoming: &crate::TurnInputClaim,
+/// Whether an incoming turn-input admission names a row this turn already
+/// drives.
+fn shares_turn_input_rows(
+    pending: &[crate::AdmittedTurnInputs],
+    incoming: &crate::AdmittedTurnInputs,
 ) -> bool {
-    pending_drives.iter().any(|drive| {
-        drive.inputs.iter().any(|pending_input| {
+    pending.iter().any(|pending| {
+        pending.inputs.iter().any(|pending_input| {
             incoming
                 .inputs
                 .iter()
@@ -140,75 +107,30 @@ fn claim_shares_turn_input_rows(
     })
 }
 
-fn merge_pending_queue_claim_authority(
-    pending_claims: &mut Vec<crate::QueuedWorkClaim>,
-    mut incoming: crate::QueuedWorkClaim,
-) -> Result<(), RuntimeError> {
-    let mut pending_refs = pending_claims.iter_mut().collect::<Vec<_>>();
-    merge_pending_claim_authority(
-        &mut pending_refs,
-        &mut incoming,
-        "queued-work",
-        |_, _, _| {},
-    )?;
-    drop(pending_refs);
-    pending_claims.retain(|claim| !claim.batches.is_empty());
+fn merge_queued_admission(
+    pending: &mut Vec<crate::AdmittedQueuedWork>,
+    mut incoming: crate::AdmittedQueuedWork,
+) {
+    drop_held_rows(pending, &mut incoming);
     if !incoming.batches.is_empty() {
-        pending_claims.push(incoming);
+        pending.push(incoming);
     }
-    Ok(())
 }
 
-/// Reconcile a checkpoint's fresh claim against the claims this turn already
-/// holds.
-///
-/// Every row a turn drives is held under a claim, including the journaled
-/// initial drive set (ADR 0069 §6), so every pending claim takes part.
-fn merge_pending_turn_input_claim_authority(
-    pending_drives: &mut Vec<crate::TurnInputClaim>,
-    incoming: &mut crate::TurnInputClaim,
-) -> Result<std::collections::BTreeSet<String>, RuntimeError> {
-    let mut already_delivered = std::collections::BTreeSet::new();
-    let mut pending_claims = pending_drives.iter_mut().collect::<Vec<_>>();
-    merge_pending_claim_authority(
-        &mut pending_claims,
-        incoming,
-        "turn-input",
-        |pending, incoming, overlapping| {
-            already_delivered.extend(overlapping.iter().cloned());
-            for application in pending
-                .applications
-                .iter()
-                .filter(|application| overlapping.contains(application.input_id.as_str()))
-            {
-                if !incoming
-                    .applications
-                    .iter()
-                    .any(|existing| existing.input_id == application.input_id)
-                {
-                    incoming.applications.push(application.clone());
-                }
-            }
-        },
-    )?;
-    drop(pending_claims);
-    pending_drives.retain(|drive| !drive.inputs.is_empty());
-    Ok(already_delivered)
-}
-
-fn merge_pending_checkpoint_turn_input_claim(
-    pending: &mut Option<crate::TurnInputClaim>,
-    incoming: crate::TurnInputClaim,
+fn merge_pending_checkpoint_turn_inputs(
+    pending: &mut Option<crate::AdmittedTurnInputs>,
+    incoming: crate::AdmittedTurnInputs,
 ) -> Result<(), RuntimeError> {
     match pending.as_ref() {
         None => *pending = Some(incoming),
-        Some(existing) if existing.claim_id == incoming.claim_id => {}
+        Some(existing) if existing.input_ids() == incoming.input_ids() => {}
         Some(existing) => {
             return Err(RuntimeError::new(
                 RuntimeErrorCode::StoreCommitFailed,
                 format!(
-                    "checkpoint replay returned turn-input claim `{}` while `{}` is pending",
-                    incoming.claim_id, existing.claim_id
+                    "checkpoint replay returned turn inputs {:?} while {:?} are pending",
+                    incoming.input_ids(),
+                    existing.input_ids()
                 ),
             ));
         }
@@ -216,72 +138,59 @@ fn merge_pending_checkpoint_turn_input_claim(
     Ok(())
 }
 
-/// The claims a turn holds, as the checkpoint fold updates them.
-struct TurnClaimSlots<'a> {
-    pending_queue_claims: &'a mut Vec<crate::QueuedWorkClaim>,
-    pending_turn_input_claims: &'a mut Vec<crate::TurnInputClaim>,
-    pending_checkpoint_turn_input_claim: &'a mut Option<crate::TurnInputClaim>,
+/// The admitted sets a turn holds, as the checkpoint fold updates them.
+struct TurnAdmissionSlots<'a> {
+    pending_queued: &'a mut Vec<crate::AdmittedQueuedWork>,
+    pending_turn_inputs: &'a mut Vec<crate::AdmittedTurnInputs>,
+    pending_checkpoint_turn_inputs: &'a mut Option<crate::AdmittedTurnInputs>,
     withheld_terminal_work: &'a mut crate::runtime::logical_turn::WithheldTerminalWork,
 }
 
-/// Folds a checkpoint's recorded claim set into the turn's claims by the rule
-/// the step body applied when it claimed them: at a terminal checkpoint, a
-/// claim this turn does not already drive is withheld work, not this turn's to
-/// settle.
-fn absorb_checkpoint_claims(
-    slots: TurnClaimSlots<'_>,
+/// Folds a checkpoint's recorded admitted set into the turn's rows by the
+/// rule the step body applied when it admitted them: at a terminal
+/// checkpoint, a row this turn does not already drive is withheld work, not
+/// this turn's to settle.
+fn absorb_checkpoint_admissions(
+    slots: TurnAdmissionSlots<'_>,
     checkpoint: CheckpointKind,
-    queued_work_claims: Vec<crate::QueuedWorkClaim>,
-    turn_input_claim: Option<crate::TurnInputClaim>,
+    queued_work: Vec<crate::AdmittedQueuedWork>,
+    turn_inputs: Option<crate::AdmittedTurnInputs>,
 ) -> Result<(), RuntimeError> {
-    let TurnClaimSlots {
-        pending_queue_claims,
-        pending_turn_input_claims,
-        pending_checkpoint_turn_input_claim,
+    let TurnAdmissionSlots {
+        pending_queued,
+        pending_turn_inputs,
+        pending_checkpoint_turn_inputs,
         withheld_terminal_work,
     } = slots;
-    let withholds_claimed_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
-    for claim in queued_work_claims {
-        if withholds_claimed_work && !claim_shares_queued_batches(pending_queue_claims, &claim) {
-            merge_pending_queue_claim_authority(&mut withheld_terminal_work.queued, claim)?;
+    let withholds_admitted_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
+    for queued in queued_work {
+        if withholds_admitted_work && !shares_queued_batches(pending_queued, &queued) {
+            merge_queued_admission(&mut withheld_terminal_work.queued, queued);
         } else {
-            merge_pending_queue_claim_authority(pending_queue_claims, claim)?;
+            merge_queued_admission(pending_queued, queued);
         }
     }
-    if let Some(mut claim) = turn_input_claim {
-        if withholds_claimed_work
-            && !claim_shares_turn_input_rows(pending_turn_input_claims, &claim)
-            && !pending_checkpoint_turn_input_claim
+    if let Some(mut admitted) = turn_inputs {
+        if withholds_admitted_work
+            && !shares_turn_input_rows(pending_turn_inputs, &admitted)
+            && !pending_checkpoint_turn_inputs
                 .as_ref()
                 .is_some_and(|pending| {
-                    pending.inputs.iter().any(|input| {
-                        claim
-                            .inputs
-                            .iter()
-                            .any(|incoming| incoming.input_id == input.input_id)
-                    })
+                    shares_turn_input_rows(std::slice::from_ref(pending), &admitted)
                 })
         {
-            merge_pending_turn_input_claim_authority(
-                &mut withheld_terminal_work.turn_inputs,
-                &mut claim,
-            )?;
-            if !claim.inputs.is_empty() {
-                withheld_terminal_work.turn_inputs.push(claim);
+            drop_held_rows(&withheld_terminal_work.turn_inputs, &mut admitted);
+            if !admitted.inputs.is_empty() {
+                withheld_terminal_work.turn_inputs.push(admitted);
             }
         } else {
-            // A replayed checkpoint outcome can re-deliver a claim this turn
-            // already drives — the withheld claim a follow-on turn was admitted
-            // with is carried by the journaled claim set. Reconcile it against
-            // the resident drives first so the same authority registers exactly
-            // one drive; only rows no drive covers are new work for the pending
-            // checkpoint slot.
-            merge_pending_turn_input_claim_authority(pending_turn_input_claims, &mut claim)?;
-            if !claim.inputs.is_empty() {
-                merge_pending_checkpoint_turn_input_claim(
-                    pending_checkpoint_turn_input_claim,
-                    claim,
-                )?;
+            // A replayed checkpoint outcome can re-deliver rows this turn
+            // already drives — the withheld rows a follow-on turn was admitted
+            // with are carried by the journaled admitted set. Only rows no
+            // drive covers are new work for the pending checkpoint slot.
+            drop_held_rows(pending_turn_inputs, &mut admitted);
+            if !admitted.inputs.is_empty() {
+                merge_pending_checkpoint_turn_inputs(pending_checkpoint_turn_inputs, admitted)?;
             }
         }
     }
@@ -289,41 +198,34 @@ fn absorb_checkpoint_claims(
 }
 
 impl RuntimeTurnDriver<'_> {
-    fn merge_pending_queue_claim_authority(
-        &mut self,
-        claim: crate::QueuedWorkClaim,
-    ) -> Result<(), RuntimeError> {
-        merge_pending_queue_claim_authority(&mut self.pending_queue_claims, claim)
-    }
-
     pub(in crate::runtime) async fn execute_checkpoint_locally(
         &mut self,
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
+        step: &str,
         event_tx: &TurnObserver,
     ) -> RuntimeEffectOutcome {
         let result = self
-            .run_checkpoint(messages, protocol_iteration, checkpoint, event_tx)
+            .run_checkpoint(messages, protocol_iteration, checkpoint, step, event_tx)
             .await
             .map_err(RuntimeEffectControllerError::from);
         RuntimeEffectOutcome::Checkpoint {
             result,
-            claims: Box::new(crate::runtime::effect::CheckpointClaimSet {
-                // A checkpoint outcome is a self-contained authority snapshot.
-                // Replay must never reconstruct it from mutations to the
-                // driver's resident claim set. Work withheld from a terminal
-                // checkpoint (FIG-3157) is part of that authority: replay
-                // routes it back by the same rule that withheld it, so the
-                // journal needs no new shape to carry it.
-                queued_work_claims: self
-                    .pending_queue_claims
+            admitted: Box::new(crate::runtime::effect::CheckpointAdmittedSet {
+                // A checkpoint outcome is a self-contained snapshot of the
+                // rows the turn holds. Replay must never reconstruct it from
+                // mutations to the driver's resident sets. Work withheld from
+                // a terminal checkpoint (FIG-3157) is part of it: replay
+                // routes it back by the same rule that withheld it.
+                queued_work: self
+                    .pending_queued
                     .iter()
                     .chain(self.withheld_terminal_work.queued.iter())
                     .cloned()
                     .collect(),
-                turn_input_claim: self
-                    .pending_checkpoint_turn_input_claim
+                turn_inputs: self
+                    .pending_checkpoint_turn_inputs
                     .clone()
                     .or_else(|| self.withheld_terminal_work.turn_inputs.last().cloned()),
                 incorporation: self.opener_state.ledger_snapshot(),
@@ -344,7 +246,7 @@ impl RuntimeTurnDriver<'_> {
         if !self.holds_capture_tail() {
             self.capture_base = self.capture_base.saturating_add(1);
         }
-        let (result, claims) = self
+        let (result, admitted) = self
             .execute_typed_turn_effect(
                 machine,
                 event_tx,
@@ -357,11 +259,11 @@ impl RuntimeTurnDriver<'_> {
             .await?;
         // The hold belongs to the iteration this checkpoint closed.
         self.interrupted_calls = false;
-        let crate::runtime::effect::CheckpointClaimSet {
-            queued_work_claims,
-            turn_input_claim,
+        let crate::runtime::effect::CheckpointAdmittedSet {
+            queued_work,
+            turn_inputs,
             incorporation,
-        } = claims;
+        } = admitted;
         // A replayed checkpoint is the authority for everything the turn
         // incorporated and enqueued before it. The cells before it re-run on
         // replay (ADR 0103) and re-incorporate the same settlements, which
@@ -371,12 +273,12 @@ impl RuntimeTurnDriver<'_> {
         // empty and this drains nothing.
         self.checkpoint_messages.drain();
         self.opener_state.absorb_ledger(incorporation);
-        // The recorded claim set is the only way the checkpoint's claims
+        // The recorded admitted set is the only way the checkpoint's rows
         // reach this driver: the step body ran on a copy of it. It is folded
-        // in before the result is read, so a checkpoint that claimed work and
-        // then failed hands that work to the failure path on the live pass
-        // and on every replay alike.
-        self.absorb_checkpoint_claims(checkpoint, queued_work_claims, turn_input_claim)
+        // in before the result is read, so a checkpoint that admitted work
+        // and then failed hands that work to the failure path on the live
+        // pass and on every replay alike.
+        self.absorb_checkpoint_admissions(checkpoint, queued_work, turn_inputs)
             .map_err(RuntimeEffectControllerError::from)?;
         // A failed checkpoint is part of the checkpoint's own recorded
         // outcome: the journal holds it, and every redrive replays it. It is
@@ -385,22 +287,22 @@ impl RuntimeTurnDriver<'_> {
         result.map_err(RuntimeEffectControllerError::into_journaled)
     }
 
-    fn absorb_checkpoint_claims(
+    fn absorb_checkpoint_admissions(
         &mut self,
         checkpoint: CheckpointKind,
-        queued_work_claims: Vec<crate::QueuedWorkClaim>,
-        turn_input_claim: Option<crate::TurnInputClaim>,
+        queued_work: Vec<crate::AdmittedQueuedWork>,
+        turn_inputs: Option<crate::AdmittedTurnInputs>,
     ) -> Result<(), RuntimeError> {
-        absorb_checkpoint_claims(
-            TurnClaimSlots {
-                pending_queue_claims: &mut self.pending_queue_claims,
-                pending_turn_input_claims: &mut self.pending_turn_input_claims,
-                pending_checkpoint_turn_input_claim: &mut self.pending_checkpoint_turn_input_claim,
+        absorb_checkpoint_admissions(
+            TurnAdmissionSlots {
+                pending_queued: &mut self.pending_queued,
+                pending_turn_inputs: &mut self.pending_turn_inputs,
+                pending_checkpoint_turn_inputs: &mut self.pending_checkpoint_turn_inputs,
                 withheld_terminal_work: &mut self.withheld_terminal_work,
             },
             checkpoint,
-            queued_work_claims,
-            turn_input_claim,
+            queued_work,
+            turn_inputs,
         )
     }
 
@@ -509,81 +411,96 @@ impl RuntimeTurnDriver<'_> {
         messages: crate::MessageSequence,
         protocol_iteration: usize,
         checkpoint: CheckpointKind,
+        step: &str,
         event_tx: &TurnObserver,
     ) -> Result<crate::CheckpointDelivery, RuntimeError> {
         let mut committed = self.checkpoint_messages.drain();
         let mut transient_messages = Vec::new();
         let mut committed_user_messages = Vec::new();
         let mut turn_causes = Vec::new();
-        let (turn_input_claim, queue_claim) = if let Some(store) = self.session.history_store() {
-            if let Some(session_execution_lease) = self.session_execution_lease.as_ref() {
-                let mut claim_policy = self
+        // Only a turn that runs under an admitted root admits at its
+        // checkpoints: the rows bind to that root, keyed by this step, under
+        // the root's drive fence (FIG-3927).
+        let admission = match (
+            self.session.history_store(),
+            self.drive_fence.as_ref(),
+            self.drive_root.as_ref(),
+        ) {
+            (Some(store), Some(fence), Some(root)) => {
+                let mut policy = self
                     .host
                     .core
                     .durability
                     .queued_work_batching
-                    .claim_policy(self.policy.context_window_tokens());
-                claim_policy.max_rows = self
+                    .admission_policy(self.policy.context_window_tokens());
+                policy.max_rows = self
                     .turn_context
-                    .checkpoint_queued_work_limit(claim_policy.max_rows);
-                match store
-                    .claim_checkpoint_work(
-                        &self.session_id,
-                        session_execution_lease,
-                        &session_execution_lease.owner,
-                        &self.turn_id,
+                    .checkpoint_queued_work_limit(policy.max_rows);
+                store
+                    .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
+                        fence: fence.clone(),
+                        root: root.clone(),
+                        turn_id: self.turn_id.clone(),
                         checkpoint,
-                        64,
-                        claim_policy,
-                    )
+                        step: step.to_string(),
+                        max_inputs: 64,
+                        policy,
+                    })
                     .await
-                {
-                    Ok(claims) => claims,
-                    Err(err @ crate::StoreError::SessionExecutionLeaseExpired { .. }) => {
-                        tracing::warn!(
-                            session_id = %self.session_id,
-                            turn_id = %self.turn_id,
-                            event = "session_execution_lease.checkpoint_advisory",
-                            cause = %err,
-                            "session execution lease expired; skipping advisory checkpoint claims"
-                        );
-                        self.session_execution_lease = None;
-                        (None, None)
-                    }
-                    Err(err) => return Err(crate::runtime::runtime_error_from_store_commit(err)),
-                }
-            } else {
-                (None, None)
+                    .map_err(crate::runtime::runtime_error_from_store_commit)?
             }
-        } else {
-            (None, None)
+            _ => crate::store::CheckpointAdmission::default(),
         };
+        if let Some(root) = self.drive_root.as_ref()
+            && !admission.is_empty()
+        {
+            let causes = admission
+                .queued
+                .as_ref()
+                .map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
+                .unwrap_or_default();
+            self.emit_trace(
+                protocol_iteration,
+                lash_trace::TraceEvent::Custom {
+                    name: "ingress.admitted".to_string(),
+                    payload: ingress_admitted_trace_payload(
+                        root,
+                        step,
+                        crate::AdmissionBoundary::ActiveTurnCheckpoint,
+                        admission.inputs.as_ref(),
+                        admission.queued.as_ref(),
+                        &causes,
+                    ),
+                },
+            );
+        }
+        let crate::store::CheckpointAdmission {
+            inputs: turn_input_admission,
+            queued: queued_admission,
+        } = admission;
         debug_assert!(
-            self.pending_checkpoint_turn_input_claim.is_none(),
-            "checkpoint claims must be resolved before another checkpoint runs"
+            self.pending_checkpoint_turn_inputs.is_none(),
+            "checkpoint admissions must be resolved before another checkpoint runs"
         );
-        // FIG-3157: a terminal finish ends the turn, so work claimed at this
-        // boundary never extends it. The claim is withheld from the delivery
-        // and starts a follow-on turn inside the same logical run instead.
-        // The boundary that claimed it is still the boundary it reports.
-        let withholds_claimed_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
-        if let Some(mut claim) = turn_input_claim {
-            let already_delivered = merge_pending_turn_input_claim_authority(
-                &mut self.pending_turn_input_claims,
-                &mut claim,
-            )?;
-            // A claim that re-delivers rows this turn already committed is a
-            // superseded replay of this turn's own work, not new input: it
-            // settles here rather than starting a turn of its own.
-            if withholds_claimed_work && already_delivered.is_empty() && !claim.inputs.is_empty() {
-                merge_pending_turn_input_claim_authority(
-                    &mut self.withheld_terminal_work.turn_inputs,
-                    &mut claim,
-                )?;
+        // FIG-3157: a terminal finish ends the turn, so work admitted at this
+        // boundary never extends it. It is withheld from the delivery and
+        // starts a follow-on turn inside the same logical run instead. The
+        // boundary that admitted it is still the boundary it reports.
+        let withholds_admitted_work = matches!(checkpoint, CheckpointKind::BeforeCompletion);
+        if let Some(mut admitted) = turn_input_admission {
+            let already_delivered = drop_held_rows(&self.pending_turn_inputs, &mut admitted);
+            // Rows this turn already drives are a replay of its own work, not
+            // new input: they settle with the turn rather than starting a
+            // turn of their own.
+            if withholds_admitted_work
+                && already_delivered.is_empty()
+                && !admitted.inputs.is_empty()
+            {
+                drop_held_rows(&self.withheld_terminal_work.turn_inputs, &mut admitted);
                 // The row was accepted at this boundary; only the turn that
                 // renders it moves. Applications are recorded by that turn.
-                let accepted_turn_inputs = claim.accepted_turn_inputs();
-                self.withheld_terminal_work.turn_inputs.push(claim);
+                let accepted_turn_inputs = admitted.accepted_turn_inputs();
+                self.withheld_terminal_work.turn_inputs.push(admitted);
                 if !accepted_turn_inputs.is_empty() {
                     self.turn_observations.observe(
                         event_tx,
@@ -595,13 +512,8 @@ impl RuntimeTurnDriver<'_> {
                         ),
                     );
                 }
-            } else {
-                let mut delivery_claim = claim.clone();
-                delivery_claim
-                    .inputs
-                    .retain(|input| !already_delivered.contains(input.input_id.as_str()));
-                self.pending_checkpoint_turn_input_claim = Some(claim);
-                let materialized = delivery_claim
+            } else if !admitted.inputs.is_empty() {
+                let materialized = admitted
                     .materialize_checkpoint_turn_input(
                         &self.turn_id,
                         self.host.core.durability.attachment_store.as_ref(),
@@ -609,40 +521,25 @@ impl RuntimeTurnDriver<'_> {
                     )
                     .await
                     .map_err(|err| RuntimeError::new(RuntimeErrorCode::StoreCommitFailed, err))?;
+                self.pending_checkpoint_turn_inputs = Some(admitted);
                 committed_user_messages.extend(materialized.messages);
                 turn_causes.extend(materialized.turn_causes);
             }
         }
-        if let Some(claim) = queue_claim {
-            let materialized = claim.materialize_queued_checkpoint_work();
+        if let Some(queued) = queued_admission {
+            let materialized = queued.materialize_queued_checkpoint_work();
             send_queued_work_started_event(
                 event_tx,
                 &mut self.turn_observations,
-                crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                &claim,
+                crate::AdmissionBoundary::ActiveTurnCheckpoint,
+                &queued,
                 materialized.turn_causes.clone(),
             );
-            self.emit_trace(
-                protocol_iteration,
-                lash_trace::TraceEvent::Custom {
-                    name: "queued_work.claimed".to_string(),
-                    payload: queued_work_trace_payload(
-                        crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                        &claim,
-                        &materialized.turn_causes,
-                    ),
-                },
-            );
-            if withholds_claimed_work
-                && !claim_shares_queued_batches(&self.pending_queue_claims, &claim)
-            {
-                merge_pending_queue_claim_authority(
-                    &mut self.withheld_terminal_work.queued,
-                    claim,
-                )?;
+            if withholds_admitted_work && !shares_queued_batches(&self.pending_queued, &queued) {
+                merge_queued_admission(&mut self.withheld_terminal_work.queued, queued);
             } else {
                 turn_causes.extend(materialized.turn_causes);
-                self.merge_pending_queue_claim_authority(claim)?;
+                merge_queued_admission(&mut self.pending_queued, queued);
             }
         }
         let plugins = Arc::clone(self.session.plugins());
@@ -788,253 +685,12 @@ async fn normalize_plugin_attachment_source(
     Ok(())
 }
 
-#[cfg(test)]
-mod claim_authority_tests {
-    use super::*;
-
-    fn coalesced_batch(batch_id: &str, enqueue_seq: u64) -> crate::QueuedWorkBatch {
-        crate::QueuedWorkBatch {
-            batch_id: batch_id.to_string().into(),
-            session_id: SessionId::from("fig905"),
-            enqueue_seq,
-            source_key: Some(format!("fig905:{batch_id}")),
-            delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
-            kind: crate::QueuedWorkKind::Turn,
-            authority: crate::QueuedWorkAuthority::new("fig905"),
-            merge_key: Some("fig905".to_string()),
-            enqueued_at_ms: 0,
-            items: Vec::new(),
-        }
-    }
-
-    fn claim(
-        claim_id: &str,
-        generation: u64,
-        fencing_token: u64,
-        batches: &[(&str, u64)],
-    ) -> crate::QueuedWorkClaim {
-        crate::QueuedWorkClaim {
-            session_id: SessionId::from("fig905"),
-            claim_id: claim_id.to_string(),
-            owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
-            lease_token: format!("token:{claim_id}"),
-            fencing_token,
-            session_lease_generation: generation,
-            data: crate::QueuedWorkClaimData {
-                batches: batches
-                    .iter()
-                    .map(|(batch_id, enqueue_seq)| coalesced_batch(batch_id, *enqueue_seq))
-                    .collect(),
-                abandon_restore_claim_id: None,
-                abandon_restore_claim_token: None,
-            },
-        }
-    }
-
-    fn authorities(claims: &[crate::QueuedWorkClaim]) -> Vec<(&str, &str)> {
-        let mut rows = claims
-            .iter()
-            .flat_map(|claim| {
-                claim
-                    .batches
-                    .iter()
-                    .map(move |batch| (batch.batch_id.as_str(), claim.claim_id.as_str()))
-            })
-            .collect::<Vec<_>>();
-        rows.sort_unstable();
-        rows
-    }
-
-    fn pending_turn_input(input_id: &str) -> crate::PendingTurnInput {
-        crate::PendingTurnInput {
-            input_id: input_id.to_string().into(),
-            session_id: SessionId::from("fig905"),
-            enqueue_seq: 1,
-            source_key: None,
-            state: crate::TurnInputState::Accepted(crate::ActiveTurnIngress {
-                turn_id: "fig905-turn".into(),
-                min_boundary: crate::TurnInputCheckpointBoundary::AfterWork,
-            }),
-            enqueued_at_ms: 0,
-            input: crate::TurnInput::text("fig905 input"),
-            run_spec: None,
-        }
-    }
-
-    fn turn_input_claim(
-        claim_id: &str,
-        generation: u64,
-        fencing_token: u64,
-        input_ids: &[&str],
-    ) -> crate::TurnInputClaim {
-        crate::TurnInputClaim {
-            session_id: SessionId::from("fig905"),
-            claim_id: claim_id.to_string(),
-            owner: crate::LeaseOwnerIdentity::opaque("fig905", claim_id),
-            lease_token: format!("token:{claim_id}"),
-            fencing_token,
-            session_lease_generation: generation,
-            data: crate::TurnInputClaimData {
-                mode: crate::TurnInputClaimMode::ActiveTurn {
-                    turn_id: crate::TurnId::from("fig905-turn"),
-                    checkpoint: crate::CheckpointKind::AfterWork,
-                },
-                inputs: input_ids
-                    .iter()
-                    .map(|input_id| pending_turn_input(input_id))
-                    .collect(),
-                applications: Vec::new(),
-            },
-        }
-    }
-
-    #[test]
-    fn one_overlap_keeps_the_successor_in_the_complete_checkpoint_claim_set() {
-        let mut pending = vec![claim("predecessor", 1, 1, &[("a", 1)])];
-        merge_pending_queue_claim_authority(&mut pending, claim("successor", 2, 2, &[("a", 1)]))
-            .expect("merge one overlapping row");
-
-        assert_eq!(authorities(&pending), vec![("a", "successor")]);
-    }
-
-    #[test]
-    fn two_coalesced_overlaps_replace_both_rows_without_slice_arithmetic() {
-        let mut pending = vec![
-            claim("predecessor-a", 1, 1, &[("a", 1)]),
-            claim("predecessor-b", 1, 1, &[("b", 2)]),
-        ];
-        merge_pending_queue_claim_authority(
-            &mut pending,
-            claim("successor", 2, 2, &[("a", 1), ("b", 2)]),
-        )
-        .expect("merge the coalesced claim shape");
-
-        assert_eq!(
-            authorities(&pending),
-            vec![("a", "successor"), ("b", "successor")]
-        );
-    }
-
-    #[test]
-    fn partial_overlap_retains_the_predecessors_non_overlapping_row() {
-        let mut pending = vec![claim("predecessor", 1, 1, &[("a", 1), ("b", 2)])];
-        merge_pending_queue_claim_authority(&mut pending, claim("successor", 2, 2, &[("a", 1)]))
-            .expect("merge a partial overlap");
-
-        assert_eq!(
-            authorities(&pending),
-            vec![("a", "successor"), ("b", "predecessor")]
-        );
-    }
-
-    #[test]
-    fn restored_older_authority_cannot_replace_a_live_successor() {
-        let mut pending = vec![claim("successor", 3, 4, &[("a", 1)])];
-        merge_pending_queue_claim_authority(
-            &mut pending,
-            claim("restored-predecessor", 2, 3, &[("a", 1)]),
-        )
-        .expect("ignore stale replay authority");
-
-        assert_eq!(authorities(&pending), vec![("a", "successor")]);
-    }
-
-    #[test]
-    fn equal_queued_work_authority_with_different_claims_is_rejected() {
-        let mut pending = vec![claim("first", 2, 3, &[("a", 1)])];
-        let error = merge_pending_queue_claim_authority(
-            &mut pending,
-            claim("conflicting", 2, 3, &[("a", 1)]),
-        )
-        .expect_err("equal authority must not silently choose a queued-work claim");
-
-        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
-        assert!(error.message.contains("conflicting claim authorities"));
-        assert_eq!(authorities(&pending), vec![("a", "first")]);
-    }
-
-    #[test]
-    fn equal_turn_input_authority_with_different_claims_is_rejected() {
-        let mut pending = vec![turn_input_claim("first", 2, 3, &["input-a"])];
-        let mut incoming = turn_input_claim("conflicting", 2, 3, &["input-a"]);
-        let error = merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
-            .expect_err("equal authority must not silently choose a turn-input claim");
-
-        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
-        assert!(error.message.contains("conflicting claim authorities"));
-        assert_eq!(pending[0].claim_id, "first");
-    }
-
-    #[test]
-    fn lower_turn_input_authority_records_delivery_and_adopts_applications() {
-        let mut predecessor = turn_input_claim("predecessor", 1, 1, &["input-a"]);
-        predecessor.applications.push(crate::TurnInputApplication {
-            input_id: "input-a".into(),
-            source_key: None,
-            turn_id: crate::TurnId::from("fig905-turn"),
-            committed_message_id: "message-a".to_string(),
-            checkpoint: Some(crate::CheckpointKind::AfterWork),
-        });
-        let mut pending = vec![predecessor];
-        let mut incoming = turn_input_claim("successor", 2, 2, &["input-a"]);
-
-        let already_delivered =
-            merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
-                .expect("merge a lower-authority turn-input claim");
-
-        assert_eq!(
-            already_delivered,
-            std::collections::BTreeSet::from(["input-a".to_string()])
-        );
-        assert!(pending.is_empty());
-        assert_eq!(incoming.inputs.len(), 1);
-        assert_eq!(incoming.applications.len(), 1);
-        assert_eq!(incoming.applications[0].committed_message_id, "message-a");
-    }
-
-    #[test]
-    fn higher_turn_input_authority_discards_the_incoming_rows_and_applications() {
-        let mut pending = vec![turn_input_claim("successor", 2, 2, &["input-a"])];
-        let mut incoming = turn_input_claim("predecessor", 1, 1, &["input-a"]);
-        incoming.applications.push(crate::TurnInputApplication {
-            input_id: "input-a".into(),
-            source_key: None,
-            turn_id: crate::TurnId::from("fig905-turn"),
-            committed_message_id: "message-a".to_string(),
-            checkpoint: Some(crate::CheckpointKind::AfterWork),
-        });
-
-        let already_delivered =
-            merge_pending_turn_input_claim_authority(&mut pending, &mut incoming)
-                .expect("merge a higher-authority turn-input claim");
-
-        assert!(already_delivered.is_empty());
-        assert_eq!(pending.len(), 1);
-        assert!(incoming.inputs.is_empty());
-        assert!(incoming.applications.is_empty());
-    }
-
-    #[test]
-    fn checkpoint_replay_rejects_a_conflicting_pending_turn_input_claim() {
-        let mut pending = Some(turn_input_claim("pending", 2, 3, &["input-a"]));
-        let error = merge_pending_checkpoint_turn_input_claim(
-            &mut pending,
-            turn_input_claim("replayed", 1, 2, &["input-a"]),
-        )
-        .expect_err("replay must not replace a different pending checkpoint claim");
-
-        assert_eq!(error.code, RuntimeErrorCode::StoreCommitFailed);
-        assert!(error.message.contains("checkpoint replay returned"));
-        assert_eq!(pending.expect("pending claim survives").claim_id, "pending");
-    }
-}
-
-/// The checkpoint's claims reach the driver through its recorded outcome
-/// alone, so a failed terminal checkpoint hands the same claims to its
+/// The checkpoint's admitted rows reach the driver through its recorded
+/// outcome alone, so a failed terminal checkpoint hands the same rows to its
 /// failure path on the live pass and on every replay: cold, on a separate
 /// worker, and under perturbed scheduling.
 #[cfg(test)]
-mod checkpoint_claim_determinism_tests {
+mod checkpoint_admission_determinism_tests {
     use super::*;
     use crate::engine::testing::{
         DeterminismCheck, FailureCause, LocalEngine, LocalTestCx, ReplayMode, RunMode,
@@ -1043,65 +699,60 @@ mod checkpoint_claim_determinism_tests {
     use std::future::Future;
     use std::pin::Pin;
 
-    fn queued_claim(claim_id: &str, batch_id: &str) -> crate::QueuedWorkClaim {
-        crate::QueuedWorkClaim {
+    fn admitted_batch(batch_id: &str) -> crate::AdmittedQueuedWork {
+        crate::AdmittedQueuedWork {
             session_id: SessionId::from("p7"),
-            claim_id: claim_id.to_string(),
-            owner: crate::LeaseOwnerIdentity::opaque("p7", claim_id),
-            lease_token: format!("token:{claim_id}"),
-            fencing_token: 1,
-            session_lease_generation: 1,
-            data: crate::QueuedWorkClaimData {
-                batches: vec![crate::QueuedWorkBatch {
-                    batch_id: batch_id.to_string().into(),
-                    session_id: SessionId::from("p7"),
-                    enqueue_seq: 1,
-                    source_key: None,
-                    delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
-                    kind: crate::QueuedWorkKind::Turn,
-                    authority: crate::QueuedWorkAuthority::new("p7"),
-                    merge_key: None,
-                    enqueued_at_ms: 0,
-                    items: Vec::new(),
-                }],
-                abandon_restore_claim_id: None,
-                abandon_restore_claim_token: None,
-            },
+            batches: vec![crate::QueuedWorkBatch {
+                batch_id: batch_id.to_string().into(),
+                session_id: SessionId::from("p7"),
+                enqueue_seq: 1,
+                source_key: None,
+                delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
+                kind: crate::QueuedWorkKind::Turn,
+                authority: crate::QueuedWorkAuthority::new("p7"),
+                merge_key: None,
+                enqueued_at_ms: 0,
+                items: Vec::new(),
+            }],
         }
     }
 
-    /// The step body of a terminal checkpoint that claims `fresh` from the
-    /// store and then fails: its outcome is the failure plus the complete
-    /// claim set, the admitted claim included.
+    /// The step body of a terminal checkpoint that admits `fresh` and then
+    /// fails: its outcome is the failure plus the complete admitted set, the
+    /// root's own admission included.
     fn failed_checkpoint(
-        admitted: crate::QueuedWorkClaim,
-        fresh: crate::QueuedWorkClaim,
+        admitted: crate::AdmittedQueuedWork,
+        fresh: crate::AdmittedQueuedWork,
     ) -> RuntimeEffectOutcome {
         RuntimeEffectOutcome::Checkpoint {
             result: Err(RuntimeEffectControllerError::new(
                 RuntimeErrorCode::PluginCheckpoint,
                 "the checkpoint hook refused",
             )),
-            claims: Box::new(crate::runtime::effect::CheckpointClaimSet {
-                queued_work_claims: vec![admitted, fresh],
-                turn_input_claim: None,
+            admitted: Box::new(crate::runtime::effect::CheckpointAdmittedSet {
+                queued_work: vec![admitted, fresh],
+                turn_inputs: None,
                 incorporation: Default::default(),
             }),
         }
     }
 
-    fn claim_ids(claims: &[crate::QueuedWorkClaim]) -> Vec<String> {
-        claims.iter().map(|claim| claim.claim_id.clone()).collect()
+    fn batch_ids(admitted: &[crate::AdmittedQueuedWork]) -> Vec<String> {
+        admitted
+            .iter()
+            .flat_map(|queued| queued.batches.iter())
+            .map(|batch| batch.batch_id.to_string())
+            .collect()
     }
 
-    /// What the turn commits after the failed checkpoint: the claims it still
+    /// What the turn commits after the failed checkpoint: the rows it still
     /// drives, and the withheld work its failure path hands back.
     fn drive<'c>(_: &'c (), cx: &'c LocalTestCx) -> Pin<Box<dyn Future<Output = ()> + 'c>> {
         Box::pin(async move {
-            let admitted = queued_claim("admitted", "batch-a");
-            let mut pending_queue_claims = vec![admitted.clone()];
-            let mut pending_turn_input_claims = Vec::new();
-            let mut pending_checkpoint_turn_input_claim = None;
+            let admitted = admitted_batch("batch-a");
+            let mut pending_queued = vec![admitted.clone()];
+            let mut pending_turn_inputs = Vec::new();
+            let mut pending_checkpoint_turn_inputs = None;
             let mut withheld_terminal_work =
                 crate::runtime::logical_turn::WithheldTerminalWork::default();
             let outcome: RuntimeEffectOutcome = cx
@@ -1109,34 +760,34 @@ mod checkpoint_claim_determinism_tests {
                     "turn/1/checkpoint/before_completion",
                     "checkpoint",
                     &"before_completion",
-                    async move { failed_checkpoint(admitted, queued_claim("fresh", "batch-b")) },
+                    async move { failed_checkpoint(admitted, admitted_batch("batch-b")) },
                 )
                 .await;
-            let (result, claims) = outcome.into_checkpoint().expect("a checkpoint outcome");
-            absorb_checkpoint_claims(
-                TurnClaimSlots {
-                    pending_queue_claims: &mut pending_queue_claims,
-                    pending_turn_input_claims: &mut pending_turn_input_claims,
-                    pending_checkpoint_turn_input_claim: &mut pending_checkpoint_turn_input_claim,
+            let (result, admitted) = outcome.into_checkpoint().expect("a checkpoint outcome");
+            absorb_checkpoint_admissions(
+                TurnAdmissionSlots {
+                    pending_queued: &mut pending_queued,
+                    pending_turn_inputs: &mut pending_turn_inputs,
+                    pending_checkpoint_turn_inputs: &mut pending_checkpoint_turn_inputs,
                     withheld_terminal_work: &mut withheld_terminal_work,
                 },
                 CheckpointKind::BeforeCompletion,
-                claims.queued_work_claims,
-                claims.turn_input_claim,
+                admitted.queued_work,
+                admitted.turn_inputs,
             )
-            .expect("fold the recorded claim set");
+            .expect("fold the recorded admitted set");
             let handed_back = result
                 .is_err()
                 .then(|| withheld_terminal_work.take_if_any())
                 .flatten()
-                .map(|withheld| claim_ids(&withheld.queued))
+                .map(|withheld| batch_ids(&withheld.queued))
                 .unwrap_or_default();
-            cx.record_commit(&(claim_ids(&pending_queue_claims), handed_back));
+            cx.record_commit(&(batch_ids(&pending_queued), handed_back));
         })
     }
 
     #[test]
-    fn a_failed_terminal_checkpoint_hands_back_its_claims_on_every_replay() {
+    fn a_failed_terminal_checkpoint_hands_back_its_admitted_rows_on_every_replay() {
         let engine = LocalEngine::new(|| (), drive);
         let report = DeterminismCheck::new(0x3672_0007)
             .perturbed_replays(6)
@@ -1145,19 +796,19 @@ mod checkpoint_claim_determinism_tests {
 
         assert_eq!(
             report.transcript.commits().collect::<Vec<_>>(),
-            vec![r#"[["admitted"],["fresh"]]"#],
-            "the admitted claim stays the turn's; the fresh one is withheld and handed back"
+            vec![r#"[["batch-a"],["batch-b"]]"#],
+            "the root's own rows stay the turn's; the fresh ones are withheld and handed back"
         );
     }
 
-    /// The shape this replaced: the step body left its claims in a side
+    /// The shape this replaced: the step body left its admissions in a side
     /// channel on the worker, and the driver read them after the step. A
-    /// replay never runs the body, so the claims it hands back differ.
+    /// replay never runs the body, so the rows it hands back differ.
     #[test]
-    fn claims_read_from_a_worker_side_channel_diverge_on_replay() {
+    fn admissions_read_from_a_worker_side_channel_diverge_on_replay() {
         #[derive(Default)]
         struct Worker {
-            side_channel: std::sync::Mutex<Vec<crate::QueuedWorkClaim>>,
+            side_channel: std::sync::Mutex<Vec<crate::AdmittedQueuedWork>>,
         }
         let engine = LocalEngine::new(Worker::default, |worker: &Worker, cx: &LocalTestCx| {
             Box::pin(async move {
@@ -1167,15 +818,15 @@ mod checkpoint_claim_determinism_tests {
                         "checkpoint",
                         &"before_completion",
                         async move {
-                            let fresh = queued_claim("fresh", "batch-b");
+                            let fresh = admitted_batch("batch-b");
                             worker.side_channel.lock_recover().push(fresh.clone());
-                            failed_checkpoint(queued_claim("admitted", "batch-a"), fresh)
+                            failed_checkpoint(admitted_batch("batch-a"), fresh)
                         },
                     )
                     .await;
                 let handed_back =
-                    claim_ids(&std::mem::take(&mut *worker.side_channel.lock_recover()));
-                cx.record_commit(&(vec!["admitted"], handed_back));
+                    batch_ids(&std::mem::take(&mut *worker.side_channel.lock_recover()));
+                cx.record_commit(&(vec!["batch-a"], handed_back));
             }) as Pin<Box<dyn Future<Output = ()> + '_>>
         });
         let failure = DeterminismCheck::new(0x3672_0007)

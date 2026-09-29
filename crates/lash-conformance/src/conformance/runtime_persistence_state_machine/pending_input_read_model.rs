@@ -1,21 +1,20 @@
-use super::{ReferenceModel, active_input_ids};
+use super::{ReferenceModel, admitted_input_ids};
 
+/// Every modeled input as the store reads it: `Admitted{root}` while the
+/// unfinished root holds it, `Open` otherwise.
 pub(super) fn pending_input_reads(model: &ReferenceModel) -> Vec<crate::PendingTurnInputRead> {
-    let held = active_input_ids(model);
-    let live_lease_expiry = model
-        .current_lease
-        .as_ref()
-        .map(|lease| lease.fencing_token);
+    let held = admitted_input_ids(model);
+    let root = model.root.as_ref().map(|root| root.root.clone());
     let mut inputs = model
         .inputs
         .values()
         .map(|modeled| {
             let input = modeled.input.clone();
-            match live_lease_expiry {
-                Some(drive_epoch) if held.contains(&input.input_id) => {
-                    crate::PendingTurnInputRead::held(input, drive_epoch)
+            match &root {
+                Some(root) if held.contains(&input.input_id) => {
+                    crate::PendingTurnInputRead::admitted(input, root.clone())
                 }
-                _ => crate::PendingTurnInputRead::pending(input),
+                _ => crate::PendingTurnInputRead::open(input),
             }
         })
         .collect::<Vec<_>>();

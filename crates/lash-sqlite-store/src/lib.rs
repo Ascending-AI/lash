@@ -41,6 +41,8 @@
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;
+#[cfg(feature = "perf-witness")]
+pub use conn::{enable_gate_timings, take_gate_timings};
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
 #[cfg(test)]
@@ -56,34 +58,29 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, prepare_process_event_append,
-    prepare_process_registration,
+    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
+    TurnLaneAdmissionPolicy, prepare_process_event_append, prepare_process_registration,
 };
 use lash_core_execution::store::queued_work::{
-    ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    MAX_SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
+    select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
-    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessListFilter,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, IngressStore, PersistedSegmentHandover,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
+    ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
+    ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
     SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
-    TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
-    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
-    facade_support::registry_transitions,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -109,7 +106,7 @@ fn commit_count_entropy_seed() -> u64 {
     (high ^ low) & (u64::MAX >> 1)
 }
 mod backend;
-mod fleet_format;
+mod compat;
 mod forks;
 mod generation_drain;
 mod graph;
@@ -177,11 +174,10 @@ use pending_turn_inputs::*;
 use queued_work::*;
 use schema::{apply_pragmas, ensure_versioned_schema};
 
-/// The SQLite durable-core session schema version stamped in `PRAGMA user_version`.
+/// The pre-1.0 durable-core DDL revision retained for schema artifacts.
 ///
-/// Hosts can use this constant for compatibility stamps. It moves whenever the
-/// SQLite session-store format changes; it does not cover the process, trigger,
-/// or effect schemas.
+/// Compatibility admission uses [`SqliteDatabase::expected_version`] and the
+/// `lash_compat` row in each physical database.
 pub const SESSION_SCHEMA_VERSION: i32 = schema::SCHEMA_VERSION;
 
 pub use process_definitions::SqliteProcessDefinitionRegistry;
@@ -422,10 +418,6 @@ fn sql_counter_value(counter: &'static str, value: u64) -> Result<i64, StoreErro
     })
 }
 
-fn sql_session_lease_generation(value: u64) -> Result<i64, StoreError> {
-    sql_counter_value("session_lease_generation", value)
-}
-
 fn plugin_sql_counter_value(
     counter: &'static str,
     value: u64,
@@ -653,7 +645,8 @@ pub struct StoreOptions {
 /// never disagree with the row that names it (FIG-1949).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 struct StoredBlobEnvelope {
-    compression: BlobCompression,
+    version: u32,
+    compression: String,
     #[serde(with = "serde_bytes")]
     content: Vec<u8>,
 }

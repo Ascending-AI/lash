@@ -10,8 +10,9 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
-use crate::runtime_persistence::complete_turn_input_claims_tx;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::store::RootStore as _;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
+use lash_core_execution::{LeaseOwnerIdentity, TurnId};
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{Layer, Registry};
 
@@ -766,216 +767,6 @@ async fn postgres_graph_generation_uniqueness_is_typed() {
         .expect("clean graph-generation uniqueness fixture");
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() {
-    let Some(database_url) = postgres_test_support::database_url() else {
-        eprintln!("skipping Postgres claim-completion fence: database URL is not set");
-        return;
-    };
-    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
-    let storage = PostgresStorage::connect(&database_url)
-        .await
-        .expect("connect claim-completion fence storage");
-    let session_id = SessionId::from(format!("postgres-claim-fence:{}", uuid::Uuid::new_v4()));
-    let input_id = format!("input:{}", uuid::Uuid::new_v4());
-    let stale = lash_core_execution::TurnInputCompletion {
-        session_id: session_id.clone(),
-        claim: Some(lash_core_execution::TurnInputSettlementClaim {
-            claim_id: "claim-a".to_string(),
-            lease_token: "token-a".to_string(),
-        }),
-        data: lash_core_execution::TurnInputCompletionData {
-            input_ids: vec![input_id.clone().into()],
-            applications: Vec::new(),
-        },
-    };
-    sqlx::query(
-        "INSERT INTO lash_sessions (session_id, head_revision, head_json)
-         VALUES ($1, 7, '{}')",
-    )
-    .bind(session_id.as_str())
-    .execute(storage.pool())
-    .await
-    .expect("insert claim-fence session head");
-    sqlx::query(
-        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
-            input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
-            submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
-            claim_owner_incarnation_id, claim_token, claim_fencing_token,
-            claim_session_lease_generation
-         )
-         VALUES (1, $1, $2, '{}', $3, '{}', '{}', 'digest', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
-    )
-    .bind(&input_id)
-    .bind(session_id.as_str())
-    .bind(lash_core_execution::TurnInputState::DeferredNextTurn.as_str())
-    .bind(stale.claim_id())
-    .bind(stale.lease_token())
-    .execute(storage.pool())
-    .await
-    .expect("insert claimed turn input");
-
-    // Ownership validation locks the exact claim row. A superseder cannot
-    // rewrite it between validation and completion.
-    let mut validating = storage.pool().begin().await.expect("begin validating tx");
-    plan_turn_input_settlement_tx(&mut validating, &stale)
-        .await
-        .expect("validate and lock stale claim");
-    let mut blocked_superseder = storage.pool().begin().await.expect("begin superseder tx");
-    sqlx::query("SET LOCAL lock_timeout = '50ms'")
-        .execute(&mut *blocked_superseder)
-        .await
-        .expect("bound superseder lock wait");
-    let blocked = sqlx::query(
-        "UPDATE lash_pending_turn_inputs
-         SET claim_id = 'claim-b', claim_owner_id = 'owner-b',
-             claim_owner_incarnation_id = 'incarnation-b', claim_token = 'token-b',
-             claim_fencing_token = 2, claim_session_lease_generation = 2
-         WHERE session_id = $1 AND input_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(&input_id)
-    .execute(&mut *blocked_superseder)
-    .await
-    .expect_err("ownership row lock must block supersession");
-    assert_eq!(
-        blocked.as_database_error().and_then(|error| error.code()),
-        Some(std::borrow::Cow::Borrowed("55P03")),
-        "supersession must fail specifically on the held row lock: {blocked}"
-    );
-    validating
-        .rollback()
-        .await
-        .expect("release validation lock");
-    blocked_superseder
-        .rollback()
-        .await
-        .expect("roll back timed-out superseder");
-
-    // Reproduce the old TOCTOU transaction shape: A observed ownership
-    // without locking, B committed a fresh generation+token, then A moved
-    // the head before attempting token-qualified completion. The checked
-    // zero-row completion must abort A's whole transaction.
-    let mut stale_committer = storage.pool().begin().await.expect("begin stale tx");
-    let observed: Option<i64> = sqlx::query_scalar(
-        "SELECT 1::BIGINT FROM lash_pending_turn_inputs
-         WHERE session_id = $1 AND input_id = $2 AND claim_id = $3 AND claim_token = $4",
-    )
-    .bind(session_id.as_str())
-    .bind(&input_id)
-    .bind(stale.claim_id())
-    .bind(stale.lease_token())
-    .fetch_optional(&mut *stale_committer)
-    .await
-    .expect("old non-locking ownership validation");
-    assert_eq!(observed, Some(1));
-
-    // The plan the stale transaction would carry: built over the ownership
-    // row as A observed it before the supersession landed.
-    let stale_plan = match lash_core_execution::store::claim_plan::plan_turn_input_settlement(
-        &stale,
-        vec![
-            lash_core_execution::store::claim_plan::TurnInputSettlementRow {
-                input_id: stale.input_ids[0].clone(),
-                facts: Some(
-                    lash_core_execution::store::claim_plan::TurnInputSettlementRowFacts {
-                        claim_id: stale.claim_id().map(str::to_string),
-                        claim_token: stale.lease_token().map(str::to_string),
-                        claim_session_lease_generation: 1,
-                        state: lash_core_execution::TurnInputState::DeferredNextTurn
-                            .as_str()
-                            .to_string(),
-                    },
-                ),
-            },
-        ],
-    ) {
-        lash_core_execution::store::claim_plan::SettlementDecision::Complete(plan) => plan,
-        lash_core_execution::store::claim_plan::SettlementDecision::Superseded(error) => {
-            panic!("the observed row still carried A's claim: {error}")
-        }
-    };
-
-    let mut superseder = storage
-        .pool()
-        .begin()
-        .await
-        .expect("begin fresh superseder");
-    sqlx::query(
-        "UPDATE lash_pending_turn_inputs
-         SET claim_id = 'claim-b', claim_owner_id = 'owner-b',
-             claim_owner_incarnation_id = 'incarnation-b', claim_token = 'token-b',
-             claim_fencing_token = 2, claim_session_lease_generation = 2
-         WHERE session_id = $1 AND input_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(&input_id)
-    .execute(&mut *superseder)
-    .await
-    .expect("supersede stale claim");
-    superseder
-        .commit()
-        .await
-        .expect("commit fresh supersession");
-
-    sqlx::query("UPDATE lash_sessions SET head_revision = head_revision + 1 WHERE session_id = $1")
-        .bind(session_id.as_str())
-        .execute(&mut *stale_committer)
-        .await
-        .expect("tentatively move stale head");
-    let error =
-        complete_turn_input_claims_tx(&mut stale_committer, std::slice::from_ref(&stale_plan))
-            .await
-            .expect_err("zero-row stale completion must trip the atomic fence");
-    assert!(matches!(
-        error,
-        StoreError::TurnInputClaimSuperseded {
-            ref session_id,
-            ref claim_id,
-            ..
-        } if session_id == stale.session_id && claim_id.as_str() == stale.claim_id().unwrap_or_default()
-    ));
-    stale_committer
-        .rollback()
-        .await
-        .expect("roll back stale head movement");
-
-    let head_revision: i64 =
-        sqlx::query_scalar("SELECT head_revision FROM lash_sessions WHERE session_id = $1")
-            .bind(session_id.as_str())
-            .fetch_one(storage.pool())
-            .await
-            .expect("read head after rejected stale commit");
-    assert_eq!(
-        head_revision, 7,
-        "rejected stale completion must not move the session head"
-    );
-    let current_claim: (String, String, i64) = sqlx::query_as(
-        "SELECT claim_id, claim_token, claim_session_lease_generation
-         FROM lash_pending_turn_inputs WHERE session_id = $1 AND input_id = $2",
-    )
-    .bind(session_id.as_str())
-    .bind(&input_id)
-    .fetch_one(storage.pool())
-    .await
-    .expect("read winning claim");
-    assert_eq!(
-        current_claim,
-        ("claim-b".to_string(), "token-b".to_string(), 2)
-    );
-
-    sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
-        .bind(session_id.as_str())
-        .execute(storage.pool())
-        .await
-        .expect("clean claim-fence input");
-    sqlx::query("DELETE FROM lash_sessions WHERE session_id = $1")
-        .bind(session_id.as_str())
-        .execute(storage.pool())
-        .await
-        .expect("clean claim-fence head");
-}
-
 #[tokio::test]
 async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -1034,7 +825,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
     ));
 }
 
-lash_conformance::checkpoint_claim_probe_tests!({
+lash_conformance::checkpoint_admission_probe_tests!({
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping Postgres checkpoint counter: database URL is not set");
         return;
@@ -1054,7 +845,7 @@ lash_conformance::checkpoint_claim_probe_tests!({
         database_lock,
         store as Arc<dyn RuntimePersistence>,
         session_id,
-        move || counting_store.checkpoint_claim_counts(),
+        move || counting_store.checkpoint_admission_counts(),
         async move {
             storage
                 .session_store_factory()
@@ -1343,15 +1134,139 @@ impl<S: tracing::Subscriber> Layer<S> for AttachmentWarnings {
     }
 }
 
-/// FIG-3381: in production the settlement verdict runs first, and it — not the
-/// write's rows-affected — is what refuses a superseded claim.
+/// A session over `storage` with a committed head and one next-turn input
+/// admitted to `root`: the fixture the settlement laws below start from.
+async fn admitted_input_fixture(
+    storage: &PostgresStorage,
+    label: &str,
+    root: &TurnId,
+) -> (
+    PostgresSessionStore,
+    lash_core_execution::store::DriveFence,
+    lash_core_execution::RuntimeSessionState,
+    lash_core_execution::store::RootAdmission,
+) {
+    let session_id = SessionId::from(format!("{label}:{}", uuid::Uuid::new_v4()));
+    let store = storage.session_store(&session_id);
+    store
+        .admit_and_bind_session(&lash_core_execution::SessionBinding::root(
+            session_id.as_str(),
+        ))
+        .await
+        .expect("admit the fixture session");
+    let mut state = lash_core_execution::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
+    };
+    let seeded = store
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await
+        .expect("seed the fixture head");
+    state.head_revision = seeded.head_revision;
+    let input = store
+        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
+            &session_id,
+            lash_core_execution::TurnInputIngress::NextTurn,
+            lash_core_execution::TurnInput::text("the admitted input"),
+        ))
+        .await
+        .expect("enqueue the fixture input");
+    let fence = store
+        .seal_drive_epoch_for_test(
+            &session_id,
+            &LeaseOwnerIdentity::opaque(format!("{label}-owner"), format!("{label}-incarnation")),
+            &format!("{label}-executor"),
+            60_000,
+        )
+        .await
+        .expect("seal the fixture drive")
+        .acquired()
+        .expect("the fixture drive is sealed");
+    let admission = store
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                &fence,
+                root,
+                lash_core_execution::store::AdmittedHead::Input(input.input_id),
+            ),
+        )
+        .await
+        .expect("admit the fixture root")
+        .expect("the fixture root takes its input");
+    (store, fence, state, admission)
+}
+
+/// A settlement locks the row it settles: the verdict reads the row under
+/// `FOR UPDATE`, so no concurrent rebind can move it between that read and
+/// the settling write.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_settlement_locks_the_admitted_row() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres settlement row lock: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect settlement-lock storage");
+    let root = TurnId::from("settlement-lock-root");
+    let (_store, _fence, state, admission) =
+        admitted_input_fixture(&storage, "postgres-settlement-lock", &root).await;
+    let input_id = admission.input_ids()[0].clone();
+
+    let mut settling = storage.pool().begin().await.expect("begin settling tx");
+    sqlx::query(
+        crate::turn_ingress::turn_ingress_sql()
+            .pending_inputs_postgres
+            .select_by_id_for_update
+            .sql(),
+    )
+    .bind(state.session_id.as_str())
+    .bind(input_id.as_str())
+    .fetch_one(&mut *settling)
+    .await
+    .expect("lock the admitted row");
+    let mut rebinder = storage.pool().begin().await.expect("begin rebinding tx");
+    sqlx::query("SET LOCAL lock_timeout = '50ms'")
+        .execute(&mut *rebinder)
+        .await
+        .expect("bound the rebinder's lock wait");
+    let blocked = sqlx::query(
+        "UPDATE lash_pending_turn_inputs SET admitted_root = 'another-root'
+         WHERE session_id = $1 AND input_id = $2",
+    )
+    .bind(state.session_id.as_str())
+    .bind(input_id.as_str())
+    .execute(&mut *rebinder)
+    .await
+    .expect_err("the settlement's row lock must block a rebind");
+    assert_eq!(
+        blocked.as_database_error().and_then(|error| error.code()),
+        Some(std::borrow::Cow::Borrowed("55P03")),
+        "the rebind must fail specifically on the held row lock: {blocked}"
+    );
+    settling
+        .rollback()
+        .await
+        .expect("release the settling lock");
+    rebinder
+        .rollback()
+        .await
+        .expect("roll back the timed-out rebind");
+}
+
+/// FIG-3927: the settlement verdict runs first, and it — not the write's
+/// rows-affected — is what refuses a row another root holds.
 ///
 /// The two paths are distinguishable in the error itself. The verdict reads
-/// the locked row, so its `TurnInputClaimSuperseded` names the claim that took
-/// the row. The write-only backstop has no row to read, so its refusal carries
-/// `None`. Asserting the populated field is therefore proof of ordering, not
-/// just of refusal: skip the verdict and this assertion fails while the typed
-/// error stays the same.
+/// the locked row, so its `IngressRowNotAdmitted` names the root that holds
+/// the row. The write-only backstop has no row to read, so its refusal
+/// carries `None`. Asserting the populated field is therefore proof of
+/// ordering, not just of refusal. The refused commit moves no head.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     let Some(database_url) = postgres_test_support::database_url() else {
@@ -1362,71 +1277,157 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
     let storage = PostgresStorage::connect(&database_url)
         .await
         .expect("connect settlement-order storage");
-    let session_id = SessionId::from(format!("postgres-settle-order:{}", uuid::Uuid::new_v4()));
-    let input_id = format!("input:{}", uuid::Uuid::new_v4());
-    let stale = lash_core_execution::TurnInputCompletion {
-        session_id: session_id.clone(),
-        claim: Some(lash_core_execution::TurnInputSettlementClaim {
-            claim_id: "claim-a".to_string(),
-            lease_token: "token-a".to_string(),
-        }),
-        data: lash_core_execution::TurnInputCompletionData {
-            input_ids: vec![input_id.clone().into()],
-            applications: Vec::new(),
-        },
-    };
+    let root = TurnId::from("settlement-order-root");
+    let (store, fence, state, admission) =
+        admitted_input_fixture(&storage, "postgres-settle-order", &root).await;
+    let input_id = admission.input_ids()[0].clone();
+    // A fork rebinds a row to its own root; the commit of the root that
+    // admitted it then names a row it no longer holds.
     sqlx::query(
-        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
-            input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
-            submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
-            claim_owner_incarnation_id, claim_token, claim_fencing_token,
-            claim_session_lease_generation
-         )
-         VALUES (1, $1, $2, '{}', $3, '{}', '{}', 'digest', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
+        "UPDATE lash_pending_turn_inputs SET admitted_root = 'rebinding-root'
+         WHERE session_id = $1 AND input_id = $2",
     )
-    .bind(&input_id)
-    .bind(session_id.as_str())
-    .bind(lash_core_execution::TurnInputState::DeferredNextTurn.as_str())
+    .bind(state.session_id.as_str())
+    .bind(input_id.as_str())
     .execute(storage.pool())
     .await
-    .expect("insert superseded turn input");
+    .expect("rebind the admitted row");
 
-    let mut tx = storage
-        .pool()
-        .begin()
+    let mut settlement = lash_core_execution::store::IngressSettlement::new(root.clone());
+    settlement
+        .completed_inputs
+        .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+    let error = store
+        .commit_runtime_state(
+            lash_core_execution::testing::store_fixtures::settling_commit_for_test(
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                &fence,
+                settlement,
+            ),
+        )
         .await
-        .expect("begin settlement-order tx");
-    let error = plan_turn_input_settlement_tx(&mut tx, &stale)
-        .await
-        .expect_err("the verdict must refuse a superseded claim before any write");
-    tx.rollback().await.expect("roll back settlement-order tx");
-
-    let StoreError::TurnInputClaimSuperseded {
-        superseding_claim_id,
-        superseding_session_lease_generation,
-        ref row_id,
+        .expect_err("the verdict must refuse a row another root holds before any write");
+    let StoreError::IngressRowNotAdmitted {
+        root: ref refused_root,
+        ref admitted_root,
         ..
     } = error
     else {
         panic!("unexpected variant: {error:?}");
     };
+    assert_eq!(*refused_root, root);
     assert_eq!(
-        superseding_claim_id.as_deref(),
-        Some("claim-b"),
-        "the refusal must name the claim the locked read observed, which only the verdict can see"
+        admitted_root.as_ref().map(TurnId::as_str),
+        Some("rebinding-root"),
+        "the refusal must name the root the locked read observed, which only the verdict can see"
     );
-    assert_eq!(
-        superseding_session_lease_generation.as_deref().copied(),
-        Some(9),
-        "the refusal must carry the observed generation, which only the verdict can see"
-    );
-    assert_eq!(row_id.as_deref(), Some(input_id.as_str()));
-
-    sqlx::query("DELETE FROM lash_pending_turn_inputs WHERE session_id = $1")
-        .bind(session_id.as_str())
-        .execute(storage.pool())
+    let head_revision = store
+        .load_session_head_meta()
         .await
-        .expect("clean settlement-order input");
+        .expect("read the head after the refusal")
+        .expect("the head exists")
+        .head_revision;
+    assert_eq!(
+        head_revision, state.head_revision,
+        "a refused settlement must not move the session head"
+    );
+}
+
+/// FIG-4044: an admission holds the drive fence it checked until it commits.
+///
+/// A seal raises the epoch on the session's `session_meta` row. Under `READ
+/// COMMITTED` a plain fence read sees the epoch the seal has not committed
+/// yet, so an admission racing the seal would bind rows under a fence the
+/// seal makes stale the moment it commits. The fence read locks the row: the
+/// admission waits for the in-flight seal, reads the epoch it committed, and
+/// is refused, binding nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_checkpoint_admission_holds_its_fence_against_a_concurrent_seal() {
+    let Some(database_url) = postgres_test_support::database_url() else {
+        eprintln!("skipping Postgres admission fence lock: database URL is not set");
+        return;
+    };
+    let _database_lock = postgres_test_support::SharedDatabaseLock::acquire(&database_url).await;
+    let storage = PostgresStorage::connect(&database_url)
+        .await
+        .expect("connect admission-fence storage");
+    let root = TurnId::from("admission-fence-root");
+    let (store, fence, state, _admission) =
+        admitted_input_fixture(&storage, "postgres-admission-fence", &root).await;
+    let input = store
+        .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
+            &state.session_id,
+            lash_core_execution::TurnInputIngress::active_turn(
+                root.clone(),
+                lash_core_execution::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            lash_core_execution::TurnInput::text("the checkpoint input"),
+        ))
+        .await
+        .expect("enqueue the checkpoint input");
+
+    // A seal in flight: the epoch is raised on the row and not yet committed.
+    let mut sealing = storage.pool().begin().await.expect("begin the seal");
+    let raised = sqlx::query(
+        "UPDATE lash_session_meta SET drive_epoch = drive_epoch + 1 WHERE session_id = $1",
+    )
+    .bind(state.session_id.as_str())
+    .execute(&mut *sealing)
+    .await
+    .expect("raise the drive epoch")
+    .rows_affected();
+    assert_eq!(raised, 1, "the seal raises the session's epoch");
+
+    let request = lash_core_execution::store::CheckpointAdmissionRequest {
+        fence,
+        root: root.clone(),
+        turn_id: root.clone(),
+        checkpoint: lash_core_execution::CheckpointKind::AfterWork,
+        step: "admission-fence-root:checkpoint".to_string(),
+        max_inputs: 10,
+        policy: lash_core_execution::testing::queued_work_admission_policy(10),
+    };
+    let admitting = tokio::spawn(async move { store.admit_at_checkpoint(&request).await });
+    // Wait until the admission has either finished, having read the epoch
+    // the seal has not committed, or is blocked on the seal's row lock.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        if admitting.is_finished() {
+            break;
+        }
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM pg_stat_activity
+             WHERE datname = current_database() AND pid <> pg_backend_pid()
+               AND wait_event_type = 'Lock' AND query LIKE '%drive_epoch%'",
+        )
+        .fetch_one(storage.pool())
+        .await
+        .expect("read lock waits");
+        if waiting > 0 {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the admission neither finished nor waited on the seal"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    sealing.commit().await.expect("commit the seal");
+    let admitted = admitting.await.expect("join the admission");
+    assert!(
+        matches!(admitted, Err(StoreError::StaleDriveFence { .. })),
+        "an admission racing a seal is refused once the seal commits, got {admitted:?}"
+    );
+    let bound: Option<String> = sqlx::query_scalar(
+        "SELECT admitted_root FROM lash_pending_turn_inputs
+         WHERE session_id = $1 AND input_id = $2",
+    )
+    .bind(state.session_id.as_str())
+    .bind(input.input_id.as_str())
+    .fetch_one(storage.pool())
+    .await
+    .expect("read the input's binding");
+    assert_eq!(bound, None, "the refused admission binds nothing");
 }
 
 /// The per-operation PostgreSQL round trips, counted by normalized statement
@@ -1435,8 +1436,8 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
 /// A statement-count pin is the only honest shape for this measurement: the
 /// ticket's budget is per *statement name*, so a wall-clock or total-row probe
 /// would pass while an extra round trip slipped in. The expected map is the
-/// production count plus the two `current_setting` probes the testing build
-/// runs inside the claim transaction — `#[cfg(test)]` compiles them in here
+/// production count plus the `current_setting` probe the testing build runs
+/// inside the admission transaction — `#[cfg(test)]` compiles them in here
 /// exactly as the `testing` feature does for the integration targets.
 async fn postgres_statement_calls_by_name(
     pool: &sqlx::PgPool,
@@ -1483,7 +1484,7 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("SELECT pg_advisory_xact_lock(") => "advisory-lock",
         q if q.starts_with("SELECT drive_epoch, drive_admission_id") => "drive-epoch-read",
         q if q.contains("FROM lash_pending_turn_inputs") => "pending-inputs-lock",
-        q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-claim-update",
+        q if q.starts_with("UPDATE lash_pending_turn_inputs") => "pending-input-admit",
         // pg_stat_statements stores this statement's own text when the row is
         // created by a cached-plan execution, but its constant-normalized form
         // (`SELECT EXISTS( SELECT $2 FROM lash_deleted_sessions ...)`) when an
@@ -1519,13 +1520,31 @@ fn postgres_statement_name(query: &str) -> &'static str {
         q if q.starts_with("INSERT INTO lash_session_meta") => "session-meta-insert",
         q if q.starts_with("INSERT INTO lash_sessions") => "head-upsert",
         q if q.starts_with("UPDATE lash_attachment_manifest") => "attachment-manifest-commit",
+        q if q.starts_with("SELECT admission_json FROM lash_session_roots") => {
+            "root-admission-read"
+        }
+        q if q.starts_with("SELECT root, admission_json FROM lash_session_roots") => {
+            "unfinished-root-read"
+        }
+        q if q.starts_with("SELECT session_state_version FROM lash_session_meta") => {
+            "session-state-version-read"
+        }
+        q if q.starts_with("UPDATE lash_session_meta SET admission_base_checkpoint_ref") => {
+            "admission-base-retain"
+        }
+        q if q.starts_with("SELECT root FROM lash_session_root_inputs") => "root-binding-read",
+        q if q.starts_with("INSERT INTO lash_session_roots") => "root-open",
+        q if q.starts_with("INSERT INTO lash_session_root_inputs") => "root-input-bind",
+        q if q.starts_with("UPDATE lash_session_roots SET admission_json") => {
+            "root-admission-write"
+        }
         q if q.starts_with("UPDATE lash_session_meta") => "session-meta-touch",
         _ => "unrecognized",
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
+async fn root_admission_and_head_commit_round_trips_are_pinned() {
     let Some(database_url) = postgres_test_support::database_url() else {
         eprintln!("skipping statement round-trip pin: database URL is not set");
         return;
@@ -1565,7 +1584,7 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .await
         .expect("admit statement-pin session");
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &session_id,
             &LeaseOwnerIdentity::opaque(
                 "statement-pin-owner",
@@ -1578,8 +1597,7 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .expect("seal statement-pin session drive")
         .acquired()
         .expect("statement-pin drive sealed");
-    let owner = lease.owner.clone();
-    store
+    let input = store
         .enqueue_pending_turn_input(lash_core_execution::PendingTurnInputDraft::new(
             &session_id,
             lash_core_execution::TurnInputIngress::NextTurn,
@@ -1613,29 +1631,46 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
     )
         .execute(storage.pool())
         .await
-        .expect("reset statement statistics before the claim measurement");
-    let claim = store
-        .claim_next_turn_inputs(&session_id, &lease.fence(), &owner, 1)
+        .expect("reset statement statistics before the admission measurement");
+    let admission = store
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                &lease,
+                &TurnId::from("statement-pin-root"),
+                lash_core_execution::store::AdmittedHead::Input(input.input_id),
+            ),
+        )
         .await
-        .expect("claim statement-pin input")
-        .expect("statement-pin input is claimable");
-    assert_eq!(claim.inputs.len(), 1);
-    let claim_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // The claim reads the sealed drive epoch in its transaction. The pending
-    // follow-on gate remains a separate read (ADR 0101 §3).
+        .expect("admit statement-pin root")
+        .expect("statement-pin input is admissible");
+    assert_eq!(admission.input_ids().len(), 1);
+    let admission_statements = postgres_statement_calls_by_name(storage.pool()).await;
+    // AdmitRoot is one write transaction: it checks the drive fence, reads
+    // any recorded admission and the pending follow-on, composes and binds
+    // the rows, retains the admission base and records the root. Binding the
+    // input to its root checks the input's existing binding, opens the root's
+    // row and writes the binding.
     assert_eq!(
-        claim_statements,
+        admission_statements,
         std::collections::BTreeMap::from([
             ("begin", 1),
             ("commit", 1),
             ("testing-lease-epoch-probe", 1),
-            ("txn-clock-ms", 1),
             ("drive-epoch-read", 1),
-            ("pending-inputs-lock", 1),
-            ("pending-input-claim-update", 1),
+            ("root-admission-read", 1),
             ("pending-follow-on-read", 1),
+            ("unfinished-root-read", 1),
+            ("txn-clock-ms", 1),
+            ("pending-inputs-lock", 1),
+            ("pending-input-admit", 1),
+            ("session-state-version-read", 1),
+            ("admission-base-retain", 1),
+            ("root-binding-read", 1),
+            ("root-open", 1),
+            ("root-input-bind", 1),
+            ("root-admission-write", 1),
         ]),
-        "claim round trips changed",
+        "admission round trips changed",
     );
 
     sqlx::query(

@@ -14,7 +14,7 @@
 //! outside this build's writable range is refused with a typed error rather
 //! than allowed to emit a format the fleet has retired.
 
-use std::ops::RangeInclusive;
+use lash_core_execution::compat::VersionRange;
 
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use sqlx::{PgPool, Postgres, Transaction};
@@ -49,17 +49,14 @@ async fn read_in_tx(tx: &mut Transaction<'_, Postgres>) -> Result<Option<i32>, s
 /// Before the first format upgrade the range is one version wide, so any other
 /// recorded value means the fleet has moved past — or never agreed with — this
 /// build, and the open is refused with the typed error an operator can route.
-fn recorded_fleet_format(
-    version: i64,
-    writable: RangeInclusive<u32>,
-) -> Result<FleetFormat, StoreError> {
+fn recorded_fleet_format(version: i64, writable: VersionRange) -> Result<FleetFormat, StoreError> {
     let Ok(version) = u32::try_from(version) else {
         return Err(StoreError::StoredDataCorrupt {
             record_kind: "lash_fleet_format.format_version",
             message: format!("not a fleet-format version: {version}"),
         });
     };
-    FleetFormat::admit_recorded(version, writable)
+    FleetFormat::admit(version, writable)
 }
 
 /// Provision and read the fleet-format row inside the open transaction that
@@ -79,7 +76,7 @@ fn recorded_fleet_format(
 /// build passes that build's range instead.
 pub(crate) async fn admit(
     tx: &mut Transaction<'_, Postgres>,
-    writable: RangeInclusive<u32>,
+    writable: VersionRange,
 ) -> Result<FleetFormat, StoreError> {
     if fleet_format_is_writable(tx)
         .await

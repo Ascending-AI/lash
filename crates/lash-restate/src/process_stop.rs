@@ -66,7 +66,7 @@ impl ProcessStopDelivery {
             let mut delay = WATCH_RETRY_FIRST_DELAY;
             loop {
                 match ingress
-                    .call_workflow_json::<_, RestateProcessCancelSignal>(
+                    .call_lash_workflow::<_, RestateProcessCancelSignal>(
                         &service,
                         &workflow_key,
                         "await_cancel",

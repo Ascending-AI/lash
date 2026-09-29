@@ -101,7 +101,6 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<
             Cow::Borrowed(operation.as_str()),
         ),
         Expr::SleepFor(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep for")),
-        Expr::SleepUntil(_) => (ExecutionNodeKind::Sleep, Cow::Borrowed("sleep until")),
         Expr::WaitSignal { .. } => (ExecutionNodeKind::Wait, Cow::Borrowed("wait_signal")),
         Expr::Await(handle) if await_wraps_direct_operation(handle) => {
             return None;
@@ -109,7 +108,6 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<
         Expr::Await(_) => (ExecutionNodeKind::Wait, Cow::Borrowed("await")),
         Expr::Finish(_) => (ExecutionNodeKind::Terminal, Cow::Borrowed("result")),
         Expr::Fail(_) => (ExecutionNodeKind::Terminal, Cow::Borrowed("failure")),
-        Expr::Yield(_) => (ExecutionNodeKind::ProcessEvent, Cow::Borrowed("yield")),
         Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
         Expr::For { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("for")),
         Expr::While { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("while")),
@@ -135,9 +133,7 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_concrete_node(expr),
         Expr::ReceiverCall { .. }
         | Expr::SleepFor(_)
-        | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::Yield(_)
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. }
@@ -153,9 +149,7 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Number(_)
         | Expr::String(_)
         | Expr::Variable(_)
-        | Expr::Tuple(_)
         | Expr::List(_)
-        | Expr::ListComprehension { .. }
         | Expr::Record(_)
         | Expr::Break
         | Expr::Continue
@@ -175,12 +169,9 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::Return(_)
         | Expr::Field { .. }
         | Expr::Index { .. }
-        | Expr::Unary { .. }
-        | Expr::Binary { .. }
         | Expr::JavaScriptUnary { .. }
         | Expr::JavaScriptBinary { .. }
-        | Expr::JavaScriptLogical { .. }
-        | Expr::TypeLiteral(_) => false,
+        | Expr::JavaScriptLogical { .. } => false,
     }
 }
 
@@ -189,9 +180,7 @@ fn label_attaches_to_assignment_value(expr: &Expr) -> bool {
         Expr::Await(expr) | Expr::ResultUnwrap(expr) => label_attaches_to_assignment_value(expr),
         Expr::ReceiverCall { .. }
         | Expr::SleepFor(_)
-        | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
-        | Expr::Yield(_)
         | Expr::Finish(_)
         | Expr::Fail(_)
         | Expr::If { .. } => true,
@@ -213,7 +202,6 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         // A literal's value is the process it defines, which the linker turns
         // into a reference; its body runs only in that process.
         Expr::ProcessLiteral(_) => true,
-        Expr::Tuple(items) => items.iter().all(is_pure_expr),
         Expr::List(items) => items.iter().all(is_pure_expr),
         Expr::Record(entries) => entries.iter().all(|(_, value)| is_pure_expr(value)),
         Expr::ResultUnwrap(expr) => is_pure_expr(expr),
@@ -233,135 +221,28 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         | Expr::Return(_) => false,
         Expr::Field { target, .. } => is_pure_expr(target),
         Expr::Index { target, index } => is_pure_expr(target) && is_pure_expr(index),
-        Expr::Unary { expr, .. } => is_pure_expr(expr),
         Expr::JavaScriptUnary { expr, .. } => is_pure_expr(expr),
         Expr::If {
             condition,
             then_block,
             else_block,
         } => is_pure_expr(condition) && is_pure_expr(then_block) && is_pure_expr(else_block),
-        Expr::Binary { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
         Expr::JavaScriptBinary { left, right, .. }
         | Expr::JavaScriptLogical { left, right, .. } => is_pure_expr(left) && is_pure_expr(right),
-        Expr::TypeLiteral(ty) => fold_type(ty).is_some(),
         Expr::Block(_)
         | Expr::Assign { .. }
         | Expr::For { .. }
-        | Expr::ListComprehension { .. }
         | Expr::While { .. }
         | Expr::Break
         | Expr::Continue
         | Expr::ReceiverCall { .. }
         | Expr::Await(_)
         | Expr::SleepFor(_)
-        | Expr::SleepUntil(_)
         | Expr::WaitSignal { .. }
         | Expr::Print(_)
-        | Expr::Yield(_)
         | Expr::Finish(_)
         | Expr::Fail(_) => false,
     }
-}
-
-pub(super) fn contains_type_literal(expr: &Expr) -> bool {
-    // `TypeLiteral` is the only node that introduces a type literal directly;
-    // every other node contains one only via a child expression. `children()`
-    // already yields an `Assign` target's dynamic index steps, so the generic
-    // structural recursion covers the path-assignment case too.
-    matches!(expr, Expr::TypeLiteral(_)) || expr.children().any(contains_type_literal)
-}
-
-/// The JSON-Schema keys used by the language's type-schema builders. Scalar
-/// type names live in [`SchemaScalarKind`]; these keys are shared by the
-/// compile-time builder ([`fold_type`]) and runtime instruction builder
-/// ([`Compiler::compile_type_expr`]).
-pub(super) mod schema_keys {
-    pub(crate) const TYPE: &str = "type";
-    pub(crate) const ITEMS: &str = "items";
-    pub(crate) const PROPERTIES: &str = "properties";
-    pub(crate) const REQUIRED: &str = "required";
-    pub(crate) const ADDITIONAL_PROPERTIES: &str = "additionalProperties";
-    pub(crate) const ANY_OF: &str = "anyOf";
-    pub(crate) const ENUM: &str = "enum";
-}
-
-/// Best-effort compile-time construction of a JSON-Schema Value for a
-/// [`TypeExpr`]. This is the single authority for the language's type -> schema
-/// shape; the runtime instruction builder mirrors only the dynamic `Ref` paths
-/// and shares the same key vocabulary ([`schema_keys`]).
-///
-/// Returns `None` when the expression contains a [`TypeExpr::Ref`] (or a nested
-/// composite that contains one) — those must be resolved at runtime via
-/// [`Instruction::ResolveTypeRef`].
-pub(super) fn fold_type(ty: &TypeExpr) -> Option<Value> {
-    use schema_keys::*;
-    match ty {
-        TypeExpr::Any => Some(interned_scalar_schema(None)),
-        TypeExpr::Str => Some(interned_scalar_schema(Some(SchemaScalarKind::String))),
-        TypeExpr::Int => Some(interned_scalar_schema(Some(SchemaScalarKind::Integer))),
-        TypeExpr::Float => Some(interned_scalar_schema(Some(SchemaScalarKind::Number))),
-        TypeExpr::Bool => Some(interned_scalar_schema(Some(SchemaScalarKind::Boolean))),
-        TypeExpr::Dict => Some(interned_scalar_schema(Some(SchemaScalarKind::Object))),
-        TypeExpr::Null => Some(interned_scalar_schema(Some(SchemaScalarKind::Null))),
-        TypeExpr::Enum(values) => {
-            let mut rec = record_with_capacity(2);
-            rec.insert(
-                TYPE.into(),
-                Value::String(SchemaScalarKind::String.as_schema_name().into()),
-            );
-            let items: Vec<Value> = values
-                .iter()
-                .map(|v| Value::String(v.clone().into()))
-                .collect();
-            rec.insert(ENUM.into(), Value::List(items.into()));
-            Some(Value::Record(Arc::new(rec)))
-        }
-        TypeExpr::List(inner) => {
-            let inner_value = fold_type(inner)?;
-            let mut rec = record_with_capacity(2);
-            rec.insert(
-                TYPE.into(),
-                Value::String(SchemaScalarKind::Array.as_schema_name().into()),
-            );
-            rec.insert(ITEMS.into(), inner_value);
-            Some(Value::Record(Arc::new(rec)))
-        }
-        TypeExpr::Object(fields) => {
-            let mut properties = record_with_capacity(fields.len());
-            for field in fields {
-                properties.insert(field.name.to_string(), fold_type(&field.ty)?);
-            }
-            let required: Vec<Value> = fields
-                .iter()
-                .filter(|f| !f.optional)
-                .map(|f| Value::String(f.name.clone().into()))
-                .collect();
-            let mut rec = record_with_capacity(4);
-            rec.insert(
-                TYPE.into(),
-                Value::String(SchemaScalarKind::Object.as_schema_name().into()),
-            );
-            rec.insert(PROPERTIES.into(), Value::Record(Arc::new(properties)));
-            rec.insert(REQUIRED.into(), Value::List(required.into()));
-            rec.insert(ADDITIONAL_PROPERTIES.into(), Value::Bool(false));
-            Some(Value::Record(Arc::new(rec)))
-        }
-        TypeExpr::Union(variants) => {
-            let folded: Option<Vec<Value>> = variants.iter().map(fold_type).collect();
-            let folded = folded?;
-            let mut rec = record_with_capacity(1);
-            rec.insert(ANY_OF.into(), Value::List(folded.into()));
-            Some(Value::Record(Arc::new(rec)))
-        }
-        TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => Some(interned_scalar_schema(None)),
-        TypeExpr::Ref(_) => None,
-    }
-}
-
-pub(super) fn wrap_type_schema_value(schema: Value) -> Value {
-    let mut wrapper = record_with_capacity(1);
-    wrapper.insert(LASH_TYPE_KEY.to_string(), schema);
-    Value::Record(Arc::new(wrapper))
 }
 
 pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
@@ -378,50 +259,12 @@ pub(super) fn is_terminal_expr(expr: &Expr) -> bool {
     }
 }
 
-/// All sites referencing `str` point at the same `Arc<Record>`, so emitting a Type literal
-/// with N string fields allocates one record, not N.
-pub(super) fn interned_scalar_schema(kind: Option<SchemaScalarKind>) -> Value {
-    static CACHE: OnceLock<[Value; 8]> = OnceLock::new();
-    let cache = CACHE.get_or_init(|| {
-        let build = |kind: SchemaScalarKind| {
-            let mut rec = record_with_capacity(1);
-            rec.insert(
-                schema_keys::TYPE.into(),
-                Value::String(kind.as_schema_name().into()),
-            );
-            Value::Record(Arc::new(rec))
-        };
-        [
-            Value::Record(Arc::new(record_with_capacity(0))),
-            build(SchemaScalarKind::String),
-            build(SchemaScalarKind::Number),
-            build(SchemaScalarKind::Integer),
-            build(SchemaScalarKind::Boolean),
-            build(SchemaScalarKind::Array),
-            build(SchemaScalarKind::Object),
-            build(SchemaScalarKind::Null),
-        ]
-    });
-    let index = match kind {
-        None => 0,
-        Some(SchemaScalarKind::String) => 1,
-        Some(SchemaScalarKind::Number) => 2,
-        Some(SchemaScalarKind::Integer) => 3,
-        Some(SchemaScalarKind::Boolean) => 4,
-        Some(SchemaScalarKind::Array) => 5,
-        Some(SchemaScalarKind::Object) => 6,
-        Some(SchemaScalarKind::Null) => 7,
-    };
-    cache[index].clone()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{TypeExpr, TypeField};
+    use crate::{TypeExpr, TypeField, runtime::Value, testing::ast_builders as builders};
 
-    #[test]
-    fn typed_output_accepts_every_producible_type_schema() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn type_literal_schema_for_every_producible_type_parses() {
         let types = vec![
             TypeExpr::Any,
             TypeExpr::Str,
@@ -445,11 +288,26 @@ mod tests {
         ];
 
         for ty in types {
-            let schema = fold_type(&ty).expect("all listed types are foldable");
+            let program = crate::Program::block(vec![crate::Expr::Finish(Box::new(
+                builders::type_literal(ty.clone()),
+            ))]);
+            let compiled = crate::runtime::entry_points::compile_program_internal(&program);
+            let mut state = crate::State::new();
+            let outcome = crate::runtime::entry_points::execute_compiled_internal(
+                &compiled,
+                &mut state,
+                &crate::testing::harness::EchoHost,
+            )
+            .await
+            .expect("type literal program should run");
+            let crate::runtime::ExecutionOutcome::Finished(Value::Record(wrapped)) = outcome else {
+                panic!("type literal should finish with the wrapped schema record");
+            };
+            let schema = wrapped
+                .get(crate::LASH_TYPE_KEY)
+                .expect("type literal carries the $lash_type schema")
+                .clone();
             let schema_json = crate::runtime::to_json_direct(&schema);
-            let wrapped = serde_json::json!({
-                (crate::LASH_TYPE_KEY): schema_json.clone()
-            });
             let expected_type = match &ty {
                 TypeExpr::Any
                 | TypeExpr::Union(_)
@@ -462,18 +320,19 @@ mod tests {
                 TypeExpr::Dict | TypeExpr::Object(_) => Some("object"),
                 TypeExpr::Null => Some("null"),
                 TypeExpr::List(_) => Some("array"),
-                TypeExpr::Ref(_) => unreachable!("refs are not foldable"),
+                TypeExpr::Ref(_) => unreachable!("refs resolve through a binding"),
             };
             assert_eq!(
-                wrapped[crate::LASH_TYPE_KEY]
-                    .get("type")
-                    .and_then(|value| value.as_str()),
+                schema_json.get("type").and_then(|value| value.as_str()),
                 expected_type,
-                "producer schema name for {ty:?}"
+                "schema name for {ty:?}"
             );
-            let accepted = crate::parse_output_schema(Some(&wrapped))
-                .expect("producer schema should parse")
-                .expect("producer schema should be present");
+            let wrapped_json = serde_json::json!({
+                (crate::LASH_TYPE_KEY): schema_json.clone()
+            });
+            let accepted = crate::parse_output_schema(Some(&wrapped_json))
+                .expect("schema should parse")
+                .expect("schema should be present");
             assert_eq!(accepted, schema_json, "schema for {ty:?} was not preserved");
         }
     }

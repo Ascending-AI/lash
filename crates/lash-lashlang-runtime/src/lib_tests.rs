@@ -253,7 +253,7 @@ pub(crate) async fn double_process_harness() -> DoubleProcessHarness {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn real_process_sleep_until_emits_deadline_and_completion() {
+async fn real_process_sleep_for_emits_wait_and_completion() {
     let (result, graph_store) = run_sleep_process().await;
     assert!(
         matches!(result, lash_core::ProcessAwaitOutput::Settled { ref output } if output.is_success()),
@@ -271,9 +271,7 @@ async fn real_process_sleep_until_emits_deadline_and_completion() {
     assert!(graph.history.iter().any(|event| matches!(
         &event.event.payload,
         TraceLanguageExecutionPayload::NodeWaiting {
-            awaited: TraceNodeAwaited::Sleep {
-                deadline_ms: Some(0)
-            },
+            awaited: TraceNodeAwaited::Sleep { deadline_ms: None },
             ..
         }
     )));
@@ -468,14 +466,14 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let harness = crate::lib_tests::double_process_harness().await;
     let store = harness.artifact_store();
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process batch() -> null { let values = await (tools.echo({value: 'a'})?, tools.echo({value: 'b'})?); finish null }",
+        source: "process batch() -> null { let values = await [tools.echo({value: 'a'})?, tools.echo({value: 'b'})?]; finish null }",
         program: b::module(
             vec![b::process_returning(
                 "batch",
                 Vec::new(),
                 lashlang::TypeExpr::Null,
                 b::block(vec![
-                    b::assign("values", b::await_expr(b::tuple(vec![echo("a"), echo("b")]))),
+                    b::assign("values", b::await_expr(b::list(vec![echo("a"), echo("b")]))),
                     b::finish(b::null()),
                 ]),
             )],
@@ -598,7 +596,7 @@ pub(crate) fn process_module(
 }
 
 /// The labelled workflow witness, whose Lashlang source is spelled out at the
-/// call site: labelled statements, an if/else, a `for`, a comprehension and a
+/// call site: labelled statements, an if/else, a `for`, a map and a
 /// `while`.
 fn labeled_workflow_program() -> lashlang::Program {
     b::program(vec![
@@ -627,22 +625,28 @@ fn labeled_workflow_program() -> lashlang::Program {
         ),
         b::assign(
             "measured",
-            b::comprehension(
+            b::map(
+                b::list(vec![b::num(1.0), b::num(2.0)]),
+                "item",
                 b::builtin("len", vec![b::list(vec![b::var("item")])]),
-                vec![b::comprehension_for(
-                    "item",
-                    b::list(vec![b::num(1.0), b::num(2.0)]),
-                )],
             ),
         ),
         b::assign("count", b::num(0.0)),
         b::while_loop(
-            b::binary(b::var("count"), lashlang::BinaryOp::Less, b::num(1.0)),
+            b::binary(
+                b::var("count"),
+                lashlang::JavaScriptBinaryOp::Less,
+                b::num(1.0),
+            ),
             b::block(vec![
                 b::labelled(b::label("Loop print", None), b::print(b::var("count"))),
                 b::assign(
                     "count",
-                    b::binary(b::var("count"), lashlang::BinaryOp::Add, b::num(1.0)),
+                    b::binary(
+                        b::var("count"),
+                        lashlang::JavaScriptBinaryOp::Add,
+                        b::num(1.0),
+                    ),
                 ),
             ]),
         ),
@@ -881,15 +885,12 @@ async fn foreground_trace_skeleton_is_derived_from_the_workflow_graph() {
             lashlang::WorkflowNodeKind::Container(lashlang::WorkflowContainer::While {
                 ..
             }) => Some("while"),
-            lashlang::WorkflowNodeKind::Container(
-                lashlang::WorkflowContainer::ListComprehension { .. },
-            ) => Some("list_comprehension"),
             _ => None,
         })
         .collect::<std::collections::BTreeSet<_>>();
     assert_eq!(
         container_kinds,
-        std::collections::BTreeSet::from(["for", "if", "list_comprehension", "while"]),
+        std::collections::BTreeSet::from(["for", "if", "while"]),
         "the equality probe must cover every workflow container kind"
     );
 
@@ -1710,34 +1711,27 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     })
     .expect("wrong-order handler compiles");
     let receiver = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "type Handler = Process<(event: str, other: str), bool>\ntype Envelope = { handler: Handler }\nprocess install(envelope: Envelope) -> bool { finish true }",
+        source: "process install(envelope: { handler: Process<(event: str, other: str), bool> }) -> bool { finish true }",
         program: b::module(
-            vec![
-                b::type_decl(
-                    "Handler",
-                    b::process_type(
-                        vec![
-                            b::param("event", lashlang::TypeExpr::Str),
-                            b::param("other", lashlang::TypeExpr::Str),
-                        ],
-                        lashlang::TypeExpr::Bool,
-                    ),
-                ),
-                b::type_decl(
-                    "Envelope",
+            vec![b::process_returning(
+                "install",
+                vec![b::param(
+                    "envelope",
                     lashlang::TypeExpr::Object(vec![b::type_field(
                         "handler",
-                        lashlang::TypeExpr::Ref("Handler".into()),
+                        b::process_type(
+                            vec![
+                                b::param("event", lashlang::TypeExpr::Str),
+                                b::param("other", lashlang::TypeExpr::Str),
+                            ],
+                            lashlang::TypeExpr::Bool,
+                        ),
                         false,
                     )]),
-                ),
-                b::process_returning(
-                    "install",
-                    vec![b::param("envelope", lashlang::TypeExpr::Ref("Envelope".into()))],
-                    lashlang::TypeExpr::Bool,
-                    b::finish(b::bool_lit(true)),
-                ),
-            ],
+                )],
+                lashlang::TypeExpr::Bool,
+                b::finish(b::bool_lit(true)),
+            )],
             Vec::new(),
         ),
         environment: &environment,

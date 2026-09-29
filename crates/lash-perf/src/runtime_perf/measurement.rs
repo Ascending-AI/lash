@@ -8,20 +8,20 @@ use lash::usage::SessionUsageReport;
 use lash_core::TestProcessRegistryWriteExt;
 use lash_core::llm::types::{LlmResponse, LlmUsage};
 use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkCompletion,
-    RuntimeAttribution, RuntimeSubject, RuntimeTurnPhase, RuntimeTurnPhaseProbe, SessionCommand,
+    DeliveryPolicy, QueuedWorkBatchDraft, RuntimeAttribution, RuntimeSubject, RuntimeTurnPhase,
+    RuntimeTurnPhaseProbe, SessionCommand,
 };
 use lash_core::sansio::{
     ChatContextProjector, CompletedToolCall, PendingToolCall, PendingWork, ProtocolDriverHandle,
 };
-use lash_core::store::GraphAppend;
+use lash_core::store::{AdmittedHead, GraphAppend, RootStore as _};
 use lash_core::{
-    AttachmentIntent, DriverAction, DriverContextView, Effect, ExecResponse, LiveReplayOutcome,
-    LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part, ProtocolTurnOptions,
-    QueuedWorkStore, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
+    AttachmentIntent, DriverAction, DriverContextView, Effect, ExecResponse, IngressStore,
+    LiveReplayOutcome, LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part,
+    ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
     SessionObservationEventPayload, SessionRevision, SessionStoreFactory, TokenUsage,
-    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnInputStore,
-    TurnMachine, TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
+    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnMachine,
+    TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
     facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
@@ -47,10 +47,10 @@ use super::prompt::benchmark_prompt;
 use super::scenarios::RuntimePerfScenario;
 use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
 
-async fn seal_perf_claim(
+async fn seal_perf_drive(
     store: &(impl lash_core::RuntimePersistence + ?Sized),
     session_id: &lash_sansio::SessionId,
-) -> anyhow::Result<lash_core::ClaimAuthority> {
+) -> anyhow::Result<lash_core::store::DriveFence> {
     use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
     let stored = store.drive_epoch(session_id).await?;
     let admission = AdmissionId::new(uuid::Uuid::new_v4().to_string());
@@ -65,7 +65,7 @@ async fn seal_perf_claim(
     let DriveEpochSeal::Sealed(fence) = seal else {
         anyhow::bail!("benchmark drive seal was superseded: {seal:?}");
     };
-    Ok(lash_core::ClaimAuthority::from_drive_fence(&fence))
+    Ok(fence)
 }
 
 mod types;

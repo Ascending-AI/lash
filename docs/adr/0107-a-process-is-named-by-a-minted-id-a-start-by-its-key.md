@@ -122,3 +122,14 @@ format, the lashlang segment state and the handle and cursor spellings
   PR-2.
 - Downstream hosts that looked processes up by name must switch to the minted
   `ProcessId` returned by the start, or to their own `StartKey`.
+
+## Amendment (FIG-3562, 2026-09-29): the orchestration start-key namespace is deleted
+
+Namespace 2 of §2, "an orchestrating tool call: its admitted scope, call id
+and start ordinal", is deleted with orchestrating tools ([ADR 0116](0116-tools-are-opaque.md)). A spawn is a
+declared start keyed by its tool intent (namespace 1). The family stays
+`lash.process-start-key` v1, changed in place under the freeze. The known
+retention gap is closed for declared starts: registration writes a consumer
+hold on the process row, prune refuses a held row, and the hold is released
+only after the parked call's settlement is incorporated or its opener's scope
+closes ([ADR 0116](0116-tools-are-opaque.md) §3.6).

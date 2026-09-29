@@ -17,7 +17,6 @@
 //! `cancel_pending_turn_input`.
 
 use crate::admit;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_core::testing::TestTurnDrive as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
@@ -37,18 +36,6 @@ pub(super) fn text_response(text: &str) -> crate::LlmResponse {
         response_metadata: Default::default(),
         ..crate::LlmResponse::default()
     }
-}
-
-pub(super) fn fixed_text_provider(text: &str) -> crate::ProviderHandle {
-    let text = text.to_string();
-    crate::testing::TestProvider::builder()
-        .kind("stub")
-        .complete(move |_| {
-            let text = text.clone();
-            async move { Ok(text_response(&text)) }
-        })
-        .build()
-        .into_handle()
 }
 
 pub(super) async fn acceptance_runtime(
@@ -149,13 +136,9 @@ pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 /// nothing is left pending. A backend that drove the caller's copy of the words
 /// instead of the accepted row settles no application for it.
 ///
-/// Mid-drive the session offers *no* claimable input, because the accepted row
-/// is held by this turn's own claim. The ordinary pending listing still returns
-/// that row with the factual held status and the matching live lease's exact
-/// expiry. (The complementary ordering proof, that the row is durable before
-/// anything executes, is
-/// [`orphaned_direct_turn_input_is_drivable_by_another_worker`], where the drive
-/// aborts before committing and the row is still there.)
+/// Mid-drive the session offers *no* open input, because the accepted row is
+/// bound to this turn's own root. The ordinary pending listing still returns
+/// that row with the factual `Admitted{root}` status naming the root.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -182,11 +165,7 @@ pub async fn direct_turn_accepts_before_driving(
                         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
                         .await
                         .expect("read the session's pending inputs mid-drive");
-                    let epoch = store
-                        .drive_epoch(&SessionId::from(SESSION_ID))
-                        .await
-                        .expect("read the current drive epoch mid-drive");
-                    *probe.lock().expect("probe lock") = Some((pending, epoch));
+                    *probe.lock().expect("probe lock") = Some(pending);
                     Ok(text_response("accepted"))
                 }
             })
@@ -213,24 +192,24 @@ pub async fn direct_turn_accepts_before_driving(
         .await
         .expect("run the direct acceptance conformance turn");
 
-    let (pending, epoch) = probe
+    let pending = probe
         .lock()
         .expect("probe lock")
         .clone()
         .expect("the provider must have run");
-    assert_eq!(pending.len(), 1, "the held input must remain visible");
+    assert_eq!(pending.len(), 1, "the admitted input must remain visible");
     let held = &pending[0];
     assert_eq!(
         held.status,
-        crate::PendingTurnInputReadStatus::Held {
-            drive_epoch: epoch.epoch
+        crate::PendingTurnInputReadStatus::Admitted {
+            root: turn_id.clone()
         },
-        "the held marker must carry the matching drive epoch"
+        "the admitted marker must name the root driving it"
     );
     assert_eq!(
         held.input.state,
         crate::TurnInputState::DeferredNextTurn,
-        "held is a read status, not a persisted TurnInputState"
+        "admitted is a read status, not a persisted TurnInputState"
     );
 
     let acceptance = turn
@@ -282,120 +261,6 @@ pub async fn direct_turn_accepts_before_driving(
                 Some(crate::MessageOrigin::TurnInput { input_id: Some(id), .. }) if *id == input_id
             )),
         "the committed conversation must attribute its user input to the accepted row"
-    );
-}
-
-/// An accepted direct-turn input whose first driver never committed is
-/// rediscoverable, claimable, and drivable by an unrelated worker.
-///
-/// The first driver's worker dies after its claim, leaving that claim pinned to
-/// a session-lease generation that no longer holds the lane. The successor
-/// claims it under ADR 0029's generation fence with no repair step, no TTL, and
-/// no knowledge that the input was ever direct.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
-    prefix: &str,
-    backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
-    let turn_id = TurnId::from(format!("{prefix}-orphaned-direct-turn"));
-    let died = Arc::new(tokio::sync::Notify::new());
-    let effect_host: Arc<dyn crate::EffectHost> = backend.effect_host();
-    let mut first_driver = acceptance_runtime(
-        &store,
-        &backend,
-        fixed_text_provider("never reached"),
-        vec![crash_before_commit_plugin(Arc::clone(&died))],
-        crate::testing::runtime_lease_owner(),
-    )
-    .await;
-    let scope = effect_host
-        .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, &turn_id)))
-        .expect("scope the abandoned direct turn");
-    crash_turn(
-        &store,
-        &died,
-        first_driver.drive_child_session_turn(
-            direct_input(&turn_id, "input the first driver never commits"),
-            crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-        ),
-    )
-    .await;
-    let orphaned = store
-        .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
-        .await
-        .expect("read pending inputs after the abort");
-    let input_id = orphaned
-        .first()
-        .expect("an abandoned direct turn leaves its acceptance durable and rediscoverable")
-        .input
-        .input_id
-        .clone();
-    drop(first_driver);
-
-    // The successor is a different worker: its own lease owner, its own
-    // runtime, and no handle on the future that accepted the input.
-    let mut successor = acceptance_runtime(
-        &store,
-        &backend,
-        fixed_text_provider("recovered by another worker"),
-        Vec::new(),
-        crate::LeaseOwnerIdentity::opaque(
-            format!("{prefix}-successor-owner"),
-            format!("{prefix}-successor-incarnation"),
-        ),
-    )
-    .await;
-    let drain_id = format!("{prefix}-successor-drain");
-    let drain_scope = effect_host
-        .scoped(admit(crate::ExecutionScope::queue_drain(
-            SESSION_ID, &drain_id,
-        )))
-        .expect("scope the successor drain");
-    let drain = Box::pin(
-        successor.drive_one_admitted_queued_root(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            drain_scope,
-        )),
-    )
-    .await
-    .expect("the successor drain must run");
-    let recovered = match drain {
-        crate::QueuedTurnDrain::Ran(turn) => turn,
-        crate::QueuedTurnDrain::Empty(reason) => panic!(
-            "an orphaned direct-turn acceptance must be claimable by any worker; drain was empty: \
-             {reason:?}"
-        ),
-    };
-    assert!(
-        matches!(recovered.outcome, crate::TurnOutcome::Finished(_)),
-        "the successor must commit a complete turn: {:?}",
-        recovered.outcome
-    );
-
-    let application = store
-        .list_turn_input_applications(&SessionId::from(SESSION_ID))
-        .await
-        .expect("read settled applications after recovery")
-        .into_iter()
-        .find(|application| application.input_id == input_id)
-        .expect("the recovered input settles as canonical input of the successor's turn");
-    assert_eq!(
-        application.turn_id.as_str(),
-        turn_id,
-        "the successor preserves the accepted input's canonical root id"
-    );
-    assert!(
-        store
-            .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
-            .await
-            .expect("read pending inputs after recovery")
-            .iter()
-            .all(|pending| pending.input.input_id != input_id),
-        "recovery settles the row rather than leaving it claimable forever"
     );
 }
 
@@ -467,194 +332,6 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
             .map(|round| Some(format!("{prefix}-resubmit-{round}")))
             .collect::<Vec<_>>(),
         "direct ingress keys each row by its turn id and by nothing else"
-    );
-}
-
-/// Unclaimed settlement is a conditional write on every backend (ADR 0069 §5).
-///
-/// A turn that drove the acceptance it minted may settle that row without
-/// holding a claim on it, fenced by the head CAS. That makes the settlement a
-/// predicate, not a blind update, and the predicate has to be *observable*: a
-/// settlement that matched no row must surface as a typed supersession error
-/// rather than as a silent success. Backends that discard their affected-row
-/// count report "settled" for work they never did, which is precisely the defect
-/// this law exists to catch.
-///
-/// Three rows, three predicates:
-///
-/// * an open, unclaimed row settles, and the row is gone afterwards;
-/// * a row a live claim owns fails the `claim IS NULL` half, because an
-///   unclaimed settlement may never reach through another driver's fence;
-/// * a cancelled row fails the terminal-state half, because a withdrawn
-///   admission is not settleable by the turn that once drove it.
-///
-/// The losing settlements carry no lease generation, so they are never dropped
-/// and retried the way a superseded *claimed* settlement is: they are their own
-/// error, and the driver that raises one retires at its first commit attempt.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn unclaimed_turn_input_settlement_is_a_conditional_write(
-    prefix: &str,
-    // The law settles through the store alone; the shared fixture's backend
-    // is unused here.
-    _backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
-    let mut state = crate::RuntimeSessionState {
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let accept = async |text: String| {
-        crate::store::TurnInputStore::enqueue_pending_turn_input(
-            store.as_ref(),
-            crate::PendingTurnInputDraft::new(
-                SESSION_ID,
-                crate::TurnInputIngress::next_turn(),
-                crate::TurnInput::text(text),
-            ),
-        )
-        .await
-        .expect("accept a turn input for the unclaimed-settlement law")
-    };
-    let unclaimed = |input: &crate::PendingTurnInput| crate::TurnInputCompletion {
-        session_id: SessionId::from(SESSION_ID.to_string()),
-        claim: None,
-        data: crate::TurnInputCompletionData {
-            input_ids: vec![input.input_id.clone()],
-            applications: Vec::new(),
-        },
-    };
-
-    // (a) A row another driver's claim owns is out of reach: the claim half of
-    // the predicate is what stops a lane-less turn from settling through a live
-    // fence.
-    let claimed = accept(format!(
-        "{prefix}: a claimed row is not settleable unclaimed"
-    ))
-    .await;
-    let lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from(SESSION_ID),
-            &crate::testing::runtime_lease_owner(),
-            "unclaimed-settlement-law-executor",
-            60_000,
-        )
-        .await
-        .expect("claim the session execution lease")
-        .acquired()
-        .expect("the session execution lease is free in this law");
-    let claim = crate::store::TurnInputStore::claim_next_turn_inputs(
-        store.as_ref(),
-        &SessionId::from(SESSION_ID),
-        &lease.fence(),
-        &crate::testing::runtime_lease_owner(),
-        10,
-    )
-    .await
-    .expect("claim the next turn inputs")
-    .expect("the accepted row is claimable");
-    assert!(
-        claim
-            .inputs
-            .iter()
-            .any(|input| input.input_id == claimed.input_id)
-    );
-    let err = crate::store::SessionCommitStore::commit_runtime_state(
-        store.as_ref(),
-        crate::store::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(unclaimed(&claimed)),
-    )
-    .await
-    .expect_err("an unclaimed settlement must not reach through a live claim");
-    assert!(
-        matches!(
-            err,
-            crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. }
-        ),
-        "a lost unclaimed settlement is its own typed error, not a claim supersession \
-         and never a silent success: {err:?}"
-    );
-    crate::store::TurnInputStore::abandon_turn_input_claim(store.as_ref(), &claim)
-        .await
-        .expect("abandon the claim");
-    store
-        .supersede_claim_epoch_for_test(&lease)
-        .await
-        .expect("release the session execution lease");
-
-    // (b) A withdrawn admission is terminal. The turn that accepted it does not
-    // get to settle it anyway.
-    let cancelled = accept(format!(
-        "{prefix}: a cancelled row is not settleable unclaimed"
-    ))
-    .await;
-    crate::store::TurnInputStore::cancel_pending_turn_input(
-        store.as_ref(),
-        &SessionId::from(SESSION_ID),
-        &cancelled.input_id,
-    )
-    .await
-    .expect("cancel the acceptance");
-    let err = crate::store::SessionCommitStore::commit_runtime_state(
-        store.as_ref(),
-        crate::store::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(unclaimed(&cancelled)),
-    )
-    .await
-    .expect_err("an unclaimed settlement must not resurrect a cancelled admission");
-    assert!(
-        matches!(
-            err,
-            crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. }
-        ),
-        "a terminal row loses the unclaimed predicate with the same typed error: {err:?}"
-    );
-
-    // (c) The open row settles, and settling it is the only thing that removes
-    // it: the driver that accepted it is the driver that retired it. It runs
-    // last because it is the only commit here that publishes, and a published
-    // commit moves the head every later commit would have to be rebased onto.
-    let open = accept(format!("{prefix}: an open acceptance settles unclaimed")).await;
-    crate::store::SessionCommitStore::commit_runtime_state(
-        store.as_ref(),
-        crate::store::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(unclaimed(&open)),
-    )
-    .await
-    .expect("an unclaimed settlement of an open row commits");
-    assert!(
-        crate::store::TurnInputStore::list_pending_turn_inputs(
-            store.as_ref(),
-            &SessionId::from(SESSION_ID)
-        )
-        .await
-        .expect("list pending inputs after the unclaimed settlement")
-        .iter()
-        .all(|pending| pending.input.input_id != open.input_id),
-        "an unclaimed settlement retires the row it named"
-    );
-
-    // (d) A settled row is terminal in the other direction: the state the
-    // replay path meets. A replayed acceptance whose turn already committed
-    // finds its own row `Completed`, and settling it a second time must lose
-    // the same way a cancelled row does — at-most-once settlement is what stops
-    // a redrive from writing a second durable record.
-    state.head_revision += 1;
-    let err = crate::store::SessionCommitStore::commit_runtime_state(
-        store.as_ref(),
-        crate::store::RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(unclaimed(&open)),
-    )
-    .await
-    .expect_err("an unclaimed settlement must not settle an already-settled row twice");
-    assert!(
-        matches!(
-            err,
-            crate::store::StoreError::UnclaimedTurnInputSettlementSuperseded { .. }
-        ),
-        "a completed row loses the unclaimed predicate with the same typed error: {err:?}"
     );
 }
 
@@ -804,17 +481,13 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
         self.inner.list_pending_turn_inputs(session_id).await
     }
 
-    async fn claim_next_turn_inputs(
+    async fn pending_turn_input(
         &self,
         session_id: &SessionId,
-        session_execution_lease: &crate::ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
+        input_id: &crate::InputId,
+    ) -> Result<Option<crate::PendingTurnInputRead>, crate::StoreError> {
         self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
-        self.inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await
+        self.inner.pending_turn_input(session_id, input_id).await
     }
 }
 
@@ -851,7 +524,7 @@ impl Journal {
 
     /// Bound every claim this journal's runtimes take to `max_inputs` rows.
     fn with_turn_input_claim(mut self, max_inputs: usize) -> Self {
-        self.batching = self.batching.with_max_turn_input_claim(max_inputs);
+        self.batching = self.batching.with_max_turn_input_admission(max_inputs);
         self
     }
 
@@ -1288,7 +961,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
         matches!(
             journal.controller.journaled_drive(),
             Some(crate::store::RootAdmissionAnswer::Refused {
-                refusal: crate::store::RootAdmissionRefusal::SettledOrRemoved
+                refusal: crate::store::RootAdmissionRefusal::HeadGone
             })
         ),
         "the redrive journals the refusal it ceded with"
@@ -1411,7 +1084,7 @@ pub async fn drive_effect_refusal_is_journaled(
         matches!(
             journal.controller.journaled_drive(),
             Some(crate::store::RootAdmissionAnswer::Refused {
-                refusal: crate::store::RootAdmissionRefusal::SettledOrRemoved
+                refusal: crate::store::RootAdmissionRefusal::HeadGone
             })
         ),
         "the refusal is journaled"
@@ -1453,11 +1126,11 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
     ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
         for open in self
             .inner
-            .list_pending_turn_inputs(&request.session_id)
+            .list_pending_turn_inputs(request.session_id())
             .await?
         {
             self.inner
-                .cancel_pending_turn_input(&request.session_id, &open.input.input_id)
+                .cancel_pending_turn_input(request.session_id(), &open.input.input_id)
                 .await?;
         }
         self.inner.admit_root(request).await
@@ -1531,93 +1204,6 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
             .is_some_and(|last| last.contains("the direct input")),
         "the direct input is answered last: {requests:?}"
     );
-}
-
-/// The worker dies after its drive is journaled and before its commit; while
-/// it is down, a recovery drain under a newer lease generation reclaims the
-/// same rows and answers them. The redrive replays the journaled claim, finds
-/// its settlement superseded, and cedes: it never commits the same words a
-/// second time without a settlement (ADR 0069 §6).
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn uncommitted_redrive_cedes_when_a_drain_answered_its_rows(
-    prefix: &str,
-    backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
-) {
-    let turn_id = TurnId::from(format!("{prefix}-redrive-after-drain"));
-    let journal = Journal::new(&backend);
-    let (provider, _) = recording_provider("answered by the first driver to commit");
-    journal
-        .crash_before_commit(&store, provider.clone(), &turn_id, "answer me once")
-        .await;
-    let journaled = match journal.controller.journaled_drive() {
-        Some(crate::store::RootAdmissionAnswer::Admitted { admission }) => admission,
-        other => panic!("the first execution claimed its accepted row: {other:?}"),
-    };
-    let accepted = journaled.input_ids()[0].clone();
-
-    let mut drainer = acceptance_runtime(
-        &store,
-        &journal.backend,
-        provider.clone(),
-        Vec::new(),
-        crate::LeaseOwnerIdentity::opaque(
-            format!("{prefix}-recovery-owner"),
-            format!("{prefix}-recovery-incarnation"),
-        ),
-    )
-    .await;
-    let drain_id = format!("{prefix}-recovery-drain");
-    let drain_scope = journal
-        .effect_host
-        .scoped(admit(crate::ExecutionScope::queue_drain(
-            SESSION_ID, &drain_id,
-        )))
-        .expect("scope the recovery drain");
-    let drain = drainer
-        .drive_one_admitted_queued_root(crate::TurnOptions::new(
-            tokio_util::sync::CancellationToken::new(),
-            drain_scope,
-        ))
-        .await
-        .expect("the recovery drain runs");
-    assert!(
-        matches!(drain, crate::QueuedTurnDrain::Ran(_)),
-        "the recovery drain reclaims and answers the orphaned rows"
-    );
-    drop(drainer);
-
-    // The successor's admission raised the drive epoch, so the older
-    // admission cannot race its answer into another commit.
-    let ceded = journal
-        .run(&store, provider, &turn_id, "answer me once")
-        .await
-        .expect_err("a redrive whose rows another driver answered must not commit them again");
-    assert_eq!(
-        ceded.code,
-        crate::RuntimeErrorCode::StoreCommitFailed,
-        "{ceded:?}"
-    );
-    assert!(ceded.message.contains("drive fence epoch") && ceded.message.contains("is stale"));
-    let applied = applications(&store).await;
-    assert_eq!(
-        applied
-            .iter()
-            .filter(|application| application.input_id == accepted)
-            .count(),
-        1,
-        "the input is answered exactly once: {applied:?}"
-    );
-    assert!(
-        applied
-            .iter()
-            .all(|application| application.turn_id == turn_id),
-        "the recovery drain keeps the accepted root identity: {applied:?}"
-    );
-    assert!(pending_input_ids(&store).await.is_empty());
 }
 
 /// An acceptance whose body ran, committed its row, and then lost its outcome

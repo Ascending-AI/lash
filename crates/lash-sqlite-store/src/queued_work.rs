@@ -138,39 +138,13 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) authority_json: String,
     pub(crate) merge_key: Option<String>,
     pub(crate) enqueued_at_ms: u64,
-    pub(crate) claim_fencing_token: u64,
-    pub(crate) claim_id: Option<String>,
-    pub(crate) claim_token: Option<String>,
-    pub(crate) claim_session_lease_generation: u64,
-    pub(crate) claim_owner_incarnation_id: Option<String>,
+    /// The root whose admission holds the batch; `None` while it is open.
+    pub(crate) admitted_root: Option<String>,
 }
 
-impl QueuedBatchRow {
-    /// The claim columns the shared claimability verdict consults.
-    ///
-    /// Exposed as one value rather than two fields so a call site cannot pass
-    /// a generation that belongs to a different row's token.
-    pub(crate) fn claim_facts(
-        &self,
-    ) -> lash_core_execution::store_backend_support::WorkRowClaimFacts<'_> {
-        lash_core_execution::store_backend_support::WorkRowClaimFacts {
-            claim_token: self.claim_token.as_deref(),
-            claim_session_lease_generation: self.claim_session_lease_generation,
-            claim_owner_incarnation_id: self.claim_owner_incarnation_id.as_deref(),
-        }
-    }
-}
-
-pub(crate) fn claim_candidate_from_row(
-    row: &QueuedBatchRow,
-    batch: &QueuedWorkBatch,
-) -> ClaimCandidate {
-    ClaimCandidate::from_batch(
-        batch,
-        row.claim_fencing_token,
-        row.claim_id.clone(),
-        row.claim_token.clone(),
-    )
+/// The turn-lane candidate `batch` offers an admission.
+pub(crate) fn turn_lane_candidate(batch: &QueuedWorkBatch) -> TurnLaneCandidate {
+    TurnLaneCandidate::from_batch(batch)
 }
 
 pub(crate) fn queued_batch_row_from_sql(
@@ -190,19 +164,7 @@ pub(crate) fn queued_batch_row_from_sql(
             "enqueued_at_ms",
             row.get("enqueued_at_ms")?,
         )?,
-        claim_fencing_token: u64_from_sql(
-            "QueuedWorkBatch",
-            "claim_fencing_token",
-            row.get("claim_fencing_token")?,
-        )?,
-        claim_id: row.get("claim_id")?,
-        claim_token: row.get("claim_token")?,
-        claim_session_lease_generation: u64_from_sql(
-            "QueuedWorkBatch",
-            "claim_session_lease_generation",
-            row.get("claim_session_lease_generation")?,
-        )?,
-        claim_owner_incarnation_id: row.get("claim_owner_incarnation_id")?,
+        admitted_root: row.get("admitted_root")?,
     })
 }
 
@@ -335,108 +297,129 @@ pub(crate) fn enqueue_queued_work_conn_with_outcome(
     Ok(QueuedWorkEnqueueOutcome::Inserted(inserted))
 }
 
-/// Observe every covered row inside the commit's `BEGIN IMMEDIATE` write
-/// transaction and return the shared settlement plan for this completion
-/// (FIG-1065). The plan's ordered writes execute at the same point in the
-/// commit the hand-written body ran: each consumed wake's redelivery fence
-/// first, then the row's removal.
-pub(crate) fn plan_queued_work_settlement_conn(
+/// Complete batch `batch_id`, which root `root` of session `session_id` must
+/// hold, inside the commit's `BEGIN IMMEDIATE` write transaction (FIG-3927).
+///
+/// The shared verdict decides over the row as read; a consumed wake's
+/// redelivery fence lands before the row leaves, because a crash between the
+/// two would replay a wake the session already consumed (FIG-1065). The
+/// root predicate stays on the delete as its backstop.
+pub(crate) fn complete_admitted_batch_conn(
     conn: &Connection,
-    completed: &QueuedWorkCompletion,
-) -> Result<lash_core_execution::store::claim_plan::QueuedWorkSettlementPlan, StoreError> {
+    session_id: &SessionId,
+    root: &lash_core_execution::TurnId,
+    batch_id: &lash_core_execution::BatchId,
+) -> Result<(), StoreError> {
     let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-    let mut rows = Vec::with_capacity(completed.batch_ids.len());
-    for batch_id in &completed.batch_ids {
-        // Lock and read: this runs inside the commit's `BEGIN IMMEDIATE`
-        // transaction, so the row cannot move before the settlement below.
-        let observed = conn
-            .query_row(
-                turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
-                params![completed.session_id.as_str(), batch_id.as_str()],
-                |row| {
-                    Ok((
-                        row.get::<_, Option<String>>(0)?,
-                        row.get::<_, Option<String>>(1)?,
-                        row.get::<_, i64>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let claim = observed
-            .map(|(claim_id, claim_token, generation)| {
-                Ok(
-                    lash_core_execution::store::claim_plan::QueuedWorkSettlementRowClaim {
-                        claim_id,
-                        claim_token,
-                        claim_session_lease_generation: u64::try_from(generation).map_err(
-                            |_| {
-                                stored_data_corrupt(
-                                    "QueuedWorkBatch",
-                                    format!(
-                                        "claim_session_lease_generation must be non-negative, got {generation}"
-                                    ),
-                                )
-                            },
-                        )?,
-                    },
-                )
-            })
-            .transpose()?;
-        // The wake identity a settled batch contributes to its redelivery
-        // fence: the claim-keyed head payload, decoded the same way
-        // PostgreSQL decodes it. The wake batch carries exactly one wake
-        // item, so the head payload is the batch's whole wake contribution.
-        let terminal_wake = match claim.as_ref() {
-            Some(_) => conn
-                .query_row(
-                    turn_ingress
-                        .queued_batches
-                        .select_claimed_batch_head_payload
-                        .sql(),
-                    params![
-                        completed.session_id.as_str(),
-                        batch_id.as_str(),
-                        completed.claim_id,
-                        completed.lease_token,
-                    ],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()
-                .map_err(sqlite_error)?
-                .map(decode_queued_payload)
-                .transpose()?
-                .and_then(|payload| {
-                    lash_core_execution::store::claim_plan::TerminalProcessWake::of_payload(
-                        None, &payload,
-                    )
-                }),
-            None => None,
-        };
-        rows.push(
-            lash_core_execution::store::claim_plan::QueuedWorkSettlementRow {
-                batch_id: batch_id.clone(),
-                claim,
-                terminal_wake,
-            },
-        );
+    let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
+    let observed: Option<Option<String>> = conn
+        .query_row(
+            turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
+            params![session_id.as_str(), batch_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    lash_core_execution::store_backend_support::require_admitted_to_root(
+        session_id,
+        root,
+        &row,
+        observed.as_ref().map(Option::as_deref),
+    )?;
+    // The wake identity a settled batch contributes to its redelivery fence:
+    // the root-keyed head payload, decoded the same way PostgreSQL decodes it.
+    // The wake batch carries exactly one wake item, so the head payload is
+    // the batch's whole wake contribution.
+    let terminal_wake = conn
+        .query_row(
+            turn_ingress
+                .queued_batches
+                .select_admitted_batch_head_payload
+                .sql(),
+            params![session_id.as_str(), batch_id.as_str(), root.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .map(decode_queued_payload)
+        .transpose()?
+        .and_then(|payload| {
+            lash_core_execution::store::TerminalProcessWake::of_payload(None, &payload)
+        });
+    if let Some(wake) = terminal_wake.as_ref() {
+        raise_wake_redelivery_fence_conn(conn, session_id, wake)?;
     }
-    // The shared planner takes the verdict: a settlement is authorized only
-    // while every covered row still carries this claim's id and lease token.
-    lash_core_execution::store::claim_plan::plan_queued_work_settlement(completed, rows)
-        .into_result()
+    let settled = conn
+        .execute(
+            turn_ingress.queued_batches.settle_admitted.sql(),
+            params![session_id.as_str(), batch_id.as_str(), root.as_str()],
+        )
+        .map_err(sqlite_error)?;
+    lash_core_execution::store_backend_support::require_fenced_write_applied(
+        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+        crate::SQLITE_BACKEND,
+        batch_id.as_str(),
+        u64::try_from(settled).unwrap_or(u64::MAX),
+        || StoreError::IngressRowNotAdmitted {
+            session_id: session_id.clone(),
+            root: root.clone(),
+            row: Box::new(row.clone()),
+            admitted_root: None,
+        },
+    )
+}
+
+/// Settle open session command `batch_id` of session `session_id`, in the
+/// commit that applied it (FIG-3927): the command lane takes no admission,
+/// so the predicate is the row's presence and openness. A command withdrawn
+/// since the drive read it refuses the whole commit.
+pub(crate) fn settle_open_command_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    batch_id: &lash_core_execution::BatchId,
+) -> Result<(), StoreError> {
+    let turn_ingress = crate::turn_ingress::turn_ingress_sql();
+    let observed: Option<Option<String>> = conn
+        .query_row(
+            turn_ingress.queued_batches_sqlite.settlement_facts.sql(),
+            params![session_id.as_str(), batch_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    lash_core_execution::store_backend_support::require_open_command(
+        session_id,
+        batch_id,
+        observed.as_ref().map(Option::as_deref),
+    )?;
+    let settled = conn
+        .execute(
+            turn_ingress.queued_batches.settle_command.sql(),
+            params![session_id.as_str(), batch_id.as_str()],
+        )
+        .map_err(sqlite_error)?;
+    lash_core_execution::store_backend_support::require_fenced_write_applied(
+        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+        crate::SQLITE_BACKEND,
+        batch_id.as_str(),
+        u64::try_from(settled).unwrap_or(u64::MAX),
+        || StoreError::SessionCommandWithdrawn {
+            session_id: session_id.clone(),
+            batch_id: batch_id.clone(),
+        },
+    )
 }
 
 /// Raise session `session_id`'s redelivery fence to `max(floor, sequence)`
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// claim settlement and host cancel — raises the floor with the row's
+/// settlement by its root and host cancel — raises the floor with the row's
 /// removal (FIG-1065, FIG-3545). Callers write the fence before the delete.
 pub(crate) fn raise_wake_redelivery_fence_conn(
     conn: &Connection,
     session_id: &SessionId,
-    wake: &lash_core_execution::store::claim_plan::TerminalProcessWake,
+    wake: &lash_core_execution::store::TerminalProcessWake,
 ) -> Result<(), StoreError> {
     let allocation_floor = i64::try_from(wake.sequence).map_err(|_| {
         stored_data_corrupt(

@@ -1,5 +1,5 @@
 use crate::TurnId;
-use crate::runtime::claim_settlement::TurnClaimSettlement;
+use crate::runtime::turn_settlement::TurnIngressSettlement;
 use crate::store::RuntimePersistence;
 use crate::{OmittedToolCalls, PluginSession, ToolCallRecord, TurnOutcome};
 
@@ -16,8 +16,7 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     pub(super) failure_evidence: &'a [crate::TurnFailureEvidence],
     pub(super) outcome: &'a TurnOutcome,
-    pub(super) claim_settlement: TurnClaimSettlement,
-    pub(super) current_session_lease_fence: Option<crate::ClaimAuthority>,
+    pub(super) ingress_settlement: TurnIngressSettlement,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3).
     pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
     pub(super) interrupted_turn_input_turn_id: Option<TurnId>,
@@ -26,5 +25,4 @@ pub(super) struct FinalCommitInput<'a> {
     pub(super) turn_cancel_closure_settlement: Option<crate::TurnCancelClosureSettlement>,
     pub(super) turn_control_resolver: Option<&'a dyn crate::AwaitEventResolver>,
     pub(super) recorded_attachment_intent_ids: std::collections::BTreeSet<crate::AttachmentId>,
-    pub(super) session_execution_lease_completion: Option<crate::ClaimAuthority>,
 }

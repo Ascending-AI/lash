@@ -1,61 +1,58 @@
-use lash_core::runtime::{
-    DeliveryPolicy, QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary,
-};
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
-use lash_core::{ClaimAuthority, LeaseOwnerIdentity, RuntimePersistence};
+use lash_core::store::{AdmittedHead, DriveFence, RootAdmission};
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::{LeaseOwnerIdentity, RuntimePersistence, StoreError, TurnId};
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
+/// The two writes that bind queued work to a root.
 #[derive(Clone, Copy, Debug)]
 pub(super) enum Entry {
-    Leading,
-    Automatic,
+    /// `admit_root` headed by the first batch.
+    Root,
+    /// `admit_at_checkpoint` of the running root.
     Checkpoint,
 }
-pub(super) const ENTRIES: [Entry; 3] = [Entry::Leading, Entry::Automatic, Entry::Checkpoint];
+pub(super) const ENTRIES: [Entry; 2] = [Entry::Root, Entry::Checkpoint];
+
+/// The root every case admits.
+const ROOT: &str = "atomicity-root";
 
 pub(super) struct Case {
     pub(super) store: Arc<dyn RuntimePersistence>,
     pub(super) ids: Vec<lash_core::BatchId>,
-    owner: LeaseOwnerIdentity,
-    lease: ClaimAuthority,
+    fence: DriveFence,
     entry: Entry,
 }
 
 pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) -> Case {
     let mut ids = Vec::new();
     for (sequence, task) in [(1, "first"), (2, "second")] {
-        // Both turn-work rows are wakes from one process, so they share the
-        // process-wake merge key and coalesce like the command pair does.
-        let draft = match entry {
-            Entry::Leading => QueuedWorkBatchDraft::new(
-                "root",
-                DeliveryPolicy::EarliestSafeBoundary,
-                lash_core::runtime::SessionCommand::ApplyConfigPatch {
-                    patch: Box::default(),
-                },
-            )
-            .with_merge_key("atomicity"),
-            _ => lash_core::runtime::process_wake_batch_draft(wake(sequence, task)),
-        };
+        // Both rows are wakes from one process, so they share the
+        // process-wake merge key and one admission takes both.
         let batch = store
-            .enqueue_queued_work(draft)
+            .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake(
+                sequence, task,
+            )))
             .await
-            .expect("enqueue claim row");
+            .expect("enqueue the admission row");
         ids.push(batch.batch_id);
     }
-    let owner = LeaseOwnerIdentity::opaque("claims", "claims-incarnation");
-    let lease = store
-        .seal_claim_epoch_for_test(&SessionId::from("root"), &owner, "claims-executor", 60_000)
+    let owner = LeaseOwnerIdentity::opaque("admissions", "admissions-incarnation");
+    let fence = store
+        .seal_drive_epoch_for_test(
+            &SessionId::from("root"),
+            &owner,
+            "admissions-executor",
+            60_000,
+        )
         .await
-        .expect("claim execution lease")
+        .expect("seal the drive epoch")
         .acquired()
-        .expect("execution lease available");
+        .expect("the drive epoch is sealed");
     Case {
         store,
         ids,
-        owner,
-        lease,
+        fence,
         entry,
     }
 }
@@ -87,135 +84,142 @@ fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
 }
 
 impl Case {
-    pub(super) async fn claim(&self) -> Option<QueuedWorkClaim> {
-        let policy = lash_core::testing::queued_work_claim_policy(10);
+    /// Admit the case's rows through its entry point; the batch ids bound.
+    pub(super) async fn admit(&self) -> Result<Vec<lash_core::BatchId>, StoreError> {
+        let policy = lash_core::testing::queued_work_admission_policy(10);
+        let root = TurnId::from(ROOT);
         match self.entry {
-            Entry::Leading => self
-                .store
-                .claim_leading_ready_session_command(
-                    &SessionId::from("root"),
-                    &self.lease.fence(),
-                    &self.owner,
-                )
-                .await
-                .expect("leading claim"),
-            Entry::Automatic => self
-                .store
-                .claim_ready_queued_work(
-                    &SessionId::from("root"),
-                    &self.lease.fence(),
-                    &self.owner,
-                    QueuedWorkClaimBoundary::Idle,
+            Entry::Root => {
+                let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+                    &self.fence,
+                    &root,
+                    AdmittedHead::Batch(self.ids[0].clone()),
+                );
+                request.policy = policy;
+                Ok(self
+                    .store
+                    .admit_root(&request)
+                    .await?
+                    .map(|admission| admission.batch_ids())
+                    .unwrap_or_default())
+            }
+            Entry::Checkpoint => Ok(
+                lash_core::testing::store_fixtures::admit_at_checkpoint_for_test(
+                    &self.store,
+                    &self.fence,
+                    &root,
+                    &root,
+                    lash_core::CheckpointKind::AfterWork,
+                    "atomicity-checkpoint",
+                    10,
                     policy,
                 )
-                .await
-                .expect("automatic claim")
-                .claim(),
-            Entry::Checkpoint => {
-                self.store
-                    .claim_checkpoint_work(
-                        &SessionId::from("root"),
-                        &self.lease.fence(),
-                        &self.owner,
-                        &lash_core::TurnId::from("turn"),
-                        lash_core::CheckpointKind::AfterWork,
-                        10,
-                        policy,
-                    )
-                    .await
-                    .expect("checkpoint claim")
-                    .1
-            }
+                .await?
+                .queued
+                .map(|queued| queued.batch_ids())
+                .unwrap_or_default(),
+            ),
         }
+    }
+
+    async fn admit_root(&self, root: &str) -> Result<Option<RootAdmission>, StoreError> {
+        let mut request = lash_core::testing::store_fixtures::admit_root_request_for_test(
+            &self.fence,
+            &TurnId::from(root),
+            AdmittedHead::Batch(self.ids[0].clone()),
+        );
+        request.policy = lash_core::testing::queued_work_admission_policy(10);
+        self.store.admit_root(&request).await
     }
 }
 
-/// The claimability verdict's two answers, over one row, on a real backend.
+/// An admission holds its rows across a displaced fence, on a real backend.
 ///
-/// `queued_work_batch_claimability` (FIG-3381, called by both stores since
-/// FIG-3383) says a row is claimable when it is unclaimed **or** claimed under
-/// a superseded session-execution-lease generation, and refuses it when the
-/// claiming generation already holds it. Both halves are safety properties:
-/// the first is how a crashed runner's work is recovered, and the second is
-/// what stops one generation holding two claims over one row (ADR 0029).
-///
-/// This runs on every backend, because the whole point of moving the decision
-/// into shared code is that the two cannot answer differently. The SQL
-/// predicate is still on each statement as the backstop, so a store that
-/// dropped the verdict call would still pass the first half — the second half
-/// is the one that fails, and it fails identically on both.
-pub(super) async fn claimability_verdict_holds_over_a_displaced_generation(
+/// The session's one unfinished root owns the rows it admitted: the same
+/// root admitted again, under its own fence or a successor's, reads back the
+/// recorded admission, and no other root takes them while it is unfinished
+/// (FIG-3927). Both halves run on every backend so the two cannot answer
+/// differently.
+pub(super) async fn an_admission_holds_its_rows_across_a_displaced_fence(
     store: Arc<dyn RuntimePersistence>,
     backend: &str,
 ) {
-    let case = prepare(store, Entry::Automatic).await;
+    let case = prepare(store, Entry::Root).await;
     let first = case
-        .claim()
+        .admit_root(ROOT)
         .await
-        .unwrap_or_else(|| panic!("{backend}: the first generation claims the ready run"));
-
-    // The same generation must not take the rows it already holds.
-    assert!(
-        case.claim().await.is_none(),
-        "{backend}: a generation that already holds these rows must not claim them again",
-    );
-
-    // Displace the lane. The new holder's generation is a different one, so
-    // the same rows become claimable again without anything releasing them.
-    let successor = case.displace_lease().await;
-    let second = successor
-        .claim()
-        .await
-        .unwrap_or_else(|| panic!("{backend}: a displacing generation reclaims the held rows"));
-    assert_ne!(
-        first.claim_id, second.claim_id,
-        "{backend}: the successor must take its own claim over the same rows",
-    );
+        .unwrap_or_else(|error| panic!("{backend}: the first admission: {error}"))
+        .unwrap_or_else(|| panic!("{backend}: the first fence admits the ready run"));
     assert_eq!(
-        second.data.batches.len(),
-        first.data.batches.len(),
-        "{backend}: the successor recovers the whole interrupted run",
+        first.batch_ids(),
+        case.ids,
+        "{backend}: the admission takes both rows"
+    );
+    let again = case
+        .admit_root(ROOT)
+        .await
+        .unwrap_or_else(|error| panic!("{backend}: the repeated admission: {error}"));
+    assert_eq!(
+        again.map(|admission| admission.batch_ids()),
+        Some(first.batch_ids()),
+        "{backend}: the same root reads back its recorded admission",
     );
     assert!(
-        successor.claim().await.is_none(),
-        "{backend}: the successor must not claim its own rows twice either",
+        matches!(
+            case.admit_root("atomicity-other-root").await,
+            Err(StoreError::UnfinishedRootConflict { .. })
+        ),
+        "{backend}: no other root is admitted while the first is unfinished",
+    );
+
+    let successor = case.displace_fence().await;
+    let resumed = successor
+        .admit_root(ROOT)
+        .await
+        .unwrap_or_else(|error| panic!("{backend}: the successor's resume: {error}"));
+    assert_eq!(
+        resumed.map(|admission| admission.batch_ids()),
+        Some(first.batch_ids()),
+        "{backend}: the successor resumes the recorded admission, not a new one",
+    );
+    assert!(
+        matches!(
+            successor.admit_root("atomicity-other-root").await,
+            Err(StoreError::UnfinishedRootConflict { .. })
+        ),
+        "{backend}: a successor fence does not free the admitted rows for another root",
     );
 }
 
 impl Case {
-    /// Take this session's lane for a fresh owner, advancing the generation.
-    ///
-    /// The incumbent hands the lane back first, which is what a runner does
-    /// when it stands down; the claims it left behind keep pointing at the
-    /// generation that is now gone, which is exactly the state a successor has
-    /// to recover from.
-    async fn displace_lease(&self) -> Case {
+    /// Seal a successor drive epoch over this case's session.
+    async fn displace_fence(&self) -> Case {
         self.store
-            .supersede_claim_epoch_for_test(&self.lease.fence())
+            .supersede_drive_epoch_for_test(&self.fence)
             .await
-            .expect("the incumbent hands its lane back");
-        let owner = LeaseOwnerIdentity::opaque("claims-successor", "claims-successor-incarnation");
-        let lease = self
+            .expect("the incumbent's epoch is superseded");
+        let owner =
+            LeaseOwnerIdentity::opaque("admissions-successor", "admissions-successor-incarnation");
+        let fence = self
             .store
-            .seal_claim_epoch_for_test(
+            .seal_drive_epoch_for_test(
                 &SessionId::from("root"),
                 &owner,
-                "claims-successor-executor",
+                "admissions-successor-executor",
                 60_000,
             )
             .await
-            .expect("claim the successor execution lease")
+            .expect("seal the successor epoch")
             .acquired()
-            .expect("the successor execution lease is available");
-        assert_ne!(
-            lease.fencing_token, self.lease.fencing_token,
-            "a displacing claim must advance the generation",
+            .expect("the successor epoch is sealed");
+        assert!(
+            fence.epoch() > self.fence.epoch(),
+            "a successor seal advances the epoch",
         );
         Case {
             store: Arc::clone(&self.store),
             ids: self.ids.clone(),
-            owner,
-            lease,
+            fence,
             entry: self.entry,
         }
     }

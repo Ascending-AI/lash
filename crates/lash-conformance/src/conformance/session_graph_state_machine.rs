@@ -5,7 +5,7 @@
 //! [`SessionStoreFactory`](crate::SessionStoreFactory) for each case.
 
 use crate::facade_support::SessionGraphFacadeOps;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
@@ -1413,7 +1413,7 @@ async fn commit_runtime_state_for_property(
         format!("session-graph-property-{owner_suffix}-incarnation"),
     );
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &session_id,
             &owner,
             "commit-runtime-state-for-property-executor",
@@ -1424,9 +1424,7 @@ async fn commit_runtime_state_for_property(
         .ok_or(crate::StoreError::Contended)?;
     let result = store.commit_runtime_state(commit).await;
     if result.is_err() {
-        store
-            .supersede_claim_epoch_for_test(&lease.completion())
-            .await?;
+        store.supersede_drive_epoch_for_test(&lease).await?;
     }
     result
 }

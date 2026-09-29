@@ -1,7 +1,5 @@
 use super::*;
 
-use super::entry::ListComprehensionElement;
-
 impl Compiler {
     /// `path` is the path of `expr`, the node under the `LabelAnnotated`
     /// the caller matched on.
@@ -239,44 +237,6 @@ impl Compiler {
         forced_site: Option<LashlangExecutionSite>,
         path: &AstPath,
     ) -> bool {
-        if let Expr::ListComprehension { element, clauses } = handle
-            && let Some(leaf) = comprehension_call_leaf(element)
-        {
-            // The leaf call is the element node, unwrapping `?` once.
-            let element_path = path.child(clauses.len() as u32);
-            let call_path = if leaf.unwrap {
-                element_path.child(0)
-            } else {
-                element_path
-            };
-            self.compile_list_comprehension(
-                ListComprehensionElement::DeferredCall {
-                    receiver: leaf.receiver,
-                    args: leaf.args,
-                    call_path: call_path.clone(),
-                },
-                clauses,
-                path,
-            );
-            let operation = self.push_name(leaf.operation);
-            let site = self.lashlang_execution_site_for_expr(leaf.call, &call_path);
-            let source_span = self.expression_source_span(&call_path);
-            let batch =
-                self.push_resource_operation_list_batch(CompiledResourceOperationListBatch {
-                    operation,
-                    argc: leaf.args.len(),
-                    unwrap: leaf.unwrap,
-                    aggregate_unwrap,
-                    site,
-                    source_span,
-                });
-            let instruction = self.code.len();
-            self.code
-                .push(Instruction::ResourceOperationListBatch(batch));
-            self.mark_instruction_source_span(instruction, path);
-            self.mark_forced_lashlang_execution_site(instruction, forced_site);
-            return true;
-        }
         let Some(leaf_count) = aggregate_await_shape_leaf_count(handle) else {
             return false;
         };
@@ -290,9 +250,8 @@ impl Compiler {
             self.compile_aggregate_await_shape(handle, path, &mut leaves, &mut stack_value_count);
         // A Lashlang-native aggregate waits for every result and reports its
         // first *written* unwrapped rejection — one input-order rule for the
-        // dialect's own aggregates, the list-comprehension batch included
-        // (ADR 0099 §10 L7). Only the TypeScript `Promise.*` aggregates carry
-        // an ECMA consumer mode.
+        // dialect's own aggregates (ADR 0099 §10 L7). Only the TypeScript
+        // `Promise.*` aggregates carry an ECMA consumer mode.
         let batch = self.push_resource_operation_batch(CompiledResourceOperationBatch {
             leaves: leaves.into_boxed_slice(),
             shape,
@@ -307,10 +266,6 @@ impl Compiler {
         true
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the comprehension body compiled once earlier in this same compile, filling element_shape before the aggregate is shaped, per the message"
-    )]
     fn compile_aggregate_await_shape(
         &mut self,
         expr: &Expr,
@@ -319,40 +274,6 @@ impl Compiler {
         stack_value_count: &mut usize,
     ) -> CompiledAggregateAwaitShape {
         match expr {
-            Expr::ListComprehension { element, clauses } => {
-                let mut element_leaves = Vec::new();
-                let mut element_value_count = 0;
-                let mut element_shape = None;
-                let element_path = path.child(clauses.len() as u32);
-                self.compile_list_comprehension_with(
-                    &mut |compiler| {
-                        element_shape = Some(compiler.compile_aggregate_await_shape(
-                            element,
-                            &element_path,
-                            &mut element_leaves,
-                            &mut element_value_count,
-                        ));
-                        compiler
-                            .code
-                            .push(Instruction::BuildTuple(element_value_count));
-                    },
-                    clauses,
-                    path,
-                );
-                let stack_index = *stack_value_count;
-                *stack_value_count += 1;
-                CompiledAggregateAwaitShape::Comprehension {
-                    stack_index,
-                    template: Box::new(CompiledResourceOperationBatch {
-                        leaves: element_leaves.into_boxed_slice(),
-                        shape: element_shape.expect("comprehension body compiles once"),
-                        stack_value_count: element_value_count,
-                        aggregate_unwrap: false,
-                        consumer: AggregateConsumer::AllSettled,
-                    }),
-                }
-            }
-
             Expr::ReceiverCall {
                 receiver,
                 operation,
@@ -386,22 +307,6 @@ impl Compiler {
                     leaves,
                     stack_value_count,
                 )
-            }
-            Expr::Tuple(items) => {
-                let values = items
-                    .iter()
-                    .enumerate()
-                    .map(|(index, item)| {
-                        self.compile_aggregate_await_shape(
-                            item,
-                            &path.child(index as u32),
-                            leaves,
-                            stack_value_count,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .into_boxed_slice();
-                CompiledAggregateAwaitShape::Tuple(values)
             }
             Expr::List(items) => {
                 let values = items
@@ -580,65 +485,9 @@ impl Compiler {
         condition: &Expr,
         path: &AstPath,
     ) -> usize {
-        if !contains_type_literal(condition)
-            && let Some(value) = self.fold_compile_time_expr(condition)
-        {
+        if let Some(value) = self.fold_compile_time_expr(condition) {
             self.emit_push_value(value);
             return self.emit_jump_if_false();
-        }
-
-        if let Expr::Binary { left, op, right } = condition
-            && is_comparison_binary_op(*op)
-        {
-            if let (
-                Expr::Binary {
-                    left: inner_left,
-                    op: binary_op,
-                    right: inner_right,
-                },
-                Some(Value::Number(compare_right)),
-            ) = (left.as_ref(), self.fold_compile_time_expr(right))
-                && is_numeric_binary_op(*binary_op)
-                && let (Expr::Variable(name), Some(Value::Number(binary_right))) = (
-                    inner_left.as_ref(),
-                    self.fold_compile_time_expr(inner_right),
-                )
-            {
-                let slot = self.push_slot(name);
-                let index = self.code.len();
-                self.code
-                    .push(Instruction::JumpIfSlotNumberBinaryCompareFalse {
-                        slot,
-                        binary_op: *binary_op,
-                        binary_right,
-                        compare_op: *op,
-                        compare_right,
-                        target: usize::MAX,
-                    });
-                return index;
-            }
-
-            if let (Expr::Variable(name), Some(Value::Number(right))) =
-                (left.as_ref(), self.fold_compile_time_expr(right))
-            {
-                let slot = self.push_slot(name);
-                let index = self.code.len();
-                self.code.push(Instruction::JumpIfSlotNumberCompareFalse {
-                    slot,
-                    op: *op,
-                    right,
-                    target: usize::MAX,
-                });
-                return index;
-            }
-            self.compile_expr(left, &path.child(0));
-            self.compile_expr(right, &path.child(1));
-            let index = self.code.len();
-            self.code.push(Instruction::JumpIfCompareFalse {
-                op: *op,
-                target: usize::MAX,
-            });
-            return index;
         }
 
         self.compile_expr(condition, path);
@@ -657,183 +506,10 @@ impl Compiler {
         index
     }
 
-    pub(super) fn compile_type_literal(&mut self, ty: &TypeExpr) {
-        self.compile_stats.borrow_mut().type_literals_total += 1;
-
-        if let Some(schema) = self.fold_type_expr(ty) {
-            let idx = self.push_const(wrap_type_schema_value(schema));
-            self.code.push(Instruction::PushConst(idx));
-            self.compile_stats.borrow_mut().type_literals_const_folded += 1;
-            return;
-        }
-
-        self.compile_type_expr(ty);
-        self.code.push(Instruction::WrapTypeLiteral);
-        self.compile_stats.borrow_mut().type_literals_dynamic += 1;
-    }
-
-    fn compile_type_expr(&mut self, ty: &TypeExpr) {
-        if let Some(value) = self.fold_type_expr(ty) {
-            let idx = self.push_const(value);
-            self.code.push(Instruction::PushConst(idx));
-            return;
-        }
-
-        match ty {
-            TypeExpr::Ref(name) => {
-                let slot = self.push_slot(name);
-                self.code.push(Instruction::ResolveTypeRef(slot));
-                self.compile_stats.borrow_mut().type_ref_sites += 1;
-            }
-            TypeExpr::List(inner) => {
-                let kind_idx = self.push_const(Value::String(
-                    SchemaScalarKind::Array.as_schema_name().into(),
-                ));
-                self.code.push(Instruction::PushConst(kind_idx));
-                self.compile_type_expr(inner);
-                let keys = self.push_key_list([schema_keys::TYPE, schema_keys::ITEMS].into_iter());
-                self.code.push(Instruction::BuildRecord(keys));
-            }
-            TypeExpr::Object(fields) => {
-                let kind_idx = self.push_const(Value::String(
-                    SchemaScalarKind::Object.as_schema_name().into(),
-                ));
-                self.code.push(Instruction::PushConst(kind_idx));
-
-                for field in fields {
-                    self.compile_type_expr(&field.ty);
-                }
-                let prop_keys = self.push_key_list(fields.iter().map(|f| f.name.as_str()));
-                self.code.push(Instruction::BuildRecord(prop_keys));
-
-                let required: Vec<&str> = fields
-                    .iter()
-                    .filter(|f| !f.optional)
-                    .map(|f| f.name.as_str())
-                    .collect();
-                for name in &required {
-                    let idx = self.push_const(Value::String((*name).into()));
-                    self.code.push(Instruction::PushConst(idx));
-                }
-                self.code.push(Instruction::BuildList(required.len()));
-
-                self.code.push(Instruction::PushBool(false));
-
-                let obj_keys = self.push_key_list(
-                    [
-                        schema_keys::TYPE,
-                        schema_keys::PROPERTIES,
-                        schema_keys::REQUIRED,
-                        schema_keys::ADDITIONAL_PROPERTIES,
-                    ]
-                    .into_iter(),
-                );
-                self.code.push(Instruction::BuildRecord(obj_keys));
-            }
-            TypeExpr::Union(variants) => {
-                // Union reaches this arm only when at least one variant
-                // contains a `Ref` that couldn't const-fold. Compile
-                // each variant and pack them into an `anyOf` list.
-                for variant in variants {
-                    self.compile_type_expr(variant);
-                }
-                self.code.push(Instruction::BuildList(variants.len()));
-                let keys = self.push_key_list([schema_keys::ANY_OF].into_iter());
-                self.code.push(Instruction::BuildRecord(keys));
-            }
-            TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => {
-                let idx = self.push_const(interned_scalar_schema(None));
-                self.code.push(Instruction::PushConst(idx));
-            }
-            TypeExpr::Any
-            | TypeExpr::Str
-            | TypeExpr::Int
-            | TypeExpr::Float
-            | TypeExpr::Bool
-            | TypeExpr::Dict
-            | TypeExpr::Null
-            | TypeExpr::Enum(_) => {
-                unreachable!("scalar/enum types must const-fold")
-            }
-        }
-    }
-
-    pub(super) fn fold_type_expr(&self, ty: &TypeExpr) -> Option<Value> {
-        self.fold_type_expr_inner(ty, &mut SmallVec::new())
-    }
-
-    fn fold_type_expr_inner<'a>(
-        &self,
-        ty: &'a TypeExpr,
-        resolving: &mut SmallVec<[&'a str; 4]>,
-    ) -> Option<Value> {
-        use schema_keys::*;
-        match ty {
-            TypeExpr::Ref(name) => {
-                let name = name.as_str();
-                if resolving.contains(&name) {
-                    return None;
-                }
-                let wrapper = self.const_for_name(name)?;
-                resolving.push(name);
-                let schema = unwrap_type_value(&wrapper).cloned();
-                resolving.pop();
-                schema
-            }
-            TypeExpr::List(inner) => {
-                let inner_value = self.fold_type_expr_inner(inner, resolving)?;
-                let mut rec = record_with_capacity(2);
-                rec.insert(
-                    TYPE.into(),
-                    Value::String(SchemaScalarKind::Array.as_schema_name().into()),
-                );
-                rec.insert(ITEMS.into(), inner_value);
-                Some(Value::Record(Arc::new(rec)))
-            }
-            TypeExpr::Object(fields) => {
-                let mut properties = record_with_capacity(fields.len());
-                for field in fields {
-                    properties.insert(
-                        field.name.to_string(),
-                        self.fold_type_expr_inner(&field.ty, resolving)?,
-                    );
-                }
-                let required: Vec<Value> = fields
-                    .iter()
-                    .filter(|f| !f.optional)
-                    .map(|f| Value::String(f.name.clone().into()))
-                    .collect();
-                let mut rec = record_with_capacity(4);
-                rec.insert(
-                    TYPE.into(),
-                    Value::String(SchemaScalarKind::Object.as_schema_name().into()),
-                );
-                rec.insert(PROPERTIES.into(), Value::Record(Arc::new(properties)));
-                rec.insert(REQUIRED.into(), Value::List(required.into()));
-                rec.insert(ADDITIONAL_PROPERTIES.into(), Value::Bool(false));
-                Some(Value::Record(Arc::new(rec)))
-            }
-            TypeExpr::Union(variants) => {
-                let folded: Option<Vec<Value>> = variants
-                    .iter()
-                    .map(|variant| self.fold_type_expr_inner(variant, resolving))
-                    .collect();
-                let folded = folded?;
-                let mut rec = record_with_capacity(1);
-                rec.insert(ANY_OF.into(), Value::List(folded.into()));
-                Some(Value::Record(Arc::new(rec)))
-            }
-            _ => fold_type(ty),
-        }
-    }
-
     pub(super) fn patch_jump(&mut self, index: usize, target: usize) {
         match &mut self.code[index] {
             Instruction::Jump(slot)
             | Instruction::JumpIfFalse(slot)
-            | Instruction::JumpIfCompareFalse { target: slot, .. }
-            | Instruction::JumpIfSlotNumberCompareFalse { target: slot, .. }
-            | Instruction::JumpIfSlotNumberBinaryCompareFalse { target: slot, .. }
             | Instruction::JumpIfTrue(slot)
             | Instruction::IterNext { jump_to: slot } => *slot = target,
             _ => unreachable!("patched non-jump instruction"),
@@ -841,45 +517,8 @@ impl Compiler {
     }
 }
 
-/// The single module-operation leaf of an awaited list comprehension: a
-/// receiver call, optionally under `?`. Any other element keeps the
-/// comprehension on the plain evaluate-then-await path.
-struct ComprehensionCallLeaf<'a> {
-    call: &'a Expr,
-    receiver: &'a Expr,
-    operation: &'a str,
-    args: &'a [Expr],
-    unwrap: bool,
-}
-
-fn comprehension_call_leaf(element: &Expr) -> Option<ComprehensionCallLeaf<'_>> {
-    let (call, unwrap) = match element {
-        Expr::ResultUnwrap(inner) => (inner.as_ref(), true),
-        other => (other, false),
-    };
-    let Expr::ReceiverCall {
-        receiver,
-        operation,
-        args,
-    } = call
-    else {
-        return None;
-    };
-    Some(ComprehensionCallLeaf {
-        call,
-        receiver,
-        operation: operation.as_str(),
-        args,
-        unwrap,
-    })
-}
-
 fn aggregate_await_shape_leaf_count(expr: &Expr) -> Option<usize> {
     match expr {
-        Expr::ListComprehension { element, .. } => aggregate_await_leaf_count(element),
-        Expr::Tuple(items) => items.iter().try_fold(0usize, |count, item| {
-            Some(count + aggregate_await_leaf_count(item)?)
-        }),
         Expr::List(items) => items.iter().try_fold(0usize, |count, item| {
             Some(count + aggregate_await_leaf_count(item)?)
         }),
@@ -892,12 +531,8 @@ fn aggregate_await_shape_leaf_count(expr: &Expr) -> Option<usize> {
 
 fn aggregate_await_leaf_count(expr: &Expr) -> Option<usize> {
     match expr {
-        Expr::ListComprehension { element, .. } => aggregate_await_leaf_count(element),
         Expr::ReceiverCall { .. } => Some(1),
         Expr::ResultUnwrap(inner) if matches!(inner.as_ref(), Expr::ReceiverCall { .. }) => Some(1),
-        Expr::Tuple(items) => items.iter().try_fold(0usize, |count, item| {
-            Some(count + aggregate_await_leaf_count(item)?)
-        }),
         Expr::List(items) => items.iter().try_fold(0usize, |count, item| {
             Some(count + aggregate_await_leaf_count(item)?)
         }),

@@ -184,6 +184,30 @@ pub fn process_start_slot(value: &serde_json::Value) -> Option<u32> {
         .and_then(|index| u32::try_from(index).ok())
 }
 
+/// The field of the internal result slot a trigger-registration attempt
+/// answers with.
+///
+/// A registration's receipt — revision, fingerprint, the rest of the handle
+/// record — exists only once the declared intent is realized, after the
+/// attempt sealed its output, so the attempt answers
+/// `{"__trigger_slot__": <intent index>}` and the realization replaces the
+/// slot with the trigger handle its registration produced. Same rule as the
+/// process-start slot: never a handle, never survives to a holder (FIG-3116).
+pub const TRIGGER_REGISTER_SLOT_FIELD: &str = "__trigger_slot__";
+
+/// The unrealized slot for the declared trigger registration at `intent_index`.
+pub fn trigger_register_slot_json(intent_index: u32) -> serde_json::Value {
+    serde_json::json!({ TRIGGER_REGISTER_SLOT_FIELD: intent_index })
+}
+
+/// The intent index a trigger-registration slot record names, if `value` is one.
+pub fn trigger_register_slot(value: &serde_json::Value) -> Option<u32> {
+    value
+        .get(TRIGGER_REGISTER_SLOT_FIELD)?
+        .as_u64()
+        .and_then(|index| u32::try_from(index).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

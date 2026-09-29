@@ -233,8 +233,6 @@ pub struct NodeData {
     pub condition: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iterable: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub clauses: Vec<EditableComprehensionClause>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -348,13 +346,6 @@ impl NodeName {
             WorkflowNodeNameSource::Derived => Self::Derived { title },
         }
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum EditableComprehensionClause {
-    For { binding: String, iterable: String },
-    If { condition: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

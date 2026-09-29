@@ -132,7 +132,7 @@ impl Store {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let connection = Connection::open(path).map_err(sqlite_error)?;
-        let fleet = crate::fleet_format::recorded_or_current(&connection).map_err(sqlite_error)?;
+        let fleet = crate::compat::recorded_or_current(&connection).map_err(sqlite_error)?;
         Self::get_checkpoint_conn(&connection, blob_ref, fleet)
     }
 
@@ -166,7 +166,11 @@ impl Store {
         profile: BuiltinBlobProfile,
         blob_ref: &BlobRef,
     ) -> Result<(), StoreError> {
-        let stored = encode_artifact_blob(&descriptor, profile, content)?;
+        let fleet = crate::compat::recorded_or_current(conn).map_err(sqlite_error)?;
+        let version = fleet.writer_version(lash_core_execution::surface_format!(
+            SQLITE_BLOB_ENVELOPE_VERSION
+        ));
+        let stored = encode_artifact_blob(&descriptor, profile, content, version)?;
         crate::conn::cached_execute(
             conn,
             artifact_sql().blobs_sqlite.insert_ignore.sql(),

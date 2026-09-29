@@ -6,7 +6,7 @@
 use super::drive_admission::{DriveParts, on_tier};
 use lash_core::engine::*;
 use lash_core::store::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::{SessionId, TurnId};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -210,7 +210,7 @@ impl Fixture {
         let parts = DriveParts::new(prefix, name, host, stores, 8).await;
         let root = TurnId::from(format!("{name}-root"));
         let input = parts.enqueue("first", Some(root.as_str())).await;
-        let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
             &parts.store,
             &parts.session_id,
             "parked-execution",
@@ -231,13 +231,11 @@ impl Fixture {
         let admission = parts
             .store
             .admit_root(&lash_core::store::AdmitRootRequest {
-                session_id: parts.session_id.clone(),
-                lease: lease.fence(),
-                owner: lease.owner.clone(),
+                fence: lease.clone(),
                 root: root.clone(),
                 head: lash_core::store::AdmittedHead::Input(input.clone()),
                 max_inputs: 1,
-                policy: lash_core::testing::queued_work_claim_policy(1),
+                policy: lash_core::testing::queued_work_admission_policy(1),
                 base: lash_core::store::SessionHeadRef {
                     generation: 0,
                     revision: state.head_revision,
@@ -266,7 +264,7 @@ impl Fixture {
             .expect("park");
         parts
             .store
-            .supersede_claim_epoch_for_test(&lease.completion())
+            .supersede_drive_epoch_for_test(&lease)
             .await
             .expect("execution stopped while the park holds the root");
         assert!(matches!(
@@ -276,7 +274,7 @@ impl Fixture {
                 .await
                 .expect("held inputs")[0]
                 .status,
-            crate::PendingTurnInputReadStatus::Pending
+            crate::PendingTurnInputReadStatus::Admitted { root: ref holder } if *holder == root
         ));
         Self {
             parts,
@@ -596,6 +594,260 @@ pub async fn a_terminal_root_never_reparks(
             .await
             .expect("park read")
             .is_none()
+    );
+}
+
+/// The root the fixture's input is bound to, if any.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the store answers its own reads"
+)]
+async fn input_holder(f: &Fixture) -> Option<TurnId> {
+    f.parts
+        .store
+        .list_pending_turn_inputs(&f.parts.session_id)
+        .await
+        .expect("list inputs")
+        .into_iter()
+        .find(|read| read.input.input_id == f.input)
+        .and_then(|read| match read.status {
+            crate::PendingTurnInputReadStatus::Admitted { root } => Some(root),
+            _ => None,
+        })
+}
+
+/// FIG-3927 N2, the verb paths: a parked root's cancel, its fork, the end
+/// of its lost run and its session's close each end the root, and after each
+/// no row is still bound to it. A fork hands the rows to its new root.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn no_row_stays_bound_after_a_roots_verb_close_or_lost_end(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let cancelled = Fixture::new(prefix, "unbound-cancel", &host, &stores).await;
+    assert_eq!(
+        input_holder(&cancelled).await,
+        Some(cancelled.root.clone()),
+        "the parked root holds its input"
+    );
+    cancelled.verb(RootVerb::Cancel).await.expect("cancel");
+    assert_eq!(input_holder(&cancelled).await, None, "cancel");
+
+    let forked = Fixture::new(prefix, "unbound-fork", &host, &stores).await;
+    let intent = forked.verb(RootVerb::Fork).await.expect("fork");
+    let holder = input_holder(&forked).await;
+    assert!(
+        holder.is_none() || holder == Some(forked_root(&forked.root, intent.id)),
+        "fork: the input is open or bound to the new root, got {holder:?}"
+    );
+
+    let lost = Fixture::new(prefix, "unbound-lost", &host, &stores).await;
+    lost.factory
+        .end_lost_root(
+            &RootRef {
+                session: lost.parts.session_id.clone(),
+                root: lost.root.clone(),
+            },
+            stores.clock().timestamp_ms(),
+        )
+        .await
+        .expect("end the lost root")
+        .expect("the root had no terminal");
+    assert_eq!(input_holder(&lost).await, None, "lost-run end");
+
+    let closed = Fixture::new(prefix, "unbound-close", &host, &stores).await;
+    closed
+        .factory
+        .begin_session_close(&closed.parts.session_id, stores.clock().timestamp_ms())
+        .await
+        .expect("close")
+        .expect("the session exists");
+    assert_eq!(input_holder(&closed).await, None, "session close");
+}
+
+/// FIG-4018: a root whose run met a typed refusal no retry changes ends in
+/// the store with that refusal, once. Its input is answered and no longer
+/// bound to it, the session has no unfinished root, so its next input is
+/// admitted under a new root, and a second end, or the lost-run end after
+/// it, writes nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "refused-end", &host, &stores, 8).await;
+    let root = TurnId::from("refused-end-root");
+    let input = parts.enqueue("first", Some(root.as_str())).await;
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        &parts.store,
+        &parts.session_id,
+        "refused-execution",
+    )
+    .await;
+    let state = parts.initial_state();
+    let leaf = parts
+        .runtime()
+        .await
+        .export_state()
+        .session_graph
+        .leaf_node_id
+        .clone();
+    let base = lash_core::store::SessionHeadRef {
+        generation: 0,
+        revision: state.head_revision,
+        leaf,
+        checkpoint: state.checkpoint_ref.clone(),
+    };
+    let admit = |root: &TurnId, head: &crate::InputId| lash_core::store::AdmitRootRequest {
+        fence: fence.clone(),
+        root: root.clone(),
+        head: lash_core::store::AdmittedHead::Input(head.clone()),
+        max_inputs: 1,
+        policy: lash_core::testing::queued_work_admission_policy(1),
+        base: base.clone(),
+        turn_index: state.turn_index as u64 + 1,
+        generation: None,
+        admitted_generation: lash_core::engine::BuildGeneration::for_test("refused-end"),
+    };
+    parts
+        .store
+        .admit_root(&admit(&root, &input))
+        .await
+        .expect("admit the root")
+        .expect("the root's admission reaches its head");
+    let next = parts.enqueue("next", Some("refused-end-next")).await;
+
+    let refusal = lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::StoreCommitSuperseded,
+        "the head moved under the root's commit",
+    );
+    let at_ms = stores.clock().timestamp_ms();
+    let terminal = parts
+        .store
+        .end_refused_root(&parts.session_id, &root, &refusal, at_ms)
+        .await
+        .expect("end the refused root")
+        .expect("the root had no terminal");
+    assert_eq!(terminal.kind, RootTerminalKind::Failed);
+    assert_eq!(
+        terminal.cause,
+        RootTerminalCause::Refused {
+            code: refusal.code.clone(),
+            message: refusal.message.clone(),
+            refusal_cause: None,
+        }
+    );
+    assert_eq!(
+        parts
+            .store
+            .root_terminal(&parts.session_id, &root)
+            .await
+            .expect("terminal read"),
+        Some(terminal.clone()),
+        "the end is the root's terminal evidence"
+    );
+    let pending = parts
+        .store
+        .list_pending_turn_inputs(&parts.session_id)
+        .await
+        .expect("pending");
+    assert!(
+        pending.iter().all(|row| row.input.input_id != input),
+        "the refused root's input is answered: {pending:?}"
+    );
+    assert!(
+        parts
+            .store
+            .unfinished_root(&parts.session_id)
+            .await
+            .expect("unfinished read")
+            .is_none(),
+        "the refused root no longer holds its session"
+    );
+
+    assert!(
+        parts
+            .store
+            .end_refused_root(&parts.session_id, &root, &refusal, at_ms + 1)
+            .await
+            .expect("a second end")
+            .is_none(),
+        "a second end writes nothing"
+    );
+    let factory = stores.session_store_factory();
+    assert!(
+        factory
+            .end_lost_root(
+                &RootRef {
+                    session: parts.session_id.clone(),
+                    root: root.clone(),
+                },
+                at_ms + 2,
+            )
+            .await
+            .expect("the lost-run end")
+            .is_none(),
+        "the lost-run end writes nothing over the refusal"
+    );
+    assert_eq!(
+        parts
+            .store
+            .root_terminal(&parts.session_id, &root)
+            .await
+            .expect("terminal read"),
+        Some(terminal),
+        "the root keeps its one terminal"
+    );
+
+    let next_root = TurnId::from("refused-end-next-root");
+    let admission = parts
+        .store
+        .admit_root(&admit(&next_root, &next))
+        .await
+        .expect("admit the next root")
+        .expect("the next input heads a new root");
+    assert_eq!(admission.input_ids(), vec![next]);
+
+    // A refusal's structured cause is stored with it: a root refused because
+    // its session was deleted answers its inputs with the session-retirement
+    // refusal, not with the bare code.
+    let retirement = lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::SessionDeleted,
+        "the session was deleted under the root",
+    )
+    .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
+        session_id: parts.session_id.clone(),
+    });
+    parts
+        .store
+        .end_refused_root(&parts.session_id, &next_root, &retirement, at_ms + 3)
+        .await
+        .expect("end the retired root")
+        .expect("the next root had no terminal");
+    let stored = parts
+        .store
+        .root_terminal(&parts.session_id, &next_root)
+        .await
+        .expect("terminal read")
+        .expect("the retired root's terminal");
+    assert_eq!(
+        stored.cause,
+        RootTerminalCause::Refused {
+            code: retirement.code.clone(),
+            message: retirement.message.clone(),
+            refusal_cause: retirement.cause.clone(),
+        },
+        "the stored refusal keeps its session-retirement cause"
     );
 }
 
@@ -1220,7 +1472,7 @@ pub async fn a_parked_roots_fence_stays_current_until_a_verb(
     assert!(f.parts.epoch().await.epoch > before.epoch);
 }
 
-pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_completes_after_restore(
+pub async fn a_diverged_root_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -1235,7 +1487,7 @@ pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_comple
         .expect("held");
     assert!(matches!(
         held[0].status,
-        crate::PendingTurnInputReadStatus::Pending
+        crate::PendingTurnInputReadStatus::Admitted { root: ref holder } if *holder == f.root
     ));
     let again = f
         .parts

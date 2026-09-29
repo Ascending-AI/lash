@@ -165,10 +165,10 @@ fi
 
 companion_output="$artifact_dir/companion.log"
 (cd crates/lash-sqlite-store && "$companion_executable" \
-  turn_input_claims_supersede_across_session_lease_generations \
+  a_stale_fence_writes_nothing \
   --test-threads=1) 2>&1 | tee "$companion_output"
 if ! grep -Fq 'test result: ok. 1 passed; 0 failed' "$companion_output"; then
-  echo 'companion gate: FAILED (expected one passing turn-input lease-generation test)' >&2
+  echo 'companion gate: FAILED (expected one passing stale-drive-fence test)' >&2
   exit 1
 fi
 if grep -Fn 'panicked at' "$companion_output" >&2; then

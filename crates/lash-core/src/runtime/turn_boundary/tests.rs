@@ -2,8 +2,8 @@ use super::*;
 use crate::SessionId;
 use crate::runtime::tests::helpers::{FixedAttachmentRoots, RecordingStore};
 use crate::session_model::{ConversationRecord, MessageRole, Part};
-use crate::store::TurnInputStore;
-use crate::testing::RuntimePersistenceTestClaimExt as _;
+use crate::store::IngressStore;
+use crate::testing::RuntimePersistenceTestDriveExt as _;
 use crate::testing::conformance_support::TurnCancelPeekIdentity;
 use crate::{
     AgentFrameReason, FrameKey, Message, OpenAgentFrameRequest, SessionGraph, TokenUsage,
@@ -185,15 +185,7 @@ fn frame_switch_commit_input<'a>(
         usage_deltas: &[],
         failure_evidence: &[],
         outcome,
-        claim_settlement: TurnClaimSettlement::for_test(
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            Vec::new(),
-            std::collections::HashMap::new(),
-            std::collections::HashMap::new(),
-        ),
-        current_session_lease_fence: None,
+        ingress_settlement: TurnIngressSettlement::default(),
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,
@@ -201,7 +193,6 @@ fn frame_switch_commit_input<'a>(
         turn_cancel_closure_settlement: None,
         turn_control_resolver: None,
         recorded_attachment_intent_ids: Default::default(),
-        session_execution_lease_completion: None,
     }
 }
 
@@ -268,7 +259,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
     store
         .validate_turn_cancellation_binding(
             &address.session_id,
-            &lease.fence(),
+            &lease,
             &binding_id,
             &address.execution_scope(),
         )
@@ -278,14 +269,14 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         .closure_authorization(
             &binding_id,
             address.execution_scope(),
-            &lease.fence(),
+            &lease,
             observed.clone(),
             Some(&honoured),
             None,
         )
         .expect("materialize exact closure");
     store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await
         .expect("authorize exact closure");
     let settlement = control
@@ -320,6 +311,12 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
         )
         .await
         .expect("prepare stable final state");
+    // The closure is consumed by the turn's commit under its drive fence.
+    pipeline.set_drive_commit(Some(DriveCommit {
+        fence: lease.clone(),
+        root: turn_id.clone(),
+        terminal: None,
+    }));
     let returned_state = pipeline.export_state_for_assembly();
     pipeline
         .final_commit_with_snapshots(FinalCommitInput {
@@ -335,15 +332,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             outcome: &TurnOutcome::Stopped(crate::TurnStop::Cancelled {
                 evidence: honoured.clone(),
             }),
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: Some(turn_id.clone()),
             interrupted_turn_input_cancellation: Some(honoured),
@@ -351,7 +340,6 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             turn_cancel_closure_settlement: Some(settlement),
             turn_control_resolver: Some(host.as_ref()),
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: Some(lease.completion()),
         })
         .await
         .expect("refresh stale predicate without discarding execution enrichment");
@@ -386,7 +374,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
 async fn leased_boundary(
     store: &RecordingStore,
     state: RuntimeSessionState,
-) -> (TurnBoundary, crate::ClaimAuthority) {
+) -> (TurnBoundary, crate::store::DriveFence) {
     crate::SessionCommitStore::admit_and_bind_session(
         store,
         &crate::SessionBinding::root(state.session_id.clone()),
@@ -395,7 +383,7 @@ async fn leased_boundary(
     .expect("admit turn-boundary test session");
     let owner = lease_owner("turn-boundary-test");
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &state.session_id,
             &owner,
             "leased-boundary-executor",
@@ -894,15 +882,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             usage_deltas: &[],
             failure_evidence: &[],
             outcome: &outcome,
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -910,7 +890,6 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect_err("a historical frame switch outcome must refuse the commit");
@@ -968,15 +947,7 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -984,7 +955,6 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect("the next turn commits normally after the refused switch");
@@ -1082,15 +1052,7 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1098,7 +1060,6 @@ async fn final_commit_persists_the_complete_turn_tail_once() {
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect("final commit");
@@ -1200,15 +1161,7 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1216,7 +1169,6 @@ async fn a_skipped_boundary_keeps_queued_appends_for_the_next_one() {
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect("final commit");
@@ -1291,15 +1243,7 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             usage_deltas: &[],
             failure_evidence: &[],
             outcome: &cancelled_outcome(),
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1307,7 +1251,6 @@ async fn final_commit_rejects_a_turn_tail_over_the_node_budget_before_store_muta
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect_err("the final append must enforce the transaction node budget");
@@ -1405,15 +1348,7 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             outcome: &cancelled_outcome(),
             tool_calls: &[],
             omitted: None,
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1421,7 +1356,6 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect("commit");
@@ -1440,275 +1374,67 @@ async fn final_commit_merges_usage_and_updates_persisted_graph_count() {
     assert!(pipeline.state_mut().head_revision > 0);
 }
 
-/// FIG-3552: a peer's reclaim supersedes a queued-work claim the recovered
-/// turn restored from its predecessor's generation. The recovered commit cedes
-/// and writes nothing; it never drops the row and commits the rest of the turn.
+/// A settlement names rows its root admitted, and only the root's drive fence
+/// may settle them (FIG-3927): a final commit carrying row completions but no
+/// drive commit is refused before it reaches persistence.
 #[tokio::test]
-async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_row() {
-    let store = crate::testing::unbound_recording_store().await;
+async fn final_commit_refuses_a_settlement_without_a_drive_fence() {
     let graph = SessionGraph::from_active_read_state(&[text_message(
-        "u0",
+        "admitted-input",
         MessageRole::User,
-        "recovered content",
-    )]);
-    let state = state_with_graph(graph);
-    let (mut pipeline, predecessor_lease) = leased_boundary(&store, state).await;
-    let batch = crate::QueuedWorkStore::enqueue_queued_work(
-        &store,
-        crate::process_wake_batch_draft(crate::ProcessWakeDelivery {
-            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
-            wake_id: "fig905-process-wake-1".to_string(),
-            target_session_id: SessionId::from("session-1"),
-            process_id: crate::ProcessId::fixture("fig905-process"),
-            sequence: 1,
-            event_type: "process.wake".to_string(),
-            event_invocation: crate::RuntimeInvocation {
-                attribution: crate::RuntimeAttribution::for_session("session-1"),
-                subject: crate::RuntimeSubject::ProcessEvent {
-                    process_id: crate::ProcessId::fixture("fig905-process"),
-                    sequence: 1,
-                    event_type: "process.wake".to_string(),
-                },
-                caused_by: None,
-                replay: None,
-            },
-            process_caused_by: None,
-            authority: crate::QueuedWorkAuthority::default(),
-            input: "peer-owned row".to_string(),
-            created_at_ms: 1,
-        }),
-    )
-    .await
-    .expect("enqueue FIG-905 row");
-    let predecessor_claim = crate::QueuedWorkStore::claim_ready_queued_work(
-        &store,
-        &SessionId::from("session-1"),
-        &predecessor_lease.fence(),
-        &predecessor_lease.owner,
-        crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-        crate::testing::queued_work_claim_policy(64),
-    )
-    .await
-    .expect("claim predecessor row")
-    .claim()
-    .expect("predecessor claim exists");
-    assert_eq!(predecessor_claim.batches[0].batch_id, batch.batch_id);
-    store
-        .supersede_claim_epoch_for_test(&predecessor_lease.completion())
-        .await
-        .expect("release crashed predecessor lease");
-
-    let peer_owner = lease_owner("fig905-peer");
-    let peer_lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from("session-1"),
-            &peer_owner,
-            "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor",
-            60_000,
-        )
-        .await
-        .expect("claim peer lease")
-        .acquired()
-        .expect("peer lease acquired");
-    let peer_claim = crate::QueuedWorkStore::claim_ready_queued_work(
-        &store,
-        &SessionId::from("session-1"),
-        &peer_lease.fence(),
-        &peer_owner,
-        crate::QueuedWorkClaimBoundary::Idle,
-        crate::testing::queued_work_claim_policy(64),
-    )
-    .await
-    .expect("peer reclaims row")
-    .claim()
-    .expect("peer claim exists");
-    store
-        .supersede_claim_epoch_for_test(&peer_lease.completion())
-        .await
-        .expect("release peer lease without settling its row");
-
-    let recovery_owner = lease_owner("fig905-recovery");
-    let recovery_lease = store
-        .seal_claim_epoch_for_test(
-            &SessionId::from("session-1"),
-            &recovery_owner,
-            "recovered-final-commit-cedes-to-a-peer-superseded-queue-row-executor-2",
-            60_000,
-        )
-        .await
-        .expect("claim recovery lease")
-        .acquired()
-        .expect("recovery lease acquired");
-    let returned_state = pipeline.export_state_for_assembly();
-    let head_revision = pipeline.state_mut().head_revision;
-    let ceded = pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &returned_state,
-            tool_calls: &[],
-            omitted: None,
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            agent_frame_switch_materializes: false,
-            store: Some(&store),
-            usage_deltas: &[],
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            claim_settlement: TurnClaimSettlement::for_test(
-                vec![predecessor_claim.completion()],
-                Vec::new(),
-                vec![predecessor_claim.completion()],
-                Vec::new(),
-                std::iter::once((
-                    predecessor_claim.claim_id.clone(),
-                    predecessor_claim.session_lease_generation,
-                ))
-                .collect(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: Some(recovery_lease.fence()),
-            pending_follow_on: None,
-            interrupted_turn_input_turn_id: None,
-            interrupted_turn_input_cancellation: None,
-            interrupted_turn_cancel_intent: None,
-            turn_cancel_closure_settlement: None,
-            turn_control_resolver: None,
-            recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: Some(recovery_lease.completion()),
-        })
-        .await
-        .expect_err("a recovered commit whose restored row a peer reclaimed must cede");
-    let StoreError::TurnOutcomeMaterializationRefused { error } = &ceded else {
-        panic!("the recovered commit cedes with a typed refusal: {ceded:?}");
-    };
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::AcceptedTurnInputCeded,
-        "{ceded:?}"
-    );
-    assert_eq!(
-        pipeline.state_mut().head_revision,
-        head_revision,
-        "the ceded commit publishes nothing"
-    );
-
-    let queued = crate::QueuedWorkStore::list_queued_work(&store, &SessionId::from("session-1"))
-        .await
-        .expect("list peer-owned row");
-    assert_eq!(queued.len(), 1);
-    assert_eq!(queued[0].batch_id, peer_claim.batches[0].batch_id);
-}
-
-#[tokio::test]
-async fn final_commit_rejects_claim_derived_content_without_settlement() {
-    let graph = SessionGraph::from_active_read_state(&[text_message(
-        "claimed-input",
-        MessageRole::User,
-        "claimed content",
+        "admitted content",
     )]);
     let queue_origin = crate::QueuedWorkCompletion {
         session_id: SessionId::from("session-1"),
-        claim_id: "queue-claim".to_string(),
-        lease_token: "queue-token".to_string(),
-        data: crate::QueuedWorkCompletionData {
-            batch_ids: vec!["queue-batch".into()],
-        },
+        batch_ids: vec!["queue-batch".into()],
     };
     let turn_input_origin = crate::TurnInputCompletion {
         session_id: SessionId::from("session-1"),
-        claim: Some(crate::TurnInputSettlementClaim {
-            claim_id: "turn-input-claim".to_string(),
-            lease_token: "turn-input-token".to_string(),
-        }),
         data: crate::TurnInputCompletionData {
             input_ids: vec!["turn-input".into()],
             applications: Vec::new(),
         },
     };
     let store = crate::testing::unbound_recording_store().await;
-    let (mut queue_pipeline, queue_lease) =
-        leased_boundary(&store, state_with_graph(graph.clone())).await;
-    let queue_state = queue_pipeline.export_state_for_assembly();
-    let queue_err = queue_pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &queue_state,
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            agent_frame_switch_materializes: false,
-            store: Some(&store),
-            usage_deltas: &[],
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            tool_calls: &[],
-            omitted: None,
-            claim_settlement: TurnClaimSettlement::for_test(
-                vec![queue_origin],
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
-            pending_follow_on: None,
-            interrupted_turn_input_turn_id: None,
-            interrupted_turn_input_cancellation: None,
-            interrupted_turn_cancel_intent: None,
-            turn_cancel_closure_settlement: None,
-            turn_control_resolver: None,
-            recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
-        })
-        .await
-        .expect_err("queue-derived content requires claim settlement");
-    assert!(matches!(
-        queue_err,
-        StoreError::UnsettledQueuedWorkClaim { ref claim_id, .. }
-            if claim_id == "queue-claim"
-    ));
-    store
-        .supersede_claim_epoch_for_test(&queue_lease.completion())
-        .await
-        .expect("release queue-case execution lease");
-
-    let (mut input_pipeline, _lease) = leased_boundary(&store, state_with_graph(graph)).await;
-    let input_state = input_pipeline.export_state_for_assembly();
-    let input_err = input_pipeline
-        .final_commit_with_snapshots(FinalCommitInput {
-            returned_state: &input_state,
-            plugins: None,
-            execution_state_update: ExecutionStateUpdate::Clean,
-            agent_frame_switch_materializes: false,
-            store: Some(&store),
-            usage_deltas: &[],
-            failure_evidence: &[],
-            outcome: &cancelled_outcome(),
-            tool_calls: &[],
-            omitted: None,
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                vec![turn_input_origin],
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
-            pending_follow_on: None,
-            interrupted_turn_input_turn_id: None,
-            interrupted_turn_input_cancellation: None,
-            interrupted_turn_cancel_intent: None,
-            turn_cancel_closure_settlement: None,
-            turn_control_resolver: None,
-            recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
-        })
-        .await
-        .expect_err("turn-input-derived content requires claim settlement");
-    assert!(matches!(
-        input_err,
-        StoreError::UnsettledTurnInputClaim { ref claim_id, .. }
-            if claim_id == "turn-input-claim"
-    ));
+    for settlement in [
+        TurnIngressSettlement::new(vec![queue_origin], Vec::new()),
+        TurnIngressSettlement::new(Vec::new(), vec![turn_input_origin]),
+    ] {
+        let (mut pipeline, lease) = leased_boundary(&store, state_with_graph(graph.clone())).await;
+        let returned_state = pipeline.export_state_for_assembly();
+        let error = pipeline
+            .final_commit_with_snapshots(FinalCommitInput {
+                returned_state: &returned_state,
+                plugins: None,
+                execution_state_update: ExecutionStateUpdate::Clean,
+                agent_frame_switch_materializes: false,
+                store: Some(&store),
+                usage_deltas: &[],
+                failure_evidence: &[],
+                outcome: &cancelled_outcome(),
+                tool_calls: &[],
+                omitted: None,
+                ingress_settlement: settlement,
+                pending_follow_on: None,
+                interrupted_turn_input_turn_id: None,
+                interrupted_turn_input_cancellation: None,
+                interrupted_turn_cancel_intent: None,
+                turn_cancel_closure_settlement: None,
+                turn_control_resolver: None,
+                recorded_attachment_intent_ids: Default::default(),
+            })
+            .await
+            .expect_err("an unfenced settlement is refused");
+        assert!(matches!(
+            error,
+            StoreError::IngressSettlementUnfenced { ref session_id }
+                if session_id.as_str() == "session-1"
+        ));
+        store
+            .supersede_drive_epoch_for_test(&lease)
+            .await
+            .expect("release the case's drive epoch");
+    }
     assert_eq!(
         *store.runtime_commit_count.lock_recover(),
         0,
@@ -1741,15 +1467,7 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             outcome: &cancelled_outcome(),
             tool_calls: &[],
             omitted: None,
-            claim_settlement: TurnClaimSettlement::for_test(
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                std::collections::HashMap::new(),
-                std::collections::HashMap::new(),
-            ),
-            current_session_lease_fence: None,
+            ingress_settlement: TurnIngressSettlement::default(),
             pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
@@ -1757,7 +1475,6 @@ async fn no_store_final_commit_discards_snapshots_without_touching_graph_or_usag
             turn_cancel_closure_settlement: None,
             turn_control_resolver: None,
             recorded_attachment_intent_ids: Default::default(),
-            session_execution_lease_completion: None,
         })
         .await
         .expect("no-store commit");

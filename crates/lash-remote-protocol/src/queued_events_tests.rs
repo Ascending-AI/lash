@@ -9,7 +9,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
     let cases = [
         (
             lash_core::TurnEvent::QueuedWorkStarted {
-                boundary: lash_core::runtime::QueuedWorkClaimBoundary::Idle,
+                boundary: lash_core::runtime::AdmissionBoundary::Idle,
                 batch_ids: vec!["batch".into()],
                 causes: vec![lash_core::TurnCause {
                     id: "cause".into(),
@@ -54,16 +54,15 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             correlation_id: "correlation".into(),
             event,
         };
-        let wire = activity.encode_json().unwrap();
+        let wire = activity
+            .encode_json(&crate::negotiation::test_negotiated())
+            .unwrap();
         assert_eq!(RemoteTurnActivity::decode_json(&wire).unwrap(), activity);
         let mut old: serde_json::Value = serde_json::from_slice(&wire).unwrap();
         old["protocol_version"] = serde_json::json!(52);
         assert!(matches!(
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
-            Err(RemoteProtocolError::UnsupportedProtocolVersion {
-                actual: 52,
-                expected: 100
-            })
+            Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(52) && local == crate::VersionRange::exactly(100)
         ));
     }
 }
@@ -71,9 +70,9 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
 #[test]
 fn queued_event_closed_vocabularies_have_independent_literal_pins() {
     for (value, literal) in [
-        (RemoteQueuedWorkClaimBoundary::Idle, "idle"),
+        (RemoteAdmissionBoundary::Idle, "idle"),
         (
-            RemoteQueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            RemoteAdmissionBoundary::ActiveTurnCheckpoint,
             "active_turn_checkpoint",
         ),
     ] {

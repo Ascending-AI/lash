@@ -1,8 +1,9 @@
 //! Turn ingress for a child session's in-process turn: accepting it as durable
-//! admission evidence and claiming the row it just wrote (ADR 0069).
+//! admission evidence and driving the root that admits the row it just wrote
+//! (ADR 0069).
 //!
-//! Everything here runs before the prepare phase and hands it a claim, an
-//! execution lane, and the input the claim actually materialized.
+//! Everything here runs before the prepare phase and hands it the admitted
+//! rows, the drive fence, and the input the admission materialized.
 
 use super::*;
 use crate::TurnId;
@@ -29,14 +30,9 @@ impl LashRuntime {
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
-            queued_claims,
-            turn_input_claims,
-            materialize_initial_claims,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+            admissions,
+            materialize_initial_admissions,
+            drive_fence,
         } = context;
         let turn_id = input
             .trace_turn_id
@@ -63,13 +59,9 @@ impl LashRuntime {
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop: local_stop.clone(),
-            queued_claims,
-            turn_input_claims,
-            materialize_initial_claims,
-            lease: TurnLeaseScope {
-                guard: session_execution_lease,
-                release_policy: session_execution_lease_release_policy,
-            },
+            admissions,
+            materialize_initial_admissions,
+            drive_fence,
         }))
         .await
     }
@@ -91,7 +83,7 @@ impl LashRuntime {
     /// [`AgentFrameRun::acceptance`] and on the admitted turn's
     /// [`AssembledTurn::turn_input_acceptance`]. The live `TurnContext`
     /// (the parent's process correlation and lineage) cannot be persisted, so
-    /// it is re-attached when the root's claim drives the row.
+    /// it is re-attached when the root's admission drives the row.
     ///
     /// A store-less runtime has no store to accept into and drives `input`
     /// directly.
@@ -114,21 +106,17 @@ impl LashRuntime {
             .and_then(|session| session.history_store())
         else {
             let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-            let mut session_execution_lease = self.claim_drive_authority().await?;
-            let result = Box::pin(self.drive_logical_turn(
+            return Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input, None),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),
                 opts.local_stop().clone(),
-                LogicalTurnClaims::new(Vec::new(), Vec::new()),
-                &mut session_execution_lease,
+                LogicalTurnAdmissions::new(Vec::new(), Vec::new()),
+                None,
                 stopwatch,
             ))
             .await;
-            return self
-                .settle_drive_authority(session_execution_lease.as_ref(), result)
-                .await;
         };
 
         if let Some(trace_turn_id) = input.trace_turn_id.as_ref()
@@ -195,7 +183,7 @@ impl LashRuntime {
                     },
                 ),
                 crate::RuntimeEffectLocalExecutor::turn_acceptance(
-                    Arc::clone(&store) as Arc<dyn crate::TurnInputStore>
+                    Arc::clone(&store) as Arc<dyn crate::IngressStore>
                 ),
             )
             .await
@@ -266,7 +254,7 @@ impl LashRuntime {
                 // A parked root holds the session: the input stays accepted
                 // and is driven once the park is resolved.
                 return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::QueuedRunPending,
+                    RuntimeErrorCode::SessionRootPending,
                     format!(
                         "accepted turn input `{accepted_id}` waits behind parked root `{}` \
                          (park {}); it is driven once that park is resolved",
@@ -274,7 +262,7 @@ impl LashRuntime {
                     ),
                 )));
             }
-            // A follow-on the head owes blocks every other claim (ADR 0101
+            // A follow-on the head owes blocks every other admission (ADR 0101
             // §3, FIG-3542), so the accepted row stays pending behind it: no
             // turn runs. The drive that recovers the follow-on answers the row
             // after it; a send's handle waits for that (FIG-3600).
@@ -287,7 +275,7 @@ impl LashRuntime {
             .map_err(aborted)?
             {
                 return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::QueuedRunPending,
+                    RuntimeErrorCode::SessionRootPending,
                     format!(
                         "accepted turn input `{accepted_id}` waits behind the follow-on the \
                          session head owes, with {ahead} earlier inputs ahead of it; the drive \
@@ -335,7 +323,7 @@ impl LashRuntime {
         let Some(own) = open.iter().find(|read| read.input.input_id == *accepted_id) else {
             return Ok(None);
         };
-        if !matches!(own.status, crate::PendingTurnInputReadStatus::Pending) {
+        if !matches!(own.status, crate::PendingTurnInputReadStatus::Open) {
             return Ok(None);
         }
         let ahead = open

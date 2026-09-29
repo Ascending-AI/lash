@@ -539,7 +539,13 @@ impl Processes {
             Some(cursor) => cursor,
             None => {
                 let (epoch, position) = self.core.process_observation_hub.route(process_id);
-                crate::process_observation::ProcessCursor::new(
+                let version = registry
+                    .fleet_format()
+                    .writer_version(lash_core::surface_format!(
+                        lash_sansio::PROCESS_CURSOR_VERSION
+                    ));
+                crate::process_observation::ProcessCursor::at_version(
+                    version,
                     epoch,
                     lash_sansio::ProcessCursorReference::for_process(process_id),
                     position,

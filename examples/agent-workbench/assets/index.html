@@ -4845,13 +4845,13 @@
        born in and the shell claiming a liveness nothing has evidenced. */
     const STREAM_CONNECT_TIMEOUT_MS = 8000;
 
-    async function openStream(url, signal, channel, label) {
+    async function openStream(url, signal, channel, label, headers = {}) {
       const watchdog = setTimeout(() => {
         markShellChannel(shellAvailability, channel, false, label + " is not connecting");
         renderShellStatus();
       }, STREAM_CONNECT_TIMEOUT_MS);
       try {
-        const response = await fetch(url, { cache: "no-store", signal });
+        const response = await fetch(url, { cache: "no-store", signal, headers });
         if (!response.ok || !response.body) throw new Error(label + " unavailable");
         markShellChannel(shellAvailability, channel, true);
         renderShellStatus();
@@ -4901,7 +4901,17 @@
           const url = projectionState.observationCursor
             ? "/api/observations?cursor=" + encodeURIComponent(projectionState.observationCursor)
             : "/api/observations";
-          const response = await openStream(url, signal, "observation", "the live turn stream");
+          const response = await openStream(url, signal, "observation", "the live turn stream", {
+            "x-lash-protocol-hello": JSON.stringify({
+              negotiation: "hello",
+              supported: { min: 100, max: 100 }
+            })
+          });
+          const accept = JSON.parse(response.headers.get("x-lash-protocol-accept") || "null");
+          if (accept?.negotiation !== "accept" || accept.selected !== 100
+              || accept.supported?.min > 100 || accept.supported?.max < 100) {
+            throw new Error("remote protocol negotiation failed");
+          }
           const reader = response.body.getReader();
           const decoder = new TextDecoder();
           let buffer = "";

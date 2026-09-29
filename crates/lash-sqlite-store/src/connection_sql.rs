@@ -59,13 +59,6 @@ pub(crate) const READ_ONLY_PRAGMAS: &str = "PRAGMA cache_size = -500;";
 /// nothing to say about it; the durable-core open path issues this text.
 pub(crate) const ATTACH_PROCESS_REGISTRY: &str = "ATTACH DATABASE ?1 AS process_registry";
 
-/// The schema generation an attached process registry carries.
-pub(crate) const SELECT_PROCESS_REGISTRY_USER_VERSION: &str =
-    "PRAGMA process_registry.user_version";
-
-/// The schema generation the connection's own database carries.
-pub(crate) const SELECT_USER_VERSION: &str = "PRAGMA user_version";
-
 /// The catalog read, not a read of the table itself: a registry mid-creation
 /// has the file and the version counter but not yet the rows, and asking the
 /// catalog distinguishes "not provisioned yet" from "provisioned and empty".
@@ -79,14 +72,6 @@ pub(crate) const SELECT_PROCESS_REGISTRY_IS_PROVISIONED: &str =
 /// failure: it records no release because no build that stamps has written it.
 pub(crate) const SELECT_RELEASE_STAMP_TABLE_EXISTS: &str =
     "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'release_stamp'";
-
-/// Whether the durable-core database carries the fleet-format table at all.
-///
-/// A pre-fleet-format database does not, and that is an absence rather than a
-/// read failure: it records no fleet format because no build that writes one
-/// has opened it.
-pub(crate) const SELECT_FLEET_FORMAT_TABLE_EXISTS: &str =
-    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'fleet_format'";
 
 /// The database clock, in epoch milliseconds: what the recovery leader lease
 /// compares against (ADR 0109 §1.6), so hosts with skewed clocks agree on a

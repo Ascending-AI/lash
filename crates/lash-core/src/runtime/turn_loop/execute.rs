@@ -17,8 +17,8 @@ pub(super) struct TurnDriverRemainder {
     pub(super) turn_pipeline: TurnBoundary,
     pub(super) llm_calls: Vec<crate::LlmCallRecord>,
     pub(super) failure_evidence: Vec<crate::TurnFailureEvidence>,
-    pub(super) pending_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(super) pending_turn_input_claims: Vec<crate::TurnInputClaim>,
+    pub(super) pending_queued: Vec<crate::AdmittedQueuedWork>,
+    pub(super) pending_turn_inputs: Vec<crate::AdmittedTurnInputs>,
     pub(super) withheld_terminal_work: crate::runtime::logical_turn::WithheldTerminalWork,
     /// The cancellation the turn recorded honouring, if any.
     pub(super) turn_cancel: Option<crate::TurnCancellationEvidence>,
@@ -33,9 +33,8 @@ pub(in crate::runtime) struct PreparedTurnExecuteContext<'sinks, 'run> {
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) local_stop: LocalTurnStop,
-    pub(in crate::runtime) initial_queue_claims: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) initial_turn_input_claims: Vec<crate::TurnInputClaim>,
-    pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
+    pub(in crate::runtime) initial_admissions: LogicalTurnAdmissions,
+    pub(in crate::runtime) drive_fence: Option<&'sinks DriveFence>,
 }
 
 /// The preamble step of the execute phase: the plugin prepare-turn hooks and
@@ -57,10 +56,9 @@ struct PreparedTurnAbortContext<'abort, 'run> {
     recorded_assembly: RecordedTurnAssembly,
     turn_index: usize,
     trace_turn_id: TurnId,
-    claims: &'abort LogicalTurnClaims,
+    admissions: &'abort LogicalTurnAdmissions,
     scoped_effect_controller: &'abort ScopedEffectController<'run>,
-    lease: TurnLeaseScope<'abort>,
-    session_execution_fence: Option<crate::ClaimAuthority>,
+    drive_fence: Option<&'abort DriveFence>,
     turn_control: &'abort ActiveTurnControl,
     turn_graph_appends: TurnGraphAppendDraft,
     observer: &'abort TurnObserver,
@@ -97,8 +95,8 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             turn_pipeline,
             llm_calls,
             failure_evidence,
-            pending_queue_claims,
-            pending_turn_input_claims,
+            pending_queued,
+            pending_turn_inputs,
             withheld_terminal_work,
             turn_cancel,
             ..
@@ -110,8 +108,8 @@ impl<'slot, 'run> TurnDriverSessionLoan<'slot, 'run> {
             turn_pipeline,
             llm_calls,
             failure_evidence,
-            pending_queue_claims,
-            pending_turn_input_claims,
+            pending_queued,
+            pending_turn_inputs,
             withheld_terminal_work,
             turn_cancel,
         }
@@ -249,14 +247,9 @@ impl LashRuntime {
             mut recorded_assembly,
             turn_index,
             trace_turn_id,
-            claims,
+            admissions,
             scoped_effect_controller,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
-            session_execution_fence: _session_execution_fence,
+            drive_fence,
             turn_control,
             turn_graph_appends,
             observer,
@@ -298,13 +291,10 @@ impl LashRuntime {
                 turn_index,
                 trace_turn_id,
             },
-            claims,
+            admissions,
             scoped_effect_controller,
             honoured_cancel: None,
-            lease: TurnLeaseScope {
-                guard: session_execution_lease,
-                release_policy: session_execution_lease_release_policy,
-            },
+            drive_fence,
             turn_control,
             observer,
         }))
@@ -338,13 +328,8 @@ impl LashRuntime {
             },
             scoped_effect_controller,
             local_stop,
-            initial_queue_claims,
-            initial_turn_input_claims,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+            mut initial_admissions,
+            drive_fence,
         } = context;
         let turn_observer = logical_observer.for_turn(&trace_turn_id);
         let observer = &turn_observer;
@@ -366,7 +351,6 @@ impl LashRuntime {
         let _local_stop_forwarding = local_stop
             .forward_to(Arc::clone(&turn_control), Arc::clone(&turn_control_host))
             .await;
-        let session_execution_fence = session_execution_lease.map(DriveClaimGuard::fence);
         let turn_policy = self.state.effective_policy().clone();
         let session_protocol_turn_options = self.state.effective_protocol_turn_options().clone();
         let effective_protocol_turn_options = protocol_turn_options
@@ -374,7 +358,7 @@ impl LashRuntime {
             .map(|options| session_protocol_turn_options.merged_with_override(&options))
             .unwrap_or(session_protocol_turn_options);
         let manager = self
-            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
+            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -386,8 +370,7 @@ impl LashRuntime {
             Arc::clone(session.plugins())
         };
         let mut recorded_assembly = RecordedTurnAssembly::new();
-        let initial_claims =
-            LogicalTurnClaims::new(initial_queue_claims, initial_turn_input_claims);
+        let follow_on_allowed = initial_admissions.follow_on_allowed();
         // Keep preparation and plugin-abort handling in separate async frames.
         // Their SessionReadView and abort-only locals are dropped before the
         // normal driver-construction frame clones state for the turn boundary.
@@ -412,18 +395,22 @@ impl LashRuntime {
                 recorded_assembly,
                 turn_index,
                 trace_turn_id,
-                claims: &initial_claims,
+                admissions: &initial_admissions,
                 scoped_effect_controller: &scoped_effect_controller,
-                lease: TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
-                session_execution_fence,
+                drive_fence,
                 turn_control: turn_control.as_ref(),
                 turn_graph_appends,
                 observer,
             }))
-            .await;
+            .await
+            .map(|mut execution| {
+                execution.withheld_terminal_work =
+                    initial_admissions.take_follow_on_work(matches!(
+                        execution.turn.outcome,
+                        TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                    ));
+                execution
+            });
         }
         // `prepare_turn_preamble` has returned and dropped its read-view frame
         // before this clone, avoiding a transient second graph owner.
@@ -456,12 +443,16 @@ impl LashRuntime {
             .resolve_session_policy(&self.state.session_id, turn_policy.clone())
             .map_err(crate::runtime::drive::provider_binding_unavailable)?;
         let manager = self
-            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
+            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
         let finish_scoped_effect_controller = scoped_effect_controller.clone();
         let turn_cancel_peek_controller = &finish_scoped_effect_controller;
+        // Work an earlier turn of the logical run withheld for the run's
+        // follow-on: this turn's commit carries it on with its own, or hands
+        // it to a cancellation (FIG-4044).
+        let carried_withheld = initial_admissions.withheld_terminal_work.take();
         let session = self
             .session
             .take()
@@ -483,13 +474,13 @@ impl LashRuntime {
             protocol_turn_options: effective_protocol_turn_options,
             turn_context,
             turn_causes: initial_turn_causes,
-            pending_queue_claims: initial_claims.queued,
-            pending_turn_input_claims: initial_claims.turn_inputs,
-            pending_checkpoint_turn_input_claim: None,
+            pending_queued: initial_admissions.queued,
+            pending_turn_inputs: initial_admissions.turn_inputs,
+            pending_checkpoint_turn_inputs: None,
             withheld_terminal_work: Default::default(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
-            session_execution_lease: session_execution_fence,
-            runtime_lease_owner: self.runtime_lease_owner.clone(),
+            drive_fence: drive_fence.cloned(),
+            drive_root: self.drive_root.as_ref().map(|root| root.root().clone()),
             turn_phase_probe: self.turn_phase_probe.clone(),
             turn_control: Arc::clone(&turn_control),
             protocol_reply: Default::default(),
@@ -541,17 +532,17 @@ impl LashRuntime {
                 if let Some(evidence) = honoured {
                     driver.record_turn_cancel(evidence);
                     let cancellation_messages = driver.turn_pipeline.message_sequence();
-                    let driver = driver.reclaim();
+                    let mut driver = driver.reclaim();
+                    driver
+                        .withheld_terminal_work
+                        .carry_earlier(carried_withheld);
                     self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
                     return Box::pin(self.finish_cancelled_turn_after_effect_abort(
                         CancelledTurnFinishContext {
                             driver,
                             cancellation_messages,
                             finish_scoped_effect_controller: &finish_scoped_effect_controller,
-                            lease: TurnLeaseScope {
-                                guard: session_execution_lease,
-                                release_policy: session_execution_lease_release_policy,
-                            },
+                            drive_fence,
                             turn_control: turn_control.as_ref(),
                             turn_index,
                             trace_turn_id,
@@ -560,22 +551,11 @@ impl LashRuntime {
                     ))
                     .await;
                 }
-                let driver = driver.reclaim();
+                // The rows the turn drove stay bound to its root: a redrive
+                // drives them again, and the root's terminal releases them
+                // (FIG-3927 §2.5).
+                drop(driver.reclaim());
                 self.mark_phase_end(RuntimeTurnPhase::EffectLoop);
-                let TurnDriverRemainder {
-                    mut pending_queue_claims,
-                    mut pending_turn_input_claims,
-                    withheld_terminal_work,
-                    ..
-                } = driver;
-                // An aborted turn drives no follow-on, so work withheld from
-                // its terminal checkpoint hands back with everything else.
-                pending_queue_claims.extend(withheld_terminal_work.queued);
-                pending_turn_input_claims.extend(withheld_terminal_work.turn_inputs);
-                self.abandon_queued_work_claims_after_local_abort(&err, &pending_queue_claims)
-                    .await;
-                self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
-                    .await;
                 // The park names the logical root, never this physical turn
                 // (D2 §1.3).
                 let root = self.park_root(
@@ -602,14 +582,16 @@ impl LashRuntime {
             turn_pipeline,
             llm_calls,
             failure_evidence,
-            pending_queue_claims,
-            pending_turn_input_claims,
+            pending_queued,
+            pending_turn_inputs,
             mut withheld_terminal_work,
             turn_cancel,
         } = driver;
-        let pending_claims =
-            LogicalTurnClaims::new(pending_queue_claims, pending_turn_input_claims)
-                .with_withheld_terminal_work(withheld_terminal_work.take_if_any());
+        withheld_terminal_work.carry_earlier(carried_withheld);
+        let mut pending_admissions =
+            LogicalTurnAdmissions::new(pending_queued, pending_turn_inputs)
+                .with_withheld_terminal_work(withheld_terminal_work.take_if_any())
+                .with_follow_on_allowed(follow_on_allowed);
         let finish_result = Box::pin(
             self.finish_turn(TurnCommitContext {
                 finish: TurnFinishInput {
@@ -622,31 +604,17 @@ impl LashRuntime {
                     turn_index,
                     trace_turn_id,
                 },
-                claims: &pending_claims,
+                admissions: &pending_admissions,
                 scoped_effect_controller: &finish_scoped_effect_controller,
                 honoured_cancel: turn_cancel,
-                lease: TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+                drive_fence,
                 turn_control: turn_control.as_ref(),
                 observer,
             }),
         )
         .await;
-        let mut pending_claims = pending_claims;
-        if let Err(err) = &finish_result {
-            if let Some(withheld) = pending_claims.withheld_terminal_work.take() {
-                pending_claims.queued.extend(withheld.queued);
-                pending_claims.turn_inputs.extend(withheld.turn_inputs);
-            }
-            self.abandon_queued_work_claims_after_local_abort(err, &pending_claims.queued)
-                .await;
-            self.abandon_turn_input_claims_after_local_abort(err, &pending_claims.turn_inputs)
-                .await;
-        }
         finish_result.map(|mut execution| {
-            execution.withheld_terminal_work = pending_claims.take_follow_on_work(matches!(
+            execution.withheld_terminal_work = pending_admissions.take_follow_on_work(matches!(
                 execution.turn.outcome,
                 TurnOutcome::Stopped(TurnStop::Cancelled { .. })
             ));

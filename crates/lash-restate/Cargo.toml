@@ -13,13 +13,24 @@ description = "Restate durable execution adapter for Lash runtime effects"
 name = "lash_restate"
 doctest = false
 
+[features]
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it; no production
+# build does.
+synthetic-next = []
+
 [lints]
 workspace = true
 
 [dependencies]
 lash-sansio = { workspace = true }
 async-trait = { workspace = true }
+# The SDK's payload traits, which the `Call`/`Reply` envelope implements.
+bytes = { workspace = true }
 lash-core = { workspace = true }
+# The component descriptors and typed refusals the object `_compat` gate
+# answers with (ADR 0115 §3.2).
+lash-core-store = { workspace = true }
 lash-core-worker = { workspace = true }
 lash-trace = { workspace = true }
 lash-http-transport = { workspace = true }
@@ -45,7 +56,6 @@ lash-conformance.workspace = true
 # its server (endpoint-agnostic) is used here, so the second copy of this
 # crate it links for its own backend never meets these tests' types.
 lash-restate-test.workspace = true
-bytes = { workspace = true }
 chrono = { workspace = true }
 http = "1"
 http-body = "1"

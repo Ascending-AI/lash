@@ -157,6 +157,7 @@ fn lent_with_direct_completions(
         clock: Arc::new(crate::SystemClock),
         process_lineage: None,
         turn_capture: None,
+        process_originator: None,
     }
 }
 

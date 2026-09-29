@@ -982,7 +982,7 @@ pub(crate) async fn list_queued_work(
         .map_err(AppError::internal)?;
     Ok(Json(
         store
-            .list_pending_queued_work(&session_id)
+            .list_open_queued_work(&session_id)
             .await
             .map_err(AppError::internal)?,
     ))

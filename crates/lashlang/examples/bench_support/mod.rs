@@ -1,11 +1,11 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityResult, AssignTarget, BinaryOp, Declaration, ExecutionHost,
-    ExecutionHostError, Expr, FunctionExpr, HostDescriptor, ImageValue, LASH_PROCESS_NAME_KEY,
-    LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue,
-    Program, ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest,
-    ProjectedReadResponse, ProjectedValue, Record, State, TypeExpr, TypeField, UnaryOp, Value,
-    from_json,
+    AbilityOp, AbilityResult, AssignTarget, Declaration, ExecutionHost, ExecutionHostError, Expr,
+    FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp, JavaScriptLogicalOp,
+    JavaScriptUnaryOp, LASH_PROCESS_NAME_KEY, LashlangAbilities, LashlangHostCatalog,
+    LashlangHostEnvironment, LinkedModule, ListValue, Program, ProjectedBindings,
+    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
+    State, TypeExpr, TypeField, Value, from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -157,9 +157,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                     None,
                     &["value"],
                     &[],
-                    Expr::Binary {
+                    Expr::JavaScriptBinary {
                         left: Box::new(ast_variable("value")),
-                        op: BinaryOp::Add,
+                        op: JavaScriptBinaryOp::Add,
                         right: Box::new(Expr::Number(1.0)),
                     },
                 ),
@@ -177,9 +177,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                     None,
                     &["value"],
                     &["offset"],
-                    Expr::Binary {
+                    Expr::JavaScriptBinary {
                         left: Box::new(ast_variable("value")),
-                        op: BinaryOp::Add,
+                        op: JavaScriptBinaryOp::Add,
                         right: Box::new(Expr::Index {
                             target: Box::new(ast_variable("offset")),
                             index: Box::new(Expr::Number(0.0)),
@@ -194,15 +194,15 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
         ]),
         FunctionScenario::DeepRecursion | FunctionScenario::FrameHeavy => {
             let terminal = if matches!(scenario, FunctionScenario::FrameHeavy) {
-                Expr::Yield(Box::new(Expr::List(vec![Expr::Number(0.0); 8])))
+                Expr::List(vec![Expr::Number(0.0); 8])
             } else {
                 Expr::Number(0.0)
             };
             let recurse = ast_call(
                 ast_variable("countdown"),
-                vec![Expr::Binary {
+                vec![Expr::JavaScriptBinary {
                     left: Box::new(ast_variable("n")),
-                    op: BinaryOp::Subtract,
+                    op: JavaScriptBinaryOp::Subtract,
                     right: Box::new(Expr::Number(1.0)),
                 }],
             );
@@ -219,9 +219,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                         &["n"],
                         &[],
                         Expr::If {
-                            condition: Box::new(Expr::Binary {
+                            condition: Box::new(Expr::JavaScriptBinary {
                                 left: Box::new(ast_variable("n")),
-                                op: BinaryOp::LessEqual,
+                                op: JavaScriptBinaryOp::LessEqual,
                                 right: Box::new(Expr::Number(0.0)),
                             }),
                             then_block: Box::new(terminal),
@@ -249,9 +249,9 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
                         None,
                         &["value"],
                         &[],
-                        Expr::Binary {
+                        Expr::JavaScriptBinary {
                             left: Box::new(ast_variable("value")),
-                            op: BinaryOp::Add,
+                            op: JavaScriptBinaryOp::Add,
                             right: Box::new(Expr::Number(1.0)),
                         },
                     ),

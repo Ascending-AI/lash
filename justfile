@@ -168,6 +168,15 @@ agent-service-restate-e2e:
 agent-workbench-restate-e2e:
   bash "{{repo}}/scripts/agent-workbench-restate-e2e.sh"
 
+# FIG-4042: token-free RLM warning and frame-switch companion for the manual
+# workbench continue_as runbook. The provider responses are scripted in-process.
+workbench-continue-as-budget-gate:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kiln test //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test --test_arg=budget_warning --test_sharding_strategy=disabled --test_output=errors
+  kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_sharding_strategy=disabled --test_output=errors
+  kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_sharding_strategy=disabled --test_output=errors
+
 # The regression gate for the Restate effect-group choreography. Its suites are
 # `#[ignore]`d because they need a Restate server, so this recipe is the only
 # thing that runs them: `scripts/ci/restate_suite.py` builds the test binary on
@@ -329,6 +338,60 @@ latency-gate:
   if [ "$status" -ne 0 ]; then
     echo "latency gate failed (exit $status); log: $log" >&2
     exit "$status"
+  fi
+
+# Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
+# (the default build) and N+1 (the `synthetic-next` feature), run as separate
+# `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
+# and one live `restate-server`. Bazel builds both nodes and lashctl. The
+# operator binary runs the PostgreSQL version, migrate, preflight and drain
+# steps; SQLite migrates on open. Finalize still waits for its lane; the
+# `phase_a` legs wait for their lanes. `LASH_POSTGRES_DATABASE_URL` reuses a
+# database the caller provides; otherwise a throwaway pg16 container serves
+# the run. Evidence (the step report and every node's log) lands under the
+# artifact directory, which `runbooks/rolling-upgrade/` judges.
+e2e-rolling:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  artifacts="${LASH_E2E_ROLLING_ARTIFACT_DIR:-target/functional-e2e-artifacts/e2e-rolling}"
+  case "$artifacts" in
+    /*) ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
+  esac
+  rm -rf "$artifacts"
+  mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
+  bazel_startup=()
+  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
+    bazel_startup=(--output_user_root="$BAZEL_OUTPUT_USER_ROOT")
+  fi
+  read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
+  bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_126f2aa8 \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_4165473b \
+    //crates/lashctl:lashctl \
+    //crates/lashctl:lashctl__fv_0935a4fe
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_126f2aa8 "$artifacts/bin/n+1/lash-upgrade-node"
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_4165473b "$artifacts/bin/n/lash-upgrade-node"
+  cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
+  cp bazel-bin/crates/lashctl/lashctl__fv_0935a4fe "$artifacts/bin/n+1/lashctl"
+  cargo test --locked -p lash-upgrade-harness --test rolling --no-run
+
+  export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
+  export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
+  export LASH_UPGRADE_LASHCTL_N="$artifacts/bin/n/lashctl"
+  export LASH_UPGRADE_LASHCTL_NEXT="$artifacts/bin/n+1/lashctl"
+  export LASH_E2E_ROLLING_ARTIFACT_DIR="$artifacts"
+  run=(
+    python3 scripts/ci/restate_suite.py serve --name e2e-rolling
+      --keep-log "$artifacts/restate-server.log"
+      -- cargo test --locked -p lash-upgrade-harness --test rolling
+      -- --ignored --exact roll_and_rollback_smoke --nocapture
+  )
+  if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
+    "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
+  else
+    scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
   fi
 
 agent-workbench-attachment-usage-gate port='3030':

@@ -294,7 +294,6 @@ pub fn referenced_receiver_call_paths(
             crate::ast::Declaration::Function(function) => {
                 receiver_calls_in_expr(&function.body, &mut calls);
             }
-            crate::ast::Declaration::Type(_) => {}
         }
     }
     calls.into_iter().filter_map(receiver_call_path).collect()

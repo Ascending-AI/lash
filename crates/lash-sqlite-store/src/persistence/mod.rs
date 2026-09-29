@@ -1,6 +1,6 @@
 //! The [`RuntimePersistence`] capability-segment implementations for
-//! [`Store`]: [`SessionCommitStore`],
-//! [`QueuedWorkStore`], [`TurnInputStore`], and [`StoreMaintenance`].
+//! [`Store`]: [`SessionCommitStore`], [`IngressStore`], and
+//! [`StoreMaintenance`].
 //!
 //! This is the tokio-rusqlite port of the prior store's `persistence.rs`. The
 //! public surface is byte-for-byte the prior store async trait: identical method
@@ -12,8 +12,8 @@
 //! * Read-then-write paths run through `self.conn.write(move |tx| { ... })`
 //!   (`BEGIN IMMEDIATE`, commit on `Ok`, rollback on `Err`) — this is the
 //!   cross-process write-lock guard.
-//! * Paths that may abandon partially-applied writes (the queued-work claim)
-//!   run through `self.conn.write_flow`, deciding commit vs rollback via
+//! * Paths that may abandon partially-applied writes (the admissions) run
+//!   through `self.conn.write_flow`, deciding commit vs rollback via
 //!   [`TxOutcome`].
 //! * The shared `*_conn` helpers (`try_load_session_head_meta_from_conn`,
 //!   `Self::put_checkpoint_conn`, `Self::load_usage_deltas_conn`,
@@ -25,8 +25,6 @@
 
 use super::*;
 use crate::session_sql::session_sql;
-use lash_core_execution::store::claim_plan::TurnLaneStop;
-use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -60,6 +58,47 @@ fn load_turn_failure_settlements_conn(
         }
     }
     Ok(settlements)
+}
+
+fn load_turn_commits_conn(
+    conn: &rusqlite::Connection,
+    session_id: &SessionId,
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<Vec<lash_core_execution::store::TurnCommitRecord>, StoreError> {
+    let mut statement = conn
+        .prepare(session_sql().turn_commits.select_all_for_session.sql())
+        .map_err(sqlite_error)?;
+    let rows = statement
+        .query_map(params![session_id.as_str()], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(sqlite_error)?;
+    let mut commits = Vec::new();
+    for row in rows {
+        let (turn_id, result_json, outcome_code) = row.map_err(sqlite_error)?;
+        let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+            session_id,
+            &turn_id,
+            &result_json,
+            fleet,
+        )?;
+        lash_core_execution::store::validate_turn_commit_outcome_code(
+            &receipt,
+            outcome_code.as_deref(),
+        )?;
+        if let Some(outcome) = receipt.outcome {
+            commits.push(lash_core_execution::store::TurnCommitRecord {
+                operation_key: turn_id,
+                outcome,
+            });
+        }
+    }
+    commits.sort_by(|left, right| left.operation_key.cmp(&right.operation_key));
+    Ok(commits)
 }
 
 fn read_session_state_version_conn(
@@ -140,23 +179,6 @@ pub(crate) fn ensure_session_not_deleted_conn(
     }
 }
 
-/// The claim-candidate scan for `boundary`, rendered once at startup.
-///
-/// The boundary is a closed two-variant choice, so it selects a named statement
-/// rather than splicing a predicate: an optional boundary filter — a
-/// `COALESCE(?N, …)` or a `?N IS NULL OR …` — cannot seek the
-/// `(session_id, enqueue_seq)` primary key cleanly, and this query is the claim
-/// path's hottest.
-fn sqlite_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    match boundary {
-        QueuedWorkClaimBoundary::Idle => sql.queued_batches_sqlite.claim_candidates_idle.sql(),
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
-            sql.queued_batches_sqlite.claim_candidates_boundary.sql()
-        }
-    }
-}
-
 /// Reclaim the ancestry prefix with no live child, session-head root, or
 /// explicit anchor. Reachability is derived at each destructive decision.
 pub(crate) fn retire_unreachable_ancestry_conn(
@@ -202,14 +224,18 @@ pub(crate) fn nearest_frame_node_id_conn(
     .map_err(sqlite_error)
 }
 
-mod claim_support;
-pub(crate) use claim_support::admit_root_sqlite;
+mod admission;
+pub(crate) use admission::{
+    admit_at_checkpoint_sqlite, admit_root_sqlite, open_session_command_run_sqlite,
+};
 mod drive_epoch;
+mod ingress_settlement;
 mod maintenance;
 mod queued_work;
 mod session_commit;
+pub(crate) mod turn_cancel;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
 
-use claim_support::*;
+use turn_cancel::*;

@@ -345,7 +345,7 @@ async fn aggregate_await_reports_all_children_once() {
             builders::assign("second", start_echo("two")),
             builders::assign(
                 "results",
-                builders::await_expr(builders::tuple(vec![
+                builders::await_expr(builders::list(vec![
                     builders::var("first"),
                     builders::var("second"),
                 ])),
@@ -462,28 +462,6 @@ async fn receiver_module_operation_errors_are_sanitized() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn processes_emit_events_and_terminal_outcomes() {
-    let host = RecordingProcessHost::default();
-    let program = Program::block(vec![
-        Expr::Yield(Box::new(Expr::String("checkpoint".into()))),
-        Expr::Finish(Box::new(Expr::String("done".into()))),
-    ]);
-    let mut state = State::new();
-    let compiled = compile_program(&program);
-    let outcome = execute_compiled_process(&compiled, &mut state, &host)
-        .await
-        .expect("process admins should run");
-    assert_eq!(
-        outcome,
-        ExecutionOutcome::Finished(Value::String("done".into()))
-    );
-    let events = host.events.lock_recover();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].kind, ProcessEventKind::Yield);
-    assert_eq!(events[0].value, Value::String("checkpoint".into()));
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn while_runs_inside_process_body() {
     // process count_to(limit: int) {
     //   n = 0
@@ -499,14 +477,14 @@ async fn while_runs_inside_process_body() {
                 builders::while_loop(
                     builders::binary(
                         builders::var("n"),
-                        crate::ast::BinaryOp::Less,
+                        crate::ast::JavaScriptBinaryOp::Less,
                         builders::var("limit"),
                     ),
                     builders::block(vec![builders::assign(
                         "n",
                         builders::binary(
                             builders::var("n"),
-                            crate::ast::BinaryOp::Add,
+                            crate::ast::JavaScriptBinaryOp::Add,
                             builders::num(1.0),
                         ),
                     )]),
@@ -616,7 +594,6 @@ async fn foreground_rejects_programmatic_processes() {
     // The receiving side, `wait_signal`, plus yield/fail are process-only.
     // `finish` is valid in foreground code and process code.
     for (keyword, stmt) in [
-        ("yield", Expr::Yield(Box::new(Expr::String("event".into())))),
         (
             "wait_signal",
             Expr::WaitSignal {
@@ -783,24 +760,35 @@ async fn profiled_tool_effect_keeps_sync_instruction_counts() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn profile_report_tracks_list_comprehension_append_and_iteration() {
-    // `values = [n * 2 for n in range(0, 6) if n > 1]` / `finish values`
+async fn profile_report_tracks_loop_append_and_iteration() {
+    // `values = []` / `for n in range(0, 6) { if n > 1 { values = push(values, n * 2) } }`
+    // / `finish values`
     let compiled = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "values",
-            builders::comprehension(
-                builders::binary(builders::var("n"), BinaryOp::Multiply, builders::num(2.0)),
-                vec![
-                    builders::comprehension_for(
-                        "n",
-                        builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
+        builders::assign("values", builders::list(Vec::new())),
+        builders::for_in(
+            "n",
+            builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
+            builders::if_else(
+                builders::binary(
+                    builders::var("n"),
+                    JavaScriptBinaryOp::Greater,
+                    builders::num(1.0),
+                ),
+                builders::assign(
+                    "values",
+                    builders::builtin(
+                        "push",
+                        vec![
+                            builders::var("values"),
+                            builders::binary(
+                                builders::var("n"),
+                                JavaScriptBinaryOp::Multiply,
+                                builders::num(2.0),
+                            ),
+                        ],
                     ),
-                    builders::comprehension_if(builders::binary(
-                        builders::var("n"),
-                        BinaryOp::Greater,
-                        builders::num(1.0),
-                    )),
-                ],
+                ),
+                builders::null(),
             ),
         ),
         builders::finish(builders::var("values")),
@@ -810,8 +798,8 @@ async fn profile_report_tracks_list_comprehension_append_and_iteration() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::ListAppend)),
-        "comprehension should compile to ListAppend"
+            .any(|instruction| matches!(instruction, Instruction::BeginRangeIter { .. })),
+        "a range loop should compile to iterator bytecode"
     );
 
     let mut state = State::new();
@@ -831,21 +819,31 @@ async fn profile_report_tracks_list_comprehension_append_and_iteration() {
         ))
     );
 
-    let count = |name| {
+    let instruction_count = |name| {
         report
             .instruction_stats()
             .iter()
             .find(|stat| stat.name == name)
             .map_or(0, |stat| stat.count)
     };
+    // `values = push(values, ...)` fuses to the PushAssign intrinsic, which is
+    // profiled as an intrinsic instruction rather than a builtin call.
     assert_eq!(
-        count("append_assign"),
+        instruction_count("intrinsic"),
         4,
         "{:?}",
         report.instruction_stats()
     );
-    assert!(count("begin_iter") > 0, "{:?}", report.instruction_stats());
-    assert!(count("iter_next") > 0, "{:?}", report.instruction_stats());
+    assert!(
+        instruction_count("begin_iter") > 0,
+        "{:?}",
+        report.instruction_stats()
+    );
+    assert!(
+        instruction_count("iter_next") > 0,
+        "{:?}",
+        report.instruction_stats()
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1105,7 +1103,11 @@ fn echo_round_trip_prefix() -> Vec<Expr> {
     vec![
         builders::assign(
             "before",
-            builders::binary(builders::num(20.0), BinaryOp::Add, builders::num(2.0)),
+            builders::binary(
+                builders::num(20.0),
+                JavaScriptBinaryOp::Add,
+                builders::num(2.0),
+            ),
         ),
         builders::assign(
             "echoed",
@@ -1117,7 +1119,11 @@ fn echo_round_trip_prefix() -> Vec<Expr> {
         ),
         builders::assign(
             "after",
-            builders::binary(builders::var("echoed"), BinaryOp::Add, builders::num(1.0)),
+            builders::binary(
+                builders::var("echoed"),
+                JavaScriptBinaryOp::Add,
+                builders::num(1.0),
+            ),
         ),
     ]
 }
@@ -1327,32 +1333,6 @@ async fn type_ref_resolves_previously_defined_type() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn type_ref_to_non_type_value_is_type_error() {
-    // `Inner = { count: 5 }` / `Outer = Type { nested: Inner }` / `finish Outer`
-    let err = exec(builders::program(vec![
-        builders::assign(
-            "Inner",
-            builders::record(vec![("count", builders::num(5.0))]),
-        ),
-        builders::assign(
-            "Outer",
-            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                "nested",
-                TypeExpr::Ref("Inner".into()),
-                false,
-            )])),
-        ),
-        builders::finish(builders::var("Outer")),
-    ]))
-    .await
-    .expect_err("should fail: Inner is not a Type value");
-    assert!(
-        matches!(err, RuntimeError::NotTypeValue { .. }),
-        "expected NotTypeValue, got {err:?}"
-    );
-}
-
-#[tokio::test(flavor = "current_thread")]
 async fn type_ref_with_undefined_name_is_undefined_variable() {
     // `finish Type { nested: MissingType }`
     let err = exec(finish_type_literal(vec![builders::type_field(
@@ -1368,147 +1348,6 @@ async fn type_ref_with_undefined_name_is_undefined_variable() {
             name: "MissingType".to_string()
         }
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn compile_stats_count_const_folded_and_dynamic_literals() {
-    // `Inner = Type { n: int }` / `A = Type { x: str }`
-    // `B = Type { nested: Inner }` / `finish B`
-    let compiled = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "Inner",
-            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                "n",
-                TypeExpr::Int,
-                false,
-            )])),
-        ),
-        builders::assign(
-            "A",
-            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                "x",
-                TypeExpr::Str,
-                false,
-            )])),
-        ),
-        builders::assign(
-            "B",
-            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                "nested",
-                TypeExpr::Ref("Inner".into()),
-                false,
-            )])),
-        ),
-        builders::finish(builders::var("B")),
-    ]));
-    let stats = compiled.compile_stats();
-    assert_eq!(stats.type_literals_total, 3);
-    // ADR 0096: the compile-time folder was Lashlang's value-semantics
-    // optimization and went with the dialect, so a type literal that names an
-    // earlier binding is emitted rather than folded. `Inner` and `A` still fold
-    // because they close over nothing.
-    assert_eq!(
-        stats.type_literals_const_folded, 2,
-        "Inner and A are constant"
-    );
-    assert_eq!(stats.type_literals_dynamic, 1);
-    assert_eq!(stats.type_ref_sites, 1);
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn profile_report_shows_resolve_type_ref_counts() {
-    // `Inner = await tools.echo({ value: Type { n: int } })?`
-    // `Outer = Type { nested: Inner }`
-    // `limit = await tools.echo({ value: 1 })?`
-    // `numbers = push(range(limit), limit)`
-    // `checked = validate({ nested: { n: numbers[0] } }, Outer)` / `finish checked`
-    let compiled = compile_program_for_tests(builders::program(vec![
-        builders::assign(
-            "Inner",
-            builders::module_call(
-                &["tools"],
-                "echo",
-                vec![builders::record(vec![(
-                    "value",
-                    builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                        "n",
-                        TypeExpr::Int,
-                        false,
-                    )])),
-                )])],
-            ),
-        ),
-        builders::assign(
-            "Outer",
-            builders::type_literal(TypeExpr::Object(vec![builders::type_field(
-                "nested",
-                TypeExpr::Ref("Inner".into()),
-                false,
-            )])),
-        ),
-        builders::assign(
-            "limit",
-            builders::module_call(
-                &["tools"],
-                "echo",
-                vec![builders::record(vec![("value", builders::num(1.0))])],
-            ),
-        ),
-        builders::assign(
-            "numbers",
-            builders::builtin(
-                "push",
-                vec![
-                    builders::builtin("range", vec![builders::var("limit")]),
-                    builders::var("limit"),
-                ],
-            ),
-        ),
-        builders::assign(
-            "checked",
-            builders::builtin(
-                "validate",
-                vec![
-                    builders::record(vec![(
-                        "nested",
-                        builders::record(vec![(
-                            "n",
-                            builders::index(builders::var("numbers"), builders::num(0.0)),
-                        )]),
-                    )]),
-                    builders::var("Outer"),
-                ],
-            ),
-        ),
-        builders::finish(builders::var("checked")),
-    ]));
-    let mut state = State::new();
-    let (_outcome, report) = profile_compiled(&compiled, &mut state, &Host)
-        .await
-        .expect("profile should succeed");
-    let names: Vec<_> = report.instruction_stats().iter().map(|s| s.name).collect();
-    assert!(
-        names.contains(&"resolve_type_ref"),
-        "profile should track resolve_type_ref: {names:?}"
-    );
-    assert!(
-        names.contains(&"wrap_type_literal"),
-        "profile should track wrap_type_literal: {names:?}"
-    );
-    let builtin_names: Vec<_> = report.builtin_stats().iter().map(|s| s.name).collect();
-    assert!(
-        builtin_names.contains(&"validate"),
-        "profile should track validate: {builtin_names:?}"
-    );
-    assert!(
-        builtin_names.contains(&"range"),
-        "profile should track range: {builtin_names:?}"
-    );
-    assert!(
-        builtin_names.contains(&"push"),
-        "profile should track push: {builtin_names:?}"
-    );
-    assert_eq!(report.compile_stats().type_literals_total, 2);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1678,7 +1517,7 @@ async fn computation_strips_projection() {
     let (value, _) = exec_with_projected(
         builders::program(vec![builders::finish(builders::binary(
             builders::field(builders::var("input"), "n"),
-            crate::ast::BinaryOp::Add,
+            crate::ast::JavaScriptBinaryOp::Add,
             builders::num(1.0),
         ))]),
         &projected,

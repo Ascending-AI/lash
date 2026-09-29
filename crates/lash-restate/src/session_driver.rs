@@ -22,38 +22,56 @@
 //!   controller scoped to [`drive_root_scope`], under the retry contract of a
 //!   turn handler ([`turn_handler_options`](crate::turn_handler_options)): a
 //!   parked root fails its attempt retryably and pauses after the budget, so
-//!   its journal is kept for a restored build.
+//!   its journal is kept for a restored build. A root that ended owes its
+//!   scope close: `run` sends it to the same key's shared `close` handler,
+//!   which records the kernel's `CloseRootScope` step on a journal of its
+//!   own, and returns. `LashSession` admits the next root beside the close
+//!   rather than after it (FIG-4035).
 //!
 //! The kernel owns what a drive admits and how a root runs; these handlers
 //! only give each step its journal. The root's claim step repairs orphaned
 //! inputs and records its claim. Its `InspectAdmittedHead` step records the
 //! store-backed decision about the claimed head. On replay both steps return
-//! their recorded outcomes. Before a turn effect, a fenced live check may
-//! stop a root whose claim lost authority between attempts (FIG-3824,
-//! ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
+//! their recorded outcomes: the inspection's live check runs only when its
+//! step is the attempt's live frontier, and a replay honours its recorded
+//! verdict (FIG-3824, FIG-4058, ADR 0105 §2). Rule 6 of `scripts/check-substrate-boundary.sh` pins direct
 //! store calls and the repair helper in the session drive. The core installs its
 //! [`SessionDriver`] on the engine ([`SessionWorkEngine::install_session_driver`]),
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.
 //!
-//! **Scheduling (O2).** [`SessionWorkEngine::request_drive`] is a send to
-//! `LashSession/{session}/drive` whose idempotency key is the drive
-//! request's id, answered once Restate accepted it; `schedule_drive` is its
-//! fire-and-forget twin. Every ask names its own request (the admitted row
-//! and attempt its ingress obligation asks for, `ingress:{item}:{attempt}`,
-//! or a continuation), never the session or a running drive, so an ask
-//! issued while a drive runs is never deduplicated away: it queues behind
-//! the running drive on the object, and its first admission is the re-check
-//! that admits whatever that drive left pending. An ask lost with its
-//! process, or a drive the engine lost before it admitted the row, is the
-//! ingress relay's to ask again from the row's obligation (ADR 0109 §3);
-//! nothing scans the session catalog for undriven rows.
+//! **Scheduling (O2).** A drive is a send to `LashSession/{session}/drive`
+//! whose idempotency key is the drive's request id. Every ask names its own
+//! request: the admitted row and attempt its ingress obligation asks for,
+//! `ingress:{item}:{attempt}`, or a continuation. It never names the session
+//! or a running drive. The engine coalesces the asks of one session (FIG-4036,
+//! [`asks`]). An ask that finds none of the session's drives in flight from
+//! this process is sent at once, under its own request.
+//! [`SessionWorkEngine::request_drive`] answers once Restate accepted it, and
+//! `schedule_drive` is its fire-and-forget twin. An ask that finds a drive in
+//! flight is never deduplicated into that drive. It joins the one drive queued
+//! behind it, which the engine sends once the drive in flight has ended.
+//! That drive's first admission is the re-check that admits whatever the
+//! drive before it left pending. So a burst of sends queues one drive, not
+//! one per send. An ask lost with its process, or a drive the engine lost
+//! before it admitted the row, is the ingress relay's to ask again from the
+//! row's obligation (ADR 0109 §3). Nothing scans the session catalog for
+//! undriven rows.
 //!
-//! **Generations.** Both handlers' requests carry
-//! [`LASH_SESSION_DRIVE_VERSION`], the generation of the commands their
-//! journals lead with. A request built for another generation decodes and
-//! is refused, terminally and before the handler journals anything, so a
-//! journal written under one generation is never replayed against another.
+//! **Wire (ADR 0115 §3.1).** Both handlers take a versioned
+//! [`Call`](crate::Call) and answer a [`Reply`](crate::Reply). A request
+//! carries no journal stamp: a drive pinned to one build sends its admitted
+//! root to the stable `LashTurn`, which the newest build serves, so the
+//! request crosses builds and its stamp cannot act as a drain gate. The
+//! journal the call starts is the serving build's, and the generation
+//! sentinel below guards its replay. [`LASH_SESSION_DRIVE_VERSION`] stays an
+//! input to the drain generation `G`.
+//!
+//! **The recorded outcome (ADR 0115 §3.4).** `LashTurn` keeps the root's
+//! outcome under the stamped `{format, body}` envelope at
+//! [`LASH_TURN_OUTCOME_FORMAT_VERSION`], and `outcome` dispatches on the
+//! stamp before it decodes, so a later reader of another build is refused
+//! typed rather than by an accident of decoding.
 //!
 //! **Drain generation (ADR 0106 §1, FIG-3795).** Each handler's first
 //! journaled command is the generation sentinel, a step named
@@ -71,33 +89,36 @@ use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
-    DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, drive_admission_scope,
+    DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, RootRunEnd, drive_admission_scope,
     drive_continuation_request, drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
-    ContextReadState, ContextWriteState, ObjectContext, SharedWorkflowContext, WorkflowContext,
+    ContextReadState, ObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
-use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
+use crate::compat::{Call, Reply};
+use crate::object_state::{self, FleetView, StoredValueFormats, StoredValueWriter};
 use crate::sentinel::FoldedSentinel;
 use crate::{
     LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
     parked_turn_failure,
 };
 
-/// The generation of the session driver's journaled command prefix: the
-/// input stamp of every `LashSession` and `LashTurn` request (ADR 0105 §12).
+mod asks;
+
+/// The generation of the session driver's journaled command prefix
+/// (ADR 0105 §12): a drain surface, and so an input to the build's drain
+/// generation `G`.
 ///
 /// It owns what the two handlers journal ahead of the kernel's own recorded
 /// effects: `LashSession`'s admission steps and its `LashTurn` calls, and the
 /// root start marker and seal `LashTurn` records first. Any change to those
-/// commands, their order, or what they key on bumps it. The scheduler stamps
-/// it on every request, and each handler refuses any other generation before
-/// it journals anything. An unstamped request is generation 0, which no build
-/// drives.
+/// commands, their order, or what they key on bumps it, which moves `G`, and
+/// the generation sentinel parks a journal of another `G` before it replays.
+/// No request carries it: a request crosses builds (ADR 0115 §3.1).
 ///
 /// Generation 2 (FIG-3815): `LashTurn` records the root's start marker
 /// (`drive-root-start:{admission}`) before its seal.
@@ -113,37 +134,44 @@ use crate::{
 /// Generation 4 changed in place under the pre-1.0 version freeze
 /// (FIG-3980): neither handler journals a separate generation sentinel step;
 /// its generation rides the first recorded step, admission 0 or the root's
-/// start marker.
+/// start marker. It changed in place again for FIG-4035: `LashTurn`'s `run`
+/// journals a send to its key's `close` handler where it recorded the root's
+/// `CloseRootScope` step, and `close` records that step.
 pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
 
+/// The `LashTurn` handler `run` sends its root's owed scope close to.
+const CLOSE_HANDLER: &str = "close";
+
 /// The `LashTurn` state entry `run` records the root's outcome under once it
 /// ended, terminally included; `outcome` reads it back.
 const TURN_OUTCOME_STATE: &str = "outcome";
 
-/// The generation an unstamped request was written by: none this build
-/// drives.
-fn unstamped_drive_version() -> u32 {
-    0
-}
+/// The stored format of the root outcome `LashTurn` records under its
+/// `outcome` state, in the stamped `{format, body}` envelope (ADR 0115
+/// §3.4). Bump it when [`RootOutcome`]'s stored shape changes; the previous
+/// format reads through the N-1 upcaster slot in [`TURN_OUTCOME_FORMATS`].
+pub const LASH_TURN_OUTCOME_FORMAT_VERSION: u32 = 1;
+
+/// The recorded outcome's stored-format table: the registered surface, plus
+/// the N-1 upcaster hooks (none at the 1.0 baseline).
+const TURN_OUTCOME_FORMATS: StoredValueFormats = StoredValueFormats {
+    what: "LashTurn outcome",
+    surface: lash_core::surface_format!(LASH_TURN_OUTCOME_FORMAT_VERSION),
+    upcast_n1: &[],
+};
 
 /// The request `LashSession/{session}/drive` runs: one drive of the session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestateSessionDriveRequest {
-    /// [`LASH_SESSION_DRIVE_VERSION`] of the build that scheduled the drive.
-    #[serde(default = "unstamped_drive_version")]
-    pub drive_version: u32,
     pub request: DriveRequest,
 }
 
 /// The request `LashTurn/{session}:{root}/run` runs: one admitted root.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RestateTurnDriveRequest {
-    /// [`LASH_SESSION_DRIVE_VERSION`] of the drive that admitted the root.
-    #[serde(default = "unstamped_drive_version")]
-    pub drive_version: u32,
     /// The drain generation of the build whose drive admitted the root: the
     /// generation a root the latest build refuses is routed back to
     /// (ADR 0106 §1). Unstamped, it is `None`.
@@ -153,6 +181,20 @@ pub struct RestateTurnDriveRequest {
     /// its recorded claim was admitted on, and a replay reads that claim back;
     /// adopting that head still reads live store state (FIG-3824).
     pub admitted: Admitted,
+}
+
+/// The request `LashTurn/{session}:{root}/close` runs: the scope close the
+/// key's `run` owed once its root's terminal evidence was durable
+/// (FIG-4035).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestateRootCloseRequest {
+    /// The drain generation of the build whose run owed the close: a close
+    /// sent on a generation lane names that lane's generation.
+    #[serde(default)]
+    pub sender_generation: Option<BuildGeneration>,
+    /// The logical root whose scope closes: the key's own root, or, for a
+    /// follow-on recovery, the root that owed the follow-on.
+    pub root: lash_core::TurnId,
 }
 
 /// The `LashTurn` workflow key of `root` in `session`: one workflow per
@@ -264,8 +306,17 @@ impl SessionDriver for InstalledSessionDriver {
         &self,
         controller: lash_core::ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
+    ) -> RootRunEnd {
         self.driver.run_root(controller, admitted).await
+    }
+
+    async fn close_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<(), DriveAbort> {
+        self.driver.close_root(controller, session, root).await
     }
 }
 
@@ -347,6 +398,9 @@ pub struct RestateSessionWork {
     /// (FIG-3898).
     namespace: crate::RestateNamespace,
     control: Arc<dyn lash_core::engine::SessionControlEngine>,
+    /// Every session's drive asks from this engine: what is in flight and
+    /// what is queued behind it.
+    asks: Arc<asks::DriveAsks>,
 }
 
 #[expect(
@@ -367,6 +421,7 @@ impl RestateSessionWork {
             build_generation,
             namespace,
             control,
+            asks: Arc::default(),
         }
     }
 
@@ -387,7 +442,6 @@ impl RestateSessionWork {
         request: DriveRequestId,
     ) -> Result<crate::RestateInvocationId, crate::RestateHttpError> {
         let body = RestateSessionDriveRequest {
-            drive_version: LASH_SESSION_DRIVE_VERSION,
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
@@ -399,7 +453,7 @@ impl RestateSessionWork {
                 &self.namespace.stable(LashService::SessionDriver).name(),
                 session.as_str(),
                 DRIVE_HANDLER,
-                &body,
+                &Call::new(body),
                 request.as_str(),
             )
             .await
@@ -421,7 +475,6 @@ impl RestateSessionWork {
             .namespace
             .generation(LashService::SessionDriver, generation.clone());
         let body = RestateSessionDriveRequest {
-            drive_version: LASH_SESSION_DRIVE_VERSION,
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
@@ -433,7 +486,7 @@ impl RestateSessionWork {
                 &route.name(),
                 session.as_str(),
                 DRIVE_HANDLER,
-                &body,
+                &Call::new(body),
                 request.as_str(),
             )
             .await
@@ -449,7 +502,6 @@ impl RestateSessionWork {
         request: DriveRequestId,
     ) -> Result<DriveOutcome, crate::RestateHttpError> {
         let body = RestateSessionDriveRequest {
-            drive_version: LASH_SESSION_DRIVE_VERSION,
             request: DriveRequest {
                 session: session.clone(),
                 request: request.clone(),
@@ -457,14 +509,15 @@ impl RestateSessionWork {
             },
         };
         self.ingress
-            .call_object_json_idempotent(
+            .call_object_json_idempotent::<_, Reply<DriveOutcome>>(
                 &self.namespace.stable(LashService::SessionDriver).name(),
                 session.as_str(),
                 DRIVE_HANDLER,
-                &body,
+                &Call::new(body),
                 request.as_str(),
             )
             .await
+            .map(Reply::into_body)
     }
 }
 
@@ -520,6 +573,25 @@ impl RestateSessionWork {
             ),
         )))
     }
+
+    /// The leg a drive continues on after `leg` ended with `outcome`, when
+    /// `leg` spent its root budget and handed off.
+    fn continuation(
+        &self,
+        session: &SessionId,
+        leg: &DriveRequestId,
+        outcome: &DriveOutcome,
+    ) -> Option<DriveRequestId> {
+        let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
+            && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
+        handed_off.then(|| {
+            drive_continuation_request(&DriveRequest {
+                session: session.clone(),
+                request: leg.clone(),
+                build_generation: self.build_generation.clone(),
+            })
+        })
+    }
 }
 
 impl std::fmt::Debug for RestateSessionWork {
@@ -549,37 +621,42 @@ impl SessionWorkEngine for RestateSessionWork {
             );
             return;
         };
-        let engine = self.clone();
-        let session = session.clone();
-        runtime.spawn(async move {
-            if let Err(error) = engine.send_drive(&session, request.clone()).await {
-                tracing::warn!(
-                    session_id = session.as_str(),
-                    request = request.as_str(),
-                    error = %error,
-                    "session drive send failed"
-                );
-            }
-        });
+        self.asks.join(self, &runtime, session, request);
     }
 
-    /// Send `request`'s drive and answer once Restate accepted it, under
-    /// the request's idempotency key: a repeated request attaches to its
-    /// first invocation. A send that did not reach Restate is retryable.
+    /// Join `request` to the session's drive ([`asks`]). An ask that sends
+    /// a drive answers once Restate accepted it, under the request's
+    /// idempotency key; a send that did not reach Restate is retryable. An ask
+    /// queued behind the drive in flight is accepted at once: the engine
+    /// sends it once that drive ended. A repeated request joins the drive it
+    /// joined first.
     async fn request_drive(
         &self,
         session: &SessionId,
         request: DriveRequestId,
     ) -> Result<(), lash_core::engine::EngineRefusal> {
-        self.send_drive(session, request.clone())
-            .await
-            .map(|_| ())
-            .map_err(|error| {
-                lash_core::engine::EngineRefusal::Retryable(format!(
-                    "drive `{}` of session `{session}` was not accepted: {error}",
-                    request.as_str()
-                ))
-            })
+        let refusal = |request: &DriveRequestId, error: &dyn std::fmt::Display| {
+            lash_core::engine::EngineRefusal::Retryable(format!(
+                "drive `{}` of session `{session}` was not accepted: {error}",
+                request.as_str()
+            ))
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            // No runtime to pump on: send this ask alone.
+            return self
+                .send_drive(session, request.clone())
+                .await
+                .map(|_| ())
+                .map_err(|error| refusal(&request, &error));
+        };
+        let joined = self.asks.join(self, &runtime, session, request);
+        if joined.queued {
+            return Ok(());
+        }
+        match joined.drive.sent().await {
+            asks::Sent::Accepted => Ok(()),
+            asks::Sent::Failed(error) => Err(refusal(joined.drive.request(), &error)),
+        }
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
@@ -596,8 +673,10 @@ impl SessionWorkEngine for RestateSessionWork {
         installed
     }
 
-    /// Attach to `request`'s drive by its idempotency key, starting it if no
-    /// send reached Restate. A drive a handler refused terminally is decoded
+    /// Attach to the drive `request` joined ([`asks`]) once the engine sent
+    /// it. When this engine holds no ask of `request`, attach to `request`'s
+    /// own drive by its idempotency key, starting it if no send reached
+    /// Restate. A drive a handler refused terminally is decoded
     /// back to the kernel's refusal; any other failure to attach (transport,
     /// the attach ceiling) is a retry under the same key.
     ///
@@ -614,24 +693,35 @@ impl SessionWorkEngine for RestateSessionWork {
         session: &SessionId,
         request: &DriveRequestId,
     ) -> Result<DriveOutcome, DriveAbort> {
-        let mut leg = request.clone();
+        let mut leg = match self.asks.joined(session, request) {
+            Some(drive) => match drive.sent().await {
+                asks::Sent::Accepted => drive.request().clone(),
+                asks::Sent::Failed(error) => {
+                    return Err(DriveAbort::Retry(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
+                        format!(
+                            "drive `{}` of session `{session}` was not sent: {error}",
+                            drive.request().as_str()
+                        ),
+                    )));
+                }
+            },
+            None => request.clone(),
+        };
         let mut ran = Vec::new();
         loop {
             let outcome = self.attach_drive_leg(session, &leg).await?;
-            let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
-                && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
+            let next = self.continuation(session, &leg, &outcome);
             ran.extend(outcome.ran);
-            if !handed_off {
-                return Ok(DriveOutcome {
-                    ran,
-                    stop: outcome.stop,
-                });
+            match next {
+                Some(next) => leg = next,
+                None => {
+                    return Ok(DriveOutcome {
+                        ran,
+                        stop: outcome.stop,
+                    });
+                }
             }
-            leg = drive_continuation_request(&DriveRequest {
-                session: session.clone(),
-                request: leg,
-                build_generation: self.build_generation.clone(),
-            });
         }
     }
 }
@@ -684,7 +774,7 @@ fn decode_drive_refusal(body: &str) -> Option<lash_core::RuntimeError> {
 /// without it would schedule drives nothing runs.
 #[restate_sdk::object]
 pub trait LashSession {
-    async fn drive(request: Json<RestateSessionDriveRequest>) -> HandlerResult<Json<DriveOutcome>>;
+    async fn drive(call: Call<RestateSessionDriveRequest>) -> HandlerResult<Reply<DriveOutcome>>;
 }
 
 /// One admitted root, keyed [`turn_workflow_key`]. A workflow key runs
@@ -692,13 +782,20 @@ pub trait LashSession {
 /// its recorded [`outcome`](LashTurn::outcome) instead.
 #[restate_sdk::workflow]
 pub trait LashTurn {
-    async fn run(request: Json<RestateTurnDriveRequest>) -> HandlerResult<Json<RootOutcome>>;
+    async fn run(call: Call<RestateTurnDriveRequest>) -> HandlerResult<Reply<RootOutcome>>;
 
     /// The outcome `run` recorded, once it ended: what it returned, or
     /// [`RootOutcome::Released`] for a run that ended terminally without a
     /// lash outcome. `None` while `run` has not ended.
     #[shared]
-    async fn outcome() -> HandlerResult<Json<Option<RootOutcome>>>;
+    async fn outcome(call: Call<()>) -> HandlerResult<Reply<Option<RootOutcome>>>;
+
+    /// The root's scope close, which `run` sends here once the root's
+    /// terminal evidence is durable (FIG-4035): shared, and on a journal of
+    /// its own, so neither `run` nor the session's drive waits on it and the
+    /// session's next root is admitted beside it.
+    #[shared]
+    async fn close(call: Call<RestateRootCloseRequest>) -> HandlerResult<Reply<()>>;
 }
 
 /// The `LashSession` object over the deployment's driver slot, journaling
@@ -723,6 +820,8 @@ pub(crate) struct LashTurnImpl {
     /// The lane this instance serves: the binder serves one per lane of the
     /// pinned `LashTurn` (FIG-3795).
     route: crate::services::ServiceRoute,
+    /// Where `run` reads the fleet epoch its recorded outcome is stamped at.
+    fleet: FleetView,
 }
 
 impl LashSessionImpl {
@@ -755,12 +854,14 @@ impl LashTurnImpl {
         authority_id: RestateAuthorityId,
         build_generation: BuildGeneration,
         namespace: &crate::RestateNamespace,
+        fleet: FleetView,
     ) -> Self {
         Self {
             slot,
             authority_id,
             build_generation,
             route: namespace.stable(LashService::TurnDriver),
+            fleet,
         }
     }
 
@@ -771,19 +872,6 @@ impl LashTurnImpl {
         turn.route = route;
         turn
     }
-}
-
-/// The terminal refusal of a request stamped for another generation. It is
-/// returned before the handler journals anything.
-fn retired_generation(service: LashService, found: u32) -> HandlerError {
-    drive_refusal(&lash_core::RuntimeError::new(
-        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
-        format!(
-            "{} request carries lash-session-drive-v{found}; this handler journals generation \
-             {LASH_SESSION_DRIVE_VERSION}",
-            service.base_name()
-        ),
-    ))
 }
 
 /// How a handler ends an attempt the kernel aborted.
@@ -826,15 +914,9 @@ impl LashSession for LashSessionImpl {
     async fn drive(
         &self,
         ctx: ObjectContext<'_>,
-        Json(input): Json<RestateSessionDriveRequest>,
-    ) -> HandlerResult<Json<DriveOutcome>> {
-        // The generation gate precedes every journaled command.
-        if input.drive_version != LASH_SESSION_DRIVE_VERSION {
-            return Err(retired_generation(
-                LashService::SessionDriver,
-                input.drive_version,
-            ));
-        }
+        call: Call<RestateSessionDriveRequest>,
+    ) -> HandlerResult<Reply<DriveOutcome>> {
+        let (wire, input) = call.open()?;
         drive_session_journal(
             &self.slot,
             &self.authority_id,
@@ -844,7 +926,7 @@ impl LashSession for LashSessionImpl {
             input.request,
         )
         .await
-        .map(Json)
+        .map(|outcome| Reply::at(wire, outcome))
     }
 }
 
@@ -852,37 +934,60 @@ impl LashTurn for LashTurnImpl {
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(input): Json<RestateTurnDriveRequest>,
-    ) -> HandlerResult<Json<RootOutcome>> {
-        // The generation gate precedes every journaled command.
-        if input.drive_version != LASH_SESSION_DRIVE_VERSION {
-            return Err(retired_generation(
-                LashService::TurnDriver,
-                input.drive_version,
-            ));
-        }
+        call: Call<RestateTurnDriveRequest>,
+    ) -> HandlerResult<Reply<RootOutcome>> {
+        let (wire, input) = call.open()?;
+        let writer = TURN_OUTCOME_FORMATS.writer(self.fleet.fleet_format());
         run_root_journal(
             &self.slot,
             &self.authority_id,
             &self.build_generation,
             &self.route,
             ctx,
-            input.sender_generation.as_ref(),
-            input.admitted,
+            writer,
+            input,
         )
         .await
-        .map(Json)
+        .map(|outcome| Reply::at(wire, outcome))
     }
 
     async fn outcome(
         &self,
         ctx: SharedWorkflowContext<'_>,
-    ) -> HandlerResult<Json<Option<RootOutcome>>> {
+        call: Call<()>,
+    ) -> HandlerResult<Reply<Option<RootOutcome>>> {
+        let (wire, ()) = call.open()?;
         let recorded = ctx
-            .get::<Json<RootOutcome>>(TURN_OUTCOME_STATE)
+            .get::<Vec<u8>>(TURN_OUTCOME_STATE)
             .await?
-            .map(|Json(outcome)| outcome);
-        Ok(Json(recorded))
+            .map(|bytes| {
+                object_state::decode_stamped_bytes(
+                    TURN_OUTCOME_STATE,
+                    &bytes,
+                    &TURN_OUTCOME_FORMATS,
+                )
+            })
+            .transpose()?;
+        Ok(Reply::at(wire, recorded))
+    }
+
+    async fn close(
+        &self,
+        ctx: SharedWorkflowContext<'_>,
+        call: Call<RestateRootCloseRequest>,
+    ) -> HandlerResult<Reply<()>> {
+        let (wire, input) = call.open()?;
+        close_root_journal(
+            &self.slot,
+            &self.authority_id,
+            &self.build_generation,
+            &self.route,
+            ctx,
+            input.sender_generation.as_ref(),
+            &input.root,
+        )
+        .await
+        .map(|()| Reply::at(wire, ()))
     }
 }
 
@@ -990,7 +1095,6 @@ async fn drive_admissions(
                     key.clone(),
                     "run",
                     RestateTurnDriveRequest {
-                        drive_version: LASH_SESSION_DRIVE_VERSION,
                         sender_generation: Some(generation.clone()),
                         admitted,
                     },
@@ -998,7 +1102,7 @@ async fn drive_admissions(
                 .call()
                 .await
                 {
-                    Ok(Json(outcome)) => outcome,
+                    Ok(reply) => reply.into_body(),
                     // The call ended without a lash outcome: an earlier drive
                     // already ran this key (409), the run was refused
                     // terminally, or an operator's verb killed it. The drive
@@ -1018,9 +1122,9 @@ async fn drive_admissions(
                             .call()
                             .await
                             .map_err(HandlerError::from)?;
-                        match recorded {
-                            Json(Some(outcome)) => outcome,
-                            Json(None) => {
+                        match recorded.into_body() {
+                            Some(outcome) => outcome,
+                            None => {
                                 tracing::warn!(
                                     session_id = request.session.as_str(),
                                     root = root.as_str(),
@@ -1061,7 +1165,6 @@ async fn drive_admissions(
                         request.session.as_str().to_owned(),
                         "drive",
                         RestateSessionDriveRequest {
-                            drive_version: LASH_SESSION_DRIVE_VERSION,
                             request: continuation,
                         },
                     )
@@ -1101,9 +1204,14 @@ async fn run_root_journal(
     generation: &BuildGeneration,
     route: &crate::services::ServiceRoute,
     ctx: WorkflowContext<'_>,
-    sender_generation: Option<&BuildGeneration>,
-    admitted: Admitted,
+    writer: StoredValueWriter,
+    request: RestateTurnDriveRequest,
 ) -> Result<RootOutcome, HandlerError> {
+    let RestateTurnDriveRequest {
+        sender_generation,
+        admitted,
+    } = request;
+    let sender_generation = sender_generation.as_ref();
     let expected = turn_workflow_key(admitted.session(), admitted.root());
     if ctx.key() != expected {
         return Err(misaddressed(format!(
@@ -1145,9 +1253,12 @@ async fn run_root_journal(
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
     let root = admitted.root().clone();
-    let (ended, result) = match sentinel.guard(driver.run_root(scoped, admitted)).await? {
+    let RootRunEnd { result, owed_close } =
+        sentinel.guard(driver.run_root(scoped, admitted)).await?;
+    let (ended, result) = match result {
         Ok(outcome) => (outcome.clone(), Ok(outcome)),
-        // A retryable end records nothing: the run is not over.
+        // A retryable end records nothing: the run is not over, and its
+        // retry owes the root's close again.
         Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {
             return Err(abort_failure(abort));
         }
@@ -1158,9 +1269,76 @@ async fn run_root_journal(
             (RootOutcome::Released { root }, Err(abort_failure(abort)))
         }
     };
-    // The key runs once; a later drive that admits this root reads this.
-    controller.context().set(TURN_OUTCOME_STATE, Json(ended));
+    // The root's scope close runs on the key's `close` handler, not here
+    // (FIG-4035): `run` returns once the root's report is handed over, so
+    // the session's drive admits its next root beside the close. The send is
+    // journaled, so a replay sends it once. The close is its `ScopeClose`
+    // obligation's immediate delivery, so however often it runs, the scope
+    // closes once.
+    if let Some(owed) = owed_close {
+        crate::services::routed_workflow::<_, _, ()>(
+            controller.context(),
+            route,
+            expected,
+            CLOSE_HANDLER,
+            RestateRootCloseRequest {
+                sender_generation: Some(generation.clone()),
+                root: owed,
+            },
+        )
+        .send()
+        .await?;
+    }
+    // The key runs once; a later drive that admits this root reads this,
+    // stamped so a reader of another build dispatches on its format.
+    object_state::set_stamped(controller.context(), TURN_OUTCOME_STATE, writer, ended);
     result
+}
+
+/// What `LashTurn/{session}:{root}/close` journals: the kernel's recorded
+/// `CloseRootScope` step of `root` on the key's root scope, the scope the
+/// key's `run` would have recorded it under.
+async fn close_root_journal(
+    slot: &RestateSessionDriverSlot,
+    authority_id: &RestateAuthorityId,
+    generation: &BuildGeneration,
+    route: &crate::services::ServiceRoute,
+    ctx: SharedWorkflowContext<'_>,
+    sender_generation: Option<&BuildGeneration>,
+    root: &lash_core::TurnId,
+) -> Result<(), HandlerError> {
+    let Some((session, admitted_root)) = parse_turn_workflow_key(ctx.key()) else {
+        return Err(misaddressed(format!(
+            "LashTurn/{} names no root to close `{root}` under",
+            ctx.key()
+        )));
+    };
+    // A close on a generation lane was sent by a run on that lane, which
+    // names the lane's generation; anything else is a misroute.
+    if let crate::services::Lane::Generation(lane) = route.lane()
+        && sender_generation != Some(lane)
+    {
+        return Err(misrouted(
+            route,
+            &format!("the close of root `{root}` of session `{session}` was not sent by its lane"),
+        ));
+    }
+    let handler = route.namespace().stable(LashService::TurnDriver).name();
+    let driver = slot.driver_for(&handler)?;
+    // The generation sentinel rides the close, the handler's first recorded
+    // step: a journal of another build parks before it replays past it.
+    let sentinel = Arc::new(FoldedSentinel::new(handler, generation.clone()));
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone())
+        .in_namespace(route.namespace().clone())
+        .with_build_generation(generation.clone())
+        .with_folded_sentinel(Arc::clone(&sentinel));
+    let scoped = controller
+        .scoped_effect_controller(drive_root_scope(&session, &admitted_root))
+        .map_err(refused_scope)?;
+    sentinel
+        .guard(driver.close_root(scoped, &session, root))
+        .await?
+        .map_err(abort_failure)
 }
 
 #[cfg(test)]
@@ -1184,7 +1362,16 @@ mod tests {
             &self,
             _controller: lash_core::ScopedEffectController<'_>,
             _admitted: Admitted,
-        ) -> Result<RootOutcome, DriveAbort> {
+        ) -> RootRunEnd {
+            unreachable!("the slot law runs no drive")
+        }
+
+        async fn close_root(
+            &self,
+            _controller: lash_core::ScopedEffectController<'_>,
+            _session: &SessionId,
+            _root: &lash_core::TurnId,
+        ) -> Result<(), DriveAbort> {
             unreachable!("the slot law runs no drive")
         }
     }
@@ -1266,32 +1453,31 @@ mod tests {
     }
 
     #[test]
-    fn a_request_decodes_whatever_generation_it_carries() {
+    fn a_drive_request_carries_no_journal_stamp() {
         let request = DriveRequest {
             session: SessionId::from("s"),
             request: DriveRequestId::new("r"),
             build_generation: BuildGeneration::for_test("t0"),
         };
-        let mut stamped = serde_json::to_value(RestateSessionDriveRequest {
-            drive_version: LASH_SESSION_DRIVE_VERSION,
-            request,
+        let mut encoded = serde_json::to_value(RestateSessionDriveRequest {
+            request: request.clone(),
         })
         .expect("encode");
         assert_eq!(
-            stamped["drive_version"],
-            serde_json::json!(LASH_SESSION_DRIVE_VERSION)
+            encoded
+                .as_object()
+                .expect("an object")
+                .keys()
+                .collect::<Vec<_>>(),
+            ["request"],
+            "a request crosses builds, so it carries no drain gate (ADR 0115 §3.1)"
         );
-        stamped["drive_version"] = serde_json::json!(LASH_SESSION_DRIVE_VERSION + 1);
-        let successor: RestateSessionDriveRequest =
-            serde_json::from_value(stamped.clone()).expect("a successor's stamp decodes");
-        assert_eq!(successor.drive_version, LASH_SESSION_DRIVE_VERSION + 1);
-        stamped
-            .as_object_mut()
-            .expect("an object")
-            .remove("drive_version");
-        let unstamped: RestateSessionDriveRequest =
-            serde_json::from_value(stamped).expect("an unstamped request decodes");
-        assert_eq!(unstamped.drive_version, 0);
+        // A request an older build stamped still decodes: the stamp is
+        // ignored, never checked.
+        encoded["drive_version"] = serde_json::json!(LASH_SESSION_DRIVE_VERSION + 1);
+        let decoded: RestateSessionDriveRequest =
+            serde_json::from_value(encoded).expect("a stamped request decodes");
+        assert_eq!(decoded.request, request);
     }
 
     #[test]
@@ -1435,7 +1621,7 @@ mod tests {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .len()
-                    == 2
+                    >= 2
                 {
                     break;
                 }
@@ -1444,6 +1630,8 @@ mod tests {
         })
         .await
         .expect("the send retries after 503");
+        // The accepted send is followed by the engine's attach to learn when
+        // the drive ended (FIG-4036); the first two requests are the sends.
         let requests = transport
             .requests
             .lock()
@@ -1531,7 +1719,7 @@ mod tests {
             requests: std::sync::Mutex::default(),
             responses: std::sync::Mutex::new(
                 [
-                    scripted_response(200, serde_json::to_string(&outcome).expect("encode")),
+                    scripted_response(200, crate::wire::reply_json(&outcome)),
                     scripted_response(500, failure.to_string()),
                 ]
                 .into(),
@@ -1594,7 +1782,7 @@ mod tests {
             responses: std::sync::Mutex::new(
                 [
                     scripted_response(500, failure.to_string()),
-                    scripted_response(200, serde_json::to_string(&completed).expect("encode")),
+                    scripted_response(200, crate::wire::reply_json(&completed)),
                 ]
                 .into(),
             ),

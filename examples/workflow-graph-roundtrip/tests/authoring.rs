@@ -646,7 +646,6 @@ fn catalog_node(entry: &Value, id: &str) -> FlowNode {
             expression: None,
             condition: None,
             iterable: None,
-            clauses: Vec::new(),
             source: None,
             children: Vec::new(),
             available_vars: Vec::new(),

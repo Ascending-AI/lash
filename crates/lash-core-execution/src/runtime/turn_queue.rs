@@ -29,7 +29,7 @@ pub struct QueuedWorkBatchingConfig {
     action_token_reserve: std::num::NonZeroUsize,
     max_rows: std::num::NonZeroUsize,
     max_pending_age: std::time::Duration,
-    max_turn_input_claim: std::num::NonZeroUsize,
+    max_turn_input_admission: std::num::NonZeroUsize,
     max_follow_on_recoveries: u32,
     /// `None` selects the documented Lash default,
     /// [`DrainMode::OneAtATime`](crate::DrainMode::OneAtATime), so the
@@ -48,7 +48,7 @@ impl PartialEq for QueuedWorkBatchingConfig {
         self.action_token_reserve == other.action_token_reserve
             && self.max_rows == other.max_rows
             && self.max_pending_age == other.max_pending_age
-            && self.max_turn_input_claim == other.max_turn_input_claim
+            && self.max_turn_input_admission == other.max_turn_input_admission
             && self.max_follow_on_recoveries == other.max_follow_on_recoveries
             && std::sync::Arc::ptr_eq(&self.drain_policy(), &other.drain_policy())
     }
@@ -70,7 +70,7 @@ impl QueuedWorkBatchingConfig {
     /// Default upper bound on pending next-turn inputs one idle claim absorbs
     /// into a single turn.
     ///
-    /// Hosts may replace it with [`Self::with_max_turn_input_claim`].
+    /// Hosts may replace it with [`Self::with_max_turn_input_admission`].
     pub const DEFAULT_MAX_TURN_INPUT_CLAIM: usize = 64;
 
     /// These bounds apply to fresh claims. Redriving an interrupted claim keeps
@@ -92,8 +92,10 @@ impl QueuedWorkBatchingConfig {
             max_rows: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_ROWS)
                 .expect("default queued-work row bound is non-zero"),
             max_pending_age: Self::DEFAULT_MAX_PENDING_AGE,
-            max_turn_input_claim: std::num::NonZeroUsize::new(Self::DEFAULT_MAX_TURN_INPUT_CLAIM)
-                .expect("default turn-input claim bound is non-zero"),
+            max_turn_input_admission: std::num::NonZeroUsize::new(
+                Self::DEFAULT_MAX_TURN_INPUT_CLAIM,
+            )
+            .expect("default turn-input claim bound is non-zero"),
             max_follow_on_recoveries: crate::store::DEFAULT_MAX_FOLLOW_ON_RECOVERIES,
             drain_policy: None,
         }
@@ -191,18 +193,18 @@ impl QueuedWorkBatchingConfig {
     /// # Panics
     ///
     /// Panics when `max_inputs` is zero.
-    pub const fn with_max_turn_input_claim(mut self, max_inputs: usize) -> Self {
+    pub const fn with_max_turn_input_admission(mut self, max_inputs: usize) -> Self {
         let Some(max_inputs) = std::num::NonZeroUsize::new(max_inputs) else {
             panic!("turn-input claim bound must be non-zero");
         };
-        self.max_turn_input_claim = max_inputs;
+        self.max_turn_input_admission = max_inputs;
         self
     }
 
     /// Returns the maximum number of pending next-turn inputs one idle claim
     /// absorbs into a single turn.
-    pub const fn max_turn_input_claim(&self) -> usize {
-        self.max_turn_input_claim.get()
+    pub const fn max_turn_input_admission(&self) -> usize {
+        self.max_turn_input_admission.get()
     }
 
     /// Returns the maximum number of compatible rows in one fresh claim.
@@ -221,8 +223,8 @@ impl QueuedWorkBatchingConfig {
         self.max_pending_age
     }
 
-    pub fn claim_policy(&self, max_context_tokens: usize) -> QueuedWorkClaimPolicy {
-        QueuedWorkClaimPolicy {
+    pub fn admission_policy(&self, max_context_tokens: usize) -> TurnLaneAdmissionPolicy {
+        TurnLaneAdmissionPolicy {
             max_context_tokens,
             action_token_reserve: self.action_token_reserve(),
             max_rows: self.max_rows(),

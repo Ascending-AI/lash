@@ -28,6 +28,7 @@ impl<'run> ProcessRunContext<'run> {
             dispatch_parent_invocation: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
             process_lineage: None,
+            process_originator: None,
         }
     }
 
@@ -55,6 +56,7 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: tokio_util::sync::CancellationToken,
     process_lineage: Option<crate::ProcessLineage>,
+    process_originator: Option<crate::ProcessOriginator>,
 }
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
@@ -107,6 +109,14 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         lineage: crate::ProcessLineage,
     ) -> Self {
         self.process_lineage = Some(lineage);
+        self
+    }
+
+    pub(in crate::runtime::session_manager::process_runners) fn process_originator(
+        mut self,
+        originator: crate::ProcessOriginator,
+    ) -> Self {
+        self.process_originator = Some(originator);
         self
     }
 
@@ -189,6 +199,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             clock: Arc::clone(&self.services.current.host.core.clock),
             process_lineage: self.process_lineage,
             turn_capture: None,
+            process_originator: self.process_originator,
         });
         // Publish the process incarnation as a live opener, lending this
         // dispatch context to the group children it opens (ADR 0099 §3). The

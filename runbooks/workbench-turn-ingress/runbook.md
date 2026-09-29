@@ -32,8 +32,9 @@ structure rather than exact assistant wording.
    admitted checkpoint and starts another provider iteration, that next request must contain
    the injected input as an ordinary user message. The same message must appear exactly once
    in the durable session graph, `GET /api/state`, and the rendered transcript, then flow
-   through normal assembled history exactly once in later turns. A `turn_input.completed`
-   trace claim proves settlement but does not replace provider and transcript evidence. If
+   through normal assembled history exactly once in later turns. An `ingress.settled`
+   trace record naming the input proves settlement but does not replace provider and
+   transcript evidence. If
    the input arrives after the turn's last checkpoint, it must become the next turn's first
    committed user input instead of being stranded.
 5. **Queued means a full committed turn.** The queued marker must be absent from provider
@@ -64,10 +65,10 @@ structure rather than exact assistant wording.
   an ordinary composer **send** also lands there, with `ingress {"scope":"next_turn"}`, so a
   one-send run holds three rows, not two — and
   `<data-dir>/trace.jsonl` events named `agent_workbench.turn_input.enqueued` and
-  `turn_input.completed`. The claim columns on that table are `claim_id`, `claim_owner_id`,
-  `claim_owner_incarnation_id`, `claim_token`, `claim_fencing_token` and
-  `claim_session_lease_generation`; there is no `claimed_turn_id` column, and selecting one
-  fails with `no such column`.
+  `ingress.settled` (payload `root` and `input_ids`, settled by root and turn per ADR 0101's
+  FIG-3927 amendment). An admitted row names its root in `admitted_root` and `admitted_by`;
+  there are no claim columns and no `claimed_turn_id` column, and selecting one fails with
+  `no such column`.
 - Provider truth is the `llm_call_started` trace record, **not** `provider_request`. A
   `provider_request` record drops its body once the assembled request exceeds the trace's
   inline limit — it then carries `body_json_omitted_reason: "size_limit"` and a `body_len`
@@ -146,7 +147,7 @@ a fixed delay. Gate in this order:
 1. the first provider request after the admitted checkpoint — read from `llm_call_started`,
    per Working material — contains the injected marker exactly once as a user message,
    proving the model received it during the initial turn;
-   exactly one `turn_input.completed` trace claim also places its input id under that turn id;
+   exactly one `ingress.settled` record also places its input id under that turn id and root;
 2. the injected marker appears exactly once as a committed user message in the durable
    session graph, `GET /api/state`, and the rendered page; capture all three surfaces and
    require their message text and ordering to agree;

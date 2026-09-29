@@ -35,6 +35,7 @@ use lash_core_execution::{
 use sqlx::postgres::{PgPool, PgPoolOptions};
 
 use crate::PostgresStorage;
+use lash_core_execution::compat::{self, CompatAdmission, ComponentId, StampRead};
 
 pub(crate) mod walk;
 
@@ -163,31 +164,42 @@ impl StorePreflight for PostgresStorePreflight {
 
     async fn schema_status(&self) -> Result<StoreSchemaStatus, StoreError> {
         let report = PostgresStorage::verify_schema_for(&self.pool).await?;
-        let expected = i64::from(PostgresStorage::schema_version());
-        let verdict = match report.found_version {
-            Some(found) if i64::from(found) != expected => StoreSchemaVerdict::Mismatch {
-                found: i64::from(found),
-            },
-            // An absent stamp over existing lash tables is *not* an empty
-            // deployment. The open path detects exactly this shape and refuses
-            // it (`unstamped_schema` in `postgres/schema.rs`), so reporting it
-            // as absent would hand back a pass for a store that is about to
-            // refuse — the crash loop this surface exists to prevent. Version 0
-            // stands for "provisioned, never stamped", which is the same
-            // convention SQLite's side already reports for a populated database
-            // whose `user_version` is 0.
-            None if report.schema.is_some() => StoreSchemaVerdict::Mismatch { found: 0 },
-            // Nothing provisioned: no stamp and no lash tables to carry one.
-            None => StoreSchemaVerdict::Absent,
-            // Structural drift at the expected version is not a version
-            // refusal, and inventing one would misreport it. The report's own
-            // per-object diff is the finding, so it is passed through verbatim
-            // and left undecided — `SchemaCheck::Enforce` does refuse it at
-            // open, which is why the verdict must not read as a pass either.
-            Some(_) if !report.is_conformant() => StoreSchemaVerdict::Unreadable {
+        let descriptor = compat::descriptor(ComponentId::POSTGRES).ok_or_else(|| {
+            StoreError::Backend("missing PostgreSQL compatibility descriptor".into())
+        })?;
+        let stamp = if report.schema.is_some() {
+            crate::schema::read_compat_stamp(&self.pool, true).await
+        } else {
+            StampRead::Absent { populated: false }
+        };
+        let min_reader = match &stamp {
+            StampRead::Present(stamp) => Some(i64::from(stamp.min_reader)),
+            _ => None,
+        };
+        let verdict = match compat::admit(descriptor, stamp) {
+            Err(refusal) => StoreSchemaVerdict::Refused { refusal },
+            Ok(CompatAdmission::Provision) => StoreSchemaVerdict::Absent,
+            Ok(CompatAdmission::Native) if report.is_conformant() => StoreSchemaVerdict::Matches,
+            Ok(CompatAdmission::Native) => StoreSchemaVerdict::Unreadable {
                 reason: report.to_string(),
             },
-            Some(_) => StoreSchemaVerdict::Matches,
+            Ok(CompatAdmission::Expanded { version }) => {
+                let mut tx = self.pool.begin().await.map_err(crate::store_sqlx_error)?;
+                let findings = crate::schema_shape::expanded_findings(&mut tx, &report).await?;
+                tx.commit().await.map_err(crate::store_sqlx_error)?;
+                if findings.is_empty() {
+                    StoreSchemaVerdict::Expanded {
+                        found: i64::from(version),
+                    }
+                } else {
+                    StoreSchemaVerdict::Refused {
+                        refusal: compat::CompatRefusal::ShapeRefused {
+                            component: descriptor.component.as_str().to_owned(),
+                            findings,
+                        },
+                    }
+                }
+            }
         };
         let release = crate::release_stamp::read(&self.pool).await;
         let fleet_format = crate::fleet_format::read(&self.pool).await;
@@ -195,7 +207,8 @@ impl StorePreflight for PostgresStorePreflight {
             databases: vec![StoreSchemaDatabase {
                 name: COMPONENT_DATABASE_NAME.to_string(),
                 location: self.location.clone(),
-                expected,
+                expected: i64::from(descriptor.reads.max()),
+                min_reader,
                 verdict,
             }],
             release,

@@ -143,9 +143,10 @@ lash_store_sql::statements! {
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status,
                             lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
-                            record_json
+                            record_json, consumer_hold_key, consumer_hold_scope_kind,
+                            consumer_hold_scope_id
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)";
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)";
 
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
@@ -250,6 +251,7 @@ lash_store_sql::statements! {
              WHERE {{retired_process_status(status)}}
                AND updated_at_ms < ?1
                AND (?2 IS NULL OR change_seq <= ?2)
+               AND consumer_hold_key IS NULL
                AND NOT EXISTS (
                    SELECT 1 FROM process_wake_deliveries AS delivery
                    WHERE delivery.process_id = processes.process_id

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ast::{BinaryOp, UnaryOp};
+use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 
 /// The lashlang spelling of the language-operation parity fixture, kept as the
 /// label the divergence assertions quote.
@@ -958,14 +958,21 @@ async fn projected_values_match_normal_values_for_language_operations() {
                         ),
                         (
                             "plus",
-                            builders::binary(record_a(), BinaryOp::Add, builders::num(1.0)),
+                            builders::binary(
+                                record_a(),
+                                JavaScriptBinaryOp::Add,
+                                builders::num(1.0),
+                            ),
                         ),
-                        ("neg", builders::unary(UnaryOp::Negate, record_a())),
+                        (
+                            "neg",
+                            builders::unary(JavaScriptUnaryOp::Negate, record_a()),
+                        ),
                         (
                             "cmp",
                             builders::binary(
                                 record_a(),
-                                BinaryOp::Less,
+                                JavaScriptBinaryOp::Less,
                                 builders::field(input("record"), "b"),
                             ),
                         ),
@@ -1017,7 +1024,11 @@ async fn projected_values_match_normal_values_for_ranges_validation_and_iteratio
                     range(),
                     builders::block(vec![builders::assign(
                         "total",
-                        builders::binary(builders::var("total"), BinaryOp::Add, builders::var("i")),
+                        builders::binary(
+                            builders::var("total"),
+                            JavaScriptBinaryOp::Add,
+                            builders::var("i"),
+                        ),
                     )]),
                 ),
                 builders::finish(builders::record(vec![

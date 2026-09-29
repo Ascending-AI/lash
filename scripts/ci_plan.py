@@ -42,6 +42,7 @@ FAMILIES = (
     "functional_e2e",
     "workers_e2e",
     "restate_suites",
+    "rolling_upgrade",
     "feature_lanes",
     "workbench",
     "regress",
@@ -275,6 +276,7 @@ GATED_JOBS = {
     "stack-budget": "rust",
     "postgres-store": "stores",
     "pr-host-workers": "pr_host_restate",
+    "rolling-upgrade": "rolling_upgrade",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
@@ -1078,6 +1080,35 @@ def _is_restate_suite_path(
     )
 
 
+# `rolling_upgrade` selects Phase A's rolling-upgrade gate (ADR 0115 §6,
+# FIG-3805): `just e2e-rolling` rolls two builds of the diff's tree, N and the
+# `synthetic-next` N+1, over live stores and a live Restate server. ADR 0115
+# requires it on every change to a registered versioned surface, so the rule
+# is the registry's: a diff selects the gate when it touches a file that
+# declares a `[[surface]]` constant of `scripts/versioned-surfaces.toml`, or
+# the harness, lashctl and the runbook.
+VERSIONED_SURFACES_REGISTRY = "scripts/versioned-surfaces.toml"
+ROLLING_UPGRADE_PACKAGES = frozenset(
+    {"crates/lash-upgrade-harness", "crates/lashctl", "runbooks/rolling-upgrade"}
+)
+
+
+@lru_cache(maxsize=None)
+def versioned_surface_paths(root: str | None = None) -> frozenset[str]:
+    """The files that declare a registered versioned surface's constant."""
+
+    base = Path(root) if root is not None else REPO_ROOT
+    with (base / VERSIONED_SURFACES_REGISTRY).open("rb") as handle:
+        registry = tomllib.load(handle)
+    return frozenset(surface["constant_path"] for surface in registry["surface"])
+
+
+def _is_rolling_upgrade_path(path: str, surface_paths: frozenset[str]) -> bool:
+    return path in surface_paths or any(
+        path.startswith(f"{package}/") for package in ROLLING_UPGRADE_PACKAGES
+    )
+
+
 # `facade` gates the untrusted Cargo seal lane: only the facade crate's public
 # API or the root manifests can break the API surface it seals. Trusted events
 # seal on every run inside `bazel-tests`, where an unchanged seal is a cache
@@ -1665,6 +1696,7 @@ def classify(
     store_dirs: frozenset[str] | None = None,
     restate_dirs: frozenset[str] | None = None,
     lane_dirs: frozenset[str] | None = None,
+    surface_paths: frozenset[str] | None = None,
 ) -> dict[str, str]:
     if not changes:
         raise PlanError("the changed path set was empty")
@@ -1683,6 +1715,11 @@ def classify(
             restate_dirs = restate_suite_dirs()
         except (OSError, ValueError, KeyError, tomllib.TOMLDecodeError) as error:
             return fail_open(f"Restate suite registry is underivable: {error}")
+    if surface_paths is None:
+        try:
+            surface_paths = versioned_surface_paths()
+        except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as error:
+            return fail_open(f"versioned surface registry is underivable: {error}")
     if lane_dirs is None:
         try:
             lane_dirs = feature_lane_package_dirs()
@@ -1794,6 +1831,9 @@ def classify(
         "restate_suites": any(
             _is_restate_suite_path(path, classes[path], restate_dirs)
             for path in build
+        ),
+        "rolling_upgrade": any(
+            _is_rolling_upgrade_path(path, surface_paths) for path in build
         ),
         "feature_lanes": any(
             _is_feature_gate_path(path, classes[path], lane_dirs) for path in build

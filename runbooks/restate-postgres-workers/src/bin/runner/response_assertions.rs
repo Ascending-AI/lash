@@ -365,11 +365,12 @@ pub(super) fn assert_frame_switch_cancel_response(response: &TurnResponse) -> Re
     Ok(())
 }
 
+/// Reads the provider's own receipts in the witness database.
 pub(super) async fn assert_frame_switch_provider_order(pool: &sqlx::PgPool) -> Result<()> {
     let queued: Vec<String> = sqlx::query_scalar(
-        "SELECT scenario FROM lash_e2e_provider_calls
+        "SELECT scenario FROM witness_provider_receipts
          WHERE workflow_id = 'e2e-frame-switch-queued'
-         ORDER BY call_id",
+         ORDER BY receipt_id",
     )
     .fetch_all(pool)
     .await
@@ -384,9 +385,9 @@ pub(super) async fn assert_frame_switch_provider_order(pool: &sqlx::PgPool) -> R
         "queued frame-switch provider order changed: {queued:?}"
     );
     let crash: Vec<String> = sqlx::query_scalar(
-        "SELECT scenario FROM lash_e2e_provider_calls
+        "SELECT scenario FROM witness_provider_receipts
          WHERE workflow_id = 'e2e-frame-switch-crash'
-         ORDER BY call_id",
+         ORDER BY receipt_id",
     )
     .fetch_all(pool)
     .await
@@ -396,9 +397,9 @@ pub(super) async fn assert_frame_switch_provider_order(pool: &sqlx::PgPool) -> R
         "crash recovery duplicated or lost a physical turn: {crash:?}"
     );
     let prepared: Vec<String> = sqlx::query_scalar(
-        "SELECT scenario FROM lash_e2e_provider_calls
+        "SELECT scenario FROM witness_provider_receipts
          WHERE workflow_id = 'e2e-frame-switch-prepared'
-         ORDER BY call_id",
+         ORDER BY receipt_id",
     )
     .fetch_all(pool)
     .await
@@ -412,9 +413,9 @@ pub(super) async fn assert_frame_switch_provider_order(pool: &sqlx::PgPool) -> R
         "prepared frame-switch provider order changed: {prepared:?}"
     );
     let cancel: Vec<String> = sqlx::query_scalar(
-        "SELECT scenario FROM lash_e2e_provider_calls
+        "SELECT scenario FROM witness_provider_receipts
          WHERE workflow_id = 'e2e-frame-switch-cancel'
-         ORDER BY call_id",
+         ORDER BY receipt_id",
     )
     .fetch_all(pool)
     .await

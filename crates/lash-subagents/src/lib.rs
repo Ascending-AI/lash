@@ -57,6 +57,7 @@ pub struct SubagentsPluginFactory {
     registry: Arc<CapabilityRegistry>,
     final_answer_format: RlmFinalAnswerFormat,
     lifetime: lash_core::LifetimePolicy,
+    timeout: Option<std::time::Duration>,
 }
 
 impl SubagentsPluginFactory {
@@ -74,7 +75,16 @@ impl SubagentsPluginFactory {
             registry,
             final_answer_format: RlmFinalAnswerFormat::RawFinalValue,
             lifetime: Arc::new(lifetime),
+            timeout: None,
         }
+    }
+
+    /// Bounds how long a `spawn_agent` call waits for its child. A spawn
+    /// that times out answers a timeout error, and the runtime cancels the
+    /// child. There is no bound by default.
+    pub fn with_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
     }
 
     pub fn with_session_spec(mut self, spec: SessionSpec) -> Self {
@@ -122,47 +132,25 @@ impl PluginFactory for SubagentsPluginFactory {
         &self,
         ctx: &PluginSessionContext,
     ) -> Result<Arc<dyn lash_core::facade_support::SessionPlugin>, PluginError> {
-        let registry = Arc::clone(&self.registry);
-        let session_spec = self.session_spec.clone();
-        let tool_access = self.tool_access.clone();
-        let final_answer_format = self.final_answer_format.clone();
-        let parent_subagent = ctx.subagent.clone();
-
-        let implementation = Arc::new(rlm::RlmSubagentToolsProvider {
-            registry: Arc::clone(&registry),
-            session_spec: session_spec.clone(),
-            tool_access,
-            final_answer_format,
-            lifetime: Arc::clone(&self.lifetime),
-            parent_subagent,
-            include_submit_error: ctx.subagent.is_some(),
-        });
-        let orchestrating_tool = rlm::spawn_agent_orchestrating_tool(Arc::clone(&implementation));
-        let leaf_provider: Option<Arc<dyn ToolProvider>> =
-            implementation.include_submit_error.then(|| {
-                Arc::new(
-                    rlm::RlmSubagentToolsProvider {
-                        registry: Arc::clone(&implementation.registry),
-                        session_spec: implementation.session_spec.clone(),
-                        tool_access: implementation.tool_access.clone(),
-                        final_answer_format: implementation.final_answer_format.clone(),
-                        lifetime: Arc::clone(&implementation.lifetime),
-                        parent_subagent: implementation.parent_subagent.clone(),
-                        include_submit_error: true,
-                    }
-                    .into_leaf_provider(),
-                ) as Arc<dyn ToolProvider>
-            });
+        let provider: Arc<dyn ToolProvider> = Arc::new(
+            rlm::RlmSubagentToolsProvider {
+                registry: Arc::clone(&self.registry),
+                session_spec: self.session_spec.clone(),
+                tool_access: self.tool_access.clone(),
+                final_answer_format: self.final_answer_format.clone(),
+                lifetime: Arc::clone(&self.lifetime),
+                parent_subagent: ctx.subagent.clone(),
+                include_submit_error: ctx.subagent.is_some(),
+                timeout: self.timeout,
+            }
+            .into_provider(),
+        );
 
         let subagent_authority = ctx.subagent.clone();
         PluginSpecFactory::new(
             "subagents",
             Arc::new(move |_ctx| {
-                let mut spec =
-                    PluginSpec::new().with_orchestrating_tool(orchestrating_tool.clone());
-                if let Some(provider) = leaf_provider.as_ref() {
-                    spec = spec.with_tool_provider(Arc::clone(provider));
-                }
+                let mut spec = PluginSpec::new().with_tool_provider(Arc::clone(&provider));
                 if let Some(authority) = subagent_authority.clone() {
                     let note = rlm_support::subagent_capability_note(&authority);
                     spec = spec.with_prompt_contributor(Arc::new(move |_ctx| {

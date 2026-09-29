@@ -269,7 +269,8 @@ pub(super) enum FreshnessHeadObservation {
 pub(super) struct PendingTurnInputObservation {
     pub(super) input_id: String,
     pub(super) state: TurnInputStateKind,
-    pub(super) claim_session_lease_generation: Option<u64>,
+    pub(super) admitted_root: Option<String>,
+    pub(super) admitted_by: Option<String>,
 }
 
 /// One `session_roots` row's terminal evidence and scope-close obligation
@@ -302,10 +303,8 @@ pub(super) struct QueuedWorkObservation {
     authority: QueuedWorkAuthority,
     merge_key: Option<String>,
     payloads: Vec<serde_json::Value>,
-    claim_id_present: bool,
-    claim_token_present: bool,
-    claim_fencing_token: u64,
-    claim_session_lease_generation: Option<u64>,
+    admitted_root: Option<String>,
+    admitted_by: Option<String>,
 }
 
 #[expect(
@@ -338,20 +337,12 @@ pub(super) fn queued_work_observations_from_sql_rows(
                     work_kind,
                     authority_json,
                     merge_key,
-                    claim_id,
-                    claim_token,
-                    claim_fencing_token,
-                    claim_session_lease_generation,
+                    admitted_root,
+                    admitted_by,
                 ),
             )| {
                 let mut payloads = payloads_by_batch.remove(&batch_id).unwrap_or_default();
                 payloads.sort_by_key(|(item_index, _)| *item_index);
-                assert_claim_id_spelling(
-                    claim_id.as_deref(),
-                    "qwc",
-                    _enqueue_seq as u64,
-                    claim_fencing_token as u64,
-                );
                 QueuedWorkObservation {
                     ordinal,
                     source_key,
@@ -366,32 +357,10 @@ pub(super) fn queued_work_observations_from_sql_rows(
                         .into_iter()
                         .map(|(_item_index, payload)| payload)
                         .collect(),
-                    claim_id_present: claim_id.is_some(),
-                    claim_token_present: claim_token.is_some(),
-                    claim_fencing_token: claim_fencing_token as u64,
-                    claim_session_lease_generation: claim_token
-                        .as_ref()
-                        .map(|_| claim_session_lease_generation as u64),
+                    admitted_root,
+                    admitted_by,
                 }
             },
         )
         .collect()
-}
-
-pub(super) fn assert_claim_id_spelling(
-    claim_id: Option<&str>,
-    prefix: &str,
-    enqueue_seq: u64,
-    fencing_token: u64,
-) {
-    // This raw-durable dialect guard is reached only by the cross-backend test,
-    // whose entrypoint is Postgres-gated. A SQLite-only lane does not run it;
-    // lash-sqlite-store therefore pins its `qwc` and `tic` spellings locally too.
-    if let Some(claim_id) = claim_id {
-        assert_eq!(
-            claim_id,
-            format!("{prefix}:{enqueue_seq}:{fencing_token}"),
-            "durable claim-id bytes drifted from the backend dialect"
-        );
-    }
 }

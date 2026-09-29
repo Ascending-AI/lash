@@ -784,19 +784,26 @@ pub(crate) async fn commit_group_child_boundary(
 /// Whether `outcome` is the attempt's declared process start at
 /// `intent_index`, realized or refused.
 fn declares_start_at(outcome: &crate::ToolIntentExecutionOutcome, intent_index: u32) -> bool {
-    match outcome {
-        crate::ToolIntentExecutionOutcome::Executed {
-            identity,
-            kind: crate::ToolIntentKind::StartProcess,
-            ..
-        } => identity.intent_index == intent_index,
+    declares_at(outcome, crate::ToolIntentKind::StartProcess, intent_index)
+}
+
+fn declares_at(
+    outcome: &crate::ToolIntentExecutionOutcome,
+    kind: crate::ToolIntentKind,
+    intent_index: u32,
+) -> bool {
+    let (outcome_kind, index) = match outcome {
+        crate::ToolIntentExecutionOutcome::Executed { identity, kind, .. } => {
+            (kind, identity.intent_index)
+        }
         crate::ToolIntentExecutionOutcome::Refused {
             intent_index: refused,
-            kind: crate::ToolIntentKind::StartProcess,
+            kind,
             ..
-        } => *refused == intent_index,
-        _ => false,
-    }
+        } => (kind, *refused),
+        _ => return false,
+    };
+    *outcome_kind == kind && index == intent_index
 }
 
 fn project_recorded_intent_outcomes(
@@ -869,6 +876,46 @@ fn project_recorded_intent_outcomes(
                     crate::ToolFailureClass::Internal,
                     "tool_value_decode_failed",
                     format!("malformed realized process handle: {error}"),
+                ));
+            }
+        }
+        return;
+    }
+    // A trigger registration's slot resolves the same way: the realized
+    // receipt — which alone carries the revision and fingerprint — replaces
+    // the slot before the answer reaches a model or a cell (FIG-3116).
+    if let Some(intent_index) = lash_sansio::handle::trigger_register_slot(&value.to_json_value())
+        && outcomes.iter().any(|outcome| {
+            declares_at(
+                outcome,
+                crate::ToolIntentKind::RegisterTrigger,
+                intent_index,
+            )
+        })
+    {
+        let realized = outcomes.iter().find_map(|outcome| match outcome {
+            crate::ToolIntentExecutionOutcome::Executed {
+                identity,
+                kind: crate::ToolIntentKind::RegisterTrigger,
+                result,
+            } if identity.intent_index == intent_index => Some(result),
+            _ => None,
+        });
+        let Some(handle) = realized else {
+            *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                crate::ToolFailureClass::Unavailable,
+                "trigger_register_unrealized",
+                "the declared trigger registration did not produce a subscription",
+            ));
+            return;
+        };
+        match serde_json::from_value(handle.clone()) {
+            Ok(decoded) => *value = decoded,
+            Err(error) => {
+                *output = crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Internal,
+                    "tool_value_decode_failed",
+                    format!("malformed realized trigger handle: {error}"),
                 ));
             }
         }

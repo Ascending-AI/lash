@@ -522,7 +522,7 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
             }
             RuntimeEffectCommand::Checkpoint { .. } => Ok(RuntimeEffectOutcome::Checkpoint {
                 result: Ok(lash_core::CheckpointDelivery::default()),
-                claims: Box::default(),
+                admitted: Box::default(),
             }),
             RuntimeEffectCommand::Process { command } => {
                 self.process_starts.fetch_add(1, Ordering::SeqCst);

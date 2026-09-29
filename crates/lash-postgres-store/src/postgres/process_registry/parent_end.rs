@@ -126,12 +126,22 @@ pub(crate) async fn record_tx(
         tx,
         &lash_core_execution::store::ObligationKey::ParentEnd {
             parent_kind: kind.to_string(),
-            parent_id: id,
+            parent_id: id.clone(),
         },
         crate::obligation_ledger::DUE_AT_ONCE_MS,
     )
     .await
     .map_err(|error| PluginError::Session(error.to_string()))?;
+    // The close ends every wait the scope's calls still hold (ADR 0116
+    // §3.6): an abandoned call leaks no hold, and a late start under the
+    // closed scope is refused, so no redrive needs the row pinned.
+    sqlx::query(process_sql().process.release_consumer_holds_owned_by.sql())
+        .bind(kind)
+        .bind(id)
+        .execute(&mut **tx)
+        .await
+        .map(drop)
+        .map_err(plugin_sqlx_error)?;
     Ok(())
 }
 

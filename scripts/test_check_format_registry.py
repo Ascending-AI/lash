@@ -280,7 +280,7 @@ class RealRepositoryTests(unittest.TestCase):
         self.assertEqual(gate.check(gate.ROOT, registry, manifest), [])
 
     def test_the_gate_names_the_constants_fig_3521_found_unregistered(self) -> None:
-        # The four version constants that were in neither the registry nor the
+        # The three surviving version constants that were in neither the registry nor the
         # manifest before FIG-3521. Dropping their entries must fail the gate by
         # name; a sweep that stopped seeing them would pass silently instead.
         missing = {
@@ -289,8 +289,6 @@ class RealRepositoryTests(unittest.TestCase):
             "crates/lash-restate/src/controller/process_command.rs:"
             "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
             "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
-            "crates/lash-core-store/src/store/queued_work.rs:"
-            "QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION",
         }
         registry = gate.load_registry(gate.DEFAULT_CONFIG)
         pruned = dataclasses.replace(

@@ -110,7 +110,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         first_result.assistant_output.safe_text,
         "follow-on complete"
     );
-    let pending_after_follow = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let pending_after_follow = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -168,7 +168,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         "second queued complete"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -256,7 +256,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
+        lash_core::store::IngressStore::list_queued_work(
             store.as_ref(),
             &SessionId::from(SESSION_ID)
         )
@@ -298,7 +298,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
             .await;
     runtime.host.core.attachment_source_policy = Arc::new(DenyClaimedAttachments);
-    let inbound = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
+    let inbound = lash_core::store::IngressStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             "root",
@@ -334,7 +334,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::InvalidInput)
     ));
-    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -406,7 +406,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::PluginAbort)
     ));
-    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -670,15 +670,12 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     );
     assert_eq!(call_index.load(Ordering::SeqCst), switch_count);
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queue after bounded chain")
-        .is_empty()
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("queue after bounded chain")
+            .is_empty()
     );
-    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -785,7 +782,6 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         committed.outcome,
         TurnOutcome::AgentFrameSwitch { .. }
     ));
-    assert_eq!(store.abandoned_claim_counts(), (0, 0));
     let pending = lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
         .await
         .expect("load the head")
@@ -794,13 +790,10 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         .expect("the failed follow-on remains owed");
     assert_eq!(pending.physical_index(), switch_count as u64);
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root"),
-        )
-        .await
-        .expect("list queued work")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"),)
+            .await
+            .expect("list queued work")
+            .is_empty(),
         "a frame handoff is never a queue row"
     );
     assert_eq!(
@@ -860,13 +853,10 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list queue after command plus turn")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list queue after command plus turn")
+            .is_empty(),
         "command `{}` and turn input `{}` should both be completed",
         command.batch_id,
         turn.input_id
@@ -990,13 +980,10 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list queue after first turn")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list queue after first turn")
+            .is_empty(),
         "later command `{}` must drain before turn `{}` runs",
         command.batch_id,
         turn.input_id
@@ -1019,13 +1006,10 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
     handler.close().await.expect("close the scope's handler");
     assert!(command_only.is_none());
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list queue after later command")
-        .is_empty()
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list queue after later command")
+            .is_empty()
     );
 }
 
@@ -1160,7 +1144,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     };
     assert_eq!(
         *boundary,
-        lash_core::testing::runtime_internals::QueuedWorkClaimBoundary::Idle
+        lash_core::testing::runtime_internals::AdmissionBoundary::Idle
     );
     assert_eq!(batch_ids.len(), 1);
     assert!(causes.iter().any(|cause| {
@@ -1218,13 +1202,10 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         "empty wake turns must not synthesize blank user history"
     );
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queued work after commit")
-        .is_empty()
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("queued work after commit")
+            .is_empty()
     );
 }
 

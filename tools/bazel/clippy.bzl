@@ -196,6 +196,7 @@ lash_clippy_aspect = aspect(
                 Label("//crates/lash-core-worker:clippy.toml"),
                 Label("//crates/lash-perf:clippy.toml"),
                 Label("//crates/lash-sim:clippy.toml"),
+                Label("//crates/lash-upgrade-harness:clippy.toml"),
                 Label("//examples/agent-service:clippy.toml"),
                 Label("//examples/agent-workbench:clippy.toml"),
                 Label("//examples/slack-clone:clippy.toml"),

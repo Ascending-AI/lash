@@ -3,6 +3,9 @@
 use super::*;
 use lash_sansio::SessionId;
 
+/// The stored SQLite blob envelope's format under the 1.0 freeze.
+pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 1;
+
 /// Read a stored process id: a column this store only ever wrote from a
 /// minted id, so any other spelling is corrupt stored data.
 pub(crate) fn sql_process_id(
@@ -85,7 +88,14 @@ pub(crate) fn encode_artifact_blob(
     descriptor: &BlobArtifactDescriptor,
     profile: BuiltinBlobProfile,
     content: &[u8],
+    version: u32,
 ) -> Result<Vec<u8>, StoreError> {
+    if version != SQLITE_BLOB_ENVELOPE_VERSION {
+        return Err(StoreError::RecordEncodingFailed {
+            record_kind: "SQLite stored blob envelope".to_string(),
+            message: format!("no encoder for fleet-selected version {version}"),
+        });
+    }
     let (compression, stored_content) = if should_compress_blob(profile, descriptor, content.len())
     {
         (BlobCompression::Zlib, compress_blob(content)?)
@@ -94,7 +104,12 @@ pub(crate) fn encode_artifact_blob(
     };
     encode_msgpack(
         &StoredBlobEnvelope {
-            compression,
+            version,
+            compression: match compression {
+                BlobCompression::None => "None",
+                BlobCompression::Zlib => "Zlib",
+            }
+            .to_string(),
             content: stored_content,
         },
         "SQLite stored blob envelope",
@@ -104,9 +119,22 @@ pub(crate) fn encode_artifact_blob(
 pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
     let envelope = rmp_serde::from_slice::<StoredBlobEnvelope>(bytes)
         .map_err(|error| stored_data_corrupt("artifact blob envelope", error))?;
-    match envelope.compression {
-        BlobCompression::None => Ok(envelope.content),
-        BlobCompression::Zlib => decompress_blob(&envelope.content),
+    if envelope.version != SQLITE_BLOB_ENVELOPE_VERSION {
+        return Err(StoreError::UnsupportedRecordSchemaVersion {
+            record_kind: "SQLite stored blob envelope",
+            actual: envelope.version,
+            expected: SQLITE_BLOB_ENVELOPE_VERSION,
+        });
+    }
+    match envelope.compression.as_str() {
+        "None" => Ok(envelope.content),
+        "Zlib" => decompress_blob(&envelope.content),
+        unknown => Err(StoreError::Incompatible {
+            refusal: lash_core_store::compat::CompatRefusal::UnknownVocabulary {
+                surface: "SQLite blob compression".to_string(),
+                label: unknown.to_string(),
+            },
+        }),
     }
 }
 
@@ -215,6 +243,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn blob_envelope_decoder_refuses_an_unknown_version_or_compression() {
+        let content = b"durable attachment".to_vec();
+        for (version, compression) in [
+            (SQLITE_BLOB_ENVELOPE_VERSION + 1, "None"),
+            (SQLITE_BLOB_ENVELOPE_VERSION, "future-codec"),
+        ] {
+            let stored = encode_msgpack(
+                &StoredBlobEnvelope {
+                    version,
+                    compression: compression.to_string(),
+                    content: content.clone(),
+                },
+                "blob fixture",
+            )
+            .expect("encode future envelope");
+            let refusal = decode_artifact_blob(&stored).expect_err("must refuse unknown shape");
+            if version != SQLITE_BLOB_ENVELOPE_VERSION {
+                assert!(matches!(
+                    refusal,
+                    StoreError::UnsupportedRecordSchemaVersion {
+                        record_kind: "SQLite stored blob envelope",
+                        actual,
+                        expected: SQLITE_BLOB_ENVELOPE_VERSION,
+                    } if actual == version
+                ));
+            } else {
+                assert!(matches!(refusal, StoreError::Incompatible { .. }));
+            }
+            let still_stored: StoredBlobEnvelope =
+                rmp_serde::from_slice(&stored).expect("stored bytes remain intact");
+            assert_eq!(still_stored.content, content);
+        }
+    }
+
+    #[test]
     fn blob_envelope_carries_no_descriptor_field() {
         let content = vec![b'x'; 8192];
         for (profile, compression) in [
@@ -229,18 +292,30 @@ mod tests {
                     BlobCompression::None,
                 ),
             ] {
-                let encoded = encode_artifact_blob(&descriptor, profile, &content)
-                    .expect("encode artifact blob");
+                let encoded = encode_artifact_blob(
+                    &descriptor,
+                    profile,
+                    &content,
+                    SQLITE_BLOB_ENVELOPE_VERSION,
+                )
+                .expect("encode artifact blob");
                 let wire: std::collections::BTreeMap<String, serde::de::IgnoredAny> =
                     rmp_serde::from_slice(&encoded).expect("inspect named MessagePack envelope");
                 assert_eq!(
                     wire.keys().collect::<Vec<_>>(),
-                    ["compression", "content"],
+                    ["compression", "content", "version"],
                     "the wire envelope carries no descriptor field"
                 );
                 let envelope: StoredBlobEnvelope =
                     rmp_serde::from_slice(&encoded).expect("decode stored blob envelope");
-                assert_eq!(envelope.compression, expected_compression);
+                assert_eq!(envelope.version, SQLITE_BLOB_ENVELOPE_VERSION);
+                assert_eq!(
+                    envelope.compression,
+                    match expected_compression {
+                        BlobCompression::None => "None",
+                        BlobCompression::Zlib => "Zlib",
+                    }
+                );
                 assert_eq!(decode_artifact_blob(&encoded).unwrap(), content);
             }
         }

@@ -254,7 +254,7 @@ pub enum TurnEvent {
         turn_id: TurnId,
     },
     QueuedWorkStarted {
-        boundary: crate::QueuedWorkClaimBoundary,
+        boundary: crate::AdmissionBoundary,
         batch_ids: Vec<String>,
         causes: Vec<crate::TurnCause>,
     },
@@ -646,6 +646,20 @@ pub trait SessionStoreFactory:
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::StoreError>;
 
+    /// Turn scopes whose inputs the root's admission bound to it. The scope
+    /// owner reads these after terminal evidence to close joined turns with
+    /// their root, even when the session remains open.
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, crate::StoreError> {
+        let Some(store) = self.open_existing_store_by_id(session_id).await? else {
+            return Ok(Vec::new());
+        };
+        store.bound_turn_scopes(session_id, root).await
+    }
+
     /// Read exact cancellation closure pins before session deletion or
     /// process-scope retirement. Implementors that cannot provide this
     /// lifecycle fence fail closed; callers must never infer an empty set from
@@ -674,7 +688,7 @@ pub trait SessionStoreFactory:
     /// before session state, plugins, and a runtime are hydrated.
     ///
     /// First-party factories override this at their database seam. `Some`
-    /// reports a known durable answer; `None` means claimability is unknown and
+    /// reports a known durable answer; `None` means admissibility is unknown and
     /// admits one conservative, successfully completed run. A transiently
     /// failed pass still receives the driver's finite retry ladder before the
     /// demand idles. Unknown must hydrate rather than silently strand durable
@@ -692,7 +706,7 @@ pub trait SessionStoreFactory:
             return Ok(None);
         };
         if !store
-            .list_pending_queued_work(&request.session_id)
+            .list_open_queued_work(&request.session_id)
             .await?
             .is_empty()
         {

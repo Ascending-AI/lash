@@ -225,7 +225,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
             // before its delivery condition, so its emptiness is not evidence
             // that anything ran. The full listing keeps the batch until the
             // drain settles it (SPEC-PRELUDE, FIG-2875).
-            let drained = !lash_core::store::QueuedWorkStore::list_queued_work(
+            let drained = !lash_core::store::IngressStore::list_queued_work(
                 durable_store.as_ref(),
                 &session_id,
             )

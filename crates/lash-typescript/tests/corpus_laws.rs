@@ -86,7 +86,6 @@ fn binders(program: &Program) -> BTreeSet<String> {
                 names.extend(function.params.iter().map(|param| param.name.to_string()));
                 walk(&function.body, &mut names);
             }
-            Declaration::Type(_) => {}
         }
     }
     names

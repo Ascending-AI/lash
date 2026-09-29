@@ -708,78 +708,6 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
     Ok(())
 }
 
-#[tokio::test]
-async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()> {
-    let double = restate_double(SEED).await;
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double.lash_backend(),
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(mock_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session_id = SessionId::from("durable-claim-token");
-    let session = core.session(session_id.clone()).open().await?;
-    let durable = session.durable();
-    // Seeded through the store port: a facade send would ask the engine to
-    // drive, racing the pending reads this law makes. Parked on a turn that
-    // never runs so the engine cannot claim it either.
-    let accepted = core
-        .store_factory
-        .open_existing_store_by_id(&session_id)
-        .await?
-        .expect("the opened session has a store")
-        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft {
-            input_id: Some("claim-token".to_string()),
-            ..lash_core::PendingTurnInputDraft::new(
-                session_id.clone(),
-                lash_core::TurnInputIngress::active_turn(
-                    lash_core::TurnId::from("claim-token-parked-turn"),
-                    lash_core::TurnInputCheckpointBoundary::AfterWork,
-                ),
-                TurnInput::text("claimed input"),
-            )
-        })
-        .await
-        .expect("enqueue the pending input");
-
-    let input = durable
-        .pending_turn_inputs()
-        .await?
-        .into_iter()
-        .find(|read| read.input.input_id == accepted.input_id)
-        .expect("the enqueued input is pending");
-    // Release is token-authorised: the store matches `claim_id` *and*
-    // `lease_token`, so a claim this caller never held moves nothing. (The
-    // backends' matching itself is pinned by the store conformance suite;
-    // what this asserts is that the Durable Session hands the claim through
-    // unchanged rather than releasing by session id.)
-    let forged = lash_core::TurnInputClaim {
-        session_id: session_id.clone(),
-        claim_id: "forged-claim".to_string(),
-        owner: crate::testing::runtime_lease_owner(),
-        lease_token: "forged-token".to_string(),
-        fencing_token: 1,
-        session_lease_generation: 1,
-        data: lash_core::runtime::TurnInputClaimData {
-            mode: lash_core::runtime::TurnInputClaimMode::NextTurn,
-            inputs: vec![input.input.clone()],
-            applications: Vec::new(),
-        },
-    };
-    durable
-        .abandon_turn_input_claim(&forged)
-        .await
-        .expect("a non-holder's release is a no-op, not a queue mutation");
-    let after = durable.pending_turn_inputs().await?;
-    assert_eq!(after.len(), 1, "the queue is untouched by a forged release");
-    assert_eq!(
-        after[0].input.input_id, accepted.input_id,
-        "the pending input is the one that was enqueued"
-    );
-    Ok(())
-}
-
 /// Counters for everything `open()` does that `durable()` must not.
 #[derive(Default)]
 struct RuntimeBuildCounters {
@@ -1359,9 +1287,9 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
                 .await?
                 .first()
                 .map(|read| &read.status),
-            Some(lash_core::runtime::PendingTurnInputReadStatus::Pending)
+            Some(lash_core::runtime::PendingTurnInputReadStatus::Open)
         ),
-        "before the drain claims it, the row reads as pending"
+        "before the drain admits it, the row reads as open"
     );
     drop(hold);
 
@@ -1372,20 +1300,21 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
         .await
-        .expect("the drain reaches the provider with the input claimed");
+        .expect("the drain reaches the provider with the input admitted");
 
     let held = observer.pending_turn_inputs().await?;
     let row = held
         .iter()
         .find(|read| read.input.input_id == accepted.input_id)
-        .expect("a held input is still reported by the Durable Session, not hidden");
-    match row.status {
-        lash_core::runtime::PendingTurnInputReadStatus::Held { drive_epoch } => assert!(
-            drive_epoch > 0,
-            "a held row carries the matching sealed drive epoch"
+        .expect("an admitted input is still reported by the Durable Session, not hidden");
+    assert!(
+        matches!(
+            row.status,
+            lash_core::runtime::PendingTurnInputReadStatus::Admitted { .. }
         ),
-        ref other => panic!("the claimed input must read as held, got {other:?}"),
-    }
+        "the input the drain took must read as admitted to its root, got {:?}",
+        row.status
+    );
 
     release.add_permits(1);
     drain.await.expect("drain task")?;

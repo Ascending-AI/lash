@@ -9,7 +9,6 @@ export type NodeData = {
   availableVars?: TypedVariable[];
   binding?: string | null;
   children?: ChildGroup[];
-  clauses?: EditableComprehensionClause[];
   condition?: string | null;
   diagnostics?: TypeDiagnostic[];
   effect?: string | null;
@@ -34,18 +33,6 @@ export type NodeData = {
   terminalKind?: string | null;
   [k: string]: unknown;
 } & NodeData1;
-export type EditableComprehensionClause =
-  | {
-      binding: string;
-      iterable: string;
-      kind: 'for';
-      [k: string]: unknown;
-    }
-  | {
-      condition: string;
-      kind: 'if';
-      [k: string]: unknown;
-    };
 export type EditableValue = unknown;
 export type NodeData1 =
   | {

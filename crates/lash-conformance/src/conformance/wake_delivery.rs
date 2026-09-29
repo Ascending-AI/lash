@@ -1,7 +1,7 @@
 use super::*;
 use crate::testing::TestClock;
 use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
@@ -527,7 +527,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         "wake-authority-owner:incarnation",
     );
     let authority_lease = authority_target
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &SessionId::from(authority_target_session_id),
             &authority_owner,
             "wake-authority-target-executor",
@@ -537,18 +537,19 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
         .expect("claim authority target execution lease")
         .acquired()
         .expect("authority target lease is free");
-    let authority_claim = authority_target
-        .claim_ready_queued_work(
-            &SessionId::from(authority_target_session_id),
-            &authority_lease.fence(),
-            &authority_owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("claim authority-separated wakes")
-        .claim()
-        .expect("first authority wake is ready");
+    let authority_root = "wake-authority-root";
+    let authority_admission = super::admitted_root_with_policy(
+        &authority_target,
+        &authority_lease,
+        authority_root,
+        crate::store::AdmittedHead::Batch(authority_rows[0].batch_id.clone()),
+        crate::testing::queued_work_admission_policy(10),
+    )
+    .await;
+    let authority_claim = authority_admission
+        .queued
+        .as_ref()
+        .expect("first authority wake is admitted");
     assert_eq!(
         authority_claim.batches.len(),
         1,
@@ -564,10 +565,15 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
             .as_str()
         )
     );
-    authority_target
-        .supersede_claim_epoch_for_test(&authority_lease.completion())
-        .await
-        .expect("release authority target execution lease");
+    super::end_root(
+        &authority_target,
+        &authority_lease,
+        super::releasing(
+            authority_root,
+            authority_claim.batches.iter().map(super::batch_row),
+        ),
+    )
+    .await;
     let after = serde_json::to_vec(
         &registry
             .get_process(&process_id)
@@ -1330,12 +1336,12 @@ async fn settle_queued_batch(
     session_id: &SessionId,
     batch_id: &str,
 ) {
-    // The turn lane is claimed in enqueue order: only the head wake is
-    // settled through a claim. A wake behind it leaves through the other
+    // The turn lane is admitted in enqueue order: only the head wake is
+    // settled through an admission. A wake behind it leaves through the other
     // terminal transition, a host cancel, which raises the same redelivery
     // floor (FIG-3545).
     let head = target
-        .list_pending_queued_work(session_id)
+        .list_open_queued_work(session_id)
         .await
         .expect("list the target lane")
         .into_iter()
@@ -1354,52 +1360,31 @@ async fn settle_queued_batch(
         format!("{batch_id}:incarnation"),
     );
     let lease = target
-        .seal_claim_epoch_for_test(session_id, &owner, "settle-queued-batch-executor", 60_000)
+        .seal_drive_epoch_for_test(session_id, &owner, "settle-queued-batch-executor", 60_000)
         .await
         .expect("claim target session lease")
         .acquired()
         .expect("target session lease available");
-    let claim = target
-        .claim_ready_queued_work(
-            session_id,
-            &lease.fence(),
-            &owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .map(crate::QueuedWorkClaimOutcome::claim)
-        .expect("claim target wake batch")
-        .expect("target wake batch remains live");
-    assert_eq!(
-        claim.batches.len(),
-        1,
-        "the claim takes the head wake alone"
-    );
-    let head_revision = target
-        .load_session()
-        .await
-        .expect("load target session before wake settlement")
-        .map_or(0, |read| read.head_revision);
-    let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
-        &crate::RuntimeSessionState {
-            session_id: SessionId::from(session_id.to_string()),
-            head_revision,
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        },
-        &[],
+    let root = format!("settle-wake:{batch_id}");
+    let admission = super::admitted_root_with_policy(
+        target,
+        &lease,
+        &root,
+        crate::store::AdmittedHead::Batch(head.batch_id.clone()),
+        crate::testing::queued_work_admission_policy(1),
     )
-    .with_operation(crate::OperationId::new(
-        crate::ExecutionScope::runtime_operation(format!("settle-wake:{batch_id}")),
-        "commit",
-    ))
-    .expect("stamp unique wake-settlement operation");
-    target
-        .commit_runtime_state(commit.completing_queue_claim(claim.completion()))
-        .await
-        .expect("settle target wake batch");
+    .await;
+    assert_eq!(
+        admission.queued.as_ref().map(|queued| queued.batches.len()),
+        Some(1),
+        "the admission takes the head wake alone"
+    );
+    super::end_root(
+        target,
+        &lease,
+        super::completing_admission(&root, &admission),
+    )
+    .await;
 }
 
 #[expect(

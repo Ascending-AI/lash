@@ -269,7 +269,7 @@ async fn next_admission_root(
         return Ok(None);
     }
     let open = store.list_pending_turn_inputs(session).await?;
-    let queued = store.list_pending_queued_work(session).await?;
+    let queued = store.list_open_queued_work(session).await?;
     let Some(TurnLaneHead::Input(head)) = turn_lane_head(&open, &queued) else {
         return Ok(None);
     };

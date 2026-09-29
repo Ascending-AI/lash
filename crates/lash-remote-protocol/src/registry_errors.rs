@@ -1,6 +1,7 @@
 //! The protocol error type, plus the remote tool-registry contract and its
 //! reopen-stability assertion.
 
+use crate::VersionRange;
 use crate::tools::RemoteToolGrant;
 
 pub trait RemoteToolRegistry {
@@ -59,8 +60,11 @@ pub(crate) fn require_non_empty(
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum RemoteProtocolError {
-    #[error("unsupported remote protocol version {actual}; expected {expected}")]
-    UnsupportedProtocolVersion { actual: u32, expected: u32 },
+    #[error("unsupported remote protocol range {peer}; local range is {local}")]
+    Unsupported {
+        local: VersionRange,
+        peer: VersionRange,
+    },
     #[error("{type_name}.{field} is required")]
     MissingRequiredField {
         type_name: &'static str,

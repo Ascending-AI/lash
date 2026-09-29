@@ -123,16 +123,6 @@ pub(crate) struct PostgresFenceIntegrityInjector {
 impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
         let result = match target {
-            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => {
-                sqlx::query(
-                    "UPDATE lash_queued_work_batches
-                 SET claim_fencing_token = $1 WHERE batch_id = $2",
-                )
-                .bind(value)
-                .bind(batch_id)
-                .execute(self.storage.pool())
-                .await
-            }
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
                 sqlx::query("UPDATE lash_sessions SET head_revision = $1 WHERE session_id = $2")
                     .bind(value)
@@ -167,26 +157,6 @@ impl FenceIntegrityInjector for PostgresFenceIntegrityInjector {
 
     async fn observe_raw_value(&self, target: &FenceIntegrityTarget) -> FenceIntegrityObservation {
         match target {
-            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => {
-                let (value, claim_id, claim_token, generation): (
-                    i64,
-                    Option<String>,
-                    Option<String>,
-                    i64,
-                ) = sqlx::query_as(
-                    "SELECT claim_fencing_token, claim_id, claim_token,
-                            claim_session_lease_generation
-                     FROM lash_queued_work_batches WHERE batch_id = $1",
-                )
-                .bind(batch_id)
-                .fetch_one(self.storage.pool())
-                .await
-                .expect("observe Postgres queued-work fence");
-                FenceIntegrityObservation {
-                    value,
-                    mutation_fingerprint: format!("{claim_id:?}:{claim_token:?}:{generation}"),
-                }
-            }
             FenceIntegrityTarget::SessionHeadRevision { session_id } => {
                 let (value, head_json, leaf, checkpoint): (
                     i64,

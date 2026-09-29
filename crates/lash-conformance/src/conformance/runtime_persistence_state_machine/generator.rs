@@ -1,6 +1,6 @@
 use super::*;
 
-const GENERATED_PREFIX_OPS: usize = 59;
+const GENERATED_PREFIX_OPS: usize = 63;
 
 pub(super) struct ComponentSelection {
     pub(super) store_tool: bool,
@@ -56,7 +56,7 @@ pub(super) fn generated_case() -> impl Strategy<Value = GeneratedCase> {
 fn generated_prefix() -> Vec<RuntimePersistenceOp> {
     use RuntimePersistenceOp::*;
     let operations = vec![
-        ClaimLease { owner: 0 },
+        SealFence { owner: 0 },
         RecordUsage { slot: 0, value: 0 },
         RecordUsage {
             slot: 1,
@@ -138,7 +138,8 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 3,
             coalesce: true,
         },
-        ClaimWork,
+        // A root takes the exclusive head alone and its commit settles it.
+        AdmitWork,
         Commit {
             component_mode: 0,
             value: 0,
@@ -146,9 +147,10 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ClaimWork,
+        AdmitWork,
+        // The worker dies after its admission committed.
         Crash,
-        ClaimLease { owner: 1 },
+        SealFence { owner: 1 },
         StageUsage {
             replay_last_commit: false,
         },
@@ -160,10 +162,13 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             stale_head: false,
         },
         ConfirmUsage { selection: 0 },
-        ClaimLease { owner: 0 },
-        ClaimWorkWithStaleLease,
-        ClaimWork,
-        SettleStaleWork,
+        // The successor resumes the recorded admission; its rows stay bound.
+        AdmitWork,
+        CancelAdmittedRow,
+        SealFence { owner: 0 },
+        AdmitWorkWithStaleFence,
+        SettleUnderStaleFence,
+        SettleForeignRow,
         Commit {
             component_mode: 0,
             value: 0,
@@ -171,22 +176,32 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             settle_inputs: false,
             stale_head: false,
         },
-        ClaimWork,
-        Commit {
-            component_mode: 0,
-            value: 0,
-            settle_work: true,
-            settle_inputs: false,
-            stale_head: false,
-        },
+        // A joined admission; a second root is refused while it is unfinished.
+        AdmitWork,
         EnqueueTurnInput { slot: 0, value: 0 },
         EnqueueTurnInput { slot: 1, value: 1 },
-        ClaimTurnInputs { max_inputs: 3 },
+        AdmitTurnInputs { max_inputs: 3 },
+        // The root ends settling nothing: its terminal hands its rows back.
+        Commit {
+            component_mode: 0,
+            value: 0,
+            settle_work: false,
+            settle_inputs: true,
+            stale_head: false,
+        },
+        AdmitWork,
+        Commit {
+            component_mode: 0,
+            value: 0,
+            settle_work: true,
+            settle_inputs: false,
+            stale_head: false,
+        },
+        AdmitTurnInputs { max_inputs: 3 },
         Crash,
-        ClaimLease { owner: 2 },
-        ClaimTurnInputsWithStaleLease,
-        ClaimTurnInputs { max_inputs: 3 },
-        SettleStaleTurnInputs,
+        SealFence { owner: 2 },
+        AdmitTurnInputsWithStaleFence,
+        AdmitTurnInputs { max_inputs: 3 },
         Commit {
             component_mode: 1,
             value: 1,
@@ -199,10 +214,10 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
             value: 5,
             coalesce: false,
         },
-        ClaimWork,
+        AdmitWork,
         Crash,
-        ClaimLease { owner: 3 },
-        SettleStaleWork,
+        SealFence { owner: 3 },
+        SettleUnderStaleFence,
         Commit {
             component_mode: 5,
             value: 0,
@@ -240,15 +255,16 @@ fn generated_prefix() -> Vec<RuntimePersistenceOp> {
 fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
     use RuntimePersistenceOp::*;
     prop_oneof![
-        3 => (0_u8..4).prop_map(|owner| ClaimLease { owner }),
+        3 => (0_u8..4).prop_map(|owner| SealFence { owner }),
         1 => Just(Crash),
         5 => (0_u8..8, any::<u8>(), any::<bool>()).prop_map(|(slot, value, coalesce)| EnqueueWork { slot, value, coalesce }),
-        4 => Just(ClaimWork),
-        1 => Just(ClaimWorkWithStaleLease),
+        4 => Just(AdmitWork),
+        1 => Just(AdmitWorkWithStaleFence),
         2 => any::<u8>().prop_map(|selection| CancelWork { selection }),
         4 => (0_u8..8, any::<u8>()).prop_map(|(slot, value)| EnqueueTurnInput { slot, value }),
-        3 => (1_u8..5).prop_map(|max_inputs| ClaimTurnInputs { max_inputs }),
-        1 => Just(ClaimTurnInputsWithStaleLease),
+        3 => (1_u8..5).prop_map(|max_inputs| AdmitTurnInputs { max_inputs }),
+        1 => Just(AdmitTurnInputsWithStaleFence),
+        1 => Just(CancelAdmittedRow),
         2 => any::<u8>().prop_map(|selection| CancelTurnInput { selection }),
         4 => (0_u8..8, any::<u8>()).prop_map(|(slot, value)| RecordUsage { slot, value }),
         2 => any::<bool>().prop_map(|replay_last_commit| StageUsage { replay_last_commit }),
@@ -269,7 +285,7 @@ fn operation() -> impl Strategy<Value = RuntimePersistenceOp> {
             .prop_map(|(component_mode, value, settle_work, settle_inputs, stale_head)| Commit {
                 component_mode, value, settle_work, settle_inputs, stale_head,
             }),
-        2 => Just(SettleStaleWork),
-        2 => Just(SettleStaleTurnInputs),
+        2 => Just(SettleUnderStaleFence),
+        2 => Just(SettleForeignRow),
     ]
 }

@@ -380,6 +380,7 @@ impl Roll {
                     session_driver: crate::RestateSessionDriverSlot::new(),
                     build_generation: generation(build),
                     namespace: crate::RestateNamespace::default(),
+                    fleet: crate::object_state::FleetView::default(),
                 },
             )
             .build()
@@ -465,7 +466,7 @@ impl Roll {
     /// build takes it.
     async fn send_segment_zero(&self, process_id: &ProcessId) {
         self.ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 PROCESS_WORKFLOW,
                 &process_segment_workflow_key(process_id, 0),
                 "run",
@@ -494,7 +495,7 @@ impl Roll {
         let key = process_id.to_string();
         let awaiter = tokio::spawn(async move {
             ingress
-                .call_workflow_json::<_, ProcessAwaitOutput>(
+                .call_lash_workflow::<_, ProcessAwaitOutput>(
                     PROCESS_WORKFLOW,
                     &key,
                     "await_terminal",
@@ -518,7 +519,7 @@ impl Roll {
         .expect("an attach wait key");
         let workflow_key = crate::process_attach::process_attach_workflow_key(&key);
         self.ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 "LashProcessAttach",
                 &workflow_key,
                 "run",
@@ -781,7 +782,7 @@ async fn cancel_reaches_the_live_segments_recorded_route(seed: u64, cut: Cut) {
         let key = process_id.to_string();
         Box::pin(async move {
             ingress
-                .call_workflow_json::<_, ()>(PROCESS_WORKFLOW, &key, "cancel", &request)
+                .call_lash_workflow::<_, ()>(PROCESS_WORKFLOW, &key, "cancel", &request)
                 .await
                 .expect("the cancel is accepted");
         }) as BoxFuture
@@ -937,7 +938,7 @@ async fn a_refused_successor_parks_for_its_sender_and_reroutes(seed: u64) {
     let lane = crate::services::DEFAULT_NAMESPACE
         .generation(crate::LashService::ProcessWorkflow, generation("N"));
     roll.ingress
-        .send_workflow_json(
+        .send_lash_workflow(
             &lane.name(),
             &successor_key,
             "run",
@@ -1062,7 +1063,7 @@ async fn a_redrive_after_the_roll_addresses_the_recorded_route(seed: u64) {
 
     // End the process; a later lost-run pass submits nothing.
     roll.ingress
-        .call_workflow_json::<_, ()>(
+        .call_lash_workflow::<_, ()>(
             PROCESS_WORKFLOW,
             process_id.as_str(),
             "cancel",
@@ -1144,7 +1145,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
         })
     };
     roll.ingress
-        .send_workflow_json(&lane.name(), &successor_key, "run", &input("N"))
+        .send_lash_workflow(&lane.name(), &successor_key, "run", &input("N"))
         .await
         .expect("the drain's re-send");
     let output = tokio::time::timeout(Duration::from_secs(60), awaiter)
@@ -1157,7 +1158,7 @@ async fn a_forced_stable_redrive_after_the_reroute_adds_no_effects(seed: u64) {
     let refused = roll.invocations_of(&stable_successor).remove(0);
     assert_eq!(roll.server.purge(&refused.id), Some(true), "{case}: purge");
     roll.ingress
-        .send_workflow_json(PROCESS_WORKFLOW, &successor_key, "run", &input("N"))
+        .send_lash_workflow(PROCESS_WORKFLOW, &successor_key, "run", &input("N"))
         .await
         .expect("the forced stable redrive");
     roll.wait_for(|roll| {
@@ -1196,7 +1197,7 @@ async fn a_generation_lane_refuses_a_misrouted_input(seed: u64) {
             .generation(crate::LashService::ProcessWorkflow, generation("N"));
         let key = process_segment_workflow_key(&process_id, 1);
         roll.ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 &lane.name(),
                 &key,
                 "run",

@@ -261,7 +261,7 @@ impl World {
     /// promise, which only the `cancel` handler resolves.
     async fn cancel_signal(&self, id: &ProcessId) -> crate::RestateProcessCancelSignal {
         crate::RestateIngressClient::new(self.harness.connection())
-            .call_workflow_json::<_, crate::RestateProcessCancelSignal>(
+            .call_lash_workflow::<_, crate::RestateProcessCancelSignal>(
                 crate::LashService::ProcessWorkflow.base_name(),
                 id.as_str(),
                 "await_cancel",
@@ -527,7 +527,7 @@ async fn a_process_end_cancels_its_cancel_children_on_restate() {
         )
         .await;
     crate::RestateIngressClient::new(world.harness.connection())
-        .call_workflow_json::<_, crate::RestateProcessWorkflowOutput>(
+        .call_lash_workflow::<_, crate::RestateProcessWorkflowOutput>(
             crate::LashService::ProcessWorkflow.base_name(),
             &crate::process::process_segment_workflow_key(&parent_id, 0),
             "run",

@@ -158,7 +158,7 @@ impl SqliteSessionStoreFactory {
     ///
     /// The raw SQLite handle stays private so callers receive only the
     /// canonical [`lash_core_execution::SessionReadView`], which has no mutating store
-    /// operations. This path does not mutate durable session, lease, claim, or
+    /// operations. This path does not mutate durable session, lease, admission, or
     /// graph state. SQLite may materialize its `-wal` and `-shm` wal-index
     /// sidecars while reading a cold WAL catalog. Consequently a catalog on
     /// read-only media is inspectable only when the required sidecars already
@@ -363,7 +363,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.session_store_clock(),
                 None,
                 None,
-                lash_core_execution::FleetFormat::writable_range(),
+                lash_core_execution::FleetFormat::writable(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -970,7 +970,7 @@ impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
             Arc::clone(&self.clock),
             self.process_registry.as_ref(),
             self.turn_cancel_closure_owner_binding(),
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

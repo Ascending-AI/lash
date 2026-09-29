@@ -263,14 +263,14 @@ pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(
 ) {
     let session_id = SessionId::from("root-terminal-queued");
     let batch = store
-        .enqueue_queued_work(checkpoint_claims::queued_draft(
+        .enqueue_queued_work(checkpoint_admissions::queued_draft(
             &session_id,
             "queued head",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue the head batch");
-    let authority = seal_claim_authority_for_test(&store, &session_id, "queued-root").await;
+    let authority = seal_drive_fence_for_test(&store, &session_id, "queued-root").await;
     let admission = root_admissions::admitted_on(
         &store,
         &authority,
@@ -291,18 +291,11 @@ pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(
     );
     assert_eq!(terminal_of(&store, &session_id, "q").await, None);
 
-    let mut commit = turn_commit(
-        &state(&session_id),
-        "q",
-        Some(ends("q", 0, None)),
-        Some(authority.drive_fence()),
+    let commit = settling_commit_for_test(
+        turn_commit(&state(&session_id), "q", Some(ends("q", 0, None)), None),
+        &authority,
+        completing_admission("q", &admission),
     );
-    commit.session_execution_lease_fence = Some(authority.authority());
-    commit.completed_queue_claims = admission
-        .queued
-        .iter()
-        .map(|claim| claim.completion())
-        .collect();
     let receipt = store
         .commit_runtime_state(commit)
         .await
@@ -323,7 +316,7 @@ pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(
     );
     assert!(
         store
-            .list_pending_queued_work(&session_id)
+            .list_open_queued_work(&session_id)
             .await
             .expect("list pending queued work")
             .is_empty(),

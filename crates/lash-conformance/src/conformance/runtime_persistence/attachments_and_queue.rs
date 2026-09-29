@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -378,410 +377,392 @@ pub async fn pending_session_work_ordering_agrees_across_ingress_families(
     assert!(ordering.session_command_precedes_turn_input());
 }
 
+/// Race two admissions of the same rows from separate tasks; returns both
+/// outcomes.
+async fn race<T: Send + 'static>(
+    left: impl std::future::Future<Output = T> + Send + 'static,
+    right: impl std::future::Future<Output = T> + Send + 'static,
+) -> (T, T) {
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let left_barrier = Arc::clone(&barrier);
+    let right_barrier = Arc::clone(&barrier);
+    let left = crate::task::spawn(async move {
+        left_barrier.wait().await;
+        left.await
+    });
+    let right = crate::task::spawn(async move {
+        right_barrier.wait().await;
+        right.await
+    });
+    barrier.wait().await;
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: a racing task that panics fails the law"
+    )]
+    let joined = (
+        left.await.expect("join the left admission"),
+        right.await.expect("join the right admission"),
+    );
+    joined
+}
+
+/// One admission of a contested head: `Some` names the root that took it.
+fn admitted_by(
+    outcome: Result<Option<lash_core::store::RootAdmission>, StoreError>,
+    root: &str,
+) -> Option<String> {
+    match outcome {
+        Ok(Some(_)) => Some(root.to_string()),
+        Ok(None) | Err(StoreError::UnfinishedRootConflict { .. }) => None,
+        Err(error) => panic!("a contested admission resolves cleanly, got {error:?}"),
+    }
+}
+
+/// FIG-3927: concurrent admissions bind every row to at most one root. Two
+/// roots racing for the same batch head, then for the same input head, and
+/// two checkpoint steps racing for the same active-turn input: exactly one
+/// takes each row, and the store reads it back bound to the winner.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn concurrent_queue_and_turn_input_claims_have_one_owner(
+pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let session_id = "concurrent-claim-races";
+    let session_id = SessionId::from("concurrent-queue-input");
     let batch = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from(session_id),
+            &session_id,
             "single-owner queue batch",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
-        .expect("enqueue queue batch for claim race");
+        .expect("enqueue queue batch for the admission race");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "admission-race").await;
+
+    let admit = |root: &'static str, head: lash_core::store::AdmittedHead| {
+        let store = Arc::clone(&store);
+        let fence = fence.clone();
+        async move {
+            admitted_by(
+                admit_root_for_test(&store, &fence, &TurnId::from(root), head).await,
+                root,
+            )
+        }
+    };
+    let batch_head = lash_core::store::AdmittedHead::Batch(batch.batch_id.clone());
+    let (left, right) = race(
+        admit("batch-left", batch_head.clone()),
+        admit("batch-right", batch_head),
+    )
+    .await;
+    let winners = [left, right].into_iter().flatten().collect::<Vec<_>>();
+    assert_eq!(
+        winners.len(),
+        1,
+        "exactly one root may admit the same batch"
+    );
+    assert!(
+        store
+            .list_open_queued_work(&session_id)
+            .await
+            .expect("list queue after the admission race")
+            .is_empty(),
+        "the winning admission binds its batch"
+    );
+    let batch_root = winners[0].clone();
+    let recorded = admit_root_for_test(
+        &store,
+        &fence,
+        &TurnId::from(batch_root.as_str()),
+        lash_core::store::AdmittedHead::Batch(batch.batch_id.clone()),
+    )
+    .await
+    .expect("read the winner's admission back")
+    .expect("the winner holds its admission");
+    end_root(&store, &fence, completing_admission(&batch_root, &recorded)).await;
+
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            &SessionId::from(session_id),
+            &session_id,
             "single-owner turn input",
         ))
         .await
-        .expect("enqueue turn input for claim race");
-    let lease =
-        seal_claim_authority_for_test(&store, &SessionId::from(session_id), "claim-race-lease")
-            .await;
-
-    let queue_barrier = Arc::new(tokio::sync::Barrier::new(3));
-    let left_store = Arc::clone(&store);
-    let right_store = Arc::clone(&store);
-    let left_barrier = Arc::clone(&queue_barrier);
-    let right_barrier = Arc::clone(&queue_barrier);
-    let left_fence = lease.fence();
-    let right_fence = lease.fence();
-    let left_queue = crate::task::spawn(async move {
-        left_barrier.wait().await;
-        left_store
-            .claim_ready_queued_work(
-                &SessionId::from(session_id),
-                &left_fence,
-                &lease_owner("claim-race-owner"),
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(1),
-            )
-            .await
-            .map(crate::QueuedWorkClaimOutcome::claim)
-    });
-    let right_queue = crate::task::spawn(async move {
-        right_barrier.wait().await;
-        right_store
-            .claim_ready_queued_work(
-                &SessionId::from(session_id),
-                &right_fence,
-                &lease_owner("claim-race-owner"),
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(1),
-            )
-            .await
-            .map(crate::QueuedWorkClaimOutcome::claim)
-    });
-    queue_barrier.wait().await;
-    let left_queue = left_queue
-        .await
-        .expect("join left queue claimant")
-        .expect("left queue claim race resolves cleanly");
-    let right_queue = right_queue
-        .await
-        .expect("join right queue claimant")
-        .expect("right queue claim race resolves cleanly");
-    let queue_winners = [left_queue.as_ref(), right_queue.as_ref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        .expect("enqueue turn input for the admission race");
+    let input_head = lash_core::store::AdmittedHead::Input(input.input_id.clone());
+    let (left, right) = race(
+        admit("input-left", input_head.clone()),
+        admit("input-right", input_head),
+    )
+    .await;
+    let winners = [left, right].into_iter().flatten().collect::<Vec<_>>();
     assert_eq!(
-        queue_winners.len(),
+        winners.len(),
         1,
-        "exactly one owner may claim the same queue batch"
+        "exactly one root may admit the same input"
     );
-    assert_eq!(queue_winners[0].batches[0].batch_id, batch.batch_id);
-    assert!(
+    assert_eq!(
         store
-            .list_pending_queued_work(&SessionId::from(session_id))
+            .root_of_input(&session_id, &input.input_id)
             .await
-            .expect("list queue after claim race")
-            .is_empty(),
-        "the winning queue claim must exclusively hide its batch"
+            .expect("read the input's root")
+            .map(|root| root.to_string()),
+        Some(winners[0].clone()),
+        "the input reads back bound to the winning root"
     );
 
-    let input_barrier = Arc::new(tokio::sync::Barrier::new(3));
-    let left_store = Arc::clone(&store);
-    let right_store = Arc::clone(&store);
-    let left_barrier = Arc::clone(&input_barrier);
-    let right_barrier = Arc::clone(&input_barrier);
-    let left_fence = lease.fence();
-    let right_fence = lease.fence();
-    let left_input = crate::task::spawn(async move {
-        left_barrier.wait().await;
-        left_store
-            .claim_next_turn_inputs(
-                &SessionId::from(session_id),
-                &left_fence,
-                &lease_owner("claim-race-owner"),
-                1,
+    let turn = TurnId::from(winners[0].as_str());
+    let active = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "single-owner active input",
+        ))
+        .await
+        .expect("enqueue an active-turn input for the checkpoint race");
+    let checkpoint = |step: &'static str| {
+        let store = Arc::clone(&store);
+        let fence = fence.clone();
+        let turn = turn.clone();
+        async move {
+            admit_at_checkpoint_for_test(
+                &store,
+                &fence,
+                &turn,
+                &turn,
+                crate::CheckpointKind::AfterWork,
+                step,
+                8,
+                crate::testing::queued_work_admission_policy(8),
             )
             .await
-    });
-    let right_input = crate::task::spawn(async move {
-        right_barrier.wait().await;
-        right_store
-            .claim_next_turn_inputs(
-                &SessionId::from(session_id),
-                &right_fence,
-                &lease_owner("claim-race-owner"),
-                1,
-            )
-            .await
-    });
-    input_barrier.wait().await;
-    let left_input = left_input
-        .await
-        .expect("join left turn-input claimant")
-        .expect("left turn-input claim race resolves cleanly");
-    let right_input = right_input
-        .await
-        .expect("join right turn-input claimant")
-        .expect("right turn-input claim race resolves cleanly");
-    let input_winners = [left_input.as_ref(), right_input.as_ref()]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+            .expect("a contested checkpoint admission resolves cleanly")
+            .inputs
+            .map(|inputs| (step, inputs.input_ids()))
+        }
+    };
+    let (left, right) = race(checkpoint("step-left"), checkpoint("step-right")).await;
+    let winners = [left, right].into_iter().flatten().collect::<Vec<_>>();
     assert_eq!(
-        input_winners.len(),
+        winners.len(),
         1,
-        "exactly one owner may claim the same turn input"
+        "exactly one checkpoint step may admit the same active-turn input"
     );
-    assert_eq!(input_winners[0].inputs[0].input_id, input.input_id);
-    assert_eq!(
-        queue_winners[0].owner.owner_id, input_winners[0].owner.owner_id,
-        "the queue and turn-input races use the same logical owner"
-    );
+    assert_eq!(winners[0].1, vec![active.input_id.clone()]);
 }
 
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_cancel_removes_only_unclaimed_batches(store: Arc<dyn RuntimePersistence>) {
+pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn RuntimePersistence>) {
+    let session = SessionId::from("queued-work-cancel");
     let cancellable = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
+            &session,
             "cancel me",
             DeliveryPolicy::AfterCurrentTurnCommit,
         ))
         .await
         .expect("enqueue cancellable batch");
     let cancelled = store
-        .cancel_queued_work_batch(&SessionId::from("root"), &cancellable.batch_id)
+        .cancel_queued_work_batch(&session, &cancellable.batch_id)
         .await
-        .expect("cancel unclaimed batch")
-        .expect("unclaimed batch is returned");
+        .expect("cancel an open batch")
+        .expect("the open batch is returned");
     assert_eq!(cancelled.batch_id, cancellable.batch_id);
     assert_eq!(queued_batch_text(&cancelled), Some("cancel me"));
     assert!(
         store
-            .list_queued_work(&SessionId::from("root"))
+            .list_queued_work(&session)
             .await
             .expect("list after cancellation")
             .is_empty(),
         "cancelled batches must be removed from the durable queue"
     );
 
-    let claimed = store
+    let admitted = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
-            "claimed",
+            &session,
+            "admitted",
             DeliveryPolicy::AfterCurrentTurnCommit,
         ))
         .await
-        .expect("enqueue claimed batch");
-    let session_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "owner").await;
-    let claim = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_lease.fence(),
-            &lease_owner("owner"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("claim batch")
-        .claim()
-        .expect("claim exists");
-    assert_eq!(claim.batches[0].batch_id, claimed.batch_id);
-    // The session lease stays live here: a claim is live for lease-less host
-    // callers exactly while the generation it pins still holds the session lease
-    // (ADR 0029), so the hiding/cancel guards below must observe a live lease.
+        .expect("enqueue the batch a root admits");
+    let fence = seal_drive_fence_for_test(&store, &session, "owner").await;
+    let admission = admitted_root(
+        &store,
+        &fence,
+        "cancel-root",
+        lash_core::store::AdmittedHead::Batch(admitted.batch_id.clone()),
+    )
+    .await;
+    assert_eq!(admission.batch_ids(), vec![admitted.batch_id.clone()]);
     assert!(
         store
-            .list_pending_queued_work(&SessionId::from("root"))
+            .list_open_queued_work(&session)
             .await
-            .expect("list pending during active claim")
+            .expect("list open work while admitted")
             .is_empty(),
-        "active claims must disappear from user-editable queue snapshots"
+        "admitted batches must disappear from user-editable queue snapshots"
     );
     assert_eq!(
         store
-            .list_queued_work(&SessionId::from("root"))
+            .list_queued_work(&session)
             .await
-            .expect("raw durable list during active claim")
+            .expect("raw durable list while admitted")
             .len(),
         1,
-        "claimed batches remain durable until their claim is completed"
+        "admitted batches remain durable until their root settles them"
     );
     assert!(
         store
-            .cancel_queued_work_batch(&SessionId::from("root"), &claimed.batch_id)
+            .cancel_queued_work_batch(&session, &admitted.batch_id)
             .await
-            .expect("cancel active claim")
+            .expect("cancel an admitted batch")
             .is_none(),
-        "actively claimed batches must not be cancelled"
+        "admitted batches must not be cancelled"
     );
-    store
-        .abandon_queued_work_claim(&claim)
-        .await
-        .expect("abandon claim");
+    end_root(
+        &store,
+        &fence,
+        releasing("cancel-root", [batch_row(&admitted)]),
+    )
+    .await;
     assert_eq!(
         store
-            .list_pending_queued_work(&SessionId::from("root"))
+            .list_open_queued_work(&session)
             .await
-            .expect("list pending after abandoned claim")
+            .expect("list open work after release")
             .len(),
         1,
-        "abandoned claims become user-editable queue work again"
+        "a released batch becomes user-editable queue work again"
     );
     assert!(
         store
-            .cancel_queued_work_batch(&SessionId::from("root"), &claimed.batch_id)
+            .cancel_queued_work_batch(&session, &admitted.batch_id)
             .await
-            .expect("cancel abandoned claim")
+            .expect("cancel a released batch")
             .is_some(),
-        "abandoned batches become cancellable again"
+        "a released batch becomes cancellable again"
     );
 }
 
+/// The command lane goes first and binds nothing (design §2.7): a turn head
+/// behind an open command is not admitted until the command applies. A
+/// command enqueued behind the turn head a drive already chose never holds
+/// that root's admission back (ADR 0101 §4); it goes first at the next
+/// boundary. A turn admission takes only turn work.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_classes_gate_command_and_turn_claims(store: Arc<dyn RuntimePersistence>) {
-    let command = store
-        .enqueue_queued_work(queued_session_command_draft(
-            &SessionId::from("root"),
-            "refresh before turn",
-        ))
-        .await
-        .expect("enqueue command");
-    let turn = store
-        .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
-            "user turn",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-        ))
-        .await
-        .expect("enqueue turn");
-
-    let rejected_turn_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "turn-owner").await;
-    assert_eq!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from("root"),
-                &rejected_turn_lease.fence(),
-                &lease_owner("turn-owner"),
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
-            .await
-            .expect("turn claim with leading command")
-            .refusal(),
-        Some(crate::QueuedWorkClaimRefusal::CommandAtHead),
-        "turn claims must not skip a leading session command, and every backend \
-         must name that same reason"
-    );
-
-    let command_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "command-owner").await;
-    let command_claim = store
-        .claim_leading_ready_session_command(
-            &SessionId::from("root"),
-            &command_lease.fence(),
-            &lease_owner("command-owner"),
-        )
-        .await
-        .expect("claim leading command")
-        .expect("leading command claim exists");
-    assert_eq!(
-        command_claim
-            .batches
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![command.batch_id.as_str()]
-    );
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(command_claim.completion()),
-        )
-        .await
-        .expect("complete command claim");
-
-    let selected_turn_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "turn-owner").await;
-    let selected_turn = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &selected_turn_lease.fence(),
-            &lease_owner("turn-owner"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .expect("claim the turn after command completion")
-        .claim()
-        .expect("the turn is at the head once the command completed");
-    assert_eq!(selected_turn.batches[0].batch_id, turn.batch_id);
-
-    let first_turn = store
-        .enqueue_queued_work(queued_draft(
-            &SessionId::from("turn-first"),
-            "first turn",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-        ))
-        .await
-        .expect("enqueue first turn");
-    let second_command = store
-        .enqueue_queued_work(queued_session_command_draft(
-            &SessionId::from("turn-first"),
-            "later refresh",
-        ))
-        .await
-        .expect("enqueue later command");
-    let rejected_command_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("turn-first"), "command-owner")
-            .await;
-    let command_claim = store
-        .claim_leading_ready_session_command(
-            &SessionId::from("turn-first"),
-            &rejected_command_lease.fence(),
-            &lease_owner("command-owner"),
-        )
-        .await
-        .expect("claim command behind turn")
-        .expect("command lane goes first");
-    assert_eq!(command_claim.batches[0].batch_id, second_command.batch_id);
-    assert!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from("turn-first"),
-                &rejected_command_lease.fence(),
-                &lease_owner("command-owner"),
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
-            .await
-            .expect("try turn claim while command is held")
-            .claim()
-            .is_none(),
-        "a held command must settle before turn work is claimed"
-    );
-    store
-        .abandon_queued_work_claim(&command_claim)
-        .await
-        .expect("release command claim");
-    assert_eq!(
-        store
-            .list_queued_work(&SessionId::from("turn-first"))
-            .await
-            .expect("list turn-first queue")
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![
-            first_turn.batch_id.as_str(),
-            second_command.batch_id.as_str()
-        ]
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
+pub async fn queued_work_classes_gate_command_and_turn_admissions(
     store: Arc<dyn RuntimePersistence>,
 ) {
+    let session = SessionId::from("queued-work-classes");
+    let fence = seal_drive_fence_for_test(&store, &session, "turn-owner").await;
+    for (case, command_first) in [("command-first", true), ("turn-first", false)] {
+        let command_draft = queued_session_command_draft(&session, &format!("{case} refresh"));
+        let turn_draft = queued_draft(
+            &session,
+            &format!("{case} turn"),
+            DeliveryPolicy::AfterCurrentTurnCommit,
+        );
+        let (command, turn) = if command_first {
+            let command = store
+                .enqueue_queued_work(command_draft)
+                .await
+                .expect("enqueue command");
+            let turn = store
+                .enqueue_queued_work(turn_draft)
+                .await
+                .expect("enqueue turn");
+            (command, turn)
+        } else {
+            let turn = store
+                .enqueue_queued_work(turn_draft)
+                .await
+                .expect("enqueue turn");
+            let command = store
+                .enqueue_queued_work(command_draft)
+                .await
+                .expect("enqueue command");
+            (command, turn)
+        };
+        let root = format!("{case}-turn-root");
+        let early = admit_root_for_test(
+            &store,
+            &fence,
+            &TurnId::from(root.as_str()),
+            lash_core::store::AdmittedHead::Batch(turn.batch_id.clone()),
+        )
+        .await
+        .expect("admission while a command is open");
+        if command_first {
+            assert!(
+                early.is_none(),
+                "{case}: a turn head behind an open command waits for it"
+            );
+        } else {
+            assert_eq!(
+                early.map(|admission| admission.batch_ids()),
+                Some(vec![turn.batch_id.clone()]),
+                "{case}: a command enqueued behind the turn head never holds it back"
+            );
+        }
+        let run = store
+            .open_session_command_run(&fence)
+            .await
+            .expect("open the command run");
+        assert_eq!(
+            run.iter()
+                .map(|batch| batch.batch_id.clone())
+                .collect::<Vec<_>>(),
+            vec![command.batch_id.clone()],
+            "{case}: the command lane goes first"
+        );
+        store
+            .commit_runtime_state(applying_commands(
+                head_commit(&store, &session).await,
+                &fence,
+                crate::QueuedWorkCompletion {
+                    session_id: session.clone(),
+                    batch_ids: run.iter().map(|batch| batch.batch_id.clone()).collect(),
+                },
+            ))
+            .await
+            .expect("the command's applying commit settles it");
+        let admitted = admitted_root(
+            &store,
+            &fence,
+            &root,
+            lash_core::store::AdmittedHead::Batch(turn.batch_id.clone()),
+        )
+        .await;
+        assert_eq!(
+            admitted.batch_ids(),
+            vec![turn.batch_id.clone()],
+            "{case}: a turn admission takes only turn work"
+        );
+        end_root(&store, &fence, completing_admission(&root, &admitted)).await;
+    }
+}
+
+/// Queued work waits for the boundary its delivery policy names, and a
+/// completion settles only under the live fence of the root holding the rows.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session = SessionId::from("queued-work-boundaries");
     let after_commit = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
+            &session,
             "after current commit",
             DeliveryPolicy::AfterCurrentTurnCommit,
         ))
@@ -789,444 +770,94 @@ pub async fn queued_work_claims_respect_boundaries_abandon_and_stale_completion(
         .expect("enqueue after-commit work");
     let earliest = store
         .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
+            &session,
             "earliest",
             DeliveryPolicy::EarliestSafeBoundary,
         ))
         .await
         .expect("enqueue earliest work");
 
-    // A single live session lease governs the whole flow: a queued-work claim
-    // blocks the checkpoint boundary only while its own generation still holds
-    // the session lease (ADR 0029).
-    let session_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "owner-a").await;
-    assert_eq!(
-        store
-            .claim_ready_queued_work(
-                &SessionId::from("root"),
-                &session_lease.fence(),
-                &lease_owner("owner-a"),
-                QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-                crate::testing::queued_work_claim_policy(10),
+    let fence = seal_drive_fence_for_test(&store, &session, "owner-a").await;
+    let root = TurnId::from("boundary-root");
+    let checkpoint = |step: &'static str| {
+        let store = Arc::clone(&store);
+        let fence = fence.clone();
+        let root = root.clone();
+        async move {
+            admit_at_checkpoint_for_test(
+                &store,
+                &fence,
+                &root,
+                &root,
+                crate::CheckpointKind::AfterWork,
+                step,
+                10,
+                crate::testing::queued_work_admission_policy(10),
             )
             .await
-            .expect("checkpoint claim")
-            .refusal(),
-        Some(crate::QueuedWorkClaimRefusal::DeliveryBoundaryBlocked),
-        "after-current-commit work at the queue head must wait for the idle \
-         boundary, and every backend must name that same reason"
-    );
-
-    let idle_claim = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_lease.fence(),
-            &lease_owner("owner-a"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("idle claim")
-        .claim()
-        .expect("idle claim exists");
-    assert_eq!(idle_claim.batches.len(), 1);
-    assert_eq!(idle_claim.batches[0].batch_id, after_commit.batch_id);
-
-    // With the after-commit head held by this generation's own live claim, the
-    // checkpoint boundary skips past it to the earliest-safe-boundary batch.
-    let checkpoint_claim = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_lease.fence(),
-            &lease_owner("owner-a"),
-            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("checkpoint claim after head is leased")
-        .claim()
-        .expect("checkpoint claim exists");
-    assert_eq!(checkpoint_claim.batches[0].batch_id, earliest.batch_id);
-
-    // Abandoning the idle claim frees the after-commit batch; reclaiming it under
-    // the same live lease advances the fencing token.
-    store
-        .abandon_queued_work_claim(&idle_claim)
-        .await
-        .expect("abandon idle claim");
-    let reclaimed = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_lease.fence(),
-            &lease_owner("owner-a"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("reclaim abandoned work")
-        .claim()
-        .expect("reclaimed work exists");
-    assert_eq!(reclaimed.batches[0].batch_id, after_commit.batch_id);
-    assert!(
-        reclaimed.fencing_token > idle_claim.fencing_token,
-        "reclaiming abandoned work must advance the fencing token"
-    );
-
-    // The pre-abandon claim's completion no longer owns any row: the reclaim
-    // rewrote the batch's claim id + lease token, so committing the stale
-    // completion is rejected as superseded (ADR 0029 keeps completion validation
-    // by claim id + lease token; the abandon+reclaim is what supersedes it).
-    let stale_state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+            .expect("checkpoint admission")
+        }
     };
-    let stale_err = commit_runtime_state_for_test(
-        &store,
-        RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-            .completing_queue_claim(idle_claim.completion()),
-        "owner-d",
-    )
-    .await
-    .expect_err("stale pre-abandon completion must be rejected");
     assert!(
-        matches!(stale_err, StoreError::QueuedWorkClaimSuperseded { .. }),
-        "stale completion produced the wrong error: {stale_err:?}"
+        checkpoint("boundary:step:1").await.is_empty(),
+        "after-current-commit work at the queue head must wait for the idle boundary"
+    );
+
+    let idle = admitted_root(
+        &store,
+        &fence,
+        "boundary-root",
+        lash_core::store::AdmittedHead::Batch(after_commit.batch_id.clone()),
+    )
+    .await;
+    assert_eq!(idle.batch_ids(), vec![after_commit.batch_id.clone()]);
+
+    // With the after-commit head bound to the root, the checkpoint boundary
+    // reaches the earliest-safe-boundary batch behind it.
+    let at_checkpoint = checkpoint("boundary:step:2").await;
+    assert_eq!(
+        at_checkpoint
+            .queued
+            .as_ref()
+            .map(|queued| queued.batch_ids())
+            .unwrap_or_default(),
+        vec![earliest.batch_id.clone()]
+    );
+
+    let settlement =
+        completing_checkpoint(completing_admission("boundary-root", &idle), &at_checkpoint);
+    let mut foreign = settlement.clone();
+    foreign.root = TurnId::from("another-root");
+    let err = try_end_root(&store, &fence, foreign)
+        .await
+        .expect_err("a completion keyed by another root must be rejected");
+    assert!(
+        matches!(err, StoreError::IngressRowNotAdmitted { .. }),
+        "a foreign-root completion produced the wrong error: {err:?}"
+    );
+    let successor = seal_drive_fence_for_test(&store, &session, "owner-b").await;
+    let err = try_end_root(&store, &fence, settlement.clone())
+        .await
+        .expect_err("a completion under a superseded fence must be rejected");
+    assert!(
+        matches!(err, StoreError::StaleDriveFence { .. }),
+        "a stale completion produced the wrong error: {err:?}"
     );
     assert_eq!(
         store
-            .list_queued_work(&SessionId::from("root"))
+            .list_queued_work(&session)
             .await
-            .expect("rejected stale completion preserves queued work")
+            .expect("refused completions preserve queued work")
             .len(),
         2,
-        "rejected stale completion must not delete the reclaimed batch"
+        "a refused completion must not delete an admitted batch"
     );
-}
-
-pub async fn queued_work_claims_supersede_across_session_lease_generations(
-    store: Arc<dyn RuntimePersistence>,
-    lease_timing: RuntimePersistenceLeaseTiming,
-) {
-    queued_work_claims_supersede_across_session_lease_generations_with_timing(store, &lease_timing)
-        .await;
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn queued_work_claims_supersede_across_session_lease_generations_with_timing(
-    store: Arc<dyn RuntimePersistence>,
-    _lease_timing: &RuntimePersistenceLeaseTiming,
-) {
-    let batch = store
-        .enqueue_queued_work(queued_draft(
-            &SessionId::from("root"),
-            "generation work",
-            DeliveryPolicy::EarliestSafeBoundary,
-        ))
-        .await
-        .expect("enqueue generation work");
-
-    // (a) Same generation: a live claim cannot re-claim its own row. The
-    // caller's validated-live fence generation matches the row's pinned
-    // generation, so self-steal is unrepresentable (ADR 0029).
-    let lease_a =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "gen-owner-a").await;
-    let claim_a = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &lease_a.fence(),
-            &lease_owner("gen-owner-a"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("first-generation claim")
-        .claim()
-        .expect("first-generation claim exists");
-    assert_eq!(claim_a.batches[0].batch_id, batch.batch_id);
-    assert_eq!(claim_a.session_lease_generation, lease_a.fencing_token);
+    end_root(&store, &successor, settlement).await;
     assert!(
         store
-            .claim_ready_queued_work(
-                &SessionId::from("root"),
-                &lease_a.fence(),
-                &lease_owner("gen-owner-a"),
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(10),
-            )
+            .list_queued_work(&session)
             .await
-            .expect("same-generation re-claim")
-            .claim()
-            .is_none(),
-        "a live claim must not be re-claimable under its own session-lease generation"
+            .expect("the live completion settles both")
+            .is_empty()
     );
-
-    // (b) Release + re-acquire mints a new generation. Re-claiming the batch
-    // replaces its ownership and supersedes the old generation's completion.
-    let lease_b =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "gen-owner-b").await;
-    assert!(
-        lease_b.fencing_token > lease_a.fencing_token,
-        "re-acquisition must mint a fresh generation"
-    );
-    let claim_b = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &lease_b.fence(),
-            &lease_owner("gen-owner-b"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("next-generation reclaim")
-        .claim()
-        .expect("next-generation reclaim exists");
-    assert_eq!(claim_b.batches[0].batch_id, batch.batch_id);
-    assert!(claim_b.fencing_token > claim_a.fencing_token);
-
-    let stale_state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    let head_before_stale = store
-        .load_session()
-        .await
-        .expect("load head before stale completion");
-    let queue_before_stale = store
-        .list_queued_work(&SessionId::from("root"))
-        .await
-        .expect("load queue before stale completion");
-    let stale_err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_queue_claim(claim_a.completion()),
-        )
-        .await
-        .expect_err("superseded-generation completion must fail");
-    assert!(
-        matches!(
-            stale_err,
-            StoreError::QueuedWorkClaimSuperseded {
-                ref row_id,
-                ref superseding_claim_id,
-                ref superseding_session_lease_generation,
-                ..
-            } if row_id.as_deref() == Some(batch.batch_id.as_str())
-                && superseding_claim_id.as_deref() == Some(claim_b.claim_id.as_str())
-                && superseding_session_lease_generation.as_deref()
-                    == Some(&claim_b.session_lease_generation)
-        ),
-        "a superseded queued-work completion must report the row and current authority: {stale_err:?}"
-    );
-    assert_eq!(
-        persisted_session_read_snapshot(
-            store
-                .load_session()
-                .await
-                .expect("load head after stale completion")
-        ),
-        persisted_session_read_snapshot(head_before_stale),
-        "superseded completion must not mutate the durable head"
-    );
-    assert_eq!(
-        serde_json::to_value(
-            store
-                .list_queued_work(&SessionId::from("root"))
-                .await
-                .expect("load queue after stale completion")
-        )
-        .expect("serialize queue after stale completion"),
-        serde_json::to_value(queue_before_stale).expect("serialize queue before stale completion"),
-        "superseded completion must not mutate queued work"
-    );
-
-    // (c) A TTL takeover mints a new generation without any release. The
-    // successor's re-claim below is what supersedes the pre-takeover claim.
-    let dead_owner = lease_owner("gen-stale");
-    let dead_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "gen-stale").await;
-    let claim_dead = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &dead_lease,
-            &dead_owner,
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("pre-supersession claim")
-        .claim()
-        .expect("claim exists");
-    let taker = lease_owner("gen-taker");
-    let taker_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "gen-taker").await;
-    assert!(taker_lease.fencing_token > dead_lease.fencing_token);
-    let claim_taker = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &taker_lease.fence(),
-            &taker,
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("post-takeover claim")
-        .claim()
-        .expect("post-takeover claim exists");
-    assert_eq!(claim_taker.batches[0].batch_id, batch.batch_id);
-    let takeover_err = store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&stale_state, &[])
-                .completing_queue_claim(claim_dead.completion()),
-        )
-        .await
-        .expect_err("pre-takeover completion must fail");
-    assert!(matches!(
-        takeover_err,
-        StoreError::QueuedWorkClaimSuperseded { .. }
-    ));
-}
-
-pub(super) fn persisted_session_read_snapshot(
-    loaded: Option<crate::store::PersistedSessionRead>,
-) -> serde_json::Value {
-    loaded.map_or(serde_json::Value::Null, |loaded| {
-        let checkpoint = loaded.checkpoint.map(|checkpoint| {
-            serde_json::json!({
-                "components": checkpoint.components,
-            })
-        });
-        serde_json::json!({
-            "head_revision": loaded.head_revision,
-            "current_frame_node_id": loaded.current_frame_node_id,
-            "graph": loaded.graph,
-            "checkpoint_ref": loaded.checkpoint_ref,
-            "checkpoint": checkpoint,
-            "token_ledger": loaded.token_ledger,
-        })
-    })
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn claim_both_generation_fenced_lanes(
-    store: &Arc<dyn RuntimePersistence>,
-    session_id: &SessionId,
-    owner: &crate::LeaseOwnerIdentity,
-    lease_ttl_ms: u64,
-) -> (
-    QueuedWorkBatch,
-    crate::PendingTurnInput,
-    crate::ClaimAuthority,
-    crate::QueuedWorkClaim,
-    crate::TurnInputClaim,
-) {
-    let batch = store
-        .enqueue_queued_work(queued_draft(
-            session_id,
-            "lease-less liveness work",
-            DeliveryPolicy::EarliestSafeBoundary,
-        ))
-        .await
-        .expect("enqueue generation-fenced queued work");
-    let input = store
-        .enqueue_pending_turn_input(pending_next_turn_input_draft(
-            session_id,
-            "lease-less liveness input",
-        ))
-        .await
-        .expect("enqueue generation-fenced turn input");
-    let lease = store
-        .seal_claim_epoch_for_test(
-            session_id,
-            owner,
-            "claim-both-generation-fenced-lanes-executor",
-            lease_ttl_ms,
-        )
-        .await
-        .expect("claim session lease for both claim lanes")
-        .acquired()
-        .expect("session lease for both claim lanes is free");
-    let queue_claim = store
-        .claim_ready_queued_work(
-            session_id,
-            &lease.fence(),
-            owner,
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("claim generation-fenced queued work")
-        .claim()
-        .expect("generation-fenced queued work claim exists");
-    let input_claim = store
-        .claim_next_turn_inputs(session_id, &lease.fence(), owner, 1)
-        .await
-        .expect("claim generation-fenced turn input")
-        .expect("generation-fenced turn input claim exists");
-    (batch, input, lease, queue_claim, input_claim)
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn assert_both_retained_claims_are_visible_and_cancellable(
-    store: &Arc<dyn RuntimePersistence>,
-    session_id: &SessionId,
-    batch: &QueuedWorkBatch,
-    input: &crate::PendingTurnInput,
-) {
-    assert_eq!(
-        store
-            .list_pending_queued_work(session_id)
-            .await
-            .expect("list queued work after claim generation stopped being live")
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![batch.batch_id.as_str()],
-        "a queued-work claim whose generation is no longer live must be visible"
-    );
-    assert_eq!(
-        store
-            .list_pending_turn_inputs(session_id)
-            .await
-            .expect("list turn inputs after claim generation stopped being live")
-            .iter()
-            .map(|read| read.input.input_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![input.input_id.as_str()],
-        "a turn-input claim whose generation is no longer live must be visible"
-    );
-    let cancelled_batch = store
-        .cancel_queued_work_batch(session_id, &batch.batch_id)
-        .await
-        .expect("cancel queued work after claim generation stopped being live")
-        .expect("queued work with a non-live claim generation is cancellable");
-    assert_eq!(cancelled_batch.batch_id, batch.batch_id);
-    let cancelled_input = store
-        .cancel_pending_turn_input(session_id, &input.input_id)
-        .await
-        .expect("cancel turn input after claim generation stopped being live");
-    expect_cancelled_pending_input(cancelled_input, &input.input_id);
-}
-
-#[expect(clippy::expect_used, reason = "conformance law assertions")]
-pub async fn claim_liveness_tracks_superseded_drive_epoch(store: Arc<dyn RuntimePersistence>) {
-    let session_id = SessionId::from("claim-liveness");
-    let owner = lease_owner("claim-liveness-owner");
-    let (batch, input, authority, _queue_claim, _input_claim) =
-        claim_both_generation_fenced_lanes(&store, &session_id, &owner, 0).await;
-    store
-        .supersede_claim_epoch_for_test(&authority)
-        .await
-        .expect("seal the successor drive");
-    assert_both_retained_claims_are_visible_and_cancellable(&store, &session_id, &batch, &input)
-        .await;
 }

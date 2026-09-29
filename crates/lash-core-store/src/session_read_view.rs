@@ -28,6 +28,7 @@ impl SessionReadView {
             },
             chronological_projection: OnceLock::new(),
             turn_failure_settlements: Arc::new(Vec::new()),
+            turn_commits: Arc::new(Vec::new()),
         }))
     }
 
@@ -43,6 +44,7 @@ impl SessionReadView {
             read_model,
             chronological_projection: OnceLock::new(),
             turn_failure_settlements: Arc::new(Vec::new()),
+            turn_commits: Arc::new(Vec::new()),
         })))
     }
 
@@ -59,6 +61,7 @@ impl SessionReadView {
             read_model,
             chronological_projection: OnceLock::new(),
             turn_failure_settlements: Arc::new(Vec::new()),
+            turn_commits: Arc::new(Vec::new()),
         })))
     }
 
@@ -66,6 +69,7 @@ impl SessionReadView {
         state: &RuntimeSessionState,
         relation: crate::SessionRelation,
         turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
+        turn_commits: Vec<crate::store::TurnCommitRecord>,
     ) -> Result<Self, crate::SessionGraphScopeError> {
         let graph = state.session_graph.clone();
         let read_model = state.read_model()?;
@@ -75,6 +79,7 @@ impl SessionReadView {
             read_model,
             chronological_projection: OnceLock::new(),
             turn_failure_settlements: Arc::new(turn_failure_settlements),
+            turn_commits: Arc::new(turn_commits),
         })))
     }
 
@@ -93,6 +98,7 @@ impl SessionReadView {
             read_model,
             chronological_projection: OnceLock::new(),
             turn_failure_settlements: Arc::new(Vec::new()),
+            turn_commits: Arc::new(Vec::new()),
         })))
     }
 
@@ -164,6 +170,11 @@ impl SessionReadView {
         self.0.turn_failure_settlements.as_slice()
     }
 
+    /// Physical turns with durable terminal outcomes, including failures missed live.
+    pub fn turn_commits(&self) -> &[crate::store::TurnCommitRecord] {
+        self.0.turn_commits.as_slice()
+    }
+
     pub fn policy(&self) -> &SessionPolicy {
         &self.0.meta.policy
     }
@@ -233,6 +244,7 @@ pub struct SessionReadState {
     read_model: crate::session_graph::SessionReadModel,
     chronological_projection: OnceLock<Arc<crate::ChronologicalProjection>>,
     turn_failure_settlements: Arc<Vec<crate::TurnFailureSettlement>>,
+    turn_commits: Arc<Vec<crate::store::TurnCommitRecord>>,
 }
 #[derive(Clone, Debug)]
 pub struct SessionReadMeta {

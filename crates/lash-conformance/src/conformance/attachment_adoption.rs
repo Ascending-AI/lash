@@ -2,7 +2,7 @@
 //! Root reconciliation is the layer-1 operation also used by terminal evidence
 //! reclamation, so this witness can run at every head in the stack.
 use lash_core::facade_support::{SessionAttachmentStore, reclaim_unreferenced_attachments};
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
 use pretty_assertions::assert_eq;
@@ -1411,7 +1411,7 @@ async fn commit_turn_owned_intent(
         "final",
     ));
     let _lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &request.session_id,
             &LeaseOwnerIdentity::opaque(
                 "attachment-conformance",

@@ -80,6 +80,7 @@
 //! invocation suspended on a v2 workflow address is unreachable from v4
 //! resolutions, so it never self-terminates; an operator cancels it.
 
+mod compat;
 mod controller;
 mod durable_wait;
 mod effect_group;
@@ -100,8 +101,13 @@ mod session_driver;
 mod session_reconcile;
 mod turn;
 mod turn_handler;
+mod wire;
 
 pub use restate_sdk;
+
+pub use compat::{
+    COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, RESTATE_WIRE_VERSION, Reply, VersionRange,
+};
 
 pub use controller::{
     EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION,
@@ -118,14 +124,14 @@ pub use durable_wait::{
 };
 pub use effect_group::{
     EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
-    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_WIRE_VERSION, EffectGroupAdmissionRequest,
-    EffectGroupAdmissionResponse, EffectGroupAdoptRequest, EffectGroupCleanup,
-    EffectGroupCleanupFacts, EffectGroupCloseDisposition, EffectGroupCloseRequest,
-    EffectGroupCloseResponse, EffectGroupDispatchRequest, EffectGroupDispatchState,
-    EffectGroupFinishRetirementResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupPayloadGetResponse, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
-    EffectGroupPhase, EffectGroupProbeAdoptResponse, EffectGroupProbeResponse,
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
+    EffectGroupAdoptRequest, EffectGroupCleanup, EffectGroupCleanupFacts,
+    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
+    EffectGroupDispatchRequest, EffectGroupDispatchState, EffectGroupFinishRetirementResponse,
+    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
+    EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupPhase,
+    EffectGroupProbeAdoptResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
     EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRefusal, EffectGroupRefusalRequest,
     EffectGroupRegisterRefusalResponse, EffectGroupRegisterRequest, EffectGroupRegisterResponse,
@@ -152,8 +158,9 @@ pub use process_attach::RestateProcessAttachRequest;
 pub use serve::serve_endpoint;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};
 pub use session_driver::{
-    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateSessionDriverSlot,
-    RestateSessionWork, RestateTurnDriveRequest, turn_workflow_key,
+    LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION, RestateRootCloseRequest,
+    RestateSessionDriveRequest, RestateSessionDriverSlot, RestateSessionWork,
+    RestateTurnDriveRequest, turn_workflow_key,
 };
 pub use turn::RestateTurnAttach;
 pub use turn_handler::{

@@ -1,6 +1,6 @@
 //! Durable turn-input vocabulary.
 //!
-//! The pending-input rows a store persists, their claim and completion
+//! The pending-input rows a store persists, their admission and completion
 //! payloads, and the checkpoint boundary rule stores filter on. The ingress
 //! driver that normalizes and applies them stays in `lash-core`.
 
@@ -312,7 +312,7 @@ pub struct PendingTurnInputDraft {
 }
 impl PendingTurnInputDraft {
     /// Constructs a `PendingTurnInputDraft` for store and durable-substrate implementors while
-    /// claiming and settling durable turn inputs.
+    /// admitting and settling durable turn inputs.
     pub fn new(
         session_id: impl Into<SessionId>,
         ingress: TurnInputIngress,
@@ -357,14 +357,14 @@ impl PendingTurnInputDraft {
     }
 
     /// Sets the input id carried by a `PendingTurnInputDraft` for store and durable-substrate
-    /// implementors while claiming and settling durable turn inputs.
+    /// implementors while admitting and settling durable turn inputs.
     pub fn with_input_id(mut self, input_id: impl Into<String>) -> Self {
         self.input_id = Some(input_id.into());
         self
     }
 
     /// Sets the source key carried by a `PendingTurnInputDraft` for store and durable-substrate
-    /// implementors while claiming and settling durable turn inputs.
+    /// implementors while admitting and settling durable turn inputs.
     pub fn with_source_key(mut self, source_key: impl Into<String>) -> Self {
         self.source_key = Some(source_key.into());
         self
@@ -391,7 +391,7 @@ impl PendingTurnInputDraft {
     ///   omitted spec and an explicit default are the same submission.
     ///
     /// Excluded: the session id and source key (the row is found by them), the
-    /// generated input id, the enqueue time, and every lifecycle and claim
+    /// generated input id, the enqueue time, and every lifecycle and admission
     /// field. The preimage is the `lash.turn-input-submission` identity family
     /// at [`TURN_INPUT_SUBMISSION_FAMILY_VERSION`]; the rendered form is
     /// `turn-input-submission:v<family>:blake3:<hex>`.
@@ -558,17 +558,17 @@ pub struct PendingTurnInput {
     pub enqueued_at_ms: u64,
     pub input: TurnInput,
     /// The interned spec the input runs under; `None` for the default spec
-    /// (FIG-3838). A claim never mixes inputs whose specs differ.
+    /// (FIG-3838). An admission never mixes inputs whose specs differ.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_spec: Option<crate::run_spec::RunSpecHash>,
 }
 
-/// Host-facing projection of one open pending turn-input record.
+/// Host-facing projection of one undelivered pending turn-input record.
 ///
 /// This projection is separate from [`PendingTurnInput`] because a row's
-/// durable lifecycle state and its read-time claim status answer different
-/// questions. A claim in the current sealed drive epoch holds the row; a
-/// superseded epoch leaves it pending for successor repair.
+/// durable lifecycle state and its admission answer different questions: an
+/// open row waits for a root to admit it, an admitted one is bound to the
+/// root that will settle or release it (FIG-3927).
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub struct PendingTurnInputRead {
@@ -579,32 +579,34 @@ pub struct PendingTurnInputRead {
 }
 
 impl PendingTurnInputRead {
-    /// Project an open row that no live matching claim currently holds.
-    pub fn pending(input: PendingTurnInput) -> Self {
+    /// Project a row no root has admitted.
+    pub fn open(input: PendingTurnInput) -> Self {
         Self {
             input,
-            status: PendingTurnInputReadStatus::Pending,
+            status: PendingTurnInputReadStatus::Open,
         }
     }
 
-    /// Project an open row held by a claim in the current drive epoch.
-    pub fn held(input: PendingTurnInput, drive_epoch: u64) -> Self {
+    /// Project a row bound to the root that admitted it.
+    pub fn admitted(input: PendingTurnInput, root: crate::TurnId) -> Self {
         Self {
             input,
-            status: PendingTurnInputReadStatus::Held { drive_epoch },
+            status: PendingTurnInputReadStatus::Admitted { root },
         }
     }
 }
 
-/// Status of an undelivered input in the current drive epoch.
+/// Whether an undelivered input waits for admission or is bound to a root
+/// (FIG-3927).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PendingTurnInputReadStatus {
-    /// No claim in the current drive epoch holds the row.
-    Pending,
-    /// The row's claim matches the current sealed drive epoch.
-    Held { drive_epoch: u64 },
+    /// No root has admitted the row.
+    Open,
+    /// Root `root` admitted the row; only that root's commit or terminal
+    /// settles or releases it.
+    Admitted { root: crate::TurnId },
 }
 
 /// Durable acceptance evidence returned to an ingress caller.
@@ -657,7 +659,7 @@ impl PendingTurnInput {
         self.state.ingress()
     }
 
-    /// Exposes accepted input to store and durable-substrate implementors while claiming and
+    /// Exposes accepted input to store and durable-substrate implementors while admitting and
     /// settling durable turn inputs.
     pub fn accepted_input(&self) -> Option<crate::AcceptedInjectedTurnInput> {
         plugin_message_from_turn_input(&self.input).map(|message| {
@@ -690,27 +692,15 @@ impl PendingTurnInputCancelTarget {
         Self::SourceKey(source_key.into())
     }
 }
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct PendingTurnInputClaimDiagnostics {
-    pub state: TurnInputState,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_owner: Option<crate::LeaseOwnerIdentity>,
-    /// The session-execution-lease generation the live claim pins, when a claim
-    /// holds the row. `None` when the row carries no claim (ADR 0029).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub claim_session_lease_generation: Option<u64>,
-    pub claim_fencing_token: u64,
-}
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "outcome", content = "data", rename_all = "snake_case")]
 pub enum PendingTurnInputCancelOutcome {
     Cancelled(PendingTurnInput),
-    AlreadyClaimed {
+    /// A root admitted the row: only that root settles or releases it, so
+    /// the host cancels the root instead (FIG-3927).
+    AlreadyAdmitted {
         input: PendingTurnInput,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        claim: Option<PendingTurnInputClaimDiagnostics>,
+        root: crate::TurnId,
     },
     AlreadyCompleted(PendingTurnInput),
     AlreadyCancelled(PendingTurnInput),
@@ -728,7 +718,7 @@ impl PendingTurnInputCancelOutcome {
     pub fn input(&self) -> Option<&PendingTurnInput> {
         match self {
             Self::Cancelled(input)
-            | Self::AlreadyClaimed { input, .. }
+            | Self::AlreadyAdmitted { input, .. }
             | Self::AlreadyCompleted(input)
             | Self::AlreadyCancelled(input) => Some(input),
             Self::NotFound => None,
@@ -753,7 +743,7 @@ pub enum PendingTurnInputSuffixCancelOutcome {
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum TurnInputClaimMode {
+pub enum TurnInputAdmissionMode {
     ActiveTurn {
         turn_id: crate::TurnId,
         checkpoint: CheckpointKind,
@@ -766,59 +756,14 @@ pub struct TurnInputCompletionData {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }
-/// The claim a settling driver held over the rows it is settling.
-///
-/// Present only in the claimed regime; see [`TurnInputCompletion::claim`].
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct TurnInputSettlementClaim {
-    pub claim_id: String,
-    pub lease_token: String,
-}
-/// A settlement receipt carrying settled turn-input identities, application
-/// evidence, and the authority the settling driver holds over those rows.
-///
-/// Turn-input settlement has exactly two regimes and one authority. Both are a
-/// conditional write decided by the head CAS the runtime commit already
-/// performs; `claim` only *strengthens* that write's predicate:
-///
-/// * `Some(..)` — the driver holds a generation-fenced claim
-///   ([ADR 0029](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0029-claims-are-generation-fenced-under-the-session-lease.md)),
-///   and the row must still carry that claim id and lease token.
-/// * `None` — the driver accepted these rows itself and drove them without the
-///   session-execution lane
-///   ([ADR 0069 §5](https://github.com/Ascending-AI/lash/blob/main/docs/adr/0069-durable-acceptance-is-the-sole-turn-ingress.md)),
-///   and the row must still be unclaimed and unsettled.
-///
-/// Every backend verifies that the settlement affected exactly one row and
-/// reports a typed supersession error otherwise; zero rows is never silent
-/// success.
+/// The turn inputs one commit completes, with their application evidence
+/// (FIG-3927): row identities only, settled under the committing root's
+/// admission.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TurnInputCompletion {
     pub session_id: SessionId,
-    #[serde(default, flatten)]
-    pub claim: Option<TurnInputSettlementClaim>,
     #[serde(flatten)]
     pub data: TurnInputCompletionData,
-}
-impl TurnInputCompletion {
-    pub fn claim_id(&self) -> Option<&str> {
-        self.claim.as_ref().map(|claim| claim.claim_id.as_str())
-    }
-
-    /// Exposes the settling lease token to store implementors, or `None` when
-    /// the settlement is unclaimed.
-    pub fn lease_token(&self) -> Option<&str> {
-        self.claim.as_ref().map(|claim| claim.lease_token.as_str())
-    }
-
-    /// Names this settlement's rows for diagnostics that must report a
-    /// settlement without assuming it had a claim id.
-    pub fn settlement_identity(&self) -> String {
-        match self.claim.as_ref() {
-            Some(claim) => claim.claim_id.clone(),
-            None => format!("unclaimed:{}", self.data.input_ids.join(",")),
-        }
-    }
 }
 impl std::ops::Deref for TurnInputCompletion {
     type Target = TurnInputCompletionData;
@@ -832,38 +777,39 @@ impl std::ops::DerefMut for TurnInputCompletion {
         &mut self.data
     }
 }
+/// Turn inputs one admission bound to a root, with their payloads, in
+/// `enqueue_seq` order (FIG-3927). The binding lives on the rows; this is
+/// what the root drives and what its journal records.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct TurnInputClaimData {
-    pub mode: TurnInputClaimMode,
+pub struct AdmittedTurnInputs {
+    pub session_id: SessionId,
+    pub mode: TurnInputAdmissionMode,
     pub inputs: Vec<PendingTurnInput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub applications: Vec<TurnInputApplication>,
 }
-/// A shared work claim carrying pending turn-input material.
-pub type TurnInputClaim = crate::WorkClaim<TurnInputClaimData>;
-impl crate::WorkClaim<TurnInputClaimData> {
-    /// Exposes completion to store and durable-substrate implementors while claiming and settling
-    /// durable queued work.
+impl AdmittedTurnInputs {
+    /// The completion a commit that delivered these inputs carries.
     pub fn completion(&self) -> TurnInputCompletion {
         TurnInputCompletion {
             session_id: self.session_id.clone(),
-            claim: Some(TurnInputSettlementClaim {
-                claim_id: self.claim_id.clone(),
-                lease_token: self.lease_token.clone(),
-            }),
             data: TurnInputCompletionData {
-                input_ids: self
-                    .inputs
-                    .iter()
-                    .map(|input| input.input_id.clone())
-                    .collect(),
+                input_ids: self.input_ids(),
                 applications: self.applications.clone(),
             },
         }
     }
 
-    /// Updates initial turn application state for store and durable-substrate implementors while
-    /// claiming and settling durable queued work.
+    /// The admitted inputs' ids, in admission order.
+    pub fn input_ids(&self) -> Vec<crate::InputId> {
+        self.inputs
+            .iter()
+            .map(|input| input.input_id.clone())
+            .collect()
+    }
+
+    /// Records the application evidence of inputs that formed a turn's
+    /// initial input.
     pub fn record_initial_turn_application(
         &mut self,
         turn_id: &crate::TurnId,
@@ -872,8 +818,8 @@ impl crate::WorkClaim<TurnInputClaimData> {
         self.applications = initial_turn_applications(&self.inputs, turn_id, committed_message_id);
     }
 
-    /// Records application evidence only for claimed inputs whose deterministic ingress message IDs
-    /// appear in the committed checkpoint messages.
+    /// Records application evidence only for admitted inputs whose deterministic ingress message
+    /// IDs appear in the committed checkpoint messages.
     pub fn record_checkpoint_applications(
         &mut self,
         turn_id: &crate::TurnId,
@@ -908,8 +854,8 @@ impl crate::WorkClaim<TurnInputClaimData> {
         self.applications.extend(recorded);
     }
 
-    /// Exposes accepted turn inputs to store and durable-substrate implementors while claiming and
-    /// settling durable queued work.
+    /// Exposes accepted turn inputs to store and durable-substrate implementors while admitting
+    /// and settling durable turn inputs.
     pub fn accepted_turn_inputs(&self) -> Vec<crate::AcceptedInjectedTurnInput> {
         self.inputs
             .iter()
@@ -917,8 +863,8 @@ impl crate::WorkClaim<TurnInputClaimData> {
             .collect()
     }
 
-    /// Materializes claimed inputs in claim order for turn-input store implementors, resolving
-    /// attachments and omitting inputs that produce no committed message.
+    /// Materializes admitted inputs in admission order for turn-input store implementors,
+    /// resolving attachments and omitting inputs that produce no committed message.
     pub async fn materialize_checkpoint_turn_input(
         &self,
         turn_id: &crate::TurnId,
@@ -944,8 +890,7 @@ impl crate::WorkClaim<TurnInputClaimData> {
         })
     }
 
-    /// Materializes for turn data for store and durable-substrate implementors while claiming and
-    /// settling durable queued work.
+    /// Materializes the admitted inputs as one turn's input.
     pub fn materialize_turn_input(&self) -> TurnInput {
         materialize_turn_input(&self.inputs)
     }
@@ -1131,7 +1076,7 @@ impl TurnInput {
 }
 /// How a running turn treats durable queued work.
 ///
-/// Written as one fact: an automatic drain may keep claiming checkpoint
+/// Written as one fact: an automatic drain may keep admitting checkpoint
 /// batches as it runs, while a Selected Queued-Work Drain is closed over the
 /// host-pinned batch-id set — checkpoint pull-in is forbidden and the pinned
 /// composition's cost bound is enforced. The remaining flag combinations are

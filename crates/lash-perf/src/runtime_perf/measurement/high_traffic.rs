@@ -18,7 +18,7 @@ struct HighTrafficStepResult {
     operations: Vec<HighTrafficOperationResult>,
     commits: u64,
     store_transaction: RuntimePerfStoreTiming,
-    claim_scan: RuntimePerfStoreTiming,
+    admission_scan: RuntimePerfStoreTiming,
     queue_enqueue: RuntimePerfStoreTiming,
     queue_depth_samples: Vec<u64>,
     rss_kb: Option<u64>,
@@ -81,7 +81,7 @@ pub(super) async fn run_once_high_traffic(
     let mut total_elapsed_ms = 0.0;
     let mut total_commits = 0u64;
     let mut total_store_transaction = RuntimePerfStoreTiming::default();
-    let mut total_claim_scan = RuntimePerfStoreTiming::default();
+    let mut total_admission_scan = RuntimePerfStoreTiming::default();
     let mut total_queue_enqueue = RuntimePerfStoreTiming::default();
     let mut pre_phase_dispatch_samples = Vec::new();
     let mut arrival_pacing_lateness_samples = Vec::new();
@@ -162,7 +162,7 @@ pub(super) async fn run_once_high_traffic(
 
         for (name, timing) in [
             ("store_transaction", step.store_transaction),
-            ("claim_scan", step.claim_scan),
+            ("admission_scan", step.admission_scan),
             ("queue_enqueue", step.queue_enqueue),
         ] {
             extra_counters.insert(
@@ -239,7 +239,7 @@ pub(super) async fn run_once_high_traffic(
         total_elapsed_ms += step.elapsed_ms;
         total_commits += step.commits;
         add_store_timing(&mut total_store_transaction, step.store_transaction);
-        add_store_timing(&mut total_claim_scan, step.claim_scan);
+        add_store_timing(&mut total_admission_scan, step.admission_scan);
         add_store_timing(&mut total_queue_enqueue, step.queue_enqueue);
     }
     turns.sort_by_key(|turn| turn.turn_index);
@@ -268,12 +268,12 @@ pub(super) async fn run_once_high_traffic(
     let pre_phase_dispatch_us = average_micros(&pre_phase_dispatch_samples);
     let arrival_pacing_lateness_us = average_micros(&arrival_pacing_lateness_samples);
     let store_transaction_us = average_store_timing(total_store_transaction);
-    let claim_scan_us = average_store_timing(total_claim_scan);
+    let admission_scan_us = average_store_timing(total_admission_scan);
     let queue_enqueue_us = average_store_timing(total_queue_enqueue);
     let mut observable_wait_values = vec![
         ("store_transaction", store_transaction_us),
         ("pre_phase_dispatch", pre_phase_dispatch_us),
-        ("claim_scan", claim_scan_us),
+        ("admission_scan", admission_scan_us),
         ("queue_enqueue", queue_enqueue_us),
     ];
     if config.arrival_rate > 0 {
@@ -308,7 +308,11 @@ pub(super) async fn run_once_high_traffic(
         "wait.store_transaction",
         total_store_transaction,
     );
-    insert_wait_phase(&mut phase_profile, "wait.claim_scan", total_claim_scan);
+    insert_wait_phase(
+        &mut phase_profile,
+        "wait.admission_scan",
+        total_admission_scan,
+    );
     insert_wait_phase(
         &mut phase_profile,
         "wait.queue_enqueue",
@@ -428,7 +432,7 @@ async fn run_high_traffic_step(
         "store_calls.commit_runtime_state",
     );
     let store_transaction = timing_delta(&timings_before, &timings_after, "store_transaction");
-    let claim_scan = timing_delta(&timings_before, &timings_after, "claim_scan");
+    let admission_scan = timing_delta(&timings_before, &timings_after, "admission_scan");
     let queue_enqueue = timing_delta(&timings_before, &timings_after, "queue_enqueue");
     let queue_depth_samples = queue_depth_samples.lock_recover().clone();
 
@@ -445,7 +449,7 @@ async fn run_high_traffic_step(
         operations,
         commits,
         store_transaction,
-        claim_scan,
+        admission_scan,
         queue_enqueue,
         queue_depth_samples,
         rss_kb: rss_kb.or(memory_before.rss_kb),

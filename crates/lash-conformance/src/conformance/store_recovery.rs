@@ -1,7 +1,7 @@
 //! Durable store-recovery laws over fresh persistence handles.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::time::Duration;
@@ -76,12 +76,12 @@ fn queued_work(session_id: &SessionId, source: &str) -> crate::QueuedWorkBatchDr
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn seed_and_claim(
+async fn seed_and_admit(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
     source: &str,
     lease_ttl_ms: u64,
-) -> (crate::ClaimAuthority, crate::QueuedWorkClaim) {
+) -> (crate::store::DriveFence, lash_core::store::RootAdmission) {
     bind_conformance_session(store, session_id).await;
     let batch = store
         .enqueue_queued_work(queued_work(session_id, source))
@@ -89,38 +89,33 @@ async fn seed_and_claim(
         .expect("seed store-recovery queued work");
     let lease_owner = owner(format!("{source}:owner-a"));
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             session_id,
             &lease_owner,
-            "seed-and-claim-executor",
+            "seed-and-admit-executor",
             lease_ttl_ms,
         )
         .await
-        .expect("claim store-recovery session lease")
+        .expect("seal the store-recovery drive")
         .acquired()
-        .expect("fresh store-recovery session lease");
-    let claim = store
-        .claim_ready_queued_work(
-            session_id,
-            &lease.fence(),
-            &lease_owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .map(crate::QueuedWorkClaimOutcome::claim)
-        .expect("claim store-recovery queued work")
-        .expect("queued work is claimable");
+        .expect("fresh store-recovery drive");
+    let admission = admitted_root(
+        store,
+        &lease,
+        &root_of(source),
+        lash_core::store::AdmittedHead::Batch(batch.batch_id.clone()),
+    )
+    .await;
     assert_eq!(
-        claim
-            .batches
-            .iter()
-            .map(|claimed| claimed.batch_id.clone())
-            .collect::<Vec<_>>(),
+        admission.batch_ids(),
         vec![batch.batch_id],
-        "the claim takes the seeded batch"
+        "the root's admission takes the seeded batch"
     );
-    (lease, claim)
+    (lease, admission)
+}
+
+fn root_of(source: &str) -> String {
+    format!("{source}:root")
 }
 
 #[expect(
@@ -132,7 +127,7 @@ async fn acquire_successor<F>(
     session_id: &SessionId,
     source: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
-) -> (Arc<dyn RuntimePersistence>, crate::ClaimAuthority)
+) -> (Arc<dyn RuntimePersistence>, crate::store::DriveFence)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
@@ -143,7 +138,7 @@ where
             let store = make(session_id);
             bind_conformance_session(&store, session_id).await;
             let acquired = store
-                .seal_claim_epoch_for_test(
+                .seal_drive_epoch_for_test(
                     session_id,
                     &successor,
                     "acquire-successor-executor",
@@ -176,38 +171,43 @@ fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessio
     state
 }
 
-fn claimed_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<lash_core::BatchId> {
-    claim
-        .batches
-        .iter()
-        .map(|batch| batch.batch_id.clone())
-        .collect()
+/// Resume `source`'s root under `fence`: the recorded admission reads back
+/// unchanged.
+async fn resume(
+    store: &Arc<dyn RuntimePersistence>,
+    fence: &crate::store::DriveFence,
+    source: &str,
+    recorded: &lash_core::store::RootAdmission,
+) -> lash_core::store::RootAdmission {
+    let resumed = admitted_root(store, fence, &root_of(source), recorded.head.clone()).await;
+    assert_eq!(
+        resumed.batch_ids(),
+        recorded.batch_ids(),
+        "the successor resumes exactly the recorded admission"
+    );
+    resumed
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn assert_no_parallel_reclaim(
+/// While the root is unfinished no second root takes its rows: the session
+/// admits one root at a time, and a bound row is no other root's head.
+async fn assert_no_second_root(
     store: &Arc<dyn RuntimePersistence>,
-    session_id: &SessionId,
-    lease: &crate::ClaimAuthority,
-    claim_owner: &crate::LeaseOwnerIdentity,
+    fence: &crate::store::DriveFence,
+    admission: &lash_core::store::RootAdmission,
 ) {
+    let result = admit_root_for_test(
+        store,
+        fence,
+        &crate::TurnId::from("store-recovery-second-root"),
+        admission.head.clone(),
+    )
+    .await;
     assert!(
-        store
-            .claim_ready_queued_work(
-                session_id,
-                &lease.fence(),
-                claim_owner,
-                crate::QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(64),
-            )
-            .await
-            .map(crate::QueuedWorkClaimOutcome::claim)
-            .expect("probe a second pre-settlement reclaim")
-            .is_none(),
-        "durably claimed work must not be delivered again before settlement"
+        matches!(
+            result,
+            Err(crate::StoreError::UnfinishedRootConflict { .. })
+        ),
+        "admitted work must not be delivered again before settlement: {result:?}"
     );
 }
 
@@ -235,70 +235,6 @@ async fn assert_settled_once(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn expired_claim_is_recoverable_once<F>(
-    make: &F,
-    prefix: &str,
-    lease_timing: &StoreRecoveryLeaseTiming,
-) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-{
-    let session_id = SessionId::from(format!("{prefix}:claim-expiry"));
-    let writer = make(&session_id);
-    let (_expired_lease, expired_claim) = seed_and_claim(
-        &writer,
-        &session_id,
-        "claim-expiry",
-        recovery_timings().ttl_ms(),
-    )
-    .await;
-    drop(writer);
-
-    let (successor_store, successor_lease) =
-        acquire_successor(make, &session_id, "claim-expiry", lease_timing).await;
-    let successor_owner = owner("claim-expiry:owner-b");
-    let batch_ids = claimed_batch_ids(&expired_claim);
-    let successor_claim = successor_store
-        .claim_ready_queued_work(
-            &session_id,
-            &successor_lease.fence(),
-            &successor_owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .map(crate::QueuedWorkClaimOutcome::claim)
-        .expect("recover expired claim")
-        .expect("expired claim is recoverable");
-    assert_eq!(
-        claimed_batch_ids(&successor_claim),
-        batch_ids,
-        "the successor recovers exactly the expired claim's batch"
-    );
-    assert_no_parallel_reclaim(
-        &successor_store,
-        &session_id,
-        &successor_lease,
-        &successor_owner,
-    )
-    .await;
-    successor_store
-        .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state_for_test(
-                &committed_state(&session_id, "claim-recovered"),
-                &[],
-            )
-            .completing_queue_claim(successor_claim.completion()),
-        )
-        .await
-        .expect("settle recovered claim");
-    drop(successor_store);
-    assert_settled_once(make, &session_id).await;
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 pub async fn checkpoint_survives_before_claim_settlement<F>(
     make: &F,
     prefix: &str,
@@ -307,21 +243,17 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = SessionId::from(format!("{prefix}:checkpoint-before-settlement"));
+    let source = "checkpoint-before-settlement";
     let writer = make(&session_id);
-    let (_expired_lease, expired_claim) = seed_and_claim(
-        &writer,
-        &session_id,
-        "checkpoint-before-settlement",
-        recovery_timings().ttl_ms(),
-    )
-    .await;
+    let (_expired_lease, admission) =
+        seed_and_admit(&writer, &session_id, source, recovery_timings().ttl_ms()).await;
     writer
         .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(
             &committed_state(&session_id, "checkpoint-committed"),
             &[],
         ))
         .await
-        .expect("commit checkpoint before claim settlement");
+        .expect("commit checkpoint before the root settles");
     drop(writer);
 
     let cold_reader = make(&session_id);
@@ -338,77 +270,48 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     );
     drop(cold_reader);
 
-    let (successor_store, successor_lease) = acquire_successor(
-        make,
-        &session_id,
-        "checkpoint-before-settlement",
-        lease_timing,
-    )
-    .await;
-    let successor_owner = owner("checkpoint-before-settlement:owner-b");
-    let batch_ids = claimed_batch_ids(&expired_claim);
-    let successor_claim = successor_store
-        .claim_ready_queued_work(
-            &session_id,
-            &successor_lease.fence(),
-            &successor_owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
-        .await
-        .map(crate::QueuedWorkClaimOutcome::claim)
-        .expect("recover checkpoint-associated claim")
-        .expect("checkpoint-associated claim is recoverable");
-    assert_eq!(
-        claimed_batch_ids(&successor_claim),
-        batch_ids,
-        "the successor recovers exactly the expired claim's batch"
-    );
-    assert_no_parallel_reclaim(
-        &successor_store,
-        &session_id,
-        &successor_lease,
-        &successor_owner,
-    )
-    .await;
+    let (successor_store, successor_lease) =
+        acquire_successor(make, &session_id, source, lease_timing).await;
+    let resumed = resume(&successor_store, &successor_lease, source, &admission).await;
+    assert_no_second_root(&successor_store, &successor_lease, &resumed).await;
     successor_store
-        .commit_runtime_state(
-            crate::RuntimeCommit::persisted_state_for_test(&recovered_state, &[])
-                .completing_queue_claim(successor_claim.completion()),
-        )
+        .commit_runtime_state(final_commit(
+            crate::RuntimeCommit::persisted_state_for_test(&recovered_state, &[]),
+            &successor_lease,
+            completing_admission(&root_of(source), &resumed),
+        ))
         .await
-        .expect("settle checkpoint-associated claim");
+        .expect("settle the checkpoint-associated root");
     drop(successor_store);
     assert_settled_once(make, &session_id).await;
 }
 
+/// A root's final commit settles its admitted rows and publishes its state in
+/// one transaction, once.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn atomic_commit_settles_claim_once<F>(make: &F, prefix: &str)
+pub async fn a_commit_settles_admitted_rows_once<F>(make: &F, prefix: &str)
 where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = SessionId::from(format!("{prefix}:atomic-settlement"));
+    let source = "atomic-settlement";
     let writer = make(&session_id);
-    let (_lease, claim) = seed_and_claim(
-        &writer,
-        &session_id,
-        "atomic-settlement",
-        RECOVERY_SUCCESSOR_TTL_MS,
-    )
-    .await;
+    let (lease, admission) =
+        seed_and_admit(&writer, &session_id, source, RECOVERY_SUCCESSOR_TTL_MS).await;
     writer
-        .commit_runtime_state(
+        .commit_runtime_state(final_commit(
             crate::RuntimeCommit::persisted_state_for_test(
                 &committed_state(&session_id, "atomically-settled"),
                 &[],
-            )
-            .completing_queue_claim(claim.completion()),
-        )
+            ),
+            &lease,
+            completing_admission(&root_of(source), &admission),
+        ))
         .await
-        .expect("atomically commit state and settle claim");
+        .expect("atomically commit state and settle the root's rows");
     drop(writer);
 
     let reader = make(&session_id);
@@ -428,6 +331,14 @@ where
             .is_some(),
         "the state half of the atomic settlement is durable"
     );
+    assert!(
+        reader
+            .unfinished_root(&session_id)
+            .await
+            .expect("read the unfinished root")
+            .is_none(),
+        "the final commit ends the root"
+    );
 }
 
 #[expect(
@@ -439,14 +350,10 @@ where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
 {
     let session_id = SessionId::from(format!("{prefix}:commit-replay"));
+    let source = "commit-replay";
     let writer = make(&session_id);
-    let (_lease, claim) = seed_and_claim(
-        &writer,
-        &session_id,
-        "commit-replay",
-        RECOVERY_SUCCESSOR_TTL_MS,
-    )
-    .await;
+    let (lease, admission) =
+        seed_and_admit(&writer, &session_id, source, RECOVERY_SUCCESSOR_TTL_MS).await;
     let operation = crate::OperationId::turn(&session_id, "recorded-commit", "final");
     let (commit, _) = crate::RuntimeCommit::persisted_state_for_test(
         &committed_state(&session_id, "recorded-commit"),
@@ -454,7 +361,11 @@ where
     )
     .with_operation(operation)
     .expect("stamp recorded commit");
-    let commit = commit.completing_queue_claim(claim.completion());
+    let commit = final_commit(
+        commit,
+        &lease,
+        completing_admission(&root_of(source), &admission),
+    );
     let first = writer
         .commit_runtime_state(commit.clone())
         .await

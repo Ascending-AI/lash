@@ -63,6 +63,7 @@ impl FakeStore {
             name: name.to_string(),
             location: format!("/srv/lash/{name}.db"),
             expected,
+            min_reader: None,
             verdict,
         });
         self

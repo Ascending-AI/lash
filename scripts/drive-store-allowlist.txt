@@ -6,7 +6,7 @@
 # Every direct persistence-trait call in the session drive is pinned. The tag
 # says where it runs: RECORDED is a call inside a recorded step's body (the
 # step's output is what a replay reads); FENCED is a live revalidation that
-# can only stop a stale claimant before another turn effect (ADR 0105 §2);
+# can only stop a stale drive before another turn effect (ADR 0105 §2);
 # a ticket id is a call the drive still makes outside any recorded step;
 # RECONCILE is the reconcile sweep, which schedules drives and decides
 # nothing inside one. A hit fails when its (file, text) is unlisted or occurs
@@ -23,12 +23,7 @@ crates/lash-core/src/runtime/drive/admission.rs  |  .unfinished_root(session_id)
 crates/lash-core/src/runtime/drive/admission.rs  |  let park = match store.load_turn_park(session_id).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/admission.rs  |  let stored_epoch = match store.drive_epoch(session_id).await {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  .committed_turn_exists(&self.root)  |  1  # RECORDED admitted-head inspection step reads committed evidence once
-crates/lash-core/src/runtime/drive/root.rs  |  .committed_turn_exists(turn_id)  |  1  # FENCED stop-only revalidation after a claim lost authority between attempts
-crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_queued_work(&self.session_id)  |  1  # RECORDED root admission step reads pending batches to answer a missed head
-crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.session_id)  |  1  # RECORDED root admission step reads pending inputs to answer a missed head
-crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.state.session_id)  |  1  # FENCED stop-only revalidation distinguishes ceded from divergent stale roots
 crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(session_id)  |  1  # RECORDED admitted-head inspection step reads an input head once
-crates/lash-core/src/runtime/drive/root.rs  |  .list_queued_work(&self.session_id)  |  1  # RECORDED root admission step reads queued batches to answer a missed head
 crates/lash-core/src/runtime/drive/root.rs  |  .list_queued_work(session_id)  |  1  # RECORDED admitted-head inspection step reads a batch head once
-crates/lash-core/src/runtime/drive/root.rs  |  crate::runtime::LashRuntime::defer_orphaned_turn_inputs_before_drain(  |  1  # RECORDED root claim step repairs orphaned inputs before it claims the root
+crates/lash-core/src/runtime/drive/root.rs  |  .validate_turn_cancellation_binding(  |  1  # RECORDED root admission step checks the session's turn-cancellation binding under the fence before it admits
 crates/lash-core/src/runtime/drive/root.rs  |  if let Some(admission) = self.store.admit_root(&request).await? {  |  1  # RECORDED

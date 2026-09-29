@@ -10,7 +10,7 @@
 //! admits, so every tier that runs turns runs them unchanged.
 //!
 //! Not here: L-S5 and L-S6 (stale-epoch mutations refused before I/O) land
-//! with the table switch that fences claims by the drive epoch (S8/P15), and
+//! with the table switch that fences admissions by the drive epoch (S8/P15), and
 //! L-S8 (a fresh execution of a started root is `SubstrateLost`) is the
 //! engine's own start marker, so the engine registers it where it keeps one.
 
@@ -42,7 +42,7 @@ impl DriveParts {
         law: &str,
         effect_host: &Arc<dyn crate::EffectHost>,
         stores: &Arc<dyn crate::StoreSet>,
-        claim_bound: usize,
+        admission_bound: usize,
     ) -> Self {
         let session_id = SessionId::from(format!("{prefix}-{law}"));
         let calls = Arc::new(AtomicUsize::new(0));
@@ -67,7 +67,8 @@ impl DriveParts {
         let mut host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
             .host_config(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
-                crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_claim(claim_bound),
+                crate::QueuedWorkBatchingConfig::new(1)
+                    .with_max_turn_input_admission(admission_bound),
             );
         host.providers.provider_resolver =
             Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
@@ -229,19 +230,17 @@ impl DriveParts {
     /// An admission request for `root` headed by `head` under `authority`.
     async fn admit_request(
         &self,
-        authority: &crate::ClaimAuthority,
+        authority: &crate::store::DriveFence,
         root: &str,
         head: crate::store::AdmittedHead,
         admitted_generation: &'static str,
     ) -> crate::store::AdmitRootRequest {
         crate::store::AdmitRootRequest {
-            session_id: self.session_id.clone(),
-            lease: authority.fence(),
-            owner: authority.owner.clone(),
+            fence: authority.clone(),
             root: TurnId::from(root),
             head,
             max_inputs: 1,
-            policy: crate::testing::queued_work_claim_policy(1),
+            policy: crate::testing::queued_work_admission_policy(1),
             base: crate::store::SessionHeadRef {
                 generation: 0,
                 revision: self.initial_state().head_revision,
@@ -258,6 +257,164 @@ impl DriveParts {
             generation: None,
             admitted_generation: crate::engine::BuildGeneration::for_test(admitted_generation),
         }
+    }
+}
+
+/// FIG-3927 N7: admission delivers. Every row a root's admission or its
+/// checkpoint binds has its ingress obligation delivered in the same write,
+/// whatever the obligation stood at: due, claimed by a relay's ask, or
+/// stalled.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law assertions require the store to succeed"
+)]
+pub async fn admission_delivers_every_row_it_binds(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    use lash_core::store::{
+        ObligationKind, ObligationSettlement, ObligationState, StallReason,
+        ingress_obligation::ingress_obligation_id,
+    };
+    let parts = DriveParts::new(prefix, "admission-delivers", &effect_host, &stores, 8).await;
+    let ingress = stores.obligation_ledger(ObligationKind::Ingress);
+    let now = stores.clock().timestamp_ms();
+    let state = |item: String| {
+        let ingress = Arc::clone(&ingress);
+        async move {
+            ingress
+                .state(&ingress_obligation_id(&item))
+                .await
+                .expect("read the obligation")
+        }
+    };
+    let claim = |item: String| {
+        let ingress = Arc::clone(&ingress);
+        async move {
+            ingress
+                .claim(&ingress_obligation_id(&item), now, 3_600_000)
+                .await
+                .expect("claim the obligation")
+                .expect("the obligation is due")
+        }
+    };
+
+    // Next-turn rows in each obligation state, bound by the root admission.
+    let due = parts.enqueue("due", None).await;
+    let claimed = parts.enqueue("claimed", None).await;
+    let stalled = parts.enqueue("stalled", None).await;
+    claim(claimed.to_string()).await;
+    let stall = claim(stalled.to_string()).await;
+    ingress
+        .settle(
+            &ingress_obligation_id(stalled.as_str()),
+            &stall.token,
+            ObligationSettlement::Stall {
+                reason: StallReason::Refused,
+                error: "stalled before its admission".to_string(),
+            },
+            now,
+        )
+        .await
+        .expect("stall the obligation");
+    for (item, expected) in [
+        (&due, ObligationState::Due),
+        (&claimed, ObligationState::Claimed),
+        (&stalled, ObligationState::Stalled),
+    ] {
+        assert_eq!(state(item.to_string()).await, Some(expected));
+    }
+    let fence = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
+        &parts.store,
+        &parts.session_id,
+        "admission-delivers",
+    )
+    .await;
+    let root = TurnId::from("admission-delivers-root");
+    let admission = lash_core::testing::store_fixtures::admit_root_for_test(
+        &parts.store,
+        &fence,
+        &root,
+        crate::store::AdmittedHead::Input(due.clone()),
+    )
+    .await
+    .expect("admit the root")
+    .expect("the admission reaches its head");
+    assert_eq!(
+        admission.input_ids(),
+        vec![due.clone(), claimed.clone(), stalled.clone()]
+    );
+    for item in [&due, &claimed, &stalled] {
+        assert_eq!(
+            state(item.to_string()).await,
+            Some(ObligationState::Delivered),
+            "the root admission delivered {item}'s obligation"
+        );
+    }
+
+    // An active-turn input and a claimed batch, bound by a checkpoint.
+    let steer = parts
+        .store
+        .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+            parts.session_id.clone(),
+            crate::TurnInputIngress::active_turn(
+                &root,
+                crate::TurnInputCheckpointBoundary::AfterWork,
+            ),
+            crate::TurnInput::text("steer"),
+        ))
+        .await
+        .expect("accept the steering input")
+        .input_id;
+    let wake = parts
+        .store
+        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
+            &parts.session_id,
+            "wake",
+            1,
+            "wake",
+            crate::DeliveryPolicy::EarliestSafeBoundary,
+        ))
+        .await
+        .expect("enqueue the wake")
+        .batch_id;
+    claim(wake.to_string()).await;
+    let checkpoint = lash_core::testing::store_fixtures::admit_at_checkpoint_for_test(
+        &parts.store,
+        &fence,
+        &root,
+        &root,
+        crate::CheckpointKind::AfterWork,
+        "admission-delivers:checkpoint",
+        64,
+        crate::testing::queued_work_admission_policy(64),
+    )
+    .await
+    .expect("admit at the checkpoint");
+    assert_eq!(
+        checkpoint
+            .inputs
+            .as_ref()
+            .map(|inputs| inputs.input_ids())
+            .unwrap_or_default(),
+        vec![steer.clone()]
+    );
+    assert_eq!(
+        checkpoint
+            .queued
+            .as_ref()
+            .map(|queued| queued.batch_ids())
+            .unwrap_or_default(),
+        vec![wake.clone()]
+    );
+    for item in [steer.to_string(), wake.to_string()] {
+        assert_eq!(
+            state(item.clone()).await,
+            Some(ObligationState::Delivered),
+            "the checkpoint delivered {item}'s obligation"
+        );
     }
 }
 
@@ -283,7 +440,7 @@ pub async fn one_unfinished_root_per_session(
             );
             let parts = DriveParts::new(prefix, &law, &host, &stores, 1).await;
             let head = parts.enqueue_head(first_kind, "first").await;
-            let authority = crate::testing::store_fixtures::seal_claim_authority_for_test(
+            let authority = crate::testing::store_fixtures::seal_drive_fence_for_test(
                 &parts.store,
                 &parts.session_id,
                 "first-root",
@@ -366,7 +523,7 @@ pub async fn a_root_admission_is_idempotent_across_new_rows_and_fences(
         let law = format!("root-admission-idempotent-{}", kind.label());
         let parts = DriveParts::new(prefix, &law, &host, &stores, 1).await;
         let head = parts.enqueue_head(kind, "first").await;
-        let first = crate::testing::store_fixtures::seal_claim_authority_for_test(
+        let first = crate::testing::store_fixtures::seal_drive_fence_for_test(
             &parts.store,
             &parts.session_id,
             "root-admission-first",
@@ -388,7 +545,7 @@ pub async fn a_root_admission_is_idempotent_across_new_rows_and_fences(
                 .await;
         }
         request.max_inputs = 8;
-        request.policy = crate::testing::queued_work_claim_policy(8);
+        request.policy = crate::testing::queued_work_admission_policy(8);
         request.turn_index = 7;
         request.admitted_generation = crate::engine::BuildGeneration::for_test("later-admission");
         let replay = parts
@@ -402,14 +559,13 @@ pub async fn a_root_admission_is_idempotent_across_new_rows_and_fences(
             serde_json::to_value(&replay).expect("encode replayed admission"),
             "{law}: a same-fence retry answers the recorded admission"
         );
-        let later = crate::testing::store_fixtures::seal_claim_authority_for_test(
+        let later = crate::testing::store_fixtures::seal_drive_fence_for_test(
             &parts.store,
             &parts.session_id,
             "root-admission-later",
         )
         .await;
-        request.lease = later.fence();
-        request.owner = later.owner.clone();
+        request.fence = later.clone();
         let replay = parts
             .store
             .admit_root(&request)
@@ -545,16 +701,16 @@ pub async fn one_authorized_drive_per_session(
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one root ran");
 }
 
-/// L-S2: one drive claims every item of the claimable prefix under one root:
-/// three accepted inputs within the claim bound are answered by one turn.
-/// Each acceptance armed its row's ingress obligation, and the drive's claim
-/// of the row delivered it in the claim's own write (ADR 0109 §3): no ask
+/// L-S2: one drive admits every item of the admissible prefix under one root:
+/// three accepted inputs within the admission bound are answered by one turn.
+/// Each acceptance armed its row's ingress obligation, and the root's
+/// admission of the row delivered it in the admission's own write (ADR 0109 §3): no ask
 /// was ever made, and nothing is owed after.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn one_drive_claims_many_items(
+pub async fn one_drive_admits_many_items(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -594,93 +750,16 @@ pub async fn one_drive_claims_many_items(
             (second, root.clone()),
             (third, root.clone())
         ],
-        "one root answers every item it claimed"
+        "one root answers every item it admitted"
     );
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one model call");
     for id in &obligations {
         assert_eq!(
             ingress.state(id).await.expect("the settled state"),
             Some(lash_core::store::ObligationState::Delivered),
-            "the drive's claim of the row delivered its ingress obligation"
+            "the root's admission of the row delivered its ingress obligation"
         );
     }
-}
-
-/// L-S3: a redrive of an admitted root drives exactly the claim its first
-/// execution recorded: the same answer, no second model call, no second
-/// epoch transition, the input applied once. The first execution dies right
-/// after its root commits; the tier redelivers it the way it recovers a
-/// crashed turn.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn claim_identity_is_idempotent_within_ownership(
-    prefix: &str,
-    effect_host: Arc<dyn crate::EffectHost>,
-    stores: Arc<dyn crate::StoreSet>,
-    runner: Arc<dyn crate::ConformanceTurnRunner>,
-) {
-    let parts = DriveParts::new(prefix, "claim-idempotent", &effect_host, &stores, 8).await;
-    let input = parts
-        .enqueue("ask once", Some("claim-idempotent-root"))
-        .await;
-    let request = parts.request("claim-idempotent-drive");
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<RootOutcome>();
-    let attempt = |crash: bool| -> crate::ConformanceTurnAttempt {
-        let parts = parts.clone();
-        let request = request.clone();
-        let tx = tx.clone();
-        Arc::new(move |scope| {
-            let parts = parts.clone();
-            let request = request.clone();
-            let tx = tx.clone();
-            Box::pin(async move {
-                let mut runtime = parts.runtime().await;
-                let admitted = admitted(
-                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
-                        .await
-                        .expect("admit the root"),
-                );
-                let outcome = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
-                    .await
-                    .expect("run the root");
-                let _ = tx.send(outcome);
-                if crash {
-                    panic!("the root's execution dies after its commit");
-                }
-                crate::ConformanceTurnEnd::Settled
-            })
-        })
-    };
-    runner
-        .run_crashed_then_redriven_turn(
-            admit(crate::ExecutionScope::turn(
-                &parts.session_id,
-                TurnId::from("drive-law-driver"),
-            )),
-            attempt(true),
-            attempt(false),
-        )
-        .await;
-    let first = rx.recv().await.expect("the first execution ran its root");
-    let again = rx.recv().await.expect("the redrive ran its root");
-    assert!(matches!(first, RootOutcome::Committed { .. }), "{first:?}");
-    assert_eq!(
-        again, first,
-        "the redrive drives the same root to the same answer"
-    );
-    assert_eq!(
-        parts.calls.load(Ordering::SeqCst),
-        1,
-        "no second model call"
-    );
-    assert_eq!(parts.epoch().await.epoch, 1, "one drive-epoch transition");
-    assert_eq!(
-        parts.applications().await,
-        vec![(input, TurnId::from("claim-idempotent-root"))],
-        "the input is applied once"
-    );
 }
 
 /// Crashes a root's execution after its model call and before its commit:
@@ -974,7 +1053,7 @@ fn fence_paths(value: &serde_json::Value, path: &str, found: &mut Vec<String>) {
 
 /// L-S12: the fence is never part of a recorded envelope. Every command a
 /// drive builds from its admission — the admission itself, the seal and the
-/// root's claim — carries no drive fence and no epoch, except the seal's
+/// root's admission — carries no drive fence and no epoch, except the seal's
 /// `observed_epoch`: the compare-and-set input it decodes from the recorded
 /// admission verdict, which every replay reproduces. The fence the seal
 /// yields rides its outcome only, and the root's turn effects are built
@@ -1028,7 +1107,7 @@ pub async fn fence_is_not_in_the_envelope_hash(
             },
         ),
         (
-            "claim",
+            "admit_root",
             crate::RuntimeEffectCommand::AdmitRoot {
                 head: crate::store::AdmittedHead::Input(input),
             },
@@ -1058,7 +1137,7 @@ pub async fn fence_is_not_in_the_envelope_hash(
 /// root is the host's id for the input that starts it, the committed turn
 /// answers under that id, and the root's effects ran under the root's own
 /// turn scope, never the scope of the caller that drove it. Where the tier
-/// can read its journal by scope, each root's seal, claim and model call are
+/// can read its journal by scope, each root's seal, admission and model call are
 /// recorded under `Turn(root)` and none under the driver's scope.
 ///
 /// Input roots only: a queued root still runs under its `QueueDrain` scope
@@ -1125,8 +1204,8 @@ pub async fn every_driver_turn_is_owned_by_its_root(
                 "root `{root}`'s seal ran under its turn scope: {keys:?}"
             );
             assert!(
-                keys.contains(&format!("drive-claim:{root}")),
-                "root `{root}`'s claim ran under its turn scope: {keys:?}"
+                keys.contains(&format!("drive-admit:{root}")),
+                "root `{root}`'s admission ran under its turn scope: {keys:?}"
             );
             assert!(
                 keys.iter().any(|key| key.contains("llm")),
@@ -1135,43 +1214,43 @@ pub async fn every_driver_turn_is_owned_by_its_root(
         }
         assert!(
             driver_keys.iter().all(|key| !key.starts_with("drive-seal:")
-                && !key.starts_with("drive-claim:")
+                && !key.starts_with("drive-admit:")
                 && !key.contains("llm")),
             "no root effect ran under the driver's scope: {driver_keys:?}"
         );
     }
 }
 
-/// Where the claim store faults once.
+/// Where the root admission faults once.
 #[derive(Clone, Copy, Debug)]
-enum ClaimFault {
-    /// The claim itself does not answer.
-    AtClaim,
-    /// The claim took its rows, then recording the root's admitted base
-    /// does not answer: the rows are this attempt's partial claim.
-    AfterClaim,
+enum AdmissionFault {
+    /// The admission itself does not answer.
+    AtAdmission,
+    /// The admission bound its rows, then its answer does not reach the
+    /// root: the rows are this attempt's uncommitted-to-journal admission.
+    AfterAdmission,
 }
 
-/// A session store whose root claim faults once, at [`ClaimFault`], with a
+/// A session store whose root admission faults once, at [`AdmissionFault`], with a
 /// transient contention the next attempt does not meet.
-struct ClaimFaultsOnce {
+struct AdmissionFaultsOnce {
     inner: Arc<dyn crate::RuntimePersistence>,
-    fault: ClaimFault,
+    fault: AdmissionFault,
     fired: AtomicUsize,
 }
 
-/// A session store whose worker dies once right after the root claim
-/// committed, before the effect journal records the claim's outcome
-/// (FIG-3840). It keeps every claim result it returned, with the drive
+/// A session store whose worker dies once right after the root admission
+/// committed, before the effect journal records the admission's outcome
+/// (FIG-3840). It keeps every admission it returned, with the drive
 /// epoch that asked for it.
-struct CrashAfterClaim {
+struct CrashAfterAdmission {
     inner: Arc<dyn crate::RuntimePersistence>,
     fired: AtomicUsize,
     results: std::sync::Mutex<Vec<(u64, crate::store::RootAdmission)>>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for CrashAfterClaim {
+impl crate::store::RuntimePersistenceDecorator for CrashAfterAdmission {
     fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -1180,49 +1259,51 @@ impl crate::store::RuntimePersistenceDecorator for CrashAfterClaim {
         &self,
         request: &crate::store::AdmitRootRequest,
     ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
-        let claim = self.inner.admit_root(request).await?;
-        if let Some(drive) = &claim {
+        let admission = self.inner.admit_root(request).await?;
+        if let Some(drive) = &admission {
             self.results
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((request.lease.fencing_token, drive.clone()));
+                .push((request.fence.epoch(), drive.clone()));
             if self
                 .fired
                 .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
                 .is_ok()
             {
-                panic!("worker died after the claim commit");
+                panic!("worker died after the admission commit");
             }
         }
-        Ok(claim)
+        Ok(admission)
     }
 }
 
-/// A root whose worker dies after the store committed its claim, but before
-/// the journal recorded the claim's outcome, is redriven by a fresh worker
-/// under the same recorded admission on exactly the composition, base and
-/// executable generation the claim committed (FIG-3840). An input that
-/// arrives in the window never widens the recorded prefix.
+/// A root whose worker dies after the store committed its admission, but
+/// before the journal recorded the admission's outcome, is redriven by a
+/// fresh worker under the same recorded drive admission on exactly the
+/// composition, base and executable generation the admission committed
+/// (FIG-3840, FIG-3927 N9 (a)). An input that arrives in the window never
+/// widens the recorded prefix.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
+pub async fn a_root_admission_survives_a_worker_crash_without_widening(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let mut parts = DriveParts::new(prefix, "claim-commit-crash", &effect_host, &stores, 8).await;
-    let crash = Arc::new(CrashAfterClaim {
+    let mut parts =
+        DriveParts::new(prefix, "admission-commit-crash", &effect_host, &stores, 8).await;
+    let crash = Arc::new(CrashAfterAdmission {
         inner: Arc::clone(&parts.store),
         fired: AtomicUsize::new(0),
         results: std::sync::Mutex::new(Vec::new()),
     });
     parts.store = Arc::clone(&crash) as Arc<dyn crate::RuntimePersistence>;
-    let first = parts.enqueue("first", Some("claim-commit-root")).await;
+    let first = parts.enqueue("first", Some("admission-commit-root")).await;
     let second = parts.enqueue("second", None).await;
-    let request = parts.request("claim-commit-drive");
+    let request = parts.request("admission-commit-drive");
     let crashing: crate::ConformanceTurnAttempt = {
         let parts = parts.clone();
         let request = request.clone();
@@ -1237,7 +1318,7 @@ pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
                         .expect("admit the root"),
                 );
                 let _ = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted).await;
-                panic!("the claim crash must interrupt the root");
+                panic!("the admission crash must interrupt the root");
             })
         })
     };
@@ -1265,20 +1346,24 @@ pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
         .run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(
                 &parts.session_id,
-                TurnId::from("claim-commit-driver"),
+                TurnId::from("admission-commit-driver"),
             )),
             crashing,
             redrive,
         )
         .await;
-    assert_eq!(crash.fired.load(Ordering::SeqCst), 1, "claim was committed");
+    assert_eq!(
+        crash.fired.load(Ordering::SeqCst),
+        1,
+        "the admission was committed"
+    );
     let results = crash
         .results
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
     let [(crashed_epoch, crashed), (successor_epoch, successor)] = results.as_slice() else {
-        panic!("the crashed worker and its successor each claim once: {results:?}");
+        panic!("the crashed worker and its successor each admit once: {results:?}");
     };
     assert_eq!(
         crashed_epoch, successor_epoch,
@@ -1287,20 +1372,20 @@ pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
     assert_eq!(
         crashed.input_ids(),
         vec![first.clone(), second.clone()],
-        "the crashed worker claimed the prefix queued before it"
+        "the crashed worker admitted the prefix queued before it"
     );
     assert_eq!(
-        serde_json::to_value(successor).expect("encode the successor's claim"),
-        serde_json::to_value(crashed).expect("encode the crashed claim"),
+        serde_json::to_value(successor).expect("encode the successor's admission"),
+        serde_json::to_value(crashed).expect("encode the crashed admission"),
         "the successor drives the recorded composition, base and generation"
     );
     assert_eq!(
         parts.applications().await,
         vec![
-            (first, TurnId::from("claim-commit-root")),
-            (second, TurnId::from("claim-commit-root"))
+            (first, TurnId::from("admission-commit-root")),
+            (second, TurnId::from("admission-commit-root"))
         ],
-        "the late input must not enter the crashed root's recorded claim"
+        "the late input must not enter the crashed root's recorded admission"
     );
 }
 
@@ -1319,7 +1404,7 @@ impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
     async fn pending_turn_cancel_closures(
         &self,
         session_id: &SessionId,
-        lease: &crate::ClaimAuthority,
+        lease: &crate::store::DriveFence,
         binding_id: &str,
         scope: &crate::ExecutionScope,
     ) -> Result<Vec<crate::TurnCancelClosureAuthorization>, crate::StoreError> {
@@ -1332,9 +1417,9 @@ impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
     }
 }
 
-/// A committed root redriven on its journal replays the claim that included
+/// A committed root redriven on its journal replays the admission that included
 /// orphan repair. The repair's store read runs only on first execution;
-/// the current lease's stop-only head check may still read committed evidence.
+/// a replay honours the recorded head verdict without a live head check.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1394,7 +1479,7 @@ pub async fn a_committed_root_replays_its_recorded_repair(
                 );
                 lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
                     .await
-                    .expect("redrive uses its recorded claim and repair");
+                    .expect("redrive uses its recorded admission and repair");
                 crate::ConformanceTurnEnd::Settled
             })
         })
@@ -1414,8 +1499,8 @@ pub async fn a_committed_root_replays_its_recorded_repair(
     assert_eq!(parts.calls(), 1, "the model call replays too");
 }
 
-impl ClaimFaultsOnce {
-    fn fire(&self, at: ClaimFault) -> Result<(), crate::StoreError> {
+impl AdmissionFaultsOnce {
+    fn fire(&self, at: AdmissionFault) -> Result<(), crate::StoreError> {
         if std::mem::discriminant(&at) == std::mem::discriminant(&self.fault)
             && self.fired.fetch_add(1, Ordering::SeqCst) == 0
         {
@@ -1426,7 +1511,7 @@ impl ClaimFaultsOnce {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for ClaimFaultsOnce {
+impl crate::store::RuntimePersistenceDecorator for AdmissionFaultsOnce {
     fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -1435,42 +1520,48 @@ impl crate::store::RuntimePersistenceDecorator for ClaimFaultsOnce {
         &self,
         request: &crate::store::AdmitRootRequest,
     ) -> Result<Option<crate::store::RootAdmission>, crate::StoreError> {
-        self.fire(ClaimFault::AtClaim)?;
+        self.fire(AdmissionFault::AtAdmission)?;
         let drive = self.inner.admit_root(request).await?;
-        self.fire(ClaimFault::AfterClaim)?;
+        self.fire(AdmissionFault::AfterAdmission)?;
         Ok(drive)
     }
 }
 
-/// A store that does not answer at a root's claim is that attempt's fault,
-/// never the claim's recorded outcome (FIG-3600 review HIGH-3). The root is
-/// re-admitted first by every later drive, so a recorded fault would replay
-/// under its claim key forever and wedge the session. Instead the attempt
-/// aborts open, its retry claims the rows (a partial claim of the faulted
-/// attempt is handed back, never left held), and the root commits once.
+/// A store that does not answer at a root's admission is that attempt's
+/// fault, never the admission's recorded outcome (FIG-3600 review HIGH-3).
+/// The root is re-admitted first by every later drive, so a recorded fault
+/// would replay under its admission key forever and wedge the session.
+/// Instead the attempt aborts open, its retry reads the root's admission
+/// back (rows the faulted attempt bound stay bound to the root), and the
+/// root commits once.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_store_fault_at_the_root_claim_is_retried_not_recorded(
+pub async fn a_store_fault_at_the_root_admission_is_retried_not_recorded(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     for (fault, law) in [
-        (ClaimFault::AtClaim, "claim-fault-at-claim"),
-        (ClaimFault::AfterClaim, "claim-fault-after-claim"),
+        (AdmissionFault::AtAdmission, "admission-fault-at-admission"),
+        (
+            AdmissionFault::AfterAdmission,
+            "admission-fault-after-admission",
+        ),
     ] {
         let mut parts = DriveParts::new(prefix, law, &effect_host, &stores, 8).await;
-        let faults = Arc::new(ClaimFaultsOnce {
+        let faults = Arc::new(AdmissionFaultsOnce {
             inner: Arc::clone(&parts.store),
             fault,
             fired: AtomicUsize::new(0),
         });
         parts.store = Arc::clone(&faults) as Arc<dyn crate::RuntimePersistence>;
-        let input = parts.enqueue("ask once", Some("claim-fault-root")).await;
-        let request = parts.request("claim-fault-drive");
+        let input = parts
+            .enqueue("ask once", Some("admission-fault-root"))
+            .await;
+        let request = parts.request("admission-fault-drive");
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<RootOutcome, String>>();
         let attempt: crate::ConformanceTurnAttempt = {
             let parts = parts.clone();
@@ -1540,7 +1631,7 @@ pub async fn a_store_fault_at_the_root_claim_is_retried_not_recorded(
         );
         assert_eq!(
             parts.applications().await,
-            vec![(input, TurnId::from("claim-fault-root"))],
+            vec![(input, TurnId::from("admission-fault-root"))],
             "{fault:?}: the input is applied once"
         );
     }
@@ -1548,8 +1639,8 @@ pub async fn a_store_fault_at_the_root_claim_is_retried_not_recorded(
 
 /// ADR 0101 §4 (FIG-3892): the command lane drains first at every turn
 /// boundary, and an input root's admission is that boundary. A session
-/// command enqueued after the root was admitted, before its claim, never
-/// holds the root's head back: the root claims the prefix ahead of the
+/// command enqueued after the drive admitted the root, before the root's
+/// own admission step, never holds the root's head back: the root takes the prefix ahead of the
 /// command and commits, while an input enqueued after the command waits.
 /// The next drive applies the command before that input runs.
 #[expect(
@@ -1581,7 +1672,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
                     .expect("admit the input root");
                 let admitted = admitted(verdict);
                 // The command and a later input arrive between the root's
-                // admission and its claim. Both are keyed, so a tier that
+                // drive admission and its own. Both are keyed, so a tier that
                 // retries this attempt admits each once.
                 parts
                     .store
@@ -1614,7 +1705,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
             })
         })
     };
-    // The root's first execution must commit: a claim the command held back
+    // The root's first execution must commit: an admission the command held back
     // would fail it retryably, and the tier would retry it forever.
     let driving = tokio::spawn({
         let runner = Arc::clone(&runner);
@@ -1625,7 +1716,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
     // wedge fails here rather than at the harness's test timeout.
     let first = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
         .await
-        .expect("the root's first execution ends instead of retrying its claim forever")
+        .expect("the root's first execution ends instead of retrying its admission forever")
         .expect("the root's first execution ended");
     assert!(
         matches!(
@@ -1633,7 +1724,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
             Ok(RootOutcome::Committed { root, .. })
                 if root.as_str() == "command-after-admission-root"
         ),
-        "the admitted root claims its head past the later command and commits: {first:?}"
+        "the admitted root takes its head past the later command and commits: {first:?}"
     );
     driving.await.expect("the tier settles the drive");
     let root = TurnId::from("command-after-admission-root");
@@ -1644,7 +1735,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
     );
     let pending = parts
         .store
-        .list_pending_queued_work(&parts.session_id)
+        .list_open_queued_work(&parts.session_id)
         .await
         .expect("read the command lane");
     assert_eq!(pending.len(), 1, "the command is still open: {pending:?}");
@@ -1671,7 +1762,7 @@ pub async fn a_command_enqueued_after_an_input_roots_admission_waits_for_the_nex
     assert!(
         parts
             .store
-            .list_pending_queued_work(&parts.session_id)
+            .list_open_queued_work(&parts.session_id)
             .await
             .expect("read the command lane")
             .is_empty(),
@@ -1806,8 +1897,8 @@ enum LaneItem {
 /// Accept `items` in order on a fresh law session, drive it to idle, and
 /// answer, per item in acceptance order, the model call that first rendered
 /// it (`None` when no call did). Queued work drains every compatible row it
-/// may (`DrainMode::All`) and one claim takes at most `claim_bound` inputs,
-/// so the only thing that keeps a claim from folding later items in is the
+/// may (`DrainMode::All`) and one admission takes at most `admission_bound`
+/// inputs, so the only thing that keeps an admission from folding later items in is the
 /// turn lane's order.
 #[expect(
     clippy::expect_used,
@@ -1820,11 +1911,11 @@ async fn first_rendering_calls(
     stores: &Arc<dyn crate::StoreSet>,
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     items: &[LaneItem],
-    claim_bound: usize,
+    admission_bound: usize,
 ) -> Vec<Option<usize>> {
-    let mut parts = DriveParts::new(prefix, law, effect_host, stores, claim_bound).await;
+    let mut parts = DriveParts::new(prefix, law, effect_host, stores, admission_bound).await;
     parts.host.durability.queued_work_batching = crate::QueuedWorkBatchingConfig::new(1)
-        .with_max_turn_input_claim(claim_bound)
+        .with_max_turn_input_admission(admission_bound)
         .with_drain_mode(crate::DrainMode::All);
     let rendered = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let model = crate::testing::TestProvider::builder()
@@ -1902,12 +1993,12 @@ async fn first_rendering_calls(
 
 /// ADR 0101 §5: the turn lane is one FIFO over both admission tables, so a
 /// turn never takes an item while an earlier item of the other kind is still
-/// unconsumed. What one claim takes — at idle or at a checkpoint — is a
+/// unconsumed. What one admission takes — at idle or at a checkpoint — is a
 /// contiguous run of the ingress sequence that stops at the first item it
 /// cannot deliver, never skipping it. Observed from the model's side: with
 /// host inputs and process wakes interleaved, the first call that renders
 /// each item never goes backwards in acceptance order, whether the queued
-/// run, an input root or a checkpoint claim did the taking.
+/// run, an input root or a checkpoint admission did the taking.
 pub async fn a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -1945,7 +2036,7 @@ pub async fn a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_o
         ),
     ];
     let mut out_of_order = Vec::new();
-    for (law, items, claim_bound) in cases {
+    for (law, items, admission_bound) in cases {
         let seen = first_rendering_calls(
             prefix,
             law,
@@ -1953,7 +2044,7 @@ pub async fn a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_o
             &stores,
             &runner,
             &items,
-            claim_bound,
+            admission_bound,
         )
         .await;
         let in_order =

@@ -107,13 +107,9 @@ impl UsageCapability {
             .stamp_semantic_boundary()
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         let result = super::super::state::commit_in_lane_context(
-            current.held_session_execution_lease.as_ref(),
+            current.held_drive_fence.as_ref(),
             Arc::clone(store),
             commit,
-            &current.runtime_lease_owner,
-            &current.runtime_lease_executor_id,
-            current.host.core.control.lease_timings,
-            Arc::clone(&current.host.core.clock),
             &current.resident_graph_head_stale,
         )
         .await

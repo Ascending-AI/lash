@@ -19,11 +19,8 @@
 //!    (`TurnReport::is_context_overflow`).
 //! 4. The same session runs another turn and finishes. Nothing was restarted.
 //!
-//! Plugin-owned overflow recovery is not exercised here: the
-//! standard-compaction plugin serves standard-protocol sessions only
-//! (FIG-4029), and an RLM session switches frames through the model-driven
-//! `continue_as`. Standard sessions own plugin recovery, covered by the
-//! `standard_compaction_persistence` tests in `crates/lash`.
+//! A separate standard-protocol session exercises plugin-owned overflow
+//! recovery on the same Restate stack. The RLM outcome arms remain separate.
 //!
 //! A control phase drives the same harness into a plain provider error and
 //! requires a *different* stop, because "distinguishable from a provider
@@ -53,6 +50,9 @@ const OVERSIZED_BYTES: usize = 512 * 1024;
 /// The tool the scripted cell calls to pull the oversized result into the
 /// turn's context.
 const OVERSIZED_TOOL: &str = "oversized_report";
+const RECOVERY_PENDING: &str = "Standard-compaction context-overflow recovery marker (pending):";
+const RECOVERY_COMPLETED: &str = "Standard-compaction context-overflow recovery completed:";
+const RECOVERY_SUMMARY: &str = "Compaction summary:";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -82,11 +82,96 @@ async fn main() -> Result<()> {
     emit(&classified);
     let control = provider_error_control(&run_id).await?;
     emit(&control);
+    emit(&standard_plugin_recovery(&run_id).await?);
     Ok(())
 }
 
 fn emit(checkpoint: &Value) {
     println!("{checkpoint}");
+}
+
+/// Read committed messages across both the old and current frames.
+fn durable_messages(view: &lash_core::SessionReadView) -> Vec<lash_core::Message> {
+    fn walk(nodes: &[lash::messages::SessionMessageTreeNode], out: &mut Vec<lash_core::Message>) {
+        for node in nodes {
+            out.push(node.message.clone());
+            walk(&node.children, out);
+        }
+    }
+    let mut messages = Vec::new();
+    walk(&view.message_tree(), &mut messages);
+    messages
+}
+
+fn plugin_record(message: &lash_core::Message, title: &str) -> bool {
+    matches!(message.origin, Some(lash_core::MessageOrigin::Plugin { ref plugin_id, .. }) if plugin_id == "standard_compaction")
+        && message
+            .parts
+            .iter()
+            .any(|part| part.content().starts_with(title))
+}
+
+/// A standard turn uses a native tool call, then the plugin summarizes the
+/// committed overflow and opens a frame before the next turn runs.
+async fn standard_plugin_recovery(run_id: &str) -> Result<Value> {
+    let harness = Harness::new(Script::ClassifiedOverflow, Protocol::Standard).await?;
+    let session_id = SessionId::from(format!("context-overflow-standard-{run_id}"));
+    let session = harness.open(&session_id).await?;
+    let overflow = session
+        .send(lash::TurnInput::text("summarize the attached report"))
+        .output()
+        .await
+        .context("standard overflow turn")?;
+    let before = session.read_view();
+    let pending = before
+        .messages()
+        .iter()
+        .any(|message| plugin_record(message, RECOVERY_PENDING));
+    let frame_before = before.to_snapshot().current_frame_node_id;
+
+    let continued = session
+        .send(lash::TurnInput::text("now give me the verdict"))
+        .output()
+        .await
+        .context("standard recovery turn")?;
+    let after = session.read_view();
+    let snapshot = after.to_snapshot();
+    let frame_after = snapshot.current_frame_node_id.clone();
+    let frame_reason = snapshot
+        .agent_frames
+        .iter()
+        .find(|frame| Some(&frame.frame_node_id) == frame_after.as_ref())
+        .map(|frame| frame.reason.as_str().to_string());
+    let history = durable_messages(&after);
+    let summary_chars = after
+        .messages()
+        .iter()
+        .find_map(|message| {
+            message.parts.iter().find_map(|part| {
+                part.content()
+                    .strip_prefix(RECOVERY_SUMMARY)
+                    .map(|text| text.trim().len())
+            })
+        })
+        .unwrap_or(0);
+
+    Ok(json!({
+        "checkpoint": "standard_plugin_recovered",
+        "protocol": "standard",
+        "session_id": session_id.as_str(),
+        "oversized_tool_result_bytes": harness.served_tool_bytes(),
+        "provider_calls": harness.provider_calls(),
+        "overflow_stop": stop_tag(&overflow.result.outcome)?,
+        "overflow_is_context_overflow": overflow.result.is_context_overflow(),
+        "plugin_recovery_pending": pending,
+        "plugin_recovery_completed": history.iter().any(|message| plugin_record(message, RECOVERY_COMPLETED)),
+        "plugin_recovery_summary_chars": summary_chars,
+        "recovery_frame_reason": frame_reason,
+        "recovery_frame_moved": frame_before != frame_after,
+        "continued_is_success": continued.result.is_success(),
+        "continued_is_context_overflow": continued.result.is_context_overflow(),
+        "continued_assistant_message": continued.result.assistant_message(),
+    }))
 }
 
 /// Phases 1-4: overflow, its own outcome, continued session.
@@ -100,7 +185,7 @@ async fn overflow_and_recovery(
     checkpoint: &str,
     session_tag: &str,
 ) -> Result<Value> {
-    let harness = Harness::new(script).await?;
+    let harness = Harness::new(script, Protocol::Rlm).await?;
     let session_id = SessionId::from(format!("context-overflow-{session_tag}-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -147,7 +232,7 @@ async fn overflow_and_recovery(
 /// The control: a plain provider error on the same harness must not produce
 /// the overflow outcome.
 async fn provider_error_control(run_id: &str) -> Result<Value> {
-    let harness = Harness::new(Script::ProviderError).await?;
+    let harness = Harness::new(Script::ProviderError, Protocol::Rlm).await?;
     let session_id = SessionId::from(format!("context-overflow-control-{run_id}"));
     let session = harness.open(&session_id).await?;
 
@@ -201,6 +286,12 @@ enum Script {
     ProviderError,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Protocol {
+    Rlm,
+    Standard,
+}
+
 struct Harness {
     core: lash::LashCore,
     provider_calls: Arc<AtomicUsize>,
@@ -214,7 +305,7 @@ impl Harness {
     /// endpoint served and registered with the local server: each arm is a
     /// deployment of its own, so its scripted provider is the one the server
     /// drives its turns with.
-    async fn new(script: Script) -> Result<Self> {
+    async fn new(script: Script, protocol: Protocol) -> Result<Self> {
         let restate = lash_restate_postgres_workers_e2e::local_restate::LocalRestate::from_env()?;
         let scratch = tempfile::tempdir().context("scratch dir for the SQLite store set")?;
         let provider_calls = Arc::new(AtomicUsize::new(0));
@@ -225,17 +316,30 @@ impl Harness {
             .context("open the SQLite store set")?;
         let engine = restate.engine(Arc::new(stores));
         let backend = lash::Backend::new(engine.clone());
-        let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
-            lash_protocol_rlm::RlmProtocolPluginConfig::builder()
-                .channel(lash_protocol_rlm::RlmChannel::Cell)
-                .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
-                .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
-                .build(),
-            &backend,
-        );
-
-        let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
-            .provider(scripted_provider(script, Arc::clone(&provider_calls)))
+        let builder = match protocol {
+            Protocol::Rlm => {
+                let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                    lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                        .channel(lash_protocol_rlm::RlmChannel::Cell)
+                        .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(
+                            1_000_000,
+                        ))
+                        .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                        .build(),
+                    &backend,
+                );
+                lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
+            }
+            Protocol::Standard => {
+                lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+            }
+        };
+        let builder = builder
+            .provider(scripted_provider(
+                script,
+                protocol,
+                Arc::clone(&provider_calls),
+            ))
             .model(
                 lash::ModelSpec::builder("context-overflow-recovery-mock")
                     .context_window_tokens(200_000)
@@ -251,7 +355,16 @@ impl Harness {
             )
             .plugin(Arc::new(OverflowPluginFactory {
                 tool_bytes: Arc::clone(&tool_bytes),
-            }))
+                protocol,
+            }));
+        let builder = if protocol == Protocol::Standard {
+            builder.plugin(Arc::new(
+                lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+            ))
+        } else {
+            builder
+        };
+        let core = builder
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "context-overflow-recovery",
                 format!("context-overflow-recovery:{}", std::process::id()),
@@ -315,15 +428,34 @@ fn oversized_call_cell() -> String {
     ))
 }
 
-fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider::ProviderHandle {
+fn scripted_provider(
+    script: Script,
+    protocol: Protocol,
+    calls: Arc<AtomicUsize>,
+) -> lash::provider::ProviderHandle {
     lash_restate_postgres_workers_e2e::scripted_provider::ScriptedProvider::builder()
         .kind("context-overflow-recovery")
-        .complete(move |_request| {
+        .complete(move |request| {
             let call = calls.fetch_add(1, Ordering::SeqCst);
+            let is_recovery_summary = protocol == Protocol::Standard && request.messages.iter().any(|message| {
+                message.blocks.iter().any(|block| match block {
+                    lash::provider::LlmContentBlock::Text { text, .. } =>
+                        text.contains("Recover a task whose turn stopped because the provider refused"),
+                    _ => false,
+                })
+            });
             async move {
+                if is_recovery_summary {
+                    return Ok(text_response(
+                        "Recovery summary: the oversized report was requested; its body was elided, and the verdict remains to be stated.".to_string(),
+                    ));
+                }
                 Ok(match (script, call) {
                     // Turn 1, call 1: reach for the oversized report.
-                    (_, 0) => text_response(oversized_call_cell()),
+                    (_, 0) => match protocol {
+                        Protocol::Rlm => text_response(oversized_call_cell()),
+                        Protocol::Standard => tool_call_response(),
+                    },
                     // Turn 1, call 2: the request now carries the oversized
                     // result and the model refuses it as too large.
                     (Script::Overflow, 1) => terminal_response(
@@ -346,16 +478,30 @@ fn scripted_provider(script: Script, calls: Arc<AtomicUsize>) -> lash::provider:
                         "upstream returned 500",
                     ),
                     // Turn 2: the session continues.
-                    (_, _) => {
-                        text_response(lash_restate_postgres_workers_e2e::scripted_finish_cell(
+                    (_, _) => match protocol {
+                        Protocol::Rlm => text_response(lash_restate_postgres_workers_e2e::scripted_finish_cell(
                             "\"the report checks out\"",
-                        ))
-                    }
+                        )),
+                        Protocol::Standard => text_response("the report checks out".to_string()),
+                    },
                 })
             }
         })
         .build()
         .into_handle()
+}
+
+fn tool_call_response() -> lash::provider::LlmResponse {
+    lash::provider::LlmResponse {
+        parts: vec![lash_core::LlmOutputPart::ToolCall {
+            call_id: "oversized-report-call".to_string(),
+            tool_name: OVERSIZED_TOOL.to_string(),
+            input_json: "{}".to_string(),
+            replay: None,
+        }],
+        response_metadata: Default::default(),
+        ..lash::provider::LlmResponse::default()
+    }
 }
 
 fn text_response(text: String) -> lash::provider::LlmResponse {
@@ -383,6 +529,7 @@ fn terminal_response(
 
 struct OverflowPluginFactory {
     tool_bytes: Arc<AtomicUsize>,
+    protocol: Protocol,
 }
 
 impl lash::plugins::PluginFactory for OverflowPluginFactory {
@@ -396,12 +543,14 @@ impl lash::plugins::PluginFactory for OverflowPluginFactory {
     ) -> Result<Arc<dyn SessionPlugin>, lash::plugins::PluginError> {
         Ok(Arc::new(OverflowPlugin {
             tool_bytes: Arc::clone(&self.tool_bytes),
+            protocol: self.protocol,
         }))
     }
 }
 
 struct OverflowPlugin {
     tool_bytes: Arc<AtomicUsize>,
+    protocol: Protocol,
 }
 
 impl SessionPlugin for OverflowPlugin {
@@ -410,7 +559,9 @@ impl SessionPlugin for OverflowPlugin {
     }
 
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), lash::plugins::PluginError> {
-        reg.context().compact(100, Arc::new(ReportCompactor));
+        if self.protocol == Protocol::Rlm {
+            reg.context().compact(100, Arc::new(ReportCompactor));
+        }
         reg.tools()
             .provider(oversized_tool_provider(Arc::clone(&self.tool_bytes)))
             .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))?;

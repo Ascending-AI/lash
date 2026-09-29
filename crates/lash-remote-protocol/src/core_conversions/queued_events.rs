@@ -27,13 +27,13 @@ impl From<lash_core::PartKind> for RemotePartKind {
     }
 }
 
-impl From<lash_core::runtime::QueuedWorkClaimBoundary> for RemoteQueuedWorkClaimBoundary {
-    fn from(value: lash_core::runtime::QueuedWorkClaimBoundary) -> Self {
+impl From<lash_core::runtime::AdmissionBoundary> for RemoteAdmissionBoundary {
+    fn from(value: lash_core::runtime::AdmissionBoundary) -> Self {
         match value {
-            lash_core::runtime::QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
+            lash_core::runtime::AdmissionBoundary::ActiveTurnCheckpoint => {
                 Self::ActiveTurnCheckpoint
             }
-            lash_core::runtime::QueuedWorkClaimBoundary::Idle => Self::Idle,
+            lash_core::runtime::AdmissionBoundary::Idle => Self::Idle,
         }
     }
 }

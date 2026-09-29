@@ -11,7 +11,10 @@ pub use context::{
     REBIND_FIELDS, RebindDisposition, RebindField, TOOL_CHILD_REBIND_VERSION, ToolDispatchContext,
     ToolTriggerEffectOutcome,
 };
-pub use pending_resolver::arm_pending_resolver;
+pub use pending_resolver::{
+    ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
+    finish_parked_wait, model_visible_intent_outcomes,
+};
 
 pub use attempt_coordinator::{
     GroupChildCoordination, ToolAttemptEffectIdentity, coordinate_tool_invocation,

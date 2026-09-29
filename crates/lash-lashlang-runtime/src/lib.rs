@@ -28,8 +28,13 @@ mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
 mod trace_waits;
 mod trigger_commands;
+mod trigger_tools;
 pub use trace_waits::TraceWaitBookkeeping;
 pub use trigger_commands::execute_trigger_operation;
+pub use trigger_tools::{
+    RegisterTriggerTools, execute_register_trigger_tool_call, register_trigger_tool_definition,
+    register_trigger_tool_provider,
+};
 mod language_runtime;
 pub use language_runtime::{
     is_language_runtime_receiver, journaled_language_runtime_value, language_runtime_operation,
@@ -471,11 +476,12 @@ fn lashlang_host_environment_from_resources(
             ),
         )?;
     }
-    Ok(LashlangHostEnvironment::new(
-        lashlang::with_trigger_resource_operations(resources)?,
-        abilities,
+    let mut resources = lashlang::with_trigger_resource_operations(resources)?;
+    lashlang::add_trigger_register_tool_binding(&mut resources)?;
+    Ok(
+        LashlangHostEnvironment::new(resources, abilities)
+            .with_language_features(language_features),
     )
-    .with_language_features(language_features))
 }
 
 pub fn lashlang_resources_from_tool_catalog(

@@ -639,24 +639,24 @@ impl LashRuntime {
 
     pub(super) fn runtime_session_services_for_turn(
         &self,
-        held_session_execution_lease: Option<&DriveClaimGuard>,
+        held_drive_fence: Option<&DriveFence>,
         turn_graph_appends: &TurnGraphAppendDraft,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::for_turn(
             self,
-            held_session_execution_lease,
+            held_drive_fence,
             turn_graph_appends,
         )?))
     }
 
     pub(super) fn runtime_session_services_after_commit(
         &self,
-        held_session_execution_lease: Option<&DriveClaimGuard>,
+        held_drive_fence: Option<&DriveFence>,
     ) -> Result<Arc<RuntimeSessionServices>, PluginOperationInvokeError> {
         Ok(Arc::new(RuntimeSessionServices::new(
             self,
             true,
-            held_session_execution_lease,
+            held_drive_fence,
         )?))
     }
 
@@ -984,15 +984,8 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
-        let commit_result = commit_runtime_state_without_session_lease(
-            store,
-            commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await;
+        let commit_result =
+            crate::store::commit_runtime_state_verified(store.as_ref(), commit).await;
         let commit_result = match commit_result {
             Ok(result) => result,
             Err(err) => {
@@ -1115,7 +1108,7 @@ impl LashRuntime {
                 batch_id: crate::BatchId::new(format!("inline-command:{}", uuid::Uuid::new_v4())),
                 source_key,
             };
-            self.apply_session_command_after_admission(vec![command], None, None, None)
+            self.apply_session_command_after_admission(vec![command], None)
                 .await?;
             return Ok(AcceptedSessionCommand::Inline(receipt));
         };
@@ -1308,7 +1301,7 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command(
         &mut self,
-        session_execution_lease: &crate::ClaimAuthority,
+        drive_fence: &crate::store::DriveFence,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
         if self
             .session
@@ -1320,13 +1313,13 @@ impl LashRuntime {
             return Ok(None);
         }
         let host = self.effect_host();
-        // The command commit keeps its claimed batch's existing operation identity.
+        // The command commit keeps its batch's existing operation identity.
         let controller = host.scoped(crate::AdmittedScope::queue_drain(
             &self.state.session_id,
             "session-command",
         ))?;
         self.drain_next_session_command_with_cancellation(
-            session_execution_lease,
+            drive_fence,
             tokio_util::sync::CancellationToken::new(),
             controller.controller(),
         )
@@ -1335,96 +1328,103 @@ impl LashRuntime {
 
     pub async fn drain_next_session_command_with_cancellation(
         &mut self,
-        session_execution_lease: &crate::ClaimAuthority,
+        drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
-        self.drain_next_session_command_fenced(
-            session_execution_lease,
-            None,
-            cancellation,
-            effect_controller,
-        )
-        .await
+        self.drain_next_session_command_fenced(drive_fence, cancellation, effect_controller)
+            .await
     }
 
-    /// Drain the next session command, its commit fenced by `drive_fence`
-    /// when one is given (ADR 0109 §7): a drive that sealed an admission
-    /// since the fence was read refuses the commit as superseded.
+    /// Apply the session's leading open command run, its commit fenced by
+    /// `drive_fence` (ADR 0109 §7, FIG-3927 §2.7): a drive that sealed an
+    /// admission since the fence was read refuses the commit as superseded.
+    ///
+    /// The command lane takes no binding. The run's rows are read open and
+    /// their obligations acknowledged delivered in one fenced write, and the
+    /// commit that applies the run settles them, predicated on each row still
+    /// being open. A host withdrawal in between refuses that commit, which
+    /// applies nothing, and the lane is read again.
     pub(super) async fn drain_next_session_command_fenced(
         &mut self,
-        session_execution_lease: &crate::ClaimAuthority,
-        drive_fence: Option<&crate::store::DriveFence>,
+        drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
     ) -> Result<Option<crate::SessionCommandReceipt>, RuntimeError> {
-        self.reload_invalidated_resident_session_state().await?;
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return Ok(None);
-        };
-        let claim = store
-            .claim_leading_ready_session_command(
-                &self.state.session_id,
-                session_execution_lease,
-                &session_execution_lease.owner,
-            )
-            .await
-            .map_err(super::runtime_error_from_store_commit)?;
-        let Some(claim) = claim else {
-            return Ok(None);
-        };
-        let Some(commands) = claim.session_commands() else {
-            return Err(RuntimeError::new(
-                crate::RuntimeErrorCode::SessionCommandClaim,
-                format!(
-                    "queued-work claim `{}` did not contain only single-command control batches",
-                    claim.claim_id
-                ),
-            ));
-        };
-        let receipts = commands
-            .iter()
-            .map(|(batch, _)| {
-                let batch_id = batch.batch_id.clone();
-                crate::SessionCommandReceipt {
-                    session_id: self.state.session_id.clone(),
-                    source_key: batch
-                        .source_key
-                        .clone()
-                        .unwrap_or_else(|| batch_id.to_string()),
-                    batch_id,
-                }
-            })
-            .collect::<Vec<_>>();
-        let commands = commands
-            .into_iter()
-            .map(|(_, command)| command.clone())
-            .collect::<Vec<_>>();
-        self.apply_session_command(
-            commands,
-            Some(claim.completion()),
-            Some(session_execution_lease),
-            drive_fence,
-            cancellation,
-            effect_controller,
-        )
-        .await?;
-        Ok(receipts.into_iter().next())
+        loop {
+            self.reload_invalidated_resident_session_state().await?;
+            let Some(store) = self
+                .session
+                .as_ref()
+                .and_then(|session| session.history_store())
+            else {
+                return Ok(None);
+            };
+            let batches = store
+                .open_session_command_run(drive_fence)
+                .await
+                .map_err(super::runtime_error_from_store_commit)?;
+            if batches.is_empty() {
+                return Ok(None);
+            }
+            let run = crate::AdmittedQueuedWork {
+                session_id: self.state.session_id.clone(),
+                batches,
+            };
+            let Some(commands) = run.session_commands() else {
+                return Err(RuntimeError::new(
+                    crate::RuntimeErrorCode::SessionCommandClaim,
+                    format!(
+                        "session command run {:?} did not contain only single-command control \
+                         batches",
+                        run.batch_ids()
+                    ),
+                ));
+            };
+            let receipts = commands
+                .iter()
+                .map(|(batch, _)| {
+                    let batch_id = batch.batch_id.clone();
+                    crate::SessionCommandReceipt {
+                        session_id: self.state.session_id.clone(),
+                        source_key: batch
+                            .source_key
+                            .clone()
+                            .unwrap_or_else(|| batch_id.to_string()),
+                        batch_id,
+                    }
+                })
+                .collect::<Vec<_>>();
+            let commands = commands
+                .into_iter()
+                .map(|(_, command)| command.clone())
+                .collect::<Vec<_>>();
+            if self
+                .apply_session_command(
+                    commands,
+                    run.completion(),
+                    drive_fence,
+                    cancellation.clone(),
+                    effect_controller,
+                )
+                .await?
+            {
+                return Ok(receipts.into_iter().next());
+            }
+        }
     }
 
+    /// Apply `commands` and commit them, settling `completion`'s rows.
+    /// `false` when a row was withdrawn since the lane was read: nothing was
+    /// applied.
     async fn apply_session_command(
         &mut self,
         commands: Vec<crate::SessionCommand>,
-        completion: Option<crate::QueuedWorkCompletion>,
-        session_execution_lease: Option<&crate::ClaimAuthority>,
-        drive_fence: Option<&crate::store::DriveFence>,
+        completion: crate::QueuedWorkCompletion,
+        drive_fence: &crate::store::DriveFence,
         cancellation: tokio_util::sync::CancellationToken,
         effect_controller: &dyn crate::RuntimeEffectController,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<bool, RuntimeError> {
         let has_durable_store = self
             .session
             .as_ref()
@@ -1434,20 +1434,15 @@ impl LashRuntime {
             || !super::commit_admission::requires_local_commit_admission(effect_controller)
         {
             return self
-                .apply_session_command_after_admission(
-                    commands,
-                    completion,
-                    session_execution_lease,
-                    drive_fence,
-                )
+                .apply_session_command_after_admission(commands, Some((completion, drive_fence)))
                 .await;
         }
         let session_id = self.state.session_id.clone();
         let work_identity = completion
-            .as_ref()
-            .map(|completion| completion.claim_id.clone())
-            .unwrap_or_else(|| "inline-session-command".to_string());
-        let result: Result<(), RuntimeCommitAdmissionError> =
+            .batch_ids
+            .first()
+            .map_or_else(|| "session-command".to_string(), ToString::to_string);
+        let result: Result<bool, RuntimeCommitAdmissionError> =
             super::run_head_advancing_commit_attempt(
                 session_id.clone(),
                 work_identity.clone(),
@@ -1466,9 +1461,7 @@ impl LashRuntime {
                     );
                     self.apply_session_command_after_admission(
                         commands,
-                        completion,
-                        session_execution_lease,
-                        drive_fence,
+                        Some((completion, drive_fence)),
                     )
                     .await
                     .map_err(RuntimeCommitAdmissionError)
@@ -1481,10 +1474,8 @@ impl LashRuntime {
     async fn apply_session_command_after_admission(
         &mut self,
         commands: Vec<crate::SessionCommand>,
-        completion: Option<crate::QueuedWorkCompletion>,
-        session_execution_lease: Option<&crate::ClaimAuthority>,
-        drive_fence: Option<&crate::store::DriveFence>,
-    ) -> Result<(), RuntimeError> {
+        applied: Option<(crate::QueuedWorkCompletion, &crate::store::DriveFence)>,
+    ) -> Result<bool, RuntimeError> {
         self.refresh_session_graph_from_store()
             .await
             .map_err(|err| {
@@ -1543,11 +1534,17 @@ impl LashRuntime {
             if let Some(next_state) = next_config_state {
                 self.install_resident_state(next_state);
             }
-            return Ok(());
+            return Ok(true);
+        };
+        let Some((completion, drive_fence)) = applied else {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::StoreCommitFailed,
+                "persisted session commands are applied by the drive's command lane",
+            ));
         };
         let operation = completion
-            .as_ref()
-            .and_then(|completion| completion.batch_ids.first())
+            .batch_ids
+            .first()
             .map(|batch_id| {
                 let state = next_config_state.as_ref().unwrap_or(&self.state);
                 crate::OperationId::new(state.queue_drain_scope(batch_id), "session-command")
@@ -1555,7 +1552,7 @@ impl LashRuntime {
             .ok_or_else(|| {
                 RuntimeError::new(
                     RuntimeErrorCode::StoreCommitFailed,
-                    "persisted session commands require a claimed queue boundary",
+                    "persisted session commands require an open command row",
                 )
             })?;
         let fleet_format = self.fleet_format();
@@ -1572,19 +1569,15 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(super::runtime_error_from_store_commit)?;
-        let Some(session_execution_lease) = session_execution_lease else {
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "session command commit requires a session execution lease",
-            ));
-        };
-        commit.session_execution_lease_fence = Some(session_execution_lease.clone());
-        commit.drive_fence = drive_fence.cloned().map(Box::new);
-        if let Some(completion) = completion {
-            commit = commit.completing_queue_claim(completion);
-        }
-        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
-            .await
+        commit.drive_fence = Some(Box::new(drive_fence.clone()));
+        commit.applied_commands = Some(completion);
+        let result =
+            match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+                // A host withdrew a command since the lane was read: the commit
+                // applied nothing, and the lane is read again (FIG-3927 §2.7).
+                Err(crate::StoreError::SessionCommandWithdrawn { .. }) => return Ok(false),
+                result => result,
+            }
             .map_err(|error| match error {
                 // A later admission sealed after the drain presented its
                 // fence: nothing was written, and the drive applies the
@@ -1599,7 +1592,7 @@ impl LashRuntime {
         if let Some(next_state) = next_config_state {
             self.install_resident_state(next_state);
         }
-        Ok(())
+        Ok(true)
     }
 }
 

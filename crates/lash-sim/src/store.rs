@@ -67,7 +67,7 @@ fn backend_fault_store_error(operation: &str, attempt: usize, retryable: bool) -
 #[derive(Clone, Debug)]
 enum ModelPendingInputState {
     Queued,
-    Claimed(String),
+    Admitted(String),
     Completed,
     Cancelled,
 }
@@ -123,7 +123,7 @@ impl ModelStore {
                     && input.mode == QueuedIngressMode::NextTurn
                     && matches!(input.state, ModelPendingInputState::Queued)
                 {
-                    input.state = ModelPendingInputState::Claimed(provider.to_string());
+                    input.state = ModelPendingInputState::Admitted(provider.to_string());
                 }
             }
         }
@@ -182,7 +182,7 @@ impl ModelStore {
             }
             BoundaryKind::Provider => {
                 for input in self.queued_input_boundaries.values_mut() {
-                    if matches!(&input.state, ModelPendingInputState::Claimed(provider) if provider == &event.boundary_id)
+                    if matches!(&input.state, ModelPendingInputState::Admitted(provider) if provider == &event.boundary_id)
                     {
                         input.state = ModelPendingInputState::Completed;
                     }
@@ -813,7 +813,7 @@ impl ModelStore {
                     match target.and_then(|target| self.queued_input_boundaries.get(target)) {
                         Some(input) => match input.state {
                             ModelPendingInputState::Queued => "cancelled",
-                            ModelPendingInputState::Claimed(_) => "already_claimed",
+                            ModelPendingInputState::Admitted(_) => "already_admitted",
                             ModelPendingInputState::Completed => "already_completed",
                             ModelPendingInputState::Cancelled => "already_cancelled",
                         },

@@ -1,0 +1,42 @@
+[package]
+name = "lashctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Operator commands for Lash installations"
+autobins = false
+autotests = false
+
+[lints]
+workspace = true
+
+[features]
+synthetic-next = ["lash-restate/synthetic-next"]
+
+[dependencies]
+lash = { workspace = true, features = ["rlm", "restate"] }
+lash-core-execution = { workspace = true }
+lash-core-store = { workspace = true }
+lash-postgres-store = { workspace = true }
+lash-remote-protocol = { workspace = true }
+lash-restate = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+[dev-dependencies]
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[[bin]]
+name = "lashctl"
+path = "src/main.rs"
+
+[[test]]
+name = "operator_json_contract"
+path = "tests/operator_json_contract.rs"

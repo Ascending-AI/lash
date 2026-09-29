@@ -728,7 +728,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         "a rejected checkpoint must not emit live application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::IngressStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -739,7 +739,7 @@ pub(super) async fn checkpoint_plugin_abort_leaves_active_input_pending_without_
         "a rejected checkpoint must not persist application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -897,7 +897,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         "a failed checkpoint attachment must not emit live application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::IngressStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -908,7 +908,7 @@ pub(super) async fn checkpoint_attachment_failure_leaves_active_input_pending_wi
         "a failed checkpoint attachment must not persist application evidence"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -1156,7 +1156,7 @@ pub(super) async fn commit_checkpoint_injected_turn_for_redrive(
         Arc::clone(&controller),
     )
     .expect("layer the handler's scope");
-    // FIG-3157: the wake claimed at the terminal checkpoint drives a
+    // FIG-3157: work admitted at the terminal checkpoint drives a
     // follow-on physical turn, so the run holds two turns. The acceptance
     // belongs to the admitted turn, which is the run's first one; the run
     // carries the same identity for callers that do not index turns.
@@ -1197,7 +1197,7 @@ pub(super) async fn redrive_checkpoint_injected_turn(
     let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
         .expect("layer the handler's scope");
     // FIG-3157: the run holds the admitted turn plus the follow-on turn the
-    // terminal-checkpoint claim drives. The acceptance identity belongs to
+    // terminal-checkpoint admission drives. The acceptance identity belongs to
     // the admitted turn, so that is the one returned here.
     let run = runtime
         .drive_turn_frames(input, TurnOptions::new(CancellationToken::new(), scope))
@@ -1224,23 +1224,54 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         turn_id,
     )
     .await;
-    let first_applications = lash_core::store::TurnInputStore::list_turn_input_applications(
+    let first_applications = lash_core::store::IngressStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )
     .await
     .expect("read first turn applications");
-    assert_eq!(first_applications.len(), 3);
-    // FIG-3157: the row claimed at the terminal checkpoint is applied as the
-    // follow-on turn's input, not as a checkpoint injection into the turn that
-    // had already committed its answer.
+    assert_eq!(first_applications.len(), 2);
+    // The root's admission composes next-turn rows only (FIG-3927 §2.2): the
+    // mid-turn injection is addressed to the turn named by the opening
+    // acceptance's source key, which the root composed as a member, so that
+    // turn never runs and never reaches a checkpoint. The root's terminal
+    // write ends that turn too (FIG-3946): it re-opens the injection as
+    // next-turn input at its own position, for the session's next root.
+    let injection = lash_core::store::IngressStore::list_pending_turn_inputs(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("list pending turn inputs")
+    .into_iter()
+    .find(|read| {
+        read.input.source_key.as_deref() == Some(format!("host:{turn_id}:injection").as_str())
+    })
+    .expect("the mid-turn injection is still pending");
+    assert_eq!(
+        injection.status,
+        lash_core::PendingTurnInputReadStatus::Open,
+        "the ended root released the injection: it is bound to no root"
+    );
+    assert_eq!(
+        injection.input.state.kind(),
+        lash_core::TurnInputStateKind::DeferredNextTurn,
+        "the injection no longer names the turn that never ran: {:?}",
+        injection.input.state
+    );
+    assert!(
+        first_applications
+            .iter()
+            .all(|application| application.input_id != injection.input.input_id),
+        "the ended root did not apply the injection"
+    );
     assert_eq!(
         first_applications
             .iter()
             .filter(|application| application.checkpoint.is_some())
             .count(),
         0,
-        "a terminal checkpoint claim is absorbed by the follow-on turn"
+        "no input was admitted at a checkpoint"
     );
 
     let replay_store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(JournalRedriveStore {
@@ -1262,7 +1293,7 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         "redrive must retain the journaled acceptance identity"
     );
     assert_eq!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::IngressStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -1271,17 +1302,101 @@ pub(super) async fn checkpoint_injected_turn_redrive_replays_the_original_commit
         first_applications,
         "redrive must preserve the original initial/checkpoint application split"
     );
+
+    // The session's next root admits the re-opened injection as its input.
+    let next_turn = TurnId::from("checkpoint-injected-next-root");
+    Box::pin(drive_root_after_checkpoint_injection(
+        &double,
+        Arc::clone(&store),
+        &next_turn,
+    ))
+    .await;
+    let applications = lash_core::store::IngressStore::list_turn_input_applications(
+        store.as_ref(),
+        &SessionId::from("root"),
+    )
+    .await
+    .expect("read applications after the next root");
+    let applied = applications
+        .iter()
+        .find(|application| application.input_id == injection.input.input_id)
+        .expect("the next root applies the injection");
+    assert_eq!(
+        applied.checkpoint, None,
+        "the next root admits the injection as next-turn input"
+    );
+    assert_ne!(
+        applied.turn_id, *turn_id,
+        "the injection is applied by a turn that ran, not the one that never did"
+    );
+    assert!(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
+            store.as_ref(),
+            &SessionId::from("root"),
+        )
+        .await
+        .expect("list pending turn inputs after the next root")
+        .iter()
+        .all(|read| read.input.input_id != injection.input.input_id),
+        "the next root settled the injection"
+    );
+}
+
+async fn drive_root_after_checkpoint_injection(
+    double: &lash_restate_test::RestateTestBackend,
+    store: Arc<RecordingStore>,
+    turn_id: &TurnId,
+) {
+    let controller: Arc<dyn lash_core::testing::EffectLayer> =
+        Arc::new(JournalReplayEffectController::default());
+    let backend = double.lash_backend();
+    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "answer to the injection".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]),
+        journal_replay_host(&backend, Arc::clone(&controller)),
+        runtime_store,
+    )
+    .await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("root", turn_id))
+        .await
+        .expect("open the next root's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), controller)
+        .expect("layer the next root's scope");
+    runtime
+        .drive_turn_frames(
+            TurnInput::text("after the injection"),
+            TurnOptions::new(CancellationToken::new(), scope),
+        )
+        .await
+        .expect("the next root commits");
+    handler
+        .close()
+        .await
+        .expect("close the next root's handler");
 }
 
 #[tokio::test]
-pub(super) async fn accepted_input_already_claimed_by_this_incarnation_cedes_before_driving() {
+pub(super) async fn accepted_input_withdrawn_before_its_drive_cedes() {
     let double = kernel_double(SEED + 18, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
-    let turn_id = &TurnId::from("accepted-input-foreign-claim");
+    let turn_id = &TurnId::from("accepted-input-withdrawn");
     let store = double_unbound_recording_store(&double).await;
     let controller: Arc<dyn lash_core::testing::EffectLayer> =
         Arc::new(JournalReplayEffectController::default());
-    let held: Arc<dyn lash_core::RuntimePersistence> = Arc::new(HeldClaimBeforeDriveStore {
+    let withdrawing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(WithdrawBeforeDriveStore {
         inner: Arc::clone(&store),
     });
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
@@ -1289,7 +1404,7 @@ pub(super) async fn accepted_input_already_claimed_by_this_incarnation_cedes_bef
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         journal_replay_host(&backend, Arc::clone(&controller)),
-        held,
+        withdrawing,
     )
     .await;
     let handler = double
@@ -1301,11 +1416,11 @@ pub(super) async fn accepted_input_already_claimed_by_this_incarnation_cedes_bef
 
     let error = runtime
         .drive_turn_frames(
-            TurnInput::text("claimed out from under the acceptance"),
+            TurnInput::text("withdrawn out from under the acceptance"),
             TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
-        .expect_err("a live probe that finds the accepted row held elsewhere cedes");
+        .expect_err("a drive that finds its accepted row withdrawn cedes");
     handler.close().await.expect("close the scope's handler");
 
     assert_eq!(
@@ -1313,19 +1428,18 @@ pub(super) async fn accepted_input_already_claimed_by_this_incarnation_cedes_bef
         lash_core::RuntimeErrorCode::AcceptedTurnInputCeded,
         "{error:?}"
     );
-    let pending = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let pending = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
     .await
     .expect("read pending inputs");
-    assert_eq!(
-        pending.len(),
-        1,
-        "the accepted row stays with its holder, neither withdrawn nor re-admitted: {pending:?}"
+    assert!(
+        pending.is_empty(),
+        "the withdrawn row is not re-admitted: {pending:?}"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_turn_input_applications(
+        lash_core::store::IngressStore::list_turn_input_applications(
             store.as_ref(),
             &SessionId::from("root"),
         )
@@ -1417,7 +1531,7 @@ pub(super) async fn active_input_after_last_call_is_first_admitted_on_next_turn(
     release.store(true, Ordering::SeqCst);
     let mut runtime = first_turn.await.expect("first turn task");
 
-    let pending = lash_core::store::TurnInputStore::list_pending_turn_inputs(
+    let pending = lash_core::store::IngressStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -1490,13 +1604,10 @@ pub(super) async fn command_only_queued_work_drain_completes_without_turn() {
 
     assert!(drained.is_none());
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("list queue after command-only drain")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("list queue after command-only drain")
+            .is_empty(),
         "command batch `{}` should be completed",
         command.batch_id
     );
@@ -1604,7 +1715,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         "wake checkpoint response"
     );
     assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -1615,13 +1726,10 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         queued_input.input_id
     );
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
-            store.as_ref(),
-            &SessionId::from("root")
-        )
-        .await
-        .expect("queued work after pending input drain")
-        .is_empty(),
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
+            .await
+            .expect("queued work after pending input drain")
+            .is_empty(),
         "process wake `{}` should be claimed at the user-input turn checkpoint",
         wake.wake_id
     );
@@ -1834,7 +1942,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
     // No idle gap: the wake was drained inside this run, with no drain call
     // and no further user input.
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
+        lash_core::store::IngressStore::list_queued_work(
             store.as_ref(),
             &SessionId::from(SESSION_ID)
         )
@@ -1859,6 +1967,261 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         held_before, held_after,
         "the session execution lease must be held across the terminal boundary"
     );
+}
+
+/// Where the run that withheld a wake for its FIG-3157 follow-on stops short
+/// of that follow-on's commit.
+#[derive(Clone, Copy, Debug)]
+enum WithheldFollowOnFailure {
+    /// The follow-on turn's own commit is refused for good.
+    FollowOnCommit,
+    /// The commit that withheld the wake fails its post-commit delivery, so
+    /// the follow-on never starts.
+    PostCommitDelivery,
+}
+
+/// FIG-3157 under FIG-3927: a follow-on that will not commit leaves no
+/// withheld row bound to its root.
+///
+/// The wake the terminal checkpoint withheld is bound to the root, and the
+/// commit that withheld it wrote no terminal because it owed the follow-on.
+/// When the run stops before that follow-on commits, the root ends at the
+/// turn whose answer it committed: it has terminal evidence, it is no longer
+/// the session's unfinished root, and the wake is open again at its own
+/// position, so the session's next drive admits it in a root of its own and
+/// completes it.
+async fn a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
+    seed: u64,
+    session_id: &'static str,
+    failure: WithheldFollowOnFailure,
+) {
+    let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
+    let root = TurnId::from(format!("{session_id}-turn"));
+    let store_cell: Arc<Mutex<Option<Arc<RecordingStore>>>> = Arc::new(Mutex::new(None));
+    let captured_store_cell = Arc::clone(&store_cell);
+    type WakeSource = (
+        Arc<dyn lash_core::ProcessRegistry>,
+        Arc<RecordingStore>,
+        ProcessId,
+    );
+    let wake_source: Arc<Mutex<Option<WakeSource>>> = Arc::new(Mutex::new(None));
+    let captured_wake_source = Arc::clone(&wake_source);
+    let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let captured_calls = Arc::clone(&calls);
+    let transport = TestProvider::builder()
+        .kind("mock")
+        .requires_streaming(true)
+        .complete(move |_| {
+            let captured_store_cell = Arc::clone(&captured_store_cell);
+            let captured_wake_source = Arc::clone(&captured_wake_source);
+            let captured_calls = Arc::clone(&captured_calls);
+            async move {
+                let source = captured_wake_source.lock_recover().take();
+                if let Some((registry, store, process)) = source {
+                    append_process_wake_to_queue(
+                        registry.as_ref(),
+                        store.as_ref(),
+                        &process,
+                        lash_core::ProcessEventAppendRequest::new(
+                            "process.wake",
+                            json!({
+                                "text": "withheld wake",
+                                "value": { "status": "withheld wake" }
+                            }),
+                        ),
+                    )
+                    .await;
+                }
+                let call = captured_calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if call == 1
+                    && matches!(failure, WithheldFollowOnFailure::FollowOnCommit)
+                    && let Some(store) = captured_store_cell.lock_recover().clone()
+                {
+                    store.fail_next_runtime_commit(lash_core::StoreError::RecordEncodingFailed {
+                        record_kind: "turn commit".to_string(),
+                        message: "injected follow-on commit refusal".to_string(),
+                    });
+                }
+                let text = if call == 0 {
+                    "committed answer"
+                } else {
+                    "wake answer"
+                };
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: text.to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        })
+        .build();
+    let persisted_failed = Arc::new(AtomicBool::new(false));
+    let plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = match failure {
+        WithheldFollowOnFailure::FollowOnCommit => Vec::new(),
+        WithheldFollowOnFailure::PostCommitDelivery => {
+            let persisted_failed = Arc::clone(&persisted_failed);
+            vec![Arc::new(RuntimeTestPluginFactory {
+                build: Arc::new(move |_| {
+                    let persisted_failed = Arc::clone(&persisted_failed);
+                    Ok(Arc::new(RuntimeTestPlugin {
+                        before_turn: None,
+                        checkpoint: None,
+                        presentation_steps: vec![],
+                        runtime_event: Some(Arc::new(move |event| {
+                            let persisted_failed = Arc::clone(&persisted_failed);
+                            Box::pin(async move {
+                                if matches!(
+                                    event,
+                                    lash_core::facade_support::PluginLifecycleEvent::TurnPersisted(
+                                        _
+                                    )
+                                ) && !persisted_failed.swap(true, Ordering::SeqCst)
+                                {
+                                    return Err(lash_core::PluginError::Session(
+                                        "injected post-commit delivery failure".to_string(),
+                                    ));
+                                }
+                                Ok(())
+                            })
+                        })),
+                        external_registrar: None,
+                    }))
+                }),
+            })]
+        }
+    };
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
+    let mut runtime = TestRuntime::new(&backend, transport)
+        .tools(Arc::new(EmptyTools))
+        .plugins(plugins)
+        .host(test_host_config(&backend))
+        .store(store.clone())
+        .with_session_id(session_id)
+        .build()
+        .await;
+    *store_cell.lock_recover() = Some(Arc::clone(&store));
+    let registry = runtime
+        .host
+        .process_registry()
+        .cloned()
+        .expect("process registry");
+    let target_scope = lash_core::SessionScope::new(session_id);
+    let registered = registry
+        .register_process(
+            lash_core::ProcessRegistration::new(
+                lash_core::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                lash_core::ProcessProvenance::session(target_scope.clone()),
+                lash_core::Lifetime::Detached,
+            )
+            .with_extra_event_types([process_wake_event_type()])
+            .with_wake_session_id(Some(target_scope.session_id.clone())),
+        )
+        .await
+        .expect("register wake process");
+    *wake_source.lock_recover() = Some((
+        Arc::clone(&registry),
+        Arc::clone(&store),
+        registered.id.clone(),
+    ));
+
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from(session_id),
+            root.clone(),
+        ))
+        .await
+        .expect("open the turn's handler");
+    let run = runtime
+        .drive_turn_frames(
+            TurnInput::text("hello"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the committed turn is the run's answer");
+    handler.close().await.expect("close the turn's handler");
+    assert_eq!(
+        run.turns.len(),
+        1,
+        "{failure:?}: only the answered turn committed"
+    );
+    assert_eq!(run.turns[0].assistant_output.safe_text, "committed answer");
+    assert!(
+        !run.turns[0].errors.is_empty(),
+        "{failure:?}: the answered turn reports the follow-on's failure"
+    );
+
+    let session = SessionId::from(session_id);
+    let terminal = lash_core::store::RootStore::root_terminal(store.as_ref(), &session, &root)
+        .await
+        .expect("read the root's terminal");
+    assert!(
+        terminal.is_some(),
+        "{failure:?}: the root ends at the turn whose answer it committed"
+    );
+    assert!(
+        lash_core::store::RootStore::unfinished_root(store.as_ref(), &session)
+            .await
+            .expect("read the unfinished root")
+            .is_none(),
+        "{failure:?}: no unfinished root holds the session"
+    );
+    let open = lash_core::store::IngressStore::list_open_queued_work(store.as_ref(), &session)
+        .await
+        .expect("list open queued work");
+    assert_eq!(
+        open.len(),
+        1,
+        "{failure:?}: the withheld wake is open again at its own position"
+    );
+
+    let handler = double
+        .open_handler(AdmittedScope::queue_drain(
+            session.clone(),
+            format!("{session_id}-redrive"),
+        ))
+        .await
+        .expect("open the drain's handler");
+    runtime
+        .drive_one_admitted_queued_root(TurnOptions::new(
+            CancellationToken::new(),
+            handler.scoped(),
+        ))
+        .await
+        .expect("the session's next drive admits the wake");
+    handler.close().await.expect("close the drain's handler");
+    assert!(
+        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &session)
+            .await
+            .expect("list queued work after the redrive")
+            .is_empty(),
+        "{failure:?}: the next drive completes the wake in a root of its own"
+    );
+}
+
+#[tokio::test]
+pub(super) async fn a_follow_on_whose_commit_is_refused_leaves_no_withheld_row_bound() {
+    Box::pin(a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
+        SEED + 19,
+        "withheld-follow-on-commit-refused",
+        WithheldFollowOnFailure::FollowOnCommit,
+    ))
+    .await;
+}
+
+#[tokio::test]
+pub(super) async fn a_withheld_commit_whose_delivery_fails_leaves_no_withheld_row_bound() {
+    Box::pin(a_follow_on_that_cannot_commit_leaves_no_withheld_row_bound(
+        SEED + 20,
+        "withheld-follow-on-delivery-failed",
+        WithheldFollowOnFailure::PostCommitDelivery,
+    ))
+    .await;
 }
 
 #[tokio::test]
@@ -1982,7 +2345,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        lash_core::store::TurnInputStore::list_pending_turn_inputs(
+        lash_core::store::IngressStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from(SESSION_ID)
         )
@@ -1993,7 +2356,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         queued_input.input_id
     );
     assert!(
-        lash_core::store::QueuedWorkStore::list_queued_work(
+        lash_core::store::IngressStore::list_queued_work(
             store.as_ref(),
             &SessionId::from(SESSION_ID)
         )
@@ -2043,21 +2406,20 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
     ));
 }
 
-// Regression (ADR 0029): a long-running turn must keep the queued-work claim it
-// already holds alive across a stall, no matter how short the lease TTL is.
-// Queued-work batches are claimed at active-turn checkpoints under the session
-// execution lease's generation; the claim carries no TTL of its own. So a turn
-// that claims a batch at one checkpoint, stalls past the (tiny) lease TTL --
-// here a slow provider call, while the session lease keeps renewing on its
-// background cadence and preserves its generation -- then crosses another
-// checkpoint re-runs `claim_ready_queued_work` under the *same* live generation,
-// which can never self-steal its own rows. At finalization the original claim
-// still owns its rows and the commit succeeds. Before generation fencing this
-// failed with `QueuedWorkClaimExpired` because the claim expired under the
-// stalled owner.
+// Regression (ADR 0029): a long-running turn must keep the queued work it
+// already admitted across a stall, no matter how short the lease TTL is.
+// Queued-work batches are admitted at active-turn checkpoints to the turn's
+// root; the binding carries no TTL of its own. So a turn that admits a batch
+// at one checkpoint, stalls past the (tiny) lease TTL -- here a slow provider
+// call, while the session lease keeps renewing on its background cadence and
+// preserves its generation -- then crosses another checkpoint re-runs
+// `admit_at_checkpoint` under the *same* live fence, which can never
+// self-steal its own rows. At finalization the root still holds its rows and
+// the commit succeeds. Before generation fencing this failed with
+// `QueuedWorkClaimExpired` because the claim expired under the stalled owner.
 //
-// This test must FAIL if anyone reintroduces time- or renewal-based claim
-// invalidation. The turn is driven with an in-process `TurnInput` (not a
-// store-claimed pending input) so the queued-work claim is the store claim
-// under scrutiny; the equally-unrenewed turn-input claim is covered by the
-// conformance generation-supersession cases.
+// This test must FAIL if anyone reintroduces time- or renewal-based binding
+// invalidation. The turn is driven with an in-process `TurnInput` (not an
+// admitted pending input) so the queued-work binding is the one under
+// scrutiny; the equally-unrenewed turn-input binding is covered by the
+// conformance admission laws.

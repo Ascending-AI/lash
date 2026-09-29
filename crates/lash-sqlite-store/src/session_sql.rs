@@ -173,7 +173,7 @@ lash_store_sql::statements! {
                     pending_follow_on_json
              FROM session_head WHERE session_id = ?1";
 
-        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every claim
+        /// The follow-on `?1`'s head owes (ADR 0101 §3), read by every admission
         /// inside its write transaction.
         select_pending_follow_on = "SELECT pending_follow_on_json FROM session_head WHERE session_id = ?1";
 
@@ -638,25 +638,6 @@ lash_store_sql::statements! {
     }
 }
 
-lash_store_sql::statements! {
-    /// `fleet_format` statements. All of them fork on the singleton flag —
-    /// SQLite's is the integer `1` and PostgreSQL's is `TRUE` — and both sides
-    /// insert the row only when absent: `F` moves forward alone, so a build
-    /// reopening a store that recorded a newer generation sees it rather than
-    /// winding the fleet back (ADR 0106 §1, FIG-3796/FIG-3800).
-    pub(crate) struct FleetFormatStatements @ "fleet_format" {
-        /// The recorded fleet format.
-        select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = 1";
-
-        /// Provisions on open: the row records this build's own fleet format
-        /// when nothing has recorded one, and a recorded row wins.
-        insert_if_absent = "INSERT INTO fleet_format (
-             singleton, format_version
-         ) VALUES (1, ?1)
-         ON CONFLICT(singleton) DO NOTHING";
-    }
-}
-
 /// Every session-core statement this store issues, rendered once.
 pub(crate) struct SessionSql {
     /// `session_meta` statements both backends issue verbatim.
@@ -689,8 +670,6 @@ pub(crate) struct SessionSql {
     pub(crate) checkpoint_edges: CheckpointBlobRefSqliteStatements,
     /// `release_stamp` statements only SQLite issues.
     pub(crate) release_stamp: ReleaseStampStatements,
-    /// `fleet_format` statements only SQLite issues.
-    pub(crate) fleet_format: FleetFormatStatements,
 }
 
 static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
@@ -711,7 +690,6 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         deleted_sqlite: DeletedSessionSqliteStatements::render(dialect),
         checkpoint_edges: CheckpointBlobRefSqliteStatements::render(dialect),
         release_stamp: ReleaseStampStatements::render(dialect),
-        fleet_format: FleetFormatStatements::render(dialect),
     }
 });
 

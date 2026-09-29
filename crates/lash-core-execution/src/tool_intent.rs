@@ -252,6 +252,17 @@ pub struct RegisterProcessDefinitionIntent {
 pub struct RegisterTriggerIntent {
     /// Session whose authority owns the subscription.
     pub session_id: SessionId,
+    /// The registrant scope the declaring attempt resolved, exactly as the
+    /// retired host-operation path resolved it from the live context.
+    pub owner_scope: crate::TriggerOwnerScope,
+    /// The actor the declaring attempt resolved for the registration.
+    pub actor: crate::ProcessOriginator,
+    /// The execution environment to publish under the realizing effect
+    /// scope's artifact owner, when the draft's `env_ref` names bytes not yet
+    /// durable. `None` when the attempt inherited an already-published env
+    /// ref from the process it runs inside.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env_spec: Option<crate::ProcessExecutionEnvSpec>,
     pub draft: crate::TriggerSubscriptionDraft,
 }
 
@@ -592,6 +603,11 @@ mod tests {
             }
             ToolIntentKind::RegisterTrigger => {
                 ToolIntent::RegisterTrigger(Box::new(RegisterTriggerIntent {
+                    owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
+                    actor: crate::ProcessOriginator::session(crate::SessionScope::new(
+                        session_id.clone(),
+                    )),
+                    env_spec: None,
                     session_id,
                     draft: crate::TriggerSubscriptionDraft::for_process(
                         "subscription",

@@ -457,6 +457,7 @@ fn tool_context_with_provider<'run>(
         clock: Arc::new(lash_core::facade_support::SystemClock),
         process_lineage: None,
         turn_capture: None,
+        process_originator: None,
     });
     lash_core::ToolContext::from_dispatch(dispatch)
         .tool_call_id(Some(CALL_ID.to_string()))

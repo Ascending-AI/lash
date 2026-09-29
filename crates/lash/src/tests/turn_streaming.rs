@@ -240,7 +240,7 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
 
     // A Durable Session acquires through the non-creating by-id seam. This
     // fixture still leaves `open_existing_store` unimplemented, so the queued
-    // driver's claimability read stays "unknown" — the property under test.
+    // driver's admissibility read stays "unknown" — the property under test.
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,

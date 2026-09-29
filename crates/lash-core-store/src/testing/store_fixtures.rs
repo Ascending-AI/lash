@@ -105,11 +105,11 @@ pub async fn commit_runtime_state_for_test(
     store.commit_runtime_state(commit).await
 }
 
-pub async fn seal_claim_authority_for_test(
+pub async fn seal_drive_fence_for_test(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
     owner_id: &str,
-) -> crate::ClaimAuthority {
+) -> crate::store::DriveFence {
     let _ = owner_id;
     let stored = match store.drive_epoch(session_id).await {
         Ok(stored) => stored,
@@ -117,16 +117,16 @@ pub async fn seal_claim_authority_for_test(
             store
                 .admit_and_bind_session(&crate::SessionBinding::root(session_id))
                 .await
-                .expect("admit claim-fence test session");
+                .expect("admit drive-fence test session");
             store
                 .drive_epoch(session_id)
                 .await
                 .expect("read admitted drive epoch")
         }
-        Err(error) => panic!("read claim-fence test drive epoch: {error}"),
+        Err(error) => panic!("read drive-fence test drive epoch: {error}"),
     };
     let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
-    let fence = match store
+    match store
         .seal_drive_epoch(
             session_id,
             &admission,
@@ -134,42 +134,41 @@ pub async fn seal_claim_authority_for_test(
             &crate::store::RootStartNonce::new(admission.as_str()),
         )
         .await
-        .expect("seal claim-fence test drive")
+        .expect("seal drive-fence test drive")
     {
         crate::store::DriveEpochSeal::Sealed(fence) => fence,
-        other => panic!("claim-fence test drive did not seal: {other:?}"),
-    };
-    crate::ClaimAuthority::from_drive_fence(&fence)
+        other => panic!("drive-fence test drive did not seal: {other:?}"),
+    }
 }
 
-/// Result of sealing a test drive admission for a claim law.
+/// Result of sealing a test drive admission for an admission law.
 #[derive(Debug)]
-pub enum DriveClaimTestOutcome {
-    Sealed(crate::ClaimAuthority),
+pub enum DriveSealTestOutcome {
+    Sealed(crate::store::DriveFence),
     Superseded { current_epoch: u64 },
     ExecutionLost,
 }
 
-impl DriveClaimTestOutcome {
-    pub fn acquired(self) -> Option<crate::ClaimAuthority> {
+impl DriveSealTestOutcome {
+    pub fn acquired(self) -> Option<crate::store::DriveFence> {
         match self {
-            Self::Sealed(authority) => Some(authority),
+            Self::Sealed(fence) => Some(fence),
             Self::Superseded { .. } => None,
             Self::ExecutionLost => None,
         }
     }
 }
 
-/// Test support for claim laws that need an independent sealed drive epoch.
+/// Test support for admission laws that need an independent sealed drive epoch.
 #[async_trait::async_trait]
-pub trait RuntimePersistenceTestClaimExt: crate::RuntimePersistence {
-    async fn seal_claim_epoch_for_test(
+pub trait RuntimePersistenceTestDriveExt: crate::RuntimePersistence {
+    async fn seal_drive_epoch_for_test(
         &self,
         session_id: &SessionId,
         _owner: &crate::LeaseOwnerIdentity,
         _executor_id: &str,
         _old_lease_ttl_ms: u64,
-    ) -> Result<DriveClaimTestOutcome, StoreError> {
+    ) -> Result<DriveSealTestOutcome, StoreError> {
         let stored = match self.drive_epoch(session_id).await {
             Ok(stored) => stored,
             Err(crate::StoreError::DriveEpochUnavailable { .. }) => {
@@ -189,28 +188,26 @@ pub trait RuntimePersistenceTestClaimExt: crate::RuntimePersistence {
             )
             .await?;
         Ok(match seal {
-            crate::store::DriveEpochSeal::Sealed(fence) => {
-                DriveClaimTestOutcome::Sealed(crate::ClaimAuthority::from_drive_fence(&fence))
-            }
+            crate::store::DriveEpochSeal::Sealed(fence) => DriveSealTestOutcome::Sealed(fence),
             crate::store::DriveEpochSeal::Superseded { epoch } => {
-                DriveClaimTestOutcome::Superseded {
+                DriveSealTestOutcome::Superseded {
                     current_epoch: epoch,
                 }
             }
-            crate::store::DriveEpochSeal::ExecutionLost => DriveClaimTestOutcome::ExecutionLost,
+            crate::store::DriveEpochSeal::ExecutionLost => DriveSealTestOutcome::ExecutionLost,
         })
     }
 
-    async fn supersede_claim_epoch_for_test(
+    async fn supersede_drive_epoch_for_test(
         &self,
-        authority: &crate::ClaimAuthority,
+        fence: &crate::store::DriveFence,
     ) -> Result<(), StoreError> {
         let admission = crate::store::AdmissionId::new(uuid::Uuid::new_v4().to_string());
         let result = self
             .seal_drive_epoch(
-                &authority.session_id,
+                fence.session(),
                 &admission,
-                authority.fencing_token,
+                fence.epoch(),
                 &crate::store::RootStartNonce::new(admission.as_str()),
             )
             .await?;
@@ -218,16 +215,93 @@ pub trait RuntimePersistenceTestClaimExt: crate::RuntimePersistence {
             crate::store::DriveEpochSeal::Sealed(_) => Ok(()),
             crate::store::DriveEpochSeal::Superseded { epoch } => {
                 Err(StoreError::StaleDriveFence {
-                    session_id: authority.session_id.clone(),
-                    fence_epoch: authority.fencing_token,
+                    session_id: fence.session().clone(),
+                    fence_epoch: fence.epoch(),
                     current_epoch: epoch,
                 })
             }
             crate::store::DriveEpochSeal::ExecutionLost => Err(StoreError::Backend(
-                "test claim successor lost execution".to_string(),
+                "test drive successor lost execution".to_string(),
             )),
         }
     }
 }
 
-impl<T: crate::RuntimePersistence + ?Sized> RuntimePersistenceTestClaimExt for T {}
+impl<T: crate::RuntimePersistence + ?Sized> RuntimePersistenceTestDriveExt for T {}
+
+/// The admission request conformance laws present for `root` headed by
+/// `head` under `fence`: generous bounds, an empty base, and a test build
+/// generation.
+pub fn admit_root_request_for_test(
+    fence: &crate::store::DriveFence,
+    root: &crate::TurnId,
+    head: crate::store::AdmittedHead,
+) -> crate::store::AdmitRootRequest {
+    crate::store::AdmitRootRequest {
+        fence: fence.clone(),
+        root: root.clone(),
+        head,
+        max_inputs: 64,
+        policy: super::queued_work_admission_policy(64),
+        base: crate::store::SessionHeadRef {
+            generation: 0,
+            revision: 0,
+            leaf: None,
+            checkpoint: None,
+        },
+        turn_index: 1,
+        generation: None,
+        admitted_generation: crate::build_generation::BuildGeneration::for_test("conformance"),
+    }
+}
+
+/// Admit `root`'s turn-lane run headed by `head` under `fence`
+/// ([`RootStore::admit_root`](crate::store::RootStore::admit_root)).
+pub async fn admit_root_for_test(
+    store: &Arc<dyn RuntimePersistence>,
+    fence: &crate::store::DriveFence,
+    root: &crate::TurnId,
+    head: crate::store::AdmittedHead,
+) -> Result<Option<crate::store::RootAdmission>, StoreError> {
+    store
+        .admit_root(&admit_root_request_for_test(fence, root, head))
+        .await
+}
+
+/// Admit what `root`'s physical turn `turn_id` takes at `checkpoint`, keyed
+/// by `step` ([`RootStore::admit_at_checkpoint`](crate::store::RootStore::admit_at_checkpoint)).
+#[allow(clippy::too_many_arguments)]
+pub async fn admit_at_checkpoint_for_test(
+    store: &Arc<dyn RuntimePersistence>,
+    fence: &crate::store::DriveFence,
+    root: &crate::TurnId,
+    turn_id: &crate::TurnId,
+    checkpoint: crate::CheckpointKind,
+    step: &str,
+    max_inputs: usize,
+    policy: crate::TurnLaneAdmissionPolicy,
+) -> Result<crate::store::CheckpointAdmission, StoreError> {
+    store
+        .admit_at_checkpoint(&crate::store::CheckpointAdmissionRequest {
+            fence: fence.clone(),
+            root: root.clone(),
+            turn_id: turn_id.clone(),
+            checkpoint,
+            step: step.to_string(),
+            max_inputs,
+            policy,
+        })
+        .await
+}
+
+/// Present `fence` on `commit` and have it settle `settlement`: the shape of
+/// every commit that settles rows a root admitted (FIG-3927).
+pub fn settling_commit_for_test(
+    mut commit: RuntimeCommit,
+    fence: &crate::store::DriveFence,
+    settlement: crate::store::IngressSettlement,
+) -> RuntimeCommit {
+    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.ingress = Some(settlement);
+    commit
+}

@@ -3,7 +3,7 @@
 use super::*;
 use lash_core::testing::TestTurnDrive;
 use lash_core::testing::runtime_helpers::RecordingSessionStoreFactory;
-use lash_core::{SessionCommitStore, TurnInputStore};
+use lash_core::{IngressStore, SessionCommitStore};
 fn parked_provider(
     started: tokio::sync::mpsc::Sender<()>,
 ) -> lash_core::facade_support::ProviderHandle {
@@ -60,7 +60,7 @@ fn registration_for(child: &SessionId) -> ProcessRegistration {
                 .with_session_id(child),
             ),
             turn_input: Box::new(lash_core::TurnInput::text("run the child turn")),
-            output_contract: lash_core::ToolOutputContract::Static,
+            result: lash_core::SessionTurnResult::Turn,
         },
         lash_core::ProcessProvenance::host(),
         lash_core::Lifetime::Detached,

@@ -69,7 +69,6 @@ impl SpanMarkers {
                     &mut resolved_markers,
                     &mut resolved,
                 ),
-                Declaration::Type(_) => {}
             }
         }
         extract(

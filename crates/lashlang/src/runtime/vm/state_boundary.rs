@@ -31,11 +31,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Ok(vm)
     }
 
-    pub fn flush_profile(&mut self, program: &CompiledProgram, host: &H) {
+    pub fn flush_profile(&mut self, host: &H) {
         if host.profile_execution() {
-            let mut profile = self.take_profile();
-            profile.compile_stats = program.compile_stats;
-            host.observe_profile(profile);
+            host.observe_profile(self.take_profile());
         }
     }
 }

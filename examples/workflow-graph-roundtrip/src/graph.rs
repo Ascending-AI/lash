@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lash::rlm::lang::{
     Expr, ProcessParam, VariableVersion, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowGraph, WorkflowListComprehensionClause, WorkflowNode, WorkflowNodeId,
-    WorkflowNodeKind, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
-    workflow_call_from_ir, workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
+    WorkflowEdgeKind, WorkflowGraph, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowSubgraph, WorkflowTerminalKind, format_type_expr, workflow_call_from_ir,
+    workflow_call_to_ir, workflow_effect_from_ir, workflow_effect_to_ir,
 };
 use lash::typescript::workflow_graph::{
     typescript_assign_target_source, typescript_expression_source,
@@ -12,9 +12,9 @@ use lash::typescript::workflow_graph::{
 use serde_json::json;
 
 use crate::{
-    ChildGroup, EdgeData, EditableComprehensionClause, ExpectedArgumentType, FlowEdge, FlowNode,
-    GraphRoots, NodeData, NodeName, RenderErrorResponse, TypeDiagnostic, TypedVariable,
-    ValidateRequest, ValidateResponse, ValidationKind, WorkflowDocument,
+    ChildGroup, EdgeData, ExpectedArgumentType, FlowEdge, FlowNode, GraphRoots, NodeData, NodeName,
+    RenderErrorResponse, TypeDiagnostic, TypedVariable, ValidateRequest, ValidateResponse,
+    ValidationKind, WorkflowDocument,
 };
 
 mod editable;
@@ -111,7 +111,6 @@ pub(crate) fn document_from_graph(
                 expression: None,
                 condition: None,
                 iterable: None,
-                clauses: Vec::new(),
                 source: None,
                 children: vec![ChildGroup {
                     slot: "body".to_string(),
@@ -190,7 +189,7 @@ pub(crate) fn graph_from_document(
             WorkflowDeclaration::Process(process) => {
                 Some((process.id.to_string(), process.clone()))
             }
-            WorkflowDeclaration::Type(_) | WorkflowDeclaration::Function(_) => None,
+            WorkflowDeclaration::Function(_) => None,
         })
         .collect::<BTreeMap<_, _>>();
     let graph_scope = GraphScope::main(document_process_bindings(&document, baseline));
@@ -208,7 +207,7 @@ pub(crate) fn graph_from_document(
     let mut declarations = baseline
         .declarations
         .iter()
-        .filter(|declaration| matches!(declaration, WorkflowDeclaration::Type(_)))
+        .filter(|declaration| matches!(declaration, WorkflowDeclaration::Function(_)))
         .cloned()
         .collect::<Vec<_>>();
     for process_id in &document.roots.processes {
@@ -423,12 +422,9 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         | WorkflowNodeKind::Call { binding, .. }
         | WorkflowNodeKind::Effect { binding, .. }
         | WorkflowNodeKind::Computation { binding, .. }
-        | WorkflowNodeKind::Container(WorkflowContainer::If { binding, .. })
-        | WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { binding, .. }) => {
-            binding
-                .as_ref()
-                .and_then(|target| typescript_assign_target_source(target).ok())
-        }
+        | WorkflowNodeKind::Container(WorkflowContainer::If { binding, .. }) => binding
+            .as_ref()
+            .and_then(|target| typescript_assign_target_source(target).ok()),
         WorkflowNodeKind::Container(WorkflowContainer::For { binding, .. }) => {
             Some(binding.clone())
         }
@@ -484,12 +480,6 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         }
         _ => None,
     };
-    let clauses = match &node.kind {
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { clauses, .. }) => {
-            clauses.iter().map(editable_clause).collect()
-        }
-        _ => Vec::new(),
-    };
     NodeData {
         kind: node_kind(node).to_string(),
         subkind: node_subkind(node).map(str::to_string),
@@ -514,7 +504,6 @@ fn node_data(node: &WorkflowNode, children: Vec<ChildGroup>, graph_scope: &Graph
         expression,
         condition,
         iterable,
-        clauses,
         source,
         children,
         available_vars: node
@@ -577,22 +566,6 @@ fn terminal_value(expression: &Expr, _scope: &FragmentScope) -> Option<String> {
         _ => return None,
     };
     typescript_expression_source(value).ok()
-}
-
-fn editable_clause(clause: &WorkflowListComprehensionClause) -> EditableComprehensionClause {
-    match clause {
-        WorkflowListComprehensionClause::For { binding, iterable } => {
-            EditableComprehensionClause::For {
-                binding: binding.clone(),
-                iterable: typescript_expression_source(iterable)
-                    .unwrap_or_else(|error| format!("<non-sourceable expression: {error}>")),
-            }
-        }
-        WorkflowListComprehensionClause::If { condition } => EditableComprehensionClause::If {
-            condition: typescript_expression_source(condition)
-                .unwrap_or_else(|error| format!("<non-sourceable expression: {error}>")),
-        },
-    }
 }
 
 fn flow_edge(edge: &WorkflowEdge, scope: &str) -> FlowEdge {
@@ -748,18 +721,6 @@ fn rebuild_children(
         for (slot, graph) in container.child_subgraphs_mut() {
             *graph = build(slot)?;
         }
-        if matches!(container, WorkflowContainer::ListComprehension { .. })
-            && allow_empty_default
-            && container
-                .child_subgraphs()
-                .next()
-                .is_some_and(|(_, element)| element.nodes.is_empty())
-        {
-            return Err(RenderErrorResponse::invalid_node_payload(
-                &node_id,
-                "container body cannot be empty; a list comprehension needs one element node",
-            ));
-        }
     }
     Ok(())
 }
@@ -907,21 +868,6 @@ fn node_from_flow_data(
                 )?,
                 bind: None,
                 body: Box::new(WorkflowSubgraph::default()),
-            },
-            Some("comprehension") => WorkflowContainer::ListComprehension {
-                binding: editable_binding(
-                    id,
-                    data.binding.as_ref(),
-                    &FragmentScope::of_data(data, graph_scope),
-                )?,
-                clauses: data
-                    .clauses
-                    .iter()
-                    .map(|clause| {
-                        workflow_clause(id, clause, &FragmentScope::of_data(data, graph_scope))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-                element: Box::new(WorkflowSubgraph::default()),
             },
             subkind => {
                 return Err(RenderErrorResponse::unknown_node_kind(
@@ -1096,18 +1042,6 @@ fn apply_editable_data(
             *condition =
                 required_expression(&node_id, data.condition.as_ref(), "condition", &scope)?;
         }
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-            binding,
-            clauses,
-            ..
-        }) => {
-            *binding = editable_binding(&node_id, data.binding.as_ref(), &scope)?;
-            *clauses = data
-                .clauses
-                .iter()
-                .map(|clause| workflow_clause(&node_id, clause, &scope))
-                .collect::<Result<Vec<_>, _>>()?;
-        }
         _ => {}
     }
     Ok(())
@@ -1173,36 +1107,6 @@ fn diagnostic_class_text(class: lash::rlm::lang::WorkflowDiagnosticClass) -> Str
         .unwrap_or_else(|| "definite".to_string())
 }
 
-fn workflow_clause(
-    node_id: &str,
-    clause: &EditableComprehensionClause,
-    scope: &FragmentScope,
-) -> Result<WorkflowListComprehensionClause, RenderErrorResponse> {
-    Ok(match clause {
-        EditableComprehensionClause::For { binding, iterable } => {
-            WorkflowListComprehensionClause::For {
-                binding: binding.clone(),
-                iterable: parse_fragment(iterable, scope).map_err(|error| {
-                    RenderErrorResponse::invalid_expression(
-                        node_id,
-                        "clause iterable",
-                        error.to_string(),
-                    )
-                })?,
-            }
-        }
-        EditableComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
-            condition: parse_fragment(condition, scope).map_err(|error| {
-                RenderErrorResponse::invalid_expression(
-                    node_id,
-                    "clause condition",
-                    error.to_string(),
-                )
-            })?,
-        },
-    })
-}
-
 fn node_ids(graph: &WorkflowSubgraph) -> Vec<String> {
     graph.nodes.iter().map(|node| node.id.to_string()).collect()
 }
@@ -1225,9 +1129,6 @@ fn node_subkind(node: &WorkflowNode) -> Option<&'static str> {
         WorkflowNodeKind::Container(WorkflowContainer::If { .. }) => Some("if"),
         WorkflowNodeKind::Container(WorkflowContainer::While { .. }) => Some("while"),
         WorkflowNodeKind::Container(WorkflowContainer::For { .. }) => Some("for"),
-        WorkflowNodeKind::Container(WorkflowContainer::ListComprehension { .. }) => {
-            Some("comprehension")
-        }
         _ => None,
     }
 }
@@ -1237,9 +1138,8 @@ fn effect_name(effect: &lash::rlm::lang::WorkflowEffectKind) -> &'static str {
     match effect {
         WorkflowEffectKind::AwaitJoin => "await_join",
         WorkflowEffectKind::WaitSignal => "wait_signal",
-        WorkflowEffectKind::SleepFor | WorkflowEffectKind::SleepUntil => "sleep",
+        WorkflowEffectKind::SleepFor => "sleep",
         WorkflowEffectKind::Print => "print",
-        WorkflowEffectKind::Yield => "yield",
         WorkflowEffectKind::Break => "break",
         WorkflowEffectKind::Continue => "continue",
     }
@@ -1434,90 +1334,5 @@ finish(items);
                 .expect("reproject transported source"),
             graph
         );
-    }
-
-    /// The fourth container kind, which no TypeScript source can produce.
-    ///
-    /// `WorkflowContainer::ListComprehension` is still part of the graph
-    /// vocabulary a host transports and edits, but TypeScript has no list
-    /// comprehension form (FIG-3033), so the node is built on the graph rather
-    /// than projected from source. The property is the same one the projected
-    /// kinds prove: the public document codec preserves the container, its
-    /// clauses and its element subgraph.
-    #[test]
-    fn api_document_transport_preserves_a_list_comprehension_container() {
-        let graph = lash::typescript::workflow_graph::workflow_graph_from_source(
-            "const items = [1, 2];\nfinish(items);\n",
-        )
-        .expect("project comprehension baseline");
-        let element = WorkflowNode {
-            id: workflow_node_id("comprehension:element"),
-            name: "data".to_string(),
-            description: None,
-            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
-            kind: WorkflowNodeKind::Data {
-                binding: None,
-                expression: Expr::Variable("value".into()),
-            },
-            available_variables: vec!["value".to_string()],
-            type_facets: None,
-            outputs: Vec::new(),
-            execution_sites: Vec::new(),
-            source_span: None,
-        };
-        let comprehension = WorkflowNode {
-            id: workflow_node_id("comprehension:container"),
-            name: "list comprehension".to_string(),
-            description: None,
-            name_source: lash::rlm::lang::WorkflowNodeNameSource::Derived,
-            kind: WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                binding: Some(lash::rlm::lang::AssignTarget::variable("doubled".into())),
-                clauses: vec![WorkflowListComprehensionClause::For {
-                    binding: "value".to_string(),
-                    iterable: Expr::Variable("items".into()),
-                }],
-                element: Box::new(WorkflowSubgraph {
-                    nodes: vec![element],
-                    edges: Vec::new(),
-                }),
-            }),
-            available_variables: vec!["items".to_string()],
-            type_facets: None,
-            outputs: Vec::new(),
-            execution_sites: Vec::new(),
-            source_span: None,
-        };
-        let mut graph = graph;
-        graph.main.nodes.insert(1, comprehension);
-
-        let document = document_from_graph(1, String::new(), graph.clone());
-        let transported: WorkflowDocument = serde_json::from_str(
-            &serde_json::to_string(&document).expect("serialize comprehension document"),
-        )
-        .expect("deserialize comprehension document");
-
-        let node = transported
-            .nodes
-            .iter()
-            .find(|node| node.data.subkind.as_deref() == Some("comprehension"))
-            .expect("comprehension container survives transport");
-        assert_eq!(node.data.binding.as_deref(), Some("doubled"));
-        assert_eq!(
-            node.data.clauses,
-            vec![EditableComprehensionClause::For {
-                binding: "value".to_string(),
-                iterable: "items".to_string(),
-            }]
-        );
-        assert!(
-            node.data
-                .children
-                .iter()
-                .any(|child| child.slot == "element" && child.node_ids.len() == 1)
-        );
-
-        let rebuilt =
-            graph_from_document(transported, &graph).expect("rebuild comprehension graph");
-        assert_eq!(rebuilt, graph);
     }
 }

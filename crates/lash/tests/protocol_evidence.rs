@@ -409,12 +409,6 @@ fn drain_area_witnesses() {
     let _ = lash::direct::LlmTerminalReason::code;
     // W0115: lash::direct::NonNegativeFiniteF64 [struct]
     type_witness::<lash::direct::NonNegativeFiniteF64>();
-    // W0116: lash::persistence::PendingTurnInputClaimDiagnostics::claim_session_lease_generation [field]
-    field_witness(
-        |value: &lash::persistence::PendingTurnInputClaimDiagnostics| {
-            let _ = &value.claim_session_lease_generation;
-        },
-    );
     // W0117: lash::persistence::PersistedSessionConfig::generation [field]
     field_witness(|value: &lash::persistence::PersistedSessionConfig| {
         let _ = &value.generation;
@@ -528,10 +522,6 @@ fn drain_area_witnesses() {
             let _ = record_kind;
         }
     });
-    // W0141: lash::persistence::WorkClaim::session_lease_generation [field]
-    field_witness(|value: &lash::persistence::WorkClaim<()>| {
-        let _ = &value.session_lease_generation;
-    });
     // W0142: lash::plugins::SessionAppendNode::ProtocolEvent [variant]
     variant_witness(|value: &lash::plugins::SessionAppendNode| {
         matches!(
@@ -557,8 +547,8 @@ fn drain_area_witnesses() {
     });
     // W0147: lash::remote::Envelope::into_body [function]
     let _ = lash::remote::Envelope::<serde_json::Value>::into_body;
-    // W0148: lash::remote::Envelope::new [function]
-    let _ = lash::remote::Envelope::<serde_json::Value>::new;
+    // W0148: lash::remote::Envelope::at [function]
+    let _ = lash::remote::Envelope::<serde_json::Value>::at;
     // W0149: lash::remote::Envelope::protocol_version [function]
     let _ = lash::remote::Envelope::<serde_json::Value>::protocol_version;
     // W0150: lash::remote::RemoteProtocolError::ConflictingLlmCallRecord [variant]

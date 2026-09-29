@@ -5,6 +5,7 @@
 
 use lash_sansio::SessionId;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use lash_core::{
@@ -21,8 +22,7 @@ use crate::capability::CapabilityRegistry;
 use crate::rlm_support::{
     self, SpawnCreateRequestInput, build_spawn_create_request, capability_list_for_description,
     example_capability_name, finalise_tool_result, render_task_prompt, required_string,
-    spawn_agent_input_schema, task_result_value, tool_definition, turn_input_for_task,
-    unknown_capability_message,
+    spawn_agent_input_schema, tool_definition, turn_input_for_task, unknown_capability_message,
 };
 
 pub(crate) struct RlmSubagentToolsProvider {
@@ -34,75 +34,32 @@ pub(crate) struct RlmSubagentToolsProvider {
     pub(crate) lifetime: lash_core::LifetimePolicy,
     pub(crate) parent_subagent: Option<SubagentSessionContext>,
     pub(crate) include_submit_error: bool,
+    /// How long a spawn waits for its child. A spawn that times out is an
+    /// error result, and the runtime cancels the child.
+    pub(crate) timeout: Option<Duration>,
 }
 
 impl RlmSubagentToolsProvider {
-    /// A subagent spawn *is* a process that runs a child lash session: decode the
-    /// journaled create request + task, emit one generic
-    /// `ProcessInput::SessionTurn`, and await its handle. Going through the
-    /// process worker (rather than any bespoke session-lifecycle code in this
-    /// crate) is what re-supplies the live parent provider, gives the child
-    /// durability, and makes it recoverable — the same generic path every other
-    /// background session turn takes.
-    async fn execute_orchestration(
-        &self,
-        args: &Value,
-        context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> Result<Value, String> {
-        // Validate against the caller's declaration at the result boundary as
-        // well as inside the built-in child. Capabilities are trusted request
-        // authors and may construct a child request that does not carry the
-        // declaration into the RLM repair loop.
-        let output_schema = lash_lashlang_runtime::parse_output_schema(args.get("output"))
-            .map_err(|err| format!("spawn_agent output schema was invalid: {err}"))?;
-        let prepared: PreparedSpawnAgent = context
-            .decode_prepared_payload()
-            .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
+    pub(crate) fn into_provider(self) -> StaticToolProvider<Self> {
+        let definitions = self.tool_definitions();
+        StaticToolProvider::new(definitions, self)
+    }
 
-        let request = lash_core::ProcessStartRequest::new(
-            lash_core::ProcessInput::SessionTurn {
-                definition_key: "lash-subagent-session-turn:v1".to_string(),
-                create_request: prepared.create_request,
-                turn_input: Box::new(prepared.turn_input),
-                output_contract: lash_core::ToolOutputContract::Static,
-            },
-            lash_core::ProcessOriginator::host(),
-            // The host's policy, resolved against the spawn's admitted start
-            // context. The decision rides the journaled start; a redrive
-            // presents the same key and gets the retained child back.
-            (self.lifetime)(&context.start_cx().map_err(|error| error.to_string())?),
-        )
-        // The spawn call's own key: every redrive of this body starts the same
-        // child, and the child's session derives from the id its start mints
-        // (ADR 0107).
-        .with_start_key(Some(context.start_key(0).map_err(|error| error.to_string())?))
-        .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
-            "subagent",
-            Some("spawn".to_string()),
-        ));
-        let child = context
-            .start_process(request)
-            .await
-            .map_err(|err| format!("failed to start subagent process: {err}"))?;
-        context.emit_child_process_started(
-            child.process_id.clone(),
-            None,
-            Some("subagent".to_string()),
-        );
-        let output = context
-            .await_process(&child.process_id)
-            .await
-            .map_err(|err| format!("subagent failed while executing its task: {err}"))?;
-        child_task_result(output, output_schema.as_ref())
+    fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        let mut definitions = vec![spawn_agent_tool_definition(&self.registry.names())];
+        if self.include_submit_error {
+            definitions.push(rlm_support::submit_error_tool_definition());
+        }
+        definitions
     }
 
     async fn prepare_spawn_agent(
         &self,
-        args: &Value,
-        context: &lash_core::ToolPrepareContext,
-        tool_id: lash_core::ToolId,
-        call: lash_core::sansio::PendingToolCall,
+        tool_id: &lash_core::ToolId,
+        call: PendingToolCall,
+        context: &ToolPrepareContext,
     ) -> Result<PreparedToolCall, ToolOutcome> {
+        let args = &call.args;
         let task = required_string(args, "task")
             .map_err(|err| ToolOutcome::err(serde_json::json!(err)))?;
         let capability_name = capability_name_from_args(args, &self.registry)
@@ -156,138 +113,123 @@ impl RlmSubagentToolsProvider {
         // The child session is the process's own, derived from the id its
         // start mints (ADR 0107), so the request names none.
         create_request.session_id = None;
-        let create_request = Box::new(create_request);
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
         let payload = serde_json::to_value(PreparedSpawnAgent {
-            create_request,
+            create_request: Box::new(create_request),
             turn_input,
+            output_schema,
         })
         .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
         Ok(PreparedToolCall::from_parts(
             call.call_id,
-            tool_id,
+            tool_id.clone(),
             call.tool_name,
             call.args,
             call.replay,
             payload,
         ))
     }
-}
 
-struct SpawnAgentOrchestratingTool {
-    provider: Arc<RlmSubagentToolsProvider>,
-    definition: ToolDefinition,
-}
-
-#[expect(
-    unsafe_code,
-    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
-)]
-pub(crate) fn spawn_agent_orchestrating_tool(
-    provider: Arc<RlmSubagentToolsProvider>,
-) -> lash_core::facade_support::OrchestratingToolDef {
-    let definition = spawn_agent_tool_definition(&provider.registry.names());
-    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
-        Arc::new(SpawnAgentOrchestratingTool {
-            provider,
-            definition,
-        });
-    // SAFETY: this crate owns the spawn-agent tool contract and body.
-    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
-}
-
-#[async_trait]
-impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOrchestratingTool {
-    fn manifest(&self) -> lash_core::ToolManifest {
-        self.definition.manifest()
-    }
-
-    fn contract(&self) -> Arc<lash_core::ToolContract> {
-        Arc::new(self.definition.contract())
-    }
-
-    async fn prepare_tool_call(
+    /// A subagent spawn *is* a process that runs a child lash session. The
+    /// body declares that one `ProcessInput::SessionTurn` start and parks on
+    /// it; the runtime launches the start, and the child's final value — the
+    /// SessionTurn runner's projection under `SessionTurnResult::FinalValue` —
+    /// resolves the call. Going through the process worker re-supplies the
+    /// live parent provider, gives the child durability and makes it
+    /// recoverable, the same generic path every other session turn takes.
+    fn execute_spawn_agent(
         &self,
-        call: lash_core::ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        let args = call.pending.args.clone();
-        self.provider
-            .prepare_spawn_agent(&args, call.context, call.tool_id, call.pending)
-            .await
-    }
-
-    async fn execute(
-        &self,
-        args: &Value,
-        context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        finalise_tool_result(self.provider.execute_orchestration(args, context).await)
+        context: &lash_core::AttemptContext<'_>,
+    ) -> Result<lash_core::ToolAttemptOutcome, String> {
+        let prepared: PreparedSpawnAgent = context
+            .decode_prepared_payload()
+            .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
+        // The host's policy, resolved against the spawn's admitted start
+        // context. The decision rides the declaration; a redrive presents the
+        // same key and gets the retained child back.
+        let lifetime = (self.lifetime)(&context.start_cx().map_err(|err| err.to_string())?);
+        let session_id = SessionId::from(context.session_id());
+        // A child spawned from inside a running process belongs to the chain
+        // that started the process; any other spawn belongs to the session
+        // that authored the call, which then observes it.
+        let originator = match context.process_spawn_provenance() {
+            Some(spawn) => spawn.originator.clone(),
+            None => lash_core::ProcessOriginator::Session {
+                session_id: session_id.clone(),
+                agent_frame_id: Some(context.agent_frame_id().clone()),
+            },
+        };
+        let declaration = lash_core::ProcessStartDeclaration::new(
+            lash_core::ProcessInput::SessionTurn {
+                definition_key: SUBAGENT_SESSION_TURN_DEFINITION.to_string(),
+                create_request: prepared.create_request,
+                turn_input: Box::new(prepared.turn_input),
+                result: lash_core::SessionTurnResult::FinalValue {
+                    schema: prepared.output_schema,
+                },
+            },
+            originator,
+            lifetime,
+        )
+        .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
+            "subagent",
+            Some("spawn".to_string()),
+        ));
+        let start = lash_core::DeclaredStart::new(
+            context,
+            lash_core::StartProcessIntent {
+                session_id,
+                declaration,
+            },
+        )
+        .map_err(|err| format!("spawn_agent could not declare its child: {err}"))?;
+        let mut pending = lash_core::PendingCompletion::new();
+        if let Some(timeout) = self.timeout {
+            pending = pending.with_deadline(timeout);
+        }
+        Ok(lash_core::ToolAttemptOutcome::pending(
+            pending.resolved_by_declared_start(start),
+        ))
     }
 }
+
+/// The definition key of a spawned child's SessionTurn process.
+const SUBAGENT_SESSION_TURN_DEFINITION: &str = "lash-subagent-session-turn";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PreparedSpawnAgent {
     create_request: Box<lash_core::SessionCreateRequest>,
     turn_input: lash_core::TurnInput,
-}
-
-/// Project the awaited subagent process output back onto the spawn tool's
-/// result. The generic `SessionTurn` runner wraps the child's terminal
-/// `AssembledTurn` in its success value. Recover it, require a finished answer,
-/// project that answer, and enforce the caller's declared output schema. A
-/// child that terminated via `submit_error` (or otherwise failed) surfaces as
-/// a tool error carrying its reason.
-fn child_task_result(
-    output: lash_core::ProcessAwaitOutput,
-    output_schema: Option<&Value>,
-) -> Result<Value, String> {
-    match output {
-        lash_core::ProcessAwaitOutput::Abandoned { .. } => {
-            Err("subagent process was abandoned before recording an outcome".to_string())
-        }
-        lash_core::ProcessAwaitOutput::NoLongerRetained { .. } => {
-            Err("subagent process outcome is no longer retained".to_string())
-        }
-        output => match output.into_tool_output().outcome {
-            lash_core::ToolCallOutcome::Success(value) => {
-                let value = lash_core::ToolCallOutput::success_tool_value(value)
-                    .into_value_for_projection();
-                let turn: lash_core::facade_support::AssembledTurn = value
-                    .get("turn")
-                    .cloned()
-                    .map(serde_json::from_value)
-                    .transpose()
-                    .map_err(|err| format!("subagent process output was malformed: {err}"))?
-                    .ok_or_else(|| "subagent process output was missing its turn".to_string())?;
-                let value = task_result_value(&turn)?;
-                if let Some(schema) = output_schema {
-                    rlm_support::validate_task_result(&value, schema).map_err(|err| {
-                        format!(
-                            "subagent task result did not match the declared output schema: {err}"
-                        )
-                    })?;
-                }
-                Ok(value)
-            }
-            lash_core::ToolCallOutcome::Failure(failure) => Err(failure.message),
-            lash_core::ToolCallOutcome::Cancelled(cancellation) => Err(cancellation.message),
-        },
-    }
+    /// The caller's declared output schema, parsed once at prepare. The
+    /// SessionTurn runner checks the child's final value against it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    output_schema: Option<Value>,
 }
 
 #[async_trait]
 impl StaticToolExecute for RlmSubagentToolsProvider {
+    fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
+        tool_id.as_str() == SPAWN_AGENT_TOOL_ID
+    }
+
     async fn prepare_tool_call(
         &self,
         tool_id: &lash_core::ToolId,
         pending: PendingToolCall,
-        _context: &ToolPrepareContext,
+        context: &ToolPrepareContext,
     ) -> Result<PreparedToolCall, ToolOutcome> {
-        Ok(PreparedToolCall::identity(tool_id.clone(), pending))
+        match pending.tool_name.as_str() {
+            "spawn_agent" => self.prepare_spawn_agent(tool_id, pending, context).await,
+            _ => Ok(PreparedToolCall::identity(tool_id.clone(), pending)),
+        }
     }
 
     async fn execute(&self, call: ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         let result = match call.name() {
+            "spawn_agent" => match self.execute_spawn_agent(call.context) {
+                Ok(outcome) => return outcome,
+                Err(err) => Err(err),
+            },
             "submit_error" => return rlm_support::submit_error_tool_result(call.args).into(),
             other => Err(format!("Unknown tool: {other}")),
         };
@@ -295,21 +237,8 @@ impl StaticToolExecute for RlmSubagentToolsProvider {
     }
 }
 
-impl RlmSubagentToolsProvider {
-    /// `spawn_agent` is registered separately in the orchestrating lane.
-    pub(crate) fn into_leaf_provider(self) -> StaticToolProvider<Self> {
-        let definitions = self.leaf_tool_definitions();
-        StaticToolProvider::new(definitions, self)
-    }
-
-    fn leaf_tool_definitions(&self) -> Vec<ToolDefinition> {
-        let mut definitions = Vec::new();
-        if self.include_submit_error {
-            definitions.push(rlm_support::submit_error_tool_definition());
-        }
-        definitions
-    }
-}
+/// The manifest id of `spawn_agent`.
+const SPAWN_AGENT_TOOL_ID: &str = "tool:spawn_agent";
 
 #[cfg(test)]
 pub(crate) fn rlm_subagent_tool_definitions(capability_names: &[String]) -> Vec<ToolDefinition> {
@@ -362,7 +291,7 @@ fn spawn_agent_definition(capability_names: &[String], examples: Vec<String>) ->
     let cap_list = capability_list_for_description(capability_names);
     let capability_detail = capability_detail_for_tool_description(capability_names);
     let description = format!(
-        "Run one subagent and return its final result. Direct awaits are serial; for parallel fan-out, start every branch process before awaiting the handle collection. {capability_detail} Available capabilities: {cap_list}. \
+        "Run one subagent and return its final result. Spawns awaited together, with `Promise.all` or in one batch, run at once. {capability_detail} Available capabilities: {cap_list}. \
         \n\nThe child inherits no state. Pass required context through `seed`; projected roots remain read-only projections, while computed values become writable globals. Projected seeds require an RLM child.\
         \n\nA child can fail terminally through `task.fail`; this operation returns that reason as an error."
     );

@@ -68,7 +68,6 @@ mod runtime {
 
         mod assembler;
         mod core_contracts;
-        mod drive_claim_observability;
         mod kernel_door;
         mod language_runtime_value;
         mod projection;

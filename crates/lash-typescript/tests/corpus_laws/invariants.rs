@@ -190,7 +190,6 @@ fn check_artifact(linked: &LinkedModule) -> Vec<String> {
                 process.name.to_string()
             }
             Declaration::Function(function) => function.name.to_string(),
-            Declaration::Type(ty) => ty.name.to_string(),
         };
         *names.entry(name).or_default() += 1;
     }

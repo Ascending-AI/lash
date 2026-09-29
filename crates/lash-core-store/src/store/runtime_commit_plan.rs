@@ -148,7 +148,7 @@ impl RuntimeCommitPlanner {
         fleet_format: super::FleetFormat,
     ) -> Result<Self, StoreError> {
         commit.validate_budget()?;
-        validate_session_execution_lease_plan(&commit)?;
+        validate_interrupted_turn_plan(&commit)?;
         commit.validate_operation_session()?;
 
         let turn_commit_hash = commit.turn_commit_hash()?;
@@ -343,27 +343,15 @@ impl RuntimeCommitPlanner {
                 derived: derived_frame_node_id.map(crate::NodeId::into_inner),
             });
         }
-        for completion in &self.commit.completed_queue_claims {
-            if completion.session_id != self.commit.session_id {
-                return Err(StoreError::QueuedWorkClaimSuperseded {
-                    session_id: completion.session_id.clone(),
-                    claim_id: completion.claim_id.clone(),
-                    row_id: None,
-                    superseding_claim_id: None,
-                    superseding_session_lease_generation: None,
-                });
-            }
-        }
-        for completion in &self.commit.completed_turn_input_claims {
-            if completion.session_id != self.commit.session_id {
-                return Err(StoreError::TurnInputClaimSuperseded {
-                    session_id: completion.session_id.clone(),
-                    claim_id: completion.settlement_identity(),
-                    row_id: None,
-                    superseding_claim_id: None,
-                    superseding_session_lease_generation: None,
-                });
-            }
+        self.commit.validate_ingress_settlement()?;
+        if let Some(commands) = self.commit.applied_commands.as_ref()
+            && commands.session_id != self.commit.session_id
+            && let Some(batch_id) = commands.batch_ids.first()
+        {
+            return Err(StoreError::SessionCommandWithdrawn {
+                session_id: self.commit.session_id.clone(),
+                batch_id: batch_id.clone(),
+            });
         }
         let derived_frame = derived_frame_node_id
             .clone()
@@ -491,6 +479,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
+            outcome: self.commit.outcome.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
@@ -551,13 +540,11 @@ fn derive_appended_node_facts(
     Ok((planned, parent.map(|parent| parent.frame_node_id)))
 }
 
-fn validate_session_execution_lease_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
-    if (!commit.undelivered_turn_input_claims.is_empty()
-        || !commit.undelivered_queue_claims.is_empty())
-        && commit.interrupted_turn_input_turn_id.is_none()
-    {
+fn validate_interrupted_turn_plan(commit: &RuntimeCommit) -> Result<(), StoreError> {
+    if commit.ingress.is_some() && commit.applied_commands.is_some() {
         return Err(StoreError::Backend(
-            "runtime commit undelivered claims require an interrupted turn id".to_string(),
+            "runtime commit cannot settle a root's ingress and a session-command run together"
+                .to_string(),
         ));
     }
     if commit.interrupted_turn_input_cancellation.is_some()

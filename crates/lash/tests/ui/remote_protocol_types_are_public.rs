@@ -2,15 +2,24 @@ use lash::TurnId;
 use lash::{ProcessId, SessionId};
 
 fn main() {
+    let local = lash::remote::REMOTE_PROTOCOL;
+    let accept = lash::remote::answer(
+        local,
+        &lash::remote::Negotiation::Hello { supported: local },
+    );
+    let negotiated = lash::remote::Negotiated::from_accept(local, &accept).unwrap();
     let input = lash::remote::turn_input::RemoteTurnInput::text("hello");
-    let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
-        session_id: SessionId::from("session"),
-        turn_id: TurnId::from("turn"),
-        input,
-        protocol_turn_options: None,
-        tool_grants: Vec::new(),
-        metadata: std::collections::HashMap::new(),
-    });
+    let request = lash::remote::Envelope::at(
+        &negotiated,
+        lash::remote::turn_input::RemoteTurnRequest {
+            session_id: SessionId::from("session"),
+            turn_id: TurnId::from("turn"),
+            input,
+            protocol_turn_options: None,
+            tool_grants: Vec::new(),
+            metadata: std::collections::HashMap::new(),
+        },
+    );
 
     assert_eq!(
         request.protocol_version(),

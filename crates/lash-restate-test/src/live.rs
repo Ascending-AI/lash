@@ -240,6 +240,18 @@ impl std::fmt::Debug for LiveRestateBackend {
     }
 }
 
+/// The URI a backend registers its endpoint at: the endpoint URL itself in
+/// the default namespace, `<endpoint_url>/ns/<namespace>` otherwise. The
+/// endpoint serves any path prefix.
+fn deployment_url(config: &LiveConfig) -> String {
+    let base = config.endpoint_url.trim_end_matches('/');
+    if config.namespace.is_default() {
+        base.to_owned()
+    } else {
+        format!("{base}/ns/{}", config.namespace.as_str())
+    }
+}
+
 impl LiveRestateBackend {
     /// Build the engine over a fresh SQLite memory store set, serve its
     /// endpoint on `config.endpoint_bind` and register it with the server.
@@ -314,16 +326,22 @@ impl LiveRestateBackend {
     /// Register the endpoint through the engine, which refuses a namespace
     /// another deployment on the server serves (FIG-3898). A deployment
     /// registered earlier at this backend's own URL — a world before this
-    /// one at the same address — is replaced.
+    /// one at the same address and in the same namespace — is replaced.
+    ///
+    /// A namespaced backend registers under a path of its namespace
+    /// ([`deployment_url`]): a deployment in another namespace is another
+    /// deployment, and the engine refuses a URI another deployment holds
+    /// (ADR 0115 §3.5), so two namespaces served in turn at one address
+    /// never share a URI.
     async fn register(&self) -> Result<(), LiveError> {
-        let url = &self.inner.config.endpoint_url;
+        let url = deployment_url(&self.inner.config);
         self.inner
             .restate
-            .register_deployment(url)
+            .register_deployment(&url)
             .await
             .map_err(|error| match error {
                 RestateRegistrationError::Admin(error) => LiveError::Register {
-                    url: url.clone(),
+                    url,
                     detail: error.to_string(),
                 },
                 refusal => LiveError::Registration(Box::new(refusal)),

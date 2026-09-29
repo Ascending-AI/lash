@@ -1,20 +1,26 @@
-//! Model-based [`RuntimePersistence`] laws for leases, queues, inputs, commit
-//! CAS, and checkpoint components; process-scoped laws live in the sibling harness.
+//! Model-based [`RuntimePersistence`] laws for drive fences, root admission,
+//! queues, inputs, commit CAS, and checkpoint components; process-scoped laws
+//! live in the sibling harness.
+//!
+//! The model is admission honesty (FIG-3927): every row is `Open` or
+//! `Admitted{root}`, at most one root is unfinished, a resumed root reads its
+//! recorded admission back under any later fence, only that root's fenced
+//! commit settles its rows, and its terminal hands the rest back open.
 
 use super::run_shape::Counter;
 use super::*;
+use crate::store::{AdmittedHead, DriveFence, IngressRowId, IngressSettlement, RootAdmission};
 use crate::store::{
     EXECUTION_STATE_CHECKPOINT_COMPONENT, PLUGIN_STATE_CHECKPOINT_COMPONENT,
     TOOL_STATE_CHECKPOINT_COMPONENT,
 };
 use crate::{
-    ClaimAuthority, LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputDraft, PluginNamespaceState, PluginState, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, RuntimeCommit,
+    LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
+    PluginNamespaceState, PluginState, QueuedWorkBatch, QueuedWorkBatchDraft, RuntimeCommit,
     RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity, StoreError, ToolState,
-    TurnInput, TurnInputClaim, TurnInputIngress, facade_support::ToolStateFacadeOps,
+    TurnId, TurnInput, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
 use proptest::prelude::*;
 use proptest::test_runner::{Config, RngSeed, TestRunner};
@@ -22,11 +28,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::future::Future;
 use std::sync::Arc;
 mod attachment_conservation;
-mod claim_honesty;
 mod counterexample;
 mod dedicated_laws;
 mod generator;
-mod interrupted_claim_laws;
 mod pending_input_read_model;
 #[cfg(test)]
 mod tests;
@@ -56,7 +60,7 @@ const MAX_OPS: usize = 96;
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum RuntimePersistenceOp {
-    ClaimLease {
+    SealFence {
         owner: u8,
     },
     Crash,
@@ -65,8 +69,8 @@ pub enum RuntimePersistenceOp {
         value: u8,
         coalesce: bool,
     },
-    ClaimWork,
-    ClaimWorkWithStaleLease,
+    AdmitWork,
+    AdmitWorkWithStaleFence,
     CancelWork {
         selection: u8,
     },
@@ -74,10 +78,11 @@ pub enum RuntimePersistenceOp {
         slot: u8,
         value: u8,
     },
-    ClaimTurnInputs {
+    AdmitTurnInputs {
         max_inputs: u8,
     },
-    ClaimTurnInputsWithStaleLease,
+    AdmitTurnInputsWithStaleFence,
+    CancelAdmittedRow,
     CancelTurnInput {
         selection: u8,
     },
@@ -119,8 +124,8 @@ pub enum RuntimePersistenceOp {
         settle_inputs: bool,
         stale_head: bool,
     },
-    SettleStaleWork,
-    SettleStaleTurnInputs,
+    SettleUnderStaleFence,
+    SettleForeignRow,
 }
 #[derive(Clone, Debug, serde::Deserialize)]
 struct GeneratedCase {
@@ -147,23 +152,39 @@ struct ComponentModel {
     execution_ref: Option<crate::BlobRef>,
 }
 
+/// The session's one unfinished root, as its admission recorded it.
+#[derive(Clone)]
+struct ModeledRoot {
+    root: TurnId,
+    admission: RootAdmission,
+    /// The drive epoch the admission committed under: a read-back under a
+    /// later fence is a resume.
+    admitted_epoch: u64,
+}
+
+impl ModeledRoot {
+    fn batch_ids(&self) -> BTreeSet<lash_core::BatchId> {
+        self.admission.batch_ids().into_iter().collect()
+    }
+
+    fn input_ids(&self) -> BTreeSet<lash_core::InputId> {
+        self.admission.input_ids().into_iter().collect()
+    }
+}
+
 #[derive(Default)]
 struct ReferenceModel {
     head_revision: u64,
     has_session: bool,
-    current_lease: Option<ClaimAuthority>,
-    stale_leases: Vec<ClaimAuthority>,
+    current_fence: Option<DriveFence>,
+    stale_fences: Vec<DriveFence>,
     work: BTreeMap<String, ModeledWork>,
     inputs: BTreeMap<String, ModeledInput>,
     input_receipts: BTreeMap<String, PendingTurnInputDraft>,
-    active_work_claims: Vec<QueuedWorkClaim>,
-    stale_work_claims: Vec<QueuedWorkClaim>,
-    active_input_claims: Vec<TurnInputClaim>,
-    stale_input_claims: Vec<TurnInputClaim>,
+    root: Option<ModeledRoot>,
+    root_sequence: u64,
     applications: Vec<crate::TurnInputApplication>,
     components: ComponentModel,
-    crashed_work: BTreeSet<lash_core::BatchId>,
-    crashed_inputs: BTreeSet<lash_core::InputId>,
     pending_usage: Arc<
         std::sync::Mutex<Vec<lash_core::testing::conformance_support::PendingTokenLedgerEntry>>,
     >,
@@ -193,19 +214,23 @@ struct PendingUsageConfirmation {
 /// new counter cannot be counted without being gated and reported.
 #[derive(Clone, Copy, Debug)]
 enum RunShapeCounter {
-    LeaseAcquisitions,
-    LeaseFenceRejections,
+    FenceSeals,
+    StaleFenceRejections,
     QueueEnqueues,
-    QueueClaims,
+    QueueAdmissions,
     QueueCompletions,
-    ClaimSupersessionRejections,
-    StaleClaimSettlements,
-    CoalescedClaims,
+    AdmissionResumes,
+    UnfinishedRootRefusals,
+    StaleFenceSettlementRejections,
+    RowNotAdmittedRejections,
+    CoalescedAdmissions,
     QueueCancellations,
+    AdmittedCancelRefusals,
     InputEnqueues,
-    InputClaims,
+    InputAdmissions,
     InputApplications,
     InputCancellations,
+    RootReleases,
     UsageRecords,
     UsageStages,
     UsageConfirmations,
@@ -221,24 +246,27 @@ enum RunShapeCounter {
     CheckpointRefReuses,
     CheckpointClears,
     CrashPoints,
-    CrashReclaims,
 }
 
 impl run_shape::Counter for RunShapeCounter {
     const ALL: &'static [Self] = &[
-        Self::LeaseAcquisitions,
-        Self::LeaseFenceRejections,
+        Self::FenceSeals,
+        Self::StaleFenceRejections,
         Self::QueueEnqueues,
-        Self::QueueClaims,
+        Self::QueueAdmissions,
         Self::QueueCompletions,
-        Self::ClaimSupersessionRejections,
-        Self::StaleClaimSettlements,
-        Self::CoalescedClaims,
+        Self::AdmissionResumes,
+        Self::UnfinishedRootRefusals,
+        Self::StaleFenceSettlementRejections,
+        Self::RowNotAdmittedRejections,
+        Self::CoalescedAdmissions,
         Self::QueueCancellations,
+        Self::AdmittedCancelRefusals,
         Self::InputEnqueues,
-        Self::InputClaims,
+        Self::InputAdmissions,
         Self::InputApplications,
         Self::InputCancellations,
+        Self::RootReleases,
         Self::UsageRecords,
         Self::UsageStages,
         Self::UsageConfirmations,
@@ -254,24 +282,27 @@ impl run_shape::Counter for RunShapeCounter {
         Self::CheckpointRefReuses,
         Self::CheckpointClears,
         Self::CrashPoints,
-        Self::CrashReclaims,
     ];
 
     fn name(self) -> &'static str {
         match self {
-            Self::LeaseAcquisitions => "lease_acquisitions",
-            Self::LeaseFenceRejections => "lease_fence_rejections",
+            Self::FenceSeals => "fence_seals",
+            Self::StaleFenceRejections => "stale_fence_rejections",
             Self::QueueEnqueues => "queue_enqueues",
-            Self::QueueClaims => "queue_claims",
+            Self::QueueAdmissions => "queue_admissions",
             Self::QueueCompletions => "queue_completions",
-            Self::ClaimSupersessionRejections => "claim_supersession_rejections",
-            Self::StaleClaimSettlements => "stale_claim_settlements",
-            Self::CoalescedClaims => "coalesced_claims",
+            Self::AdmissionResumes => "admission_resumes",
+            Self::UnfinishedRootRefusals => "unfinished_root_refusals",
+            Self::StaleFenceSettlementRejections => "stale_fence_settlement_rejections",
+            Self::RowNotAdmittedRejections => "row_not_admitted_rejections",
+            Self::CoalescedAdmissions => "coalesced_admissions",
             Self::QueueCancellations => "queue_cancellations",
+            Self::AdmittedCancelRefusals => "admitted_cancel_refusals",
             Self::InputEnqueues => "input_enqueues",
-            Self::InputClaims => "input_claims",
+            Self::InputAdmissions => "input_admissions",
             Self::InputApplications => "input_applications",
             Self::InputCancellations => "input_cancellations",
+            Self::RootReleases => "root_releases",
             Self::UsageRecords => "usage_records",
             Self::UsageStages => "usage_stages",
             Self::UsageConfirmations => "usage_confirmations",
@@ -287,7 +318,6 @@ impl run_shape::Counter for RunShapeCounter {
             Self::CheckpointRefReuses => "checkpoint_ref_reuses",
             Self::CheckpointClears => "checkpoint_clears",
             Self::CrashPoints => "crash_points",
-            Self::CrashReclaims => "crash_reclaims",
         }
     }
 
@@ -328,11 +358,6 @@ where
         .await
         .unwrap_or_else(|error| {
             panic!("{backend} dedicated runtime-persistence law failed: {error}")
-        });
-    claim_honesty::non_law_pre_reclaim_commit_symmetry(&make, DEDICATED_LAW_SEED + 10)
-        .await
-        .unwrap_or_else(|error| {
-            panic!("{backend} runtime-persistence NON-LAW demonstration failed: {error}")
         });
     replay_regression_corpus(&make)
         .await
@@ -454,8 +479,8 @@ async fn apply_operation(
 ) -> Result<(), String> {
     use RuntimePersistenceOp::*;
     match operation {
-        ClaimLease { owner } => claim_lease(store, model, shape, *owner).await?,
-        Crash => crash_between_claim_and_commit(store, model, shape).await?,
+        SealFence { owner } => seal_fence(store, model, shape, *owner).await?,
+        Crash => crash_after_admission(store, model, shape).await?,
         EnqueueWork {
             slot,
             value,
@@ -485,62 +510,26 @@ async fn apply_operation(
                 }
             }
         }
-        ClaimWork => {
-            let Some(lease) = model.current_lease.as_ref() else {
-                return Ok(());
-            };
-            if pending_work(model).is_empty() {
-                return Ok(());
-            }
-            let claim = store
-                .claim_ready_queued_work(
-                    &session_id(),
-                    &lease.fence(),
-                    &lease.owner,
-                    QueuedWorkClaimBoundary::Idle,
-                    crate::testing::queued_work_claim_policy(4),
-                )
-                .await
-                .map(crate::QueuedWorkClaimOutcome::claim)
-                .map_err(|error| error.to_string())?;
-            if let Some(claim) = claim {
-                validate_work_claim(model, lease, &claim)?;
-                if claim.batches.len() > 1 {
-                    shape[RunShapeCounter::CoalescedClaims] += 1;
-                }
-                for batch in &claim.batches {
-                    if model.crashed_work.remove(&batch.batch_id) {
-                        shape[RunShapeCounter::CrashReclaims] += 1;
-                    }
-                }
-                shape[RunShapeCounter::QueueClaims] += 1;
-                model.active_work_claims.push(claim);
-            }
-        }
-        ClaimWorkWithStaleLease => {
-            claim_work_with_stale_lease(store, model, shape).await?;
+        AdmitWork => admit_work(store, model, shape).await?,
+        AdmitWorkWithStaleFence => {
+            admit_with_stale_fence(store, model, shape, Family::Work).await?;
         }
         CancelWork { selection } => {
-            let Some(work) = select_modeled_work(model, *selection) else {
+            let Some(work) = select_open_work(model, *selection) else {
                 return Ok(());
             };
-            let held = active_work_ids(model).contains(&work.batch.batch_id);
             let removed = store
-                .cancel_queued_work_batch(&session_id(), &work.batch.batch_id)
+                .cancel_queued_work_batch(&session_id(), &work.batch_id)
                 .await
-                .map_err(|error| error.to_string())?;
-            if held && removed.is_some() {
-                return Err("cancel removed work held by a live claim".to_string());
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "an open batch was not cancellable".to_string())?;
+            if removed.batch_id != work.batch_id {
+                return Err("queue cancel returned a different batch".to_string());
             }
-            if let Some(removed) = removed {
-                if removed.batch_id != work.batch.batch_id {
-                    return Err("queue cancel returned a different batch".to_string());
-                }
-                model
-                    .work
-                    .retain(|_, candidate| candidate.batch.batch_id != removed.batch_id);
-                shape[RunShapeCounter::QueueCancellations] += 1;
-            }
+            model
+                .work
+                .retain(|_, candidate| candidate.batch.batch_id != removed.batch_id);
+            shape[RunShapeCounter::QueueCancellations] += 1;
         }
         EnqueueTurnInput { slot, value } => {
             let draft = turn_input_draft(*slot, *value);
@@ -588,65 +577,31 @@ async fn apply_operation(
                 }
             }
         }
-        ClaimTurnInputs { max_inputs } => {
-            let Some(lease) = model.current_lease.as_ref() else {
+        AdmitTurnInputs { max_inputs } => {
+            admit_turn_inputs(store, model, shape, usize::from((*max_inputs).max(1))).await?;
+        }
+        AdmitTurnInputsWithStaleFence => {
+            admit_with_stale_fence(store, model, shape, Family::Inputs).await?;
+        }
+        CancelAdmittedRow => cancel_admitted_row(store, model, shape).await?,
+        CancelTurnInput { selection } => {
+            let Some(input) = select_open_input(model, *selection) else {
                 return Ok(());
             };
-            let expected = pending_inputs(model);
-            if expected.is_empty() {
-                return Ok(());
-            }
-            if let Some(claim) = store
-                .claim_next_turn_inputs(
-                    &session_id(),
-                    &lease.fence(),
-                    &lease.owner,
-                    usize::from((*max_inputs).max(1)),
-                )
+            match store
+                .cancel_pending_turn_input(&session_id(), &input.input_id)
                 .await
                 .map_err(|error| error.to_string())?
             {
-                validate_input_claim(lease, &claim, &expected, usize::from((*max_inputs).max(1)))?;
-                for input in &claim.inputs {
-                    if model.crashed_inputs.remove(&input.input_id) {
-                        shape[RunShapeCounter::CrashReclaims] += 1;
-                    }
-                }
-                shape[RunShapeCounter::InputClaims] += 1;
-                model.active_input_claims.push(claim);
-            }
-        }
-        ClaimTurnInputsWithStaleLease => {
-            claim_turn_inputs_with_stale_lease(store, model, shape).await?;
-        }
-        CancelTurnInput { selection } => {
-            let Some(input) = select_modeled_input(model, *selection) else {
-                return Ok(());
-            };
-            let held = active_input_ids(model).contains(&input.input.input_id);
-            let outcome = store
-                .cancel_pending_turn_input(&session_id(), &input.input.input_id)
-                .await
-                .map_err(|error| error.to_string())?;
-            match outcome {
                 PendingTurnInputCancelOutcome::Cancelled(cancelled) => {
-                    if held {
-                        return Err("cancel removed input held by a live claim".to_string());
-                    }
                     model
                         .inputs
                         .retain(|_, candidate| candidate.input.input_id != cancelled.input_id);
                     shape[RunShapeCounter::InputCancellations] += 1;
                 }
-                PendingTurnInputCancelOutcome::AlreadyClaimed { .. } if held => {}
-                PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
-                    return Err(
-                        "input remained claimed after its lease generation died".to_string()
-                    );
-                }
                 other => {
                     return Err(format!(
-                        "unexpected cancel outcome for live modeled input: {other:?}"
+                        "unexpected cancel outcome for an open modeled input: {other:?}"
                     ));
                 }
             }
@@ -685,71 +640,283 @@ async fn apply_operation(
             )
             .await?;
         }
-        SettleStaleWork => settle_stale_work(store, model, shape, seed).await?,
-        SettleStaleTurnInputs => settle_stale_input(store, model, shape, seed).await?,
+        SettleUnderStaleFence => settle_under_stale_fence(store, model, shape, seed).await?,
+        SettleForeignRow => settle_foreign_row(store, model, shape, seed).await?,
     }
     Ok(())
 }
 
-async fn claim_work_with_stale_lease(
+#[derive(Clone, Copy)]
+enum Family {
+    Work,
+    Inputs,
+}
+
+/// The admission request the model presents for `root` headed by `head`:
+/// the fixture's, with the model's own bounds.
+fn admission_request(
+    fence: &DriveFence,
+    root: &TurnId,
+    head: AdmittedHead,
+    max_inputs: usize,
+) -> crate::store::AdmitRootRequest {
+    let mut request =
+        lash_core::testing::store_fixtures::admit_root_request_for_test(fence, root, head);
+    request.max_inputs = max_inputs;
+    request.policy = crate::testing::queued_work_admission_policy(4);
+    request
+}
+
+fn next_root(model: &mut ReferenceModel) -> TurnId {
+    model.root_sequence += 1;
+    TurnId::from(format!("property-root-{}", model.root_sequence))
+}
+
+/// Admit from the head of `family` under the live fence. With a root
+/// unfinished, the same root and head read its recorded admission back (a
+/// resume), and any other root is refused `UnfinishedRootConflict` without a
+/// write; otherwise a new root takes the head's prefix.
+async fn admit_from_head(
     store: &dyn RuntimePersistence,
-    model: &ReferenceModel,
+    model: &mut ReferenceModel,
+    shape: &mut RunShape,
+    head: AdmittedHead,
+    max_inputs: usize,
+) -> Result<Option<RootAdmission>, String> {
+    let Some(fence) = model.current_fence.clone() else {
+        return Ok(None);
+    };
+    if let Some(unfinished) = model.root.clone() {
+        if unfinished.admission.head == head {
+            let resumed = store
+                .admit_root(&admission_request(
+                    &fence,
+                    &unfinished.root,
+                    head,
+                    max_inputs,
+                ))
+                .await
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "a recorded admission did not read back".to_string())?;
+            if json(&resumed)? != json(&unfinished.admission)? {
+                return Err("a resumed root read back a different admission".to_string());
+            }
+            if fence.epoch() != unfinished.admitted_epoch {
+                shape[RunShapeCounter::AdmissionResumes] += 1;
+            }
+            return Ok(None);
+        }
+        let before = session_snapshot(store).await?;
+        let other = next_root(model);
+        let result = store
+            .admit_root(&admission_request(&fence, &other, head, max_inputs))
+            .await;
+        if !matches!(result, Err(StoreError::UnfinishedRootConflict { .. })) {
+            return Err(format!(
+                "a second root was admitted while one is unfinished: {result:?}"
+            ));
+        }
+        assert_snapshot_unchanged(store, before, "a second root's admission").await?;
+        shape[RunShapeCounter::UnfinishedRootRefusals] += 1;
+        return Ok(None);
+    }
+    let root = next_root(model);
+    let admission = store
+        .admit_root(&admission_request(&fence, &root, head, max_inputs))
+        .await
+        .map_err(|error| error.to_string())?;
+    if let Some(admission) = &admission {
+        model.root = Some(ModeledRoot {
+            root,
+            admission: admission.clone(),
+            admitted_epoch: fence.epoch(),
+        });
+    }
+    Ok(admission)
+}
+
+async fn admit_work(
+    store: &dyn RuntimePersistence,
+    model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
-    let Some(stale) = model.stale_leases.last() else {
+    let head = match model.root.as_ref().map(|root| root.admission.head.clone()) {
+        Some(head @ AdmittedHead::Batch(_)) => head,
+        _ => {
+            let Some(first) = open_work(model).into_iter().next() else {
+                return Ok(());
+            };
+            AdmittedHead::Batch(first.batch_id)
+        }
+    };
+    let open = open_work(model);
+    let earliest_input = open_inputs(model).first().map(|input| input.enqueue_seq);
+    let Some(admission) = admit_from_head(store, model, shape, head.clone(), 64).await? else {
+        let AdmittedHead::Batch(head_id) = &head else {
+            return Ok(());
+        };
+        let head_seq = open
+            .iter()
+            .find(|batch| batch.batch_id == *head_id)
+            .map(|batch| batch.enqueue_seq);
+        if model.root.is_none()
+            && !earliest_input
+                .zip(head_seq)
+                .is_some_and(|(input, head)| input < head)
+        {
+            return Err("an open batch head at the front of the lane was not admitted".to_string());
+        }
         return Ok(());
     };
-    if pending_work(model).is_empty() {
+    let batches = admission.batch_ids();
+    let open_ids = open
+        .iter()
+        .map(|batch| batch.batch_id.clone())
+        .collect::<BTreeSet<_>>();
+    if batches
+        .first()
+        .map(|batch| AdmittedHead::Batch(batch.clone()))
+        != Some(head)
+        || batches.iter().collect::<BTreeSet<_>>().len() != batches.len()
+        || !batches.iter().all(|batch| open_ids.contains(batch))
+        || admission.inputs.is_some()
+    {
+        return Err(format!(
+            "a batch-headed admission duplicated, invented or reordered rows: {batches:?}"
+        ));
+    }
+    if let Some(input) = earliest_input
+        && open
+            .iter()
+            .any(|batch| batches.contains(&batch.batch_id) && batch.enqueue_seq > input)
+    {
+        return Err("a batch-headed admission reached past an earlier open input".to_string());
+    }
+    if batches.len() > 1 {
+        shape[RunShapeCounter::CoalescedAdmissions] += 1;
+    }
+    shape[RunShapeCounter::QueueAdmissions] += 1;
+    Ok(())
+}
+
+async fn admit_turn_inputs(
+    store: &dyn RuntimePersistence,
+    model: &mut ReferenceModel,
+    shape: &mut RunShape,
+    max_inputs: usize,
+) -> Result<(), String> {
+    let head = match model.root.as_ref().map(|root| root.admission.head.clone()) {
+        Some(head @ AdmittedHead::Input(_)) => head,
+        _ => {
+            let Some(first) = open_inputs(model).into_iter().next() else {
+                return Ok(());
+            };
+            AdmittedHead::Input(first.input_id)
+        }
+    };
+    let earliest_batch = open_work(model).first().map(|batch| batch.enqueue_seq);
+    let expected = open_inputs(model)
+        .into_iter()
+        .take_while(|input| earliest_batch.is_none_or(|batch| input.enqueue_seq < batch))
+        .take(max_inputs)
+        .map(|input| input.input_id)
+        .collect::<Vec<_>>();
+    let was_unfinished = model.root.is_some();
+    let Some(admission) = admit_from_head(store, model, shape, head, max_inputs).await? else {
+        if !was_unfinished && !expected.is_empty() {
+            return Err("an open input head at the front of the lane was not admitted".to_string());
+        }
+        return Ok(());
+    };
+    let actual = admission.input_ids();
+    if actual != expected || admission.queued.is_some() {
+        return Err(format!(
+            "turn inputs were not admitted once in enqueue order: actual={actual:?} expected={expected:?}"
+        ));
+    }
+    shape[RunShapeCounter::InputAdmissions] += 1;
+    Ok(())
+}
+
+/// A superseded fence admits nothing: the store refuses it before any read.
+async fn admit_with_stale_fence(
+    store: &dyn RuntimePersistence,
+    model: &mut ReferenceModel,
+    shape: &mut RunShape,
+    family: Family,
+) -> Result<(), String> {
+    let Some(stale) = model.stale_fences.last().cloned() else {
+        return Ok(());
+    };
+    let head = match family {
+        Family::Work => open_work(model)
+            .first()
+            .map(|batch| AdmittedHead::Batch(batch.batch_id.clone())),
+        Family::Inputs => open_inputs(model)
+            .first()
+            .map(|input| AdmittedHead::Input(input.input_id.clone())),
+    }
+    .or_else(|| model.root.as_ref().map(|root| root.admission.head.clone()));
+    let Some(head) = head else {
         return Ok(());
     };
     let before = session_snapshot(store).await?;
+    let root = next_root(model);
     let result = store
-        .claim_ready_queued_work(
-            &session_id(),
-            &stale.fence(),
-            &stale.owner,
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(64),
-        )
+        .admit_root(&admission_request(&stale, &root, head, 64))
         .await;
     if !matches!(result, Err(StoreError::StaleDriveFence { .. })) {
-        return Err(format!(
-            "superseded lease generation claimed queued work: {result:?}"
-        ));
+        return Err(format!("a superseded fence admitted rows: {result:?}"));
     }
-    assert_snapshot_unchanged(store, before, "superseded-generation queued-work claim").await?;
-    shape[RunShapeCounter::LeaseFenceRejections] += 1;
+    assert_snapshot_unchanged(store, before, "superseded-fence admission").await?;
+    shape[RunShapeCounter::StaleFenceRejections] += 1;
     Ok(())
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn claim_turn_inputs_with_stale_lease(
+/// An admitted row is not withdrawable (N5): a host cancel of a row the
+/// unfinished root holds answers `AlreadyAdmitted{root}` (a batch: nothing
+/// removed) and changes nothing.
+async fn cancel_admitted_row(
     store: &dyn RuntimePersistence,
-    model: &ReferenceModel,
+    model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
-    if model.stale_leases.is_empty() || pending_inputs(model).is_empty() {
+    let Some(root) = model.root.clone() else {
+        return Ok(());
+    };
+    let before = session_snapshot(store).await?;
+    if let Some(input) = root.admission.input_ids().first() {
+        match store
+            .cancel_pending_turn_input(&session_id(), input)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            PendingTurnInputCancelOutcome::AlreadyAdmitted { root: holder, .. }
+                if holder == root.root => {}
+            other => {
+                return Err(format!(
+                    "an admitted input was withdrawable or named another root: {other:?}"
+                ));
+            }
+        }
+    } else if let Some(batch) = root.admission.batch_ids().first() {
+        if store
+            .cancel_queued_work_batch(&session_id(), batch)
+            .await
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
+            return Err("an admitted batch was withdrawable".to_string());
+        }
+    } else {
         return Ok(());
     }
-    let stale = model.stale_leases.last().expect("checked stale lease");
-    let before = session_snapshot(store).await?;
-    let result = store
-        .claim_next_turn_inputs(&session_id(), &stale.fence(), &stale.owner, 1)
-        .await;
-    if !matches!(result, Err(StoreError::StaleDriveFence { .. })) {
-        return Err(format!(
-            "superseded lease generation claimed turn inputs: {result:?}"
-        ));
-    }
-    assert_snapshot_unchanged(store, before, "superseded-generation turn-input claim").await?;
-    shape[RunShapeCounter::LeaseFenceRejections] += 1;
+    assert_snapshot_unchanged(store, before, "a refused cancel of an admitted row").await?;
+    shape[RunShapeCounter::AdmittedCancelRefusals] += 1;
     Ok(())
 }
 
-async fn claim_lease(
+async fn seal_fence(
     store: &dyn RuntimePersistence,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
@@ -758,56 +925,35 @@ async fn claim_lease(
     let owner = owner(owner_index);
     let executor = format!("state-machine-executor-{owner_index}");
     let outcome = store
-        .seal_claim_epoch_for_test(&session_id(), &owner, &executor, 0)
+        .seal_drive_epoch_for_test(&session_id(), &owner, &executor, 0)
         .await
         .map_err(|error| error.to_string())?;
-    let authority = outcome
+    let fence = outcome
         .acquired()
         .ok_or_else(|| "drive epoch seal lost concurrent admission".to_string())?;
-    if let Some(previous) = model.current_lease.replace(authority) {
-        model.stale_leases.push(previous);
-        for claim in model.active_work_claims.drain(..) {
-            model
-                .crashed_work
-                .extend(claim.batches.iter().map(|batch| batch.batch_id.clone()));
-            model.stale_work_claims.push(claim);
-        }
-        for claim in model.active_input_claims.drain(..) {
-            model
-                .crashed_inputs
-                .extend(claim.inputs.iter().map(|input| input.input_id.clone()));
-            model.stale_input_claims.push(claim);
-        }
+    // A later seal supersedes the fence, never the rows its root admitted.
+    if let Some(previous) = model.current_fence.replace(fence) {
+        model.stale_fences.push(previous);
     }
-    shape[RunShapeCounter::LeaseAcquisitions] += 1;
+    shape[RunShapeCounter::FenceSeals] += 1;
     Ok(())
 }
 
-async fn crash_between_claim_and_commit(
+/// A worker dies after its admission committed: its fence is superseded and
+/// the unfinished root keeps every row it admitted.
+async fn crash_after_admission(
     store: &dyn RuntimePersistence,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
-    let Some(lease) = model.current_lease.take() else {
+    let Some(fence) = model.current_fence.take() else {
         return Ok(());
     };
     store
-        .supersede_claim_epoch_for_test(&lease.completion())
+        .supersede_drive_epoch_for_test(&fence)
         .await
         .map_err(|error| error.to_string())?;
-    model.stale_leases.push(lease);
-    for claim in model.active_work_claims.drain(..) {
-        model
-            .crashed_work
-            .extend(claim.batches.iter().map(|batch| batch.batch_id.clone()));
-        model.stale_work_claims.push(claim);
-    }
-    for claim in model.active_input_claims.drain(..) {
-        model
-            .crashed_inputs
-            .extend(claim.inputs.iter().map(|input| input.input_id.clone()));
-        model.stale_input_claims.push(claim);
-    }
+    model.stale_fences.push(fence);
     shape[RunShapeCounter::CrashPoints] += 1;
     Ok(())
 }
@@ -831,22 +977,29 @@ async fn commit_operation(
     let mut state = modeled_state(model);
     install_component_bodies(&mut state, component_mode, value);
     let before_components = model.components.clone();
-    let work_claim = settle_work
-        .then(|| model.active_work_claims.first().cloned())
+    // The unfinished root's final commit, under the live fence: it completes
+    // the families the operation names and its terminal hands the rest back.
+    let ending = (settle_work || settle_inputs)
+        .then(|| model.root.clone().zip(model.current_fence.clone()))
         .flatten();
-    let mut input_claim = settle_inputs
-        .then(|| model.active_input_claims.first().cloned())
-        .flatten();
-    if let Some(claim) = input_claim.as_mut() {
-        claim.record_initial_turn_application(
-            &crate::TurnId::from(format!("property-turn-{}", model.operation_sequence)),
-            &format!("property-message-{}", model.operation_sequence),
-        );
-    }
-    let expected_applications = input_claim
+    let mut settlement = ending
         .as_ref()
-        .map(|claim| claim.applications.clone())
-        .unwrap_or_default();
+        .map(|(root, _)| IngressSettlement::new(root.root.clone()));
+    let mut expected_applications = Vec::new();
+    if let (Some((root, _)), Some(settlement)) = (ending.as_ref(), settlement.as_mut()) {
+        if settle_work && let Some(queued) = &root.admission.queued {
+            settlement.completed_batches.push(queued.completion());
+        }
+        if settle_inputs && let Some(inputs) = &root.admission.inputs {
+            let mut inputs = (**inputs).clone();
+            inputs.record_initial_turn_application(
+                &root.root,
+                &format!("property-message-{}", model.operation_sequence),
+            );
+            expected_applications = inputs.applications.clone();
+            settlement.completed_inputs.push(inputs.completion());
+        }
+    }
     let mut staged_usage = model.staged_usage.take();
     let mut staged_usage_operation = model.staged_usage_operation.take();
     let staged_replays_last_commit = match (
@@ -895,11 +1048,15 @@ async fn commit_operation(
             .checked_add(1)
             .expect("generated model head revision must remain in range");
     }
-    if let Some(claim) = &work_claim {
-        commit = commit.completing_queue_claim(claim.completion());
-    }
-    if let Some(claim) = &input_claim {
-        commit = commit.completing_turn_input_claim(claim.completion());
+    if let (Some((root, fence)), Some(settlement)) = (ending.as_ref(), settlement.clone()) {
+        commit.drive_fence = Some(Box::new(fence.clone()));
+        commit.ingress = Some(settlement);
+        commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
+            root: root.root.clone(),
+            commit: crate::store::TurnCommitId::new(root.root.clone(), 0),
+            turn: root.root.clone(),
+            stop: None,
+        }));
     }
 
     let before = session_snapshot(store).await?;
@@ -953,30 +1110,31 @@ async fn commit_operation(
         shape,
     )?;
 
-    if let Some(claim) = work_claim {
-        let settled = claim
-            .batches
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
+    if let (Some((root, _)), Some(settlement)) = (ending, settlement) {
+        let completed = settlement.rows().into_iter().collect::<BTreeSet<_>>();
+        let completed_batches = root
+            .batch_ids()
+            .into_iter()
+            .filter(|batch| completed.contains(&IngressRowId::Batch(batch.clone())))
+            .collect::<BTreeSet<_>>();
+        let completed_inputs = root
+            .input_ids()
+            .into_iter()
+            .filter(|input| completed.contains(&IngressRowId::Input(input.clone())))
             .collect::<BTreeSet<_>>();
         model
             .work
-            .retain(|_, work| !settled.contains(work.batch.batch_id.as_str()));
-        model.active_work_claims.remove(0);
-        shape[RunShapeCounter::QueueCompletions] += claim.batches.len() as u64;
-    }
-    if let Some(claim) = input_claim {
-        let settled = claim
-            .inputs
-            .iter()
-            .map(|input| input.input_id.as_str())
-            .collect::<BTreeSet<_>>();
+            .retain(|_, work| !completed_batches.contains(&work.batch.batch_id));
         model
             .inputs
-            .retain(|_, input| !settled.contains(input.input.input_id.as_str()));
-        model.active_input_claims.remove(0);
+            .retain(|_, input| !completed_inputs.contains(&input.input.input_id));
         model.applications.extend(expected_applications);
-        shape[RunShapeCounter::InputApplications] += claim.inputs.len() as u64;
+        shape[RunShapeCounter::QueueCompletions] += completed_batches.len() as u64;
+        shape[RunShapeCounter::InputApplications] += completed_inputs.len() as u64;
+        if root.batch_ids().len() + root.input_ids().len() > completed.len() {
+            shape[RunShapeCounter::RootReleases] += 1;
+        }
+        model.root = None;
     }
     shape[RunShapeCounter::AcceptedCommits] += 1;
     Ok(())
@@ -1087,127 +1245,79 @@ fn check_component_ref(
     Ok(())
 }
 
-async fn settle_stale_work(
+/// The root's settlement presented under a superseded fence (N4): refused
+/// `StaleDriveFence` before anything is written.
+async fn settle_under_stale_fence(
     store: &dyn RuntimePersistence,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
 ) -> Result<(), String> {
-    let Some(claim) = model.stale_work_claims.last().cloned() else {
+    let (Some(root), Some(stale)) = (model.root.clone(), model.stale_fences.last().cloned()) else {
         return Ok(());
     };
-    let completion = claim.completion();
-    let active_ids = active_work_ids(model);
-    let owns_all = claim.batches.iter().all(|batch| {
-        model
-            .work
-            .values()
-            .any(|work| work.batch.batch_id == batch.batch_id)
-            && !active_ids.contains(&batch.batch_id)
-    });
-    let mut commit = fresh_commit(model, seed, "stale-work")?;
-    commit = commit.completing_queue_claim(completion);
+    let mut settlement = IngressSettlement::new(root.root.clone());
+    if let Some(queued) = &root.admission.queued {
+        settlement.completed_batches.push(queued.completion());
+    }
+    if let Some(inputs) = &root.admission.inputs {
+        settlement.completed_inputs.push(inputs.completion());
+    }
+    let mut commit = fresh_commit(model, seed, "stale-fence")?;
+    commit.drive_fence = Some(Box::new(stale));
+    commit.ingress = Some(settlement);
     let before = session_snapshot(store).await?;
     let result = store.commit_runtime_state(commit).await;
-    if !owns_all {
-        if !matches!(result, Err(StoreError::QueuedWorkClaimSuperseded { .. })) {
-            return Err(format!(
-                "reclaimed queued-work claim was not superseded: {result:?}"
-            ));
-        }
-        assert_snapshot_unchanged(store, before, "reclaimed queued-work settlement").await?;
-        shape[RunShapeCounter::ClaimSupersessionRejections] += 1;
-        return Ok(());
+    if !matches!(result, Err(StoreError::StaleDriveFence { .. })) {
+        return Err(format!(
+            "a settlement under a superseded fence was not refused: {result:?}"
+        ));
     }
-
-    let result = result.map_err(|error| error.to_string())?;
-    if result.head_revision != model.head_revision + 1 {
-        return Err(
-            "accepted stale-generation settlement did not advance the head once".to_string(),
-        );
-    }
-    let settled = claim
-        .batches
-        .iter()
-        .map(|batch| batch.batch_id.as_str())
-        .collect::<BTreeSet<_>>();
-    model
-        .work
-        .retain(|_, work| !settled.contains(work.batch.batch_id.as_str()));
-    model
-        .crashed_work
-        .retain(|batch_id| !settled.contains(batch_id.as_str()));
-    model.stale_work_claims.pop();
-    model.head_revision = result.head_revision;
-    model.has_session = true;
-    shape[RunShapeCounter::QueueCompletions] += claim.batches.len() as u64;
-    shape[RunShapeCounter::StaleClaimSettlements] += 1;
-    shape[RunShapeCounter::AcceptedCommits] += 1;
+    assert_snapshot_unchanged(store, before, "superseded-fence settlement").await?;
+    shape[RunShapeCounter::StaleFenceSettlementRejections] += 1;
     Ok(())
 }
 
-async fn settle_stale_input(
+/// A settlement naming an open row (N10): no root holds it, so the commit is
+/// refused `IngressRowNotAdmitted` and writes nothing.
+async fn settle_foreign_row(
     store: &dyn RuntimePersistence,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
 ) -> Result<(), String> {
-    let Some(claim) = model.stale_input_claims.last().cloned() else {
+    let Some(fence) = model.current_fence.clone() else {
         return Ok(());
     };
-    let completion = claim.completion();
-    let active_ids = active_input_ids(model);
-    let owns_all = claim.inputs.iter().all(|input| {
-        model
-            .inputs
-            .values()
-            .any(|modeled| modeled.input.input_id == input.input_id)
-            && !active_ids.contains(&input.input_id)
-    });
-    let mut commit = fresh_commit(model, seed, "stale-input")?;
-    commit = commit.completing_turn_input_claim(completion.clone());
+    let row = open_work(model)
+        .first()
+        .map(|batch| IngressRowId::Batch(batch.batch_id.clone()))
+        .or_else(|| {
+            open_inputs(model)
+                .first()
+                .map(|input| IngressRowId::Input(input.input_id.clone()))
+        });
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let root = model.root.as_ref().map_or_else(
+        || TurnId::from("property-foreign-root"),
+        |root| root.root.clone(),
+    );
+    let mut settlement = IngressSettlement::new(root);
+    settlement.released.push(row);
+    let mut commit = fresh_commit(model, seed, "foreign-row")?;
+    commit.drive_fence = Some(Box::new(fence));
+    commit.ingress = Some(settlement);
     let before = session_snapshot(store).await?;
     let result = store.commit_runtime_state(commit).await;
-    if !owns_all {
-        if !matches!(result, Err(StoreError::TurnInputClaimSuperseded { .. })) {
-            return Err(format!(
-                "reclaimed turn-input claim was not superseded: {result:?}"
-            ));
-        }
-        assert_snapshot_unchanged(store, before, "reclaimed turn-input settlement").await?;
-        shape[RunShapeCounter::ClaimSupersessionRejections] += 1;
-        return Ok(());
+    if !matches!(result, Err(StoreError::IngressRowNotAdmitted { .. })) {
+        return Err(format!(
+            "a settlement naming an open row was not refused: {result:?}"
+        ));
     }
-
-    let result = result.map_err(|error| error.to_string())?;
-    if result.head_revision != model.head_revision + 1 {
-        return Err(
-            "accepted stale-generation input settlement did not advance the head once".to_string(),
-        );
-    }
-    if result.turn_input_applications != completion.applications {
-        return Err(
-            "accepted stale-generation input settlement returned wrong applications".to_string(),
-        );
-    }
-    let settled = claim
-        .inputs
-        .iter()
-        .map(|input| input.input_id.as_str())
-        .collect::<BTreeSet<_>>();
-    model
-        .inputs
-        .retain(|_, input| !settled.contains(input.input.input_id.as_str()));
-    model
-        .crashed_inputs
-        .retain(|input_id| !settled.contains(input_id.as_str()));
-    model.applications.extend(completion.data.applications);
-    model.stale_input_claims.pop();
-    model.head_revision = result.head_revision;
-    model.has_session = true;
-    shape[RunShapeCounter::InputApplications] += claim.inputs.len() as u64;
-    shape[RunShapeCounter::StaleClaimSettlements] += 1;
-    shape[RunShapeCounter::AcceptedCommits] += 1;
+    assert_snapshot_unchanged(store, before, "open-row settlement").await?;
+    shape[RunShapeCounter::RowNotAdmittedRejections] += 1;
     Ok(())
 }
 
@@ -1349,8 +1459,9 @@ fn turn_input_text(value: u8) -> String {
     )
 }
 
-fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
-    let held = active_work_ids(model);
+/// The batches no root holds, in `enqueue_seq` order.
+fn open_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
+    let held = admitted_work_ids(model);
     let mut work = model
         .work
         .values()
@@ -1361,8 +1472,9 @@ fn pending_work(model: &ReferenceModel) -> Vec<QueuedWorkBatch> {
     work
 }
 
-fn pending_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
-    let held = active_input_ids(model);
+/// The inputs no root holds, in `enqueue_seq` order.
+fn open_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
+    let held = admitted_input_ids(model);
     let mut inputs = model
         .inputs
         .values()
@@ -1373,90 +1485,40 @@ fn pending_inputs(model: &ReferenceModel) -> Vec<PendingTurnInput> {
     inputs
 }
 
-fn active_work_ids(model: &ReferenceModel) -> BTreeSet<lash_core::BatchId> {
+fn admitted_work_ids(model: &ReferenceModel) -> BTreeSet<lash_core::BatchId> {
     model
-        .active_work_claims
-        .iter()
-        .flat_map(|claim| claim.batches.iter().map(|batch| batch.batch_id.clone()))
-        .collect()
+        .root
+        .as_ref()
+        .map(ModeledRoot::batch_ids)
+        .unwrap_or_default()
 }
 
-fn active_input_ids(model: &ReferenceModel) -> BTreeSet<lash_core::InputId> {
+fn admitted_input_ids(model: &ReferenceModel) -> BTreeSet<lash_core::InputId> {
     model
-        .active_input_claims
-        .iter()
-        .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
-        .collect()
+        .root
+        .as_ref()
+        .map(ModeledRoot::input_ids)
+        .unwrap_or_default()
 }
 
-fn select_modeled_work(model: &ReferenceModel, selection: u8) -> Option<ModeledWork> {
-    let values = model.work.values().cloned().collect::<Vec<_>>();
+fn select_open_work(model: &ReferenceModel, selection: u8) -> Option<QueuedWorkBatch> {
+    let values = open_work(model);
     values
         .get(usize::from(selection) % values.len().max(1))
         .cloned()
 }
 
-fn select_modeled_input(model: &ReferenceModel, selection: u8) -> Option<ModeledInput> {
-    let values = model.inputs.values().cloned().collect::<Vec<_>>();
+fn select_open_input(model: &ReferenceModel, selection: u8) -> Option<PendingTurnInput> {
+    let values = open_inputs(model);
     values
         .get(usize::from(selection) % values.len().max(1))
         .cloned()
-}
-
-fn validate_work_claim(
-    model: &ReferenceModel,
-    lease: &ClaimAuthority,
-    claim: &QueuedWorkClaim,
-) -> Result<(), String> {
-    if claim.session_lease_generation != lease.fencing_token {
-        return Err("queued-work claim pinned the wrong lease generation".to_string());
-    }
-    let pending = pending_work(model)
-        .into_iter()
-        .map(|batch| batch.batch_id)
-        .collect::<BTreeSet<_>>();
-    let claimed = claim
-        .batches
-        .iter()
-        .map(|batch| batch.batch_id.clone())
-        .collect::<BTreeSet<_>>();
-    if claimed.len() != claim.batches.len() || !claimed.is_subset(&pending) {
-        return Err("queued-work claim duplicated or invented a batch".to_string());
-    }
-    Ok(())
-}
-
-fn validate_input_claim(
-    lease: &ClaimAuthority,
-    claim: &TurnInputClaim,
-    expected: &[PendingTurnInput],
-    max_inputs: usize,
-) -> Result<(), String> {
-    if claim.session_lease_generation != lease.fencing_token {
-        return Err("turn-input claim pinned the wrong lease generation".to_string());
-    }
-    let expected_ids = expected
-        .iter()
-        .take(max_inputs)
-        .map(|input| input.input_id.as_str())
-        .collect::<Vec<_>>();
-    let actual_ids = claim
-        .inputs
-        .iter()
-        .map(|input| input.input_id.as_str())
-        .collect::<Vec<_>>();
-    if actual_ids != expected_ids {
-        return Err(format!(
-            "turn inputs were not claimed once in enqueue order: actual={actual_ids:?} expected={expected_ids:?}"
-        ));
-    }
-    Ok(())
 }
 
 /// Enforce queue-depth conservation through stronger element-wise agreement on
 /// both queue read seams. Exact equality for total and pending queued work
-/// subsumes a separate cardinality law, while the model's active claims define
-/// the claimed remainder.
+/// subsumes a separate cardinality law, while the model's unfinished root
+/// defines the admitted remainder.
 async fn assert_model_agreement(
     store: &dyn RuntimePersistence,
     model: &ReferenceModel,
@@ -1477,11 +1539,11 @@ async fn assert_model_agreement(
     }
 
     let actual_pending = store
-        .list_pending_queued_work(&session_id())
+        .list_open_queued_work(&session_id())
         .await
         .map_err(|error| error.to_string())?;
-    if json(&actual_pending)? != json(&pending_work(model))? {
-        return Err("pending queued-work projection differs from live-claim model".to_string());
+    if json(&actual_pending)? != json(&open_work(model))? {
+        return Err("open queued-work projection differs from the admission model".to_string());
     }
 
     let actual_inputs = store
@@ -1490,7 +1552,7 @@ async fn assert_model_agreement(
         .map_err(|error| error.to_string())?;
     if json(&actual_inputs)? != json(&pending_input_read_model::pending_input_reads(model))? {
         return Err(
-            "pending turn-input projection differs from lifecycle and live-claim model".to_string(),
+            "pending turn-input projection differs from lifecycle and admission model".to_string(),
         );
     }
     let applications = store
@@ -1588,7 +1650,7 @@ async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::
     Ok(serde_json::json!({
         "head": head,
         "work": store.list_queued_work(&session_id()).await.map_err(|error| error.to_string())?,
-        "pending_work": store.list_pending_queued_work(&session_id()).await.map_err(|error| error.to_string())?,
+        "pending_work": store.list_open_queued_work(&session_id()).await.map_err(|error| error.to_string())?,
         "pending_inputs": store.list_pending_turn_inputs(&session_id()).await.map_err(|error| error.to_string())?,
         "applications": store.list_turn_input_applications(&session_id()).await.map_err(|error| error.to_string())?,
     }))

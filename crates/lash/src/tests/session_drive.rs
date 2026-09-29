@@ -69,7 +69,7 @@ async fn fixture_with_batching(batching: crate::QueuedWorkBatchingConfig) -> Res
 async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs() -> Result<()> {
     const INPUTS: usize = lash_core::engine::MAX_ROOTS_PER_DRIVE + 1;
     let fixture = fixture_with_batching(
-        crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
+        crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
     )
     .await?;
     let session = fixture.core.session("send-root-budget").open().await?;
@@ -193,7 +193,7 @@ impl HeldDriveFixture {
         let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(
-                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
+                crate::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_admission(1),
             )
             .provider(counting_provider(Arc::clone(&calls)))
             .model(mock_model_spec())
@@ -205,7 +205,7 @@ impl HeldDriveFixture {
             .and_then(|catalog| catalog.store_for(&session_id))
             .expect("the open created the session's store");
         for index in 0..inputs {
-            lash_core::TurnInputStore::enqueue_pending_turn_input(
+            lash_core::IngressStore::enqueue_pending_turn_input(
                 store.as_ref(),
                 lash_core::PendingTurnInputDraft::new(
                     session_id.clone(),

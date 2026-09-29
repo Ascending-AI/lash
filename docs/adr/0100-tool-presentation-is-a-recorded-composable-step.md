@@ -90,3 +90,11 @@ superseded tool-output-budget plugin and its `SpillPolicy` are deleted.
   — the presentation boundary this ADR implements.
 * `ToolSettlement` (`runtime/effect/tool_settlement.rs`) — the record the
   steps fold against and the record incorporation consumes.
+
+## Amendment (FIG-3562, 2026-09-29): no orchestrating body re-runs
+
+The reason given above for keeping durations out of the command still holds,
+but its example is historical: [ADR 0116](0116-tools-are-opaque.md) deletes orchestrating bodies, and a redrive
+now serves every tool child's journaled attempt. A declared start's launch
+receipt and wait are recorded too, so nothing a presentation depends on
+re-runs.

@@ -5,6 +5,7 @@
 //! level-1 matrix in the parent module owns the seam scaffolding they reuse.
 
 use super::*;
+use crate::LeaseOwnerIdentity;
 use pretty_assertions::assert_eq;
 
 /// Level-2 crash sites driven by the backend helper processes.
@@ -249,7 +250,7 @@ async fn recover_turn_cancel_closure(
     let lease = tokio::time::timeout(RECOVERY_TIMEOUT, async {
         loop {
             let outcome = store
-                .seal_claim_epoch_for_test(
+                .seal_drive_epoch_for_test(
                     &identity.session_id,
                     &owner,
                     "cold-process-cancel-recovery-executor",
@@ -279,7 +280,7 @@ async fn recover_turn_cancel_closure(
     store
         .validate_turn_cancellation_binding(
             &identity.session_id,
-            &lease.fence(),
+            &lease,
             authority.binding_id(),
             &admitted_scope,
         )
@@ -301,7 +302,7 @@ async fn recover_turn_cancel_closure(
         let mut pending = store
             .pending_turn_cancel_closures(
                 &identity.session_id,
-                &lease.fence(),
+                &lease,
                 authority.binding_id(),
                 &admitted_scope,
             )
@@ -353,11 +354,11 @@ async fn recover_turn_cancel_closure(
                     .expect("reopen terminal key"),
                 crate::TurnCancelClosureProposal::CancelRequested(evidence),
                 observed,
-                &lease.fence(),
+                &lease,
             )
             .expect("reconstruct the exact unpersisted closure operation");
             store
-                .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+                .authorize_turn_cancel_closure(&lease, &authorization)
                 .await
                 .expect("successor persists exact closure authorization");
             authorization
@@ -367,22 +368,38 @@ async fn recover_turn_cancel_closure(
             .await
             .expect("successor settles the authorized promise pair");
         assert!(settlement.effective_cancellation().is_some());
-        let outcome = store
-            .repair_orphaned_active_turn_inputs(
-                &identity.session_id,
-                &lease.fence(),
-                &identity.turn_id,
-                authorization.observed_intent(),
-                Some(&settlement),
-            )
+        // The recovery commit applies the requested disposition to the
+        // turn's active input and consumes the closure in one transaction.
+        let observed = authorization.observed_intent().clone();
+        let request = observed
+            .request()
+            .expect("the authorized closure observed the durable cancellation request");
+        let evidence = crate::TurnCancellationEvidence {
+            request_id: request.request_id.clone(),
+            origin: request.origin.clone(),
+            reason: request.reason.clone(),
+            undelivered: request.undelivered,
+            mode: request.mode,
+            honoured_after_step: None,
+        };
+        let state = crate::store::load_persisted_session_state(store.as_ref())
             .await
-            .expect("apply cancellation effects and consume authorization")
-            .into_applied()
-            .expect("cancellation intent remains unchanged");
-        assert!(
-            !outcome.affected_inputs.is_empty(),
-            "recovery applies the requested disposition to active-turn input"
-        );
+            .expect("load the crashed session's head")
+            .unwrap_or_else(|| crate::RuntimeSessionState {
+                session_id: identity.session_id.clone(),
+                ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                ))
+            });
+        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
+            .deferring_interrupted_turn_inputs(identity.turn_id.clone(), Some(evidence));
+        commit.interrupted_turn_cancel_intent = Some(observed);
+        commit.turn_cancel_closure_settlement = Some(settlement);
+        commit.drive_fence = Some(Box::new(lease.clone()));
+        store
+            .commit_runtime_state(commit)
+            .await
+            .expect("apply cancellation effects and consume authorization");
     }
     let record = store
         .turn_cancel_request(&address)
@@ -408,7 +425,7 @@ async fn recover_turn_cancel_closure(
         "input effects and closure consumption become durable together"
     );
     store
-        .supersede_claim_epoch_for_test(&lease.completion())
+        .supersede_drive_epoch_for_test(&lease)
         .await
         .expect("release cancellation recovery lane");
     println!(
@@ -531,7 +548,7 @@ pub async fn cold_process_real_turn_driver(
                 // scheduling delay could lapse it before the crash point;
                 // expire what it abandoned rather than waiting the term out.
                 let outcome = store
-                    .seal_claim_epoch_for_test(
+                    .seal_drive_epoch_for_test(
                         &identity.session_id,
                         &owner,
                         "cold-process-real-turn-driver-executor",
@@ -547,26 +564,31 @@ pub async fn cold_process_real_turn_driver(
         })
         .await
         .expect("peer can acquire crashed turn lease");
-        let claim = store
-            .claim_ready_queued_work(
-                &identity.session_id,
-                &lease.fence(),
-                &owner,
-                crate::QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(64),
-            )
+        let unfinished = store
+            .unfinished_root(&identity.session_id)
             .await
-            .expect("peer reclaims queued-work row")
-            .claim()
-            .expect("crashed turn left one queued-work row");
-        assert_eq!(claim.batches.len(), 1, "peer reclaims exactly one row");
+            .expect("read the crashed turn's unfinished root")
+            .expect("the crashed turn left its root unfinished");
+        let admission = lash_core::testing::store_fixtures::admit_root_for_test(
+            &store,
+            &lease,
+            &unfinished.root,
+            unfinished.head.clone(),
+        )
+        .await
+        .expect("peer reads the crashed root's admission back")
+        .expect("the crashed root's admission is recorded");
+        let batches = admission.batch_ids();
+        assert_eq!(batches.len(), 1, "the crashed root holds exactly one row");
         store
-            .supersede_claim_epoch_for_test(&lease.completion())
+            .supersede_drive_epoch_for_test(&lease)
             .await
-            .expect("release peer lease without settling peer row");
+            .expect("release the peer drive without settling the root's row");
         println!(
-            "peer_claim row={} claim={} generation={}",
-            claim.batches[0].batch_id, claim.claim_id, claim.session_lease_generation
+            "peer_admission row={} root={} epoch={}",
+            batches[0],
+            unfinished.root,
+            lease.epoch()
         );
         return;
     } else {
@@ -581,7 +603,7 @@ pub async fn cold_process_real_turn_driver(
                 // helper's lease is expired on demand, so displacement stays a
                 // real store decision instead of a wall-clock race.
                 let outcome = store
-                    .seal_claim_epoch_for_test(
+                    .seal_drive_epoch_for_test(
                         &identity.session_id,
                         &owner,
                         "cold-process-real-turn-driver-executor-2",
@@ -591,7 +613,7 @@ pub async fn cold_process_real_turn_driver(
                     .expect("poll cold-process recovery lease");
                 if let Some(authority) = outcome.acquired() {
                     store
-                        .supersede_claim_epoch_for_test(&authority)
+                        .supersede_drive_epoch_for_test(&authority)
                         .await
                         .expect("supersede recovery probe");
                     break;

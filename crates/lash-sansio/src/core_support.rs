@@ -54,7 +54,6 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-process-lease/v2",
     "lash-queued-work-batch/v2",
     "lash-queued-work-claim-lease/v2",
-    "lash-queued-work-claim-lease/v3",
     "lash-record-config-request/v1",
     "lash-rolling-history-compaction/v1",
     "lash-rolling-history-compaction/v2",

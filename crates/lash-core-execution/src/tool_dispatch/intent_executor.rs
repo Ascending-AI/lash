@@ -66,6 +66,12 @@ pub async fn execute_final_tool_intents(
             replay_key = %identity.replay_key,
         );
         let _entered = span.enter();
+        if let crate::ToolIntent::RegisterTrigger(registration) = intent
+            && let Some(refusal) = validate_trigger_registration_authority(context, registration)
+        {
+            outcomes.push(refused(index, intent.kind(), Some(identity), refusal));
+            continue;
+        }
         let result = execute_one(context, intent, &identity, child_trace_hook).await;
         let outcome = match result {
             Ok(result) => {
@@ -114,6 +120,100 @@ pub async fn execute_final_tool_intents(
         outcomes.push(outcome);
     }
     Ok(outcomes)
+}
+
+/// The declared-start launch entry (ADR 0116 §3.2): realizes the one start a
+/// pending call declared exactly as a `StartProcess` drain realizes it — the
+/// same request under the same derived key, the same journaled admission and
+/// the same child-trace hook — and answers the call's launch receipt.
+///
+/// `scope` carries the call's lineage as its parent. A realized start answers
+/// `Executed`; a typed refusal answers `Refused` and settles the call. An
+/// `Err` is a fault the call cannot settle (see [`declared_start_fault`]).
+pub(crate) async fn realize_declared_start(
+    processes: &dyn crate::ProcessService,
+    start: &crate::DeclaredStart,
+    scope: crate::ProcessOpScope<'_>,
+    child_trace_hook: Option<&crate::ToolChildExecutionTraceHook>,
+) -> Result<crate::ToolIntentExecutionOutcome, crate::RuntimeEffectControllerError> {
+    let identity = start.identity().clone();
+    let parent = scope.parent_invocation.clone().map(|parent| {
+        parent.with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
+            identity.clone(),
+        ))
+    });
+    let scope = scope.with_parent_invocation(parent);
+    let kind = crate::ToolIntentKind::StartProcess;
+    match processes
+        .start_from_recorded_intent(&start.start().session_id, start.request(), scope)
+        .await
+    {
+        Ok(handle) => {
+            // The declared kind names the child's entry, so a trace links the
+            // call to a child it can name.
+            if let Some(hook) = child_trace_hook {
+                hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
+                    process_id: handle.process_id.clone(),
+                    attempt: None,
+                    child_entry_name: start
+                        .start()
+                        .declaration
+                        .identity
+                        .as_ref()
+                        .map(|identity| identity.kind.as_str().to_string()),
+                });
+            }
+            record_executed_metric(kind);
+            Ok(crate::ToolIntentExecutionOutcome::Executed {
+                identity,
+                kind,
+                result: serde_json::to_value(handle).unwrap_or(serde_json::Value::Null),
+            })
+        }
+        Err(error) => match declared_start_fault(&error) {
+            Some(fault) => Err(fault),
+            None => Ok(refused(
+                identity.intent_index as usize,
+                kind,
+                Some(identity),
+                crate::ToolIntentRefusalReason::CommandFailed {
+                    code: error_code(&error),
+                    message: error_message(&error),
+                },
+            )),
+        },
+    }
+}
+
+/// A declared start's error the call cannot settle as its result: a replay
+/// divergence, a cancel decided before the launch, or a live fault left
+/// unrecorded, which the engine's redelivery retries (ADR 0116 §3.2 rule 7).
+/// Every other error is the start's typed refusal.
+pub(crate) fn declared_start_fault(
+    error: &crate::PluginError,
+) -> Option<crate::RuntimeEffectControllerError> {
+    match error {
+        crate::PluginError::RuntimeEffectController(error)
+            if error.code.is_replay_mismatch()
+                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
+                || !error.journaled =>
+        {
+            Some(error.clone())
+        }
+        crate::PluginError::SessionExecutionLeaseLost { .. } => {
+            Some(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::SessionExecutionLeaseLost,
+                error.to_string(),
+            ))
+        }
+        crate::PluginError::Session(_) | crate::PluginError::ProcessExecutionSuperseded { .. } => {
+            Some(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::PluginSessionManager,
+                error.to_string(),
+            ))
+        }
+        _ => None,
+    }
 }
 
 fn admit_batch(
@@ -251,6 +351,40 @@ fn refused(
         kind,
         refusal,
     }
+}
+
+fn validate_trigger_registration_authority(
+    context: &ToolDispatchContext<'_>,
+    intent: &crate::RegisterTriggerIntent,
+) -> Option<crate::ToolIntentRefusalReason> {
+    let expected_owner = match crate::resolve_trigger_owner_scope(
+        &context.session_id,
+        context.process_originator.as_ref(),
+    ) {
+        Ok(owner) => owner,
+        Err(error) => {
+            return Some(crate::ToolIntentRefusalReason::CommandFailed {
+                code: "trigger_owner_scope_unavailable".to_string(),
+                message: error.to_string(),
+            });
+        }
+    };
+    if intent.owner_scope != expected_owner {
+        return Some(crate::ToolIntentRefusalReason::ForeignTriggerOwnerScope {
+            expected: format!("{expected_owner:?}"),
+            recorded: format!("{:?}", intent.owner_scope),
+        });
+    }
+    let expected_actor = context.process_originator.clone().unwrap_or_else(|| {
+        crate::ProcessOriginator::session(crate::SessionScope::for_agent_frame(
+            context.session_id.clone(),
+            context.agent_frame_id.clone(),
+        ))
+    });
+    (intent.actor != expected_actor).then(|| crate::ToolIntentRefusalReason::ForeignTriggerActor {
+        expected: format!("{expected_actor:?}"),
+        recorded: format!("{:?}", intent.actor),
+    })
 }
 
 #[cfg(feature = "otel-trace")]
@@ -406,14 +540,7 @@ async fn execute_one(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            let outcome = Box::pin(register_recorded_trigger(
-                context,
-                router,
-                identity,
-                intent.draft.clone(),
-            ))
-            .await?;
-            Ok(serde_json::to_value(outcome).unwrap_or(serde_json::Value::Null))
+            Ok(register_recorded_trigger(context, router, identity, intent).await?)
         }
     }
 }
@@ -566,9 +693,28 @@ async fn register_recorded_trigger(
     context: &ToolDispatchContext<'_>,
     router: &crate::TriggerRouter,
     identity: &crate::ToolIntentIdentity,
-    draft: crate::TriggerSubscriptionDraft,
-) -> Result<crate::TriggerMutationReceipt, crate::PluginError> {
+    intent: &crate::RegisterTriggerIntent,
+) -> Result<serde_json::Value, crate::PluginError> {
     let scoped = context.effect_controller.scoped();
+    let mut draft = intent.draft.clone();
+    if let Some(env_spec) = intent.env_spec.as_ref() {
+        // Publication moved out of the attempt and into realization: the
+        // bytes land under the realizing execution scope's artifact owner,
+        // the same owner the retired host-operation path published under
+        // (FIG-3116). The draft's env ref is content-addressed, so the
+        // published reference is the one the draft already names.
+        let env_store = router.process_env_store().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process execution env store is unavailable in this runtime".to_string(),
+            )
+        })?;
+        draft.env_ref = crate::publish_process_execution_env(
+            env_store.as_ref(),
+            &crate::ArtifactOwner::execution(scoped.execution_scope().clone()),
+            env_spec,
+        )
+        .await?;
+    }
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
@@ -581,15 +727,14 @@ async fn register_recorded_trigger(
     .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
-    let session_scope = crate::SessionScope::new(context.session_id.clone());
     let outcome = scoped
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::Trigger {
                     command: Box::new(crate::TriggerCommand::Register {
-                        owner_scope: crate::TriggerOwnerScope::session(context.session_id.clone()),
-                        actor: crate::ProcessOriginator::session(session_scope),
+                        owner_scope: intent.owner_scope.clone(),
+                        actor: intent.actor.clone(),
                         draft,
                     }),
                 },
@@ -602,7 +747,9 @@ async fn register_recorded_trigger(
         .map_err(crate::PluginError::RuntimeEffectController)?
         .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     match outcome {
-        crate::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+        crate::TriggerCommandOutcome::Mutation { receipt } => {
+            crate::trigger_handle_outcome_value(&receipt)
+        }
         other => Err(crate::PluginError::Session(format!(
             "trigger registration returned a non-mutation outcome: {other:?}"
         ))),

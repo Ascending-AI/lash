@@ -4,6 +4,7 @@ pub mod local_restate;
 mod schema;
 pub use schema::ensure_e2e_schema;
 pub mod scripted_provider;
+pub mod witness;
 use anyhow::{Context, Result, bail};
 use lash::persistence::{AttachmentStore, LeaseOwnerIdentity};
 use lash::plugins::{
@@ -256,7 +257,6 @@ pub async fn reset_e2e_rows(pool: &PgPool) -> Result<()> {
         "DELETE FROM lash_e2e_failover_markers",
         "DELETE FROM lash_e2e_harness_signals",
         "DELETE FROM lash_e2e_tool_attempt_counts",
-        "DELETE FROM lash_e2e_provider_calls",
         "DELETE FROM lash_e2e_tool_events",
         "DELETE FROM lash_e2e_turn_events",
         "DELETE FROM lash_trigger_deliveries",
@@ -362,36 +362,6 @@ pub async fn record_terminal_result(pool: &PgPool, response: &TurnResponse) -> R
     Ok(())
 }
 
-pub async fn record_provider_call(
-    pool: &PgPool,
-    request_id: &str,
-    scenario: &str,
-    workflow_id: &str,
-    model: &str,
-    request: &serde_json::Value,
-    response: &serde_json::Value,
-) -> Result<()> {
-    sqlx::query(
-        r#"
-        INSERT INTO lash_e2e_provider_calls (
-            request_id, scenario, workflow_id, model, request_json, response_json, created_at_ms
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
-    )
-    .bind(request_id)
-    .bind(scenario)
-    .bind(workflow_id)
-    .bind(model)
-    .bind(request.to_string())
-    .bind(response.to_string())
-    .bind(current_epoch_ms() as i64)
-    .execute(pool)
-    .await
-    .with_context(|| format!("record provider call for `{workflow_id}`"))?;
-    Ok(())
-}
-
 pub async fn record_tool_event(
     pool: &PgPool,
     workflow_id: &str,
@@ -490,6 +460,8 @@ pub struct E2eCoreConfig {
     pub mock_provider_base_url: String,
     pub trace_dir: Option<PathBuf>,
     pub fail_once: bool,
+    /// The witness ledger pool (`witness.sql`), apart from `storage`.
+    pub witness: PgPool,
 }
 
 pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
@@ -545,6 +517,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             restate_ingress_url: config.restate_ingress_url,
             restate_authority_id: config.restate_authority_id,
             fail_once: config.fail_once,
+            witness: config.witness,
         }));
     if let Some(trace_dir) = config.trace_dir.as_ref() {
         builder =
@@ -567,6 +540,7 @@ struct E2ePluginFactory {
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
+    witness: PgPool,
 }
 
 impl PluginFactory for E2ePluginFactory {
@@ -612,6 +586,7 @@ impl PluginFactory for E2ePluginFactory {
             restate_ingress_url: self.restate_ingress_url.clone(),
             restate_authority_id: self.restate_authority_id.clone(),
             fail_once: self.fail_once,
+            witness: self.witness.clone(),
         }))
     }
 }
@@ -623,6 +598,7 @@ struct E2eSessionPlugin {
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
+    witness: PgPool,
 }
 
 impl SessionPlugin for E2eSessionPlugin {
@@ -644,6 +620,7 @@ impl SessionPlugin for E2eSessionPlugin {
                 self.restate_ingress_url.clone(),
                 self.restate_authority_id.clone(),
                 self.fail_once,
+                self.witness.clone(),
             ))
             .map_err(|err| lash::plugins::PluginError::Session(err.to_string()))?;
         Ok(())
@@ -701,6 +678,7 @@ fn e2e_tool_provider(
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
+    witness: PgPool,
 ) -> Arc<dyn ToolProvider> {
     Arc::new(StaticToolProvider::new(
         vec![
@@ -789,7 +767,8 @@ fn e2e_tool_provider(
                     "properties": {
                         "workflow_id": { "type": "string" },
                         "key": { "type": "string" },
-                        "delay_ms": { "type": "integer" }
+                        "delay_ms": { "type": "integer" },
+                        "lose_after_commit": { "type": "boolean" }
                     },
                     "required": ["workflow_id", "key"],
                     "additionalProperties": false
@@ -878,6 +857,7 @@ fn e2e_tool_provider(
             restate_ingress_url,
             restate_authority_id,
             fail_once,
+            witness,
         },
     )) as Arc<dyn ToolProvider>
 }
@@ -901,6 +881,7 @@ struct E2eTools {
     restate_ingress_url: String,
     restate_authority_id: lash_restate::RestateAuthorityId,
     fail_once: bool,
+    witness: PgPool,
 }
 
 type E2eToolFuture<'a> = Pin<Box<dyn Future<Output = ToolOutcome> + Send + 'a>>;
@@ -1057,7 +1038,14 @@ impl E2eTools {
             "value": format!("batch:{key}"),
             "worker_id": self.worker_id,
         });
-        let _ = record_tool_event(
+        let result = match self
+            .witness_effect(&workflow_id, &key, &call, &result)
+            .await
+        {
+            Ok(committed) => committed,
+            Err(err) => return ToolOutcome::err_fmt(format_args!("{err:#}")),
+        };
+        if let Err(err) = record_tool_event(
             &self.pool,
             &workflow_id,
             &self.worker_id,
@@ -1066,8 +1054,76 @@ impl E2eTools {
             call.args.to_owned(),
             result.clone(),
         )
-        .await;
+        .await
+        {
+            return ToolOutcome::err_fmt(format_args!("{err:#}"));
+        }
         ToolOutcome::ok(result)
+    }
+
+    /// Offer this physical attempt to the witness ledger's idempotent
+    /// receiver and answer with the committed response (FIG-608 laws 2-4).
+    ///
+    /// A `lose_after_commit` call exits the worker once, after the receiver
+    /// committed and before the reply is recorded or the tool returns: the
+    /// window in which Restate must re-enter the closure, and a second
+    /// physical attempt must find the first commit rather than make another.
+    async fn witness_effect(
+        &self,
+        workflow_id: &str,
+        key: &str,
+        call: &ToolCall<'_>,
+        result: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let logical_key = witness::effect_logical_key(workflow_id, call.name(), key);
+        let attempt_id = uuid::Uuid::new_v4().to_string();
+        let request = serde_json::to_vec(call.args).context("encode effect request")?;
+        let attempt = witness::EffectAttempt {
+            attempt_id: &attempt_id,
+            logical_key: &logical_key,
+            parent_workflow_id: workflow_id,
+            call_id: call.context.tool_call_id().unwrap_or_default(),
+            worker_id: &self.worker_id,
+            request: &request,
+        };
+        let (accepted, committed) =
+            witness::commit_effect(&self.witness, &attempt, result.to_string().as_bytes()).await?;
+        let lose = call
+            .args
+            .get("lose_after_commit")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true);
+        let marker = format!("{workflow_id}#loss-after-commit");
+        if self.fail_once
+            && lose
+            && should_exit_for_peer_failover(&self.pool, &marker, &self.worker_id, false).await
+        {
+            witness::record_nemesis(
+                &self.witness,
+                witness::NEMESIS_LOSS_AFTER_COMMIT,
+                &logical_key,
+            )
+            .await?;
+            record_worker_event(
+                &self.pool,
+                &marker,
+                &self.worker_id,
+                "intentional_exit",
+                serde_json::json!({ "tool": call.name(), "logical_key": logical_key }),
+            )
+            .await?;
+            tracing::warn!(worker_id = %self.worker_id, logical_key, "intentional E2E loss after witness commit");
+            std::process::exit(75);
+        }
+        witness::record_effect_reply(
+            &self.witness,
+            &attempt_id,
+            &logical_key,
+            accepted,
+            &committed,
+        )
+        .await?;
+        serde_json::from_slice(&committed).context("decode the committed effect response")
     }
 
     #[expect(
@@ -1182,6 +1238,14 @@ impl E2eTools {
             )
             .await
         {
+            // No exit without its evidence: a crash the witness never saw
+            // would make law 4's replay window unreadable.
+            if let Err(err) =
+                witness::record_nemesis(&self.witness, witness::NEMESIS_WORKER_EXIT, &workflow_id)
+                    .await
+            {
+                return ToolOutcome::err_fmt(format_args!("{err:#}"));
+            }
             let _ = record_worker_event(
                 &self.pool,
                 &workflow_id,

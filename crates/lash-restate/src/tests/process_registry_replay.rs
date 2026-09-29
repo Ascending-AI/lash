@@ -1116,7 +1116,7 @@ impl HttpTransport for BlockingCancelSignalTransport {
         Ok(HttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered(r#""cancel_requested""#),
+            body: HttpResponseBody::buffered(crate::wire::reply_json("cancel_requested")),
         })
     }
 }

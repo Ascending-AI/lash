@@ -56,7 +56,11 @@ async fn an_unstamped_schema_is_refused_by_preflight_exactly_as_by_open() {
     );
     assert_eq!(
         status.databases[0].verdict,
-        StoreSchemaVerdict::Mismatch { found: 0 },
+        StoreSchemaVerdict::Refused {
+            refusal: lash_core_execution::compat::CompatRefusal::Unstamped {
+                component: "postgres".to_string(),
+            },
+        },
         "an unstamped schema is provisioned-but-ungenerated, not absent"
     );
     assert!(status.databases[0].verdict.refuses_open());
@@ -71,7 +75,7 @@ async fn an_unstamped_schema_is_refused_by_preflight_exactly_as_by_open() {
         .expect("an unstamped schema must not open")
         .to_string();
     assert!(
-        refusal.to_lowercase().contains("version"),
+        refusal.to_lowercase().contains("stamp"),
         "the open refusal names the version stamp: {refusal}"
     );
 

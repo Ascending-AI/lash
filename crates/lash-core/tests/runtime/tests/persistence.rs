@@ -1030,6 +1030,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             checkpoint: Some(checkpoint),
             token_ledger: Vec::new(),
             turn_failure_settlements: Vec::new(),
+            turn_commits: Vec::new(),
         },
     );
     let old_head_revision = runtime.state().head_revision;

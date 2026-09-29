@@ -33,7 +33,8 @@ impl LashCoreBuilder {
                     self.backend.clock(),
                 )
             })
-            .with_effect_host(self.backend.effect_host()),
+            .with_effect_host(self.backend.effect_host())
+            .with_session_store_factory(self.backend.session_store_factory()),
         );
         Ok(self.apply_core_overrides(core))
     }

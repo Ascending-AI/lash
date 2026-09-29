@@ -18,12 +18,12 @@ pub(crate) async fn run_sleep_process()
         LashlangAbilities::default().with_sleep(),
     );
     let output = lashlang::compile_module(lashlang::ModuleCompileRequest {
-        source: "process pause() -> null { finish await sleep_until(0) }",
+        source: "process pause() -> null { finish await sleep_for(0) }",
         program: process_module(
             "pause",
             Vec::new(),
             lashlang::TypeExpr::Null,
-            b::sleep_until(b::num(0.0)),
+            b::sleep_for(b::num(0.0)),
         ),
         environment: &environment,
     })

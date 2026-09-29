@@ -102,47 +102,62 @@ impl SessionDriver for Driver {
         &self,
         _: lash_core::ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        if !self.restored.load(Ordering::SeqCst) {
-            return Err(DriveAbort::Retry(fault()));
-        }
-        let mut state =
-            lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
-        state.session_id = self.session.clone();
-        state.policy.session_id = Some(self.session.clone());
-        let operation =
-            lash_core::OperationId::turn(self.session.as_str(), root.as_str(), "witness");
-        let mut graph = state.pending_graph_commit();
-        graph
-            .derive_node_ids(&self.session, &operation)
-            .expect("nodes");
-        let mut commit = lash_core::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
-            &state,
-            graph,
-            &[],
-            operation,
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                if !self.restored.load(Ordering::SeqCst) {
+                    return Err(DriveAbort::Retry(fault()));
+                }
+                let mut state =
+                    lash_core::RuntimeSessionState::new(lash_core::testing::mock_session_policy());
+                state.session_id = self.session.clone();
+                state.policy.session_id = Some(self.session.clone());
+                let operation =
+                    lash_core::OperationId::turn(self.session.as_str(), root.as_str(), "witness");
+                let mut graph = state.pending_graph_commit();
+                graph
+                    .derive_node_ids(&self.session, &operation)
+                    .expect("nodes");
+                let mut commit =
+                    lash_core::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+                        &state,
+                        graph,
+                        &[],
+                        operation,
+                    )
+                    .expect("commit");
+                commit.root_terminal = Some(Box::new(RootTerminalWrite {
+                    root: root.clone(),
+                    commit: TurnCommitId::new(root.clone(), 0),
+                    turn: root.clone(),
+                    stop: None,
+                }));
+                self.store
+                    .commit_runtime_state(commit)
+                    .await
+                    .expect("commit root");
+                self.commits.fetch_add(1, Ordering::SeqCst);
+                Ok(RootOutcome::Committed {
+                    root: root.clone(),
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: "restored".into(),
+                        },
+                    ),
+                })
+            }
+            .await,
         )
-        .expect("commit");
-        commit.root_terminal = Some(Box::new(RootTerminalWrite {
-            root: root.clone(),
-            commit: TurnCommitId::new(root.clone(), 0),
-            turn: root.clone(),
-            stop: None,
-        }));
-        self.store
-            .commit_runtime_state(commit)
-            .await
-            .expect("commit root");
-        self.commits.fetch_add(1, Ordering::SeqCst);
-        Ok(RootOutcome::Committed {
-            root: root.clone(),
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: "restored".into(),
-                },
-            ),
-        })
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 struct Fixture {
@@ -1235,8 +1250,19 @@ impl SessionDriver for TickingDriver {
         &self,
         _: lash_core::ScopedEffectController<'_>,
         _: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        panic!("the recovery interval never runs a root")
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async { panic!("the recovery interval never runs a root") }.await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 

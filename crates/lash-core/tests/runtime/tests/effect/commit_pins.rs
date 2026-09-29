@@ -9,6 +9,10 @@
 //! accepted input now carries its turn id in the existing optional
 //! `source_key` field. That field is the only difference in the committed
 //! bytes.
+//!
+//! Re-pinned for FIG-4037: each physical turn commit now carries its typed
+//! `outcome`. Removing that field from the masked commit reproduces each old
+//! digest; every other committed byte is unchanged.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
@@ -88,7 +92,7 @@ async fn code_execution_turn_commits_the_pinned_bytes() {
     assert_commit_pins(
         "code execution",
         &commits,
-        &["2bc4ecf11e7c4d312851178e97155c0bef320bd97ee72c24ab86ecaf828c18ac"],
+        &["1cf8f6754e4465e7186ccd90e53b2aa9a54f4677cd06953a1d1ae10a613574bd"],
     );
 }
 
@@ -111,7 +115,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["9ff10588a08c0d6749a1430b78f7a55fb1d6603fd224637546b977f9702206f5"],
+        &["ac964fcad226092b76d7af568870c5fda1023ef261986320267198c49b480792"],
     );
 }
 
@@ -135,6 +139,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["9a2111d1bd5a39bffba9ce7027829852085860a6446e0e6bfc23f94a7e12e6ed"],
+        &["e0ed12c9b9d3855b5470ef3cffcc95f7cec3f3dfd19098678a67e77218e5199a"],
     );
 }

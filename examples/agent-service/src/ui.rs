@@ -660,12 +660,27 @@ pub(crate) const INDEX_HTML: &str = r#"<!doctype html>
       renderBoard();
       const res = await api(`/api/chats/${activeChat}/messages`, {
         method:'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-lash-protocol-hello': JSON.stringify({
+            negotiation: 'hello',
+            supported: { min: 100, max: 100 }
+          })
+        },
         body: JSON.stringify({
           text,
           board: currentBoard(),
           ...selectedModel()
         })
       });
+      const accept = JSON.parse(res.headers.get('x-lash-protocol-accept') || 'null');
+      if (accept?.negotiation !== 'accept' || accept.selected !== 100
+          || accept.supported?.min > 100 || accept.supported?.max < 100) {
+        busy = false;
+        renderBoard();
+        alert('remote protocol negotiation failed');
+        return;
+      }
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';

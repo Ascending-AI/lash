@@ -1,8 +1,8 @@
 use super::vm::{VM_CONTINUATION_FORMAT_VERSION, VmFrameContinuation, VmFrameReturnContinuation};
 use super::*;
 use crate::ast::{
-    AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, Program,
-    TypeExpr,
+    AssignTarget, Declaration, Expr, FunctionDecl, FunctionExpr, FunctionParam, JavaScriptBinaryOp,
+    JavaScriptLogicalOp, Program, TypeExpr,
 };
 use crate::runtime::entry_points::compile_program_internal;
 use crate::testing::ast_builders as builders;
@@ -140,10 +140,18 @@ impl ExecutionHost for RecordingProcessHost {
 /// `while i < <limit> { i = i + 1 }`
 fn counting_loop(limit: f64) -> Expr {
     builders::while_loop(
-        builders::binary(builders::var("i"), BinaryOp::Less, builders::num(limit)),
+        builders::binary(
+            builders::var("i"),
+            JavaScriptBinaryOp::Less,
+            builders::num(limit),
+        ),
         builders::block(vec![builders::assign(
             "i",
-            builders::binary(builders::var("i"), BinaryOp::Add, builders::num(1.0)),
+            builders::binary(
+                builders::var("i"),
+                JavaScriptBinaryOp::Add,
+                builders::num(1.0),
+            ),
         )]),
     )
 }
@@ -298,18 +306,6 @@ async fn tool_wait_speed_changes_neither_outcome_nor_instruction_count() {
         slow_vm.instructions_executed(),
         fast_vm.instructions_executed()
     );
-}
-
-#[tokio::test(flavor = "current_thread")]
-async fn string_membership_rejects_non_string_needles_without_coercion() {
-    let compiled = compile_program(&builders::program(vec![builders::finish(
-        builders::binary(builders::num(1.0), BinaryOp::In, builders::string("123")),
-    )]));
-    let mut state = State::new();
-    let error = execute(&compiled, &mut state, &Host)
-        .await
-        .expect_err("numeric string needles must not be coerced");
-    assert_eq!(error, RuntimeError::InUnsupported);
 }
 
 /// Compiles a built program, linking it first when it names host modules.
@@ -472,7 +468,7 @@ fn golden_contract_program() -> Program {
                 vec![builders::index_step(builders::var("token"))],
                 builders::binary(
                     builders::index(builders::var("counts"), builders::var("token")),
-                    BinaryOp::Add,
+                    JavaScriptBinaryOp::Add,
                     builders::num(1.0),
                 ),
             )]),
@@ -616,16 +612,6 @@ fn compiled_program_snapshot(program: Program) -> String {
     let chunk = &compiled.chunk;
     let mut out = String::new();
 
-    let stats = compiled.compile_stats();
-    writeln!(
-        out,
-        "compile_stats: total={} const_folded={} dynamic={} refs={}",
-        stats.type_literals_total,
-        stats.type_literals_const_folded,
-        stats.type_literals_dynamic,
-        stats.type_ref_sites
-    )
-    .unwrap();
     writeln!(
         out,
         "slots: [{}]",
@@ -684,11 +670,7 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         Instruction::LoadName(slot) => format!("load_name {slot}:{}", slot_name(chunk, slot)),
         Instruction::Duplicate => "duplicate".to_string(),
         Instruction::StoreName(slot) => format!("store_name {slot}:{}", slot_name(chunk, slot)),
-        Instruction::BuildTuple(count) => format!("build_tuple {count}"),
-        Instruction::BuildList(count) => format!("build_list {count}"),
         Instruction::BuildHeapList(count) => format!("build_heap_list {count}"),
-        Instruction::ListAppend => "list_append".to_string(),
-        Instruction::BuildRecord(keys) => format!("build_record {}", keys_snapshot(chunk, keys)),
         Instruction::BuildHeapRecord(keys) => {
             format!("build_heap_record {}", keys_snapshot(chunk, keys))
         }
@@ -715,55 +697,12 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
             assign_path_snapshot(chunk, path)
         ),
         Instruction::ResultUnwrap => "result_unwrap".to_string(),
-        Instruction::Unary(op) => format!("unary {op:?}"),
-        Instruction::Binary(op) => format!("binary {op:?}"),
         Instruction::JavaScriptUnary(op) => format!("javascript_unary {op:?}"),
         Instruction::JavaScriptBinary(op) => format!("javascript_binary {op:?}"),
         Instruction::IsNullish => "is_nullish".to_string(),
-        Instruction::SlotNumberBinary { slot, op, right } => format!(
-            "slot_number_binary {slot}:{} {op:?} {right}",
-            slot_name(chunk, slot)
-        ),
-        Instruction::SlotNumberCompare { slot, op, right } => format!(
-            "slot_number_compare {slot}:{} {op:?} {right}",
-            slot_name(chunk, slot)
-        ),
-        Instruction::SlotNumberBinaryCompare {
-            slot,
-            binary_op,
-            binary_right,
-            compare_op,
-            compare_right,
-        } => format!(
-            "slot_number_binary_compare {slot}:{} {binary_op:?} {binary_right} {compare_op:?} {compare_right}",
-            slot_name(chunk, slot)
-        ),
         Instruction::ToBool => "to_bool".to_string(),
         Instruction::Jump(target) => format!("jump {target}"),
         Instruction::JumpIfFalse(target) => format!("jump_if_false {target}"),
-        Instruction::JumpIfCompareFalse { op, target } => {
-            format!("jump_if_compare_false {op:?} {target}")
-        }
-        Instruction::JumpIfSlotNumberCompareFalse {
-            slot,
-            op,
-            right,
-            target,
-        } => format!(
-            "jump_if_slot_number_compare_false {slot}:{} {op:?} {right} {target}",
-            slot_name(chunk, slot)
-        ),
-        Instruction::JumpIfSlotNumberBinaryCompareFalse {
-            slot,
-            binary_op,
-            binary_right,
-            compare_op,
-            compare_right,
-            target,
-        } => format!(
-            "jump_if_slot_number_binary_compare_false {slot}:{} {binary_op:?} {binary_right} {compare_op:?} {compare_right} {target}",
-            slot_name(chunk, slot)
-        ),
         Instruction::JumpIfTrue(target) => format!("jump_if_true {target}"),
         Instruction::ResourceCall { operation, argc } => {
             format!("resource_call {} argc={argc}", name_text(chunk, operation))
@@ -783,54 +722,18 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
                 batch.aggregate_unwrap
             )
         }
-        Instruction::ResourceOperationListBatch(batch) => {
-            let batch = &chunk.resource_operation_list_batches[batch];
-            format!(
-                "resource_operation_list_batch {} argc={} unwrap={} aggregate_unwrap={}",
-                name_text(chunk, batch.operation),
-                batch.argc,
-                batch.unwrap,
-                batch.aggregate_unwrap
-            )
-        }
         Instruction::AwaitHandle => "await_handle".to_string(),
         Instruction::SleepFor => "sleep_for".to_string(),
-        Instruction::SleepUntil => "sleep_until".to_string(),
         Instruction::ProcessWaitSignal { name } => {
             format!("process_wait_signal {}", name_text(chunk, name))
         }
         Instruction::AwaitHandleUnwrap => "await_handle_unwrap".to_string(),
         Instruction::Intrinsic(op) => intrinsic_snapshot(chunk, op),
-        Instruction::AddAssign(slot) => format!("add_assign {slot}:{}", slot_name(chunk, slot)),
-        Instruction::AddAssignNumber { slot, right } => {
-            format!(
-                "add_assign_number {slot}:{} {right}",
-                slot_name(chunk, slot)
-            )
-        }
-        Instruction::AddAssignSlot { slot, right } => format!(
-            "add_assign_slot {slot}:{} {right}:{}",
-            slot_name(chunk, slot),
-            slot_name(chunk, right)
-        ),
-        Instruction::AddAssignIndexNumber { slot, right } => format!(
-            "add_assign_index_number {slot}:{} {right}",
-            slot_name(chunk, slot)
-        ),
-        Instruction::AddAssignIndexSlotNumber { slot, index, right } => format!(
-            "add_assign_index_slot_number {slot}:{} {index}:{} {right}",
-            slot_name(chunk, slot),
-            slot_name(chunk, index)
-        ),
-        Instruction::AppendAssign(slot) => {
-            format!("append_assign {slot}:{}", slot_name(chunk, slot))
-        }
         Instruction::JavaScriptAddAssign(slot) => {
             format!("javascript_add_assign {slot}:{}", slot_name(chunk, slot))
         }
         Instruction::Print => "print".to_string(),
         Instruction::Finish => "finish".to_string(),
-        Instruction::ProcessYield => "process_yield".to_string(),
         Instruction::ProcessFail => "process_fail".to_string(),
         Instruction::ObserveStep => "observe_step".to_string(),
         Instruction::Pop => "pop".to_string(),
@@ -843,10 +746,6 @@ fn instruction_snapshot(chunk: &Chunk, instruction: Instruction) -> String {
         }
         Instruction::IterNext { jump_to } => format!("iter_next {jump_to}"),
         Instruction::EndIter => "end_iter".to_string(),
-        Instruction::ResolveTypeRef(slot) => {
-            format!("resolve_type_ref {slot}:{}", slot_name(chunk, slot))
-        }
-        Instruction::WrapTypeLiteral => "wrap_type_literal".to_string(),
         Instruction::WrapHostDescriptor(type_name) => {
             format!("wrap_host_descriptor {}", name_text(chunk, type_name))
         }
@@ -1023,16 +922,6 @@ fn intrinsic_snapshot(chunk: &Chunk, op: IntrinsicOp) -> String {
             format_template_snapshot(chunk, template),
             slot_name(chunk, slot)
         ),
-        IntrinsicOp::FormatCompiledSlotNumberBinary {
-            template,
-            slot,
-            op,
-            right,
-        } => format!(
-            "intrinsic format_compiled_slot_number_binary {} {slot}:{} {op:?} {right}",
-            format_template_snapshot(chunk, template),
-            slot_name(chunk, slot)
-        ),
     }
 }
 
@@ -1080,14 +969,6 @@ async fn compiler_folds_constant_list_and_record_literals() {
             .iter()
             .any(|instruction| matches!(instruction, Instruction::PushConst(_)))
     );
-    assert!(
-        !compiled
-            .chunk
-            .code
-            .iter()
-            .any(|instruction| matches!(instruction, Instruction::BuildRecord(_)))
-    );
-
     let mut state = State::new();
     let outcome = execute_compiled(&compiled, &mut state, &Host)
         .await
@@ -1179,11 +1060,19 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
         ),
         builders::assign(
             "total",
-            builders::binary(builders::var("total"), BinaryOp::Add, builders::num(2.0)),
+            builders::binary(
+                builders::var("total"),
+                JavaScriptBinaryOp::Add,
+                builders::num(2.0),
+            ),
         ),
         builders::assign(
             "total",
-            builders::binary(builders::var("total"), BinaryOp::Add, builders::var("step")),
+            builders::binary(
+                builders::var("total"),
+                JavaScriptBinaryOp::Add,
+                builders::var("step"),
+            ),
         ),
         builders::finish(builders::record(vec![
             ("items", builders::var("items")),
@@ -1205,16 +1094,16 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::AddAssignNumber { .. })),
-        "`x = x + constant_number` should compile to numeric add-assign"
+            .any(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_))),
+        "`x = x + constant_number` should compile to fused add-assign"
     );
     assert!(
         compiled
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::AddAssignSlot { .. })),
-        "`x = x + y` should compile to slot add-assign"
+            .any(|instruction| matches!(instruction, Instruction::JavaScriptAddAssign(_))),
+        "`x = x + y` should compile to fused add-assign"
     );
     assert!(
         !compiled
@@ -1229,8 +1118,8 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
             .chunk
             .code
             .iter()
-            .any(|instruction| matches!(instruction, Instruction::AddAssign(_))),
-        "numeric assignment forms should not route through generic add-assign"
+            .any(|instruction| matches!(instruction, Instruction::JavaScriptBinary(_))),
+        "the assignment forms should not route through a generic add"
     );
 
     let mut state = State::new();
@@ -1310,12 +1199,16 @@ async fn a_long_run_reaches_only_the_scheduled_checkpoints() {
         builders::while_loop(
             builders::binary(
                 builders::var("n"),
-                BinaryOp::Less,
+                JavaScriptBinaryOp::Less,
                 builders::num(1_500_000.0),
             ),
             builders::block(vec![builders::assign(
                 "n",
-                builders::binary(builders::var("n"), BinaryOp::Add, builders::num(1.0)),
+                builders::binary(
+                    builders::var("n"),
+                    JavaScriptBinaryOp::Add,
+                    builders::num(1.0),
+                ),
             )]),
         ),
     ]));

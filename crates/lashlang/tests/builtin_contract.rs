@@ -333,7 +333,7 @@ async fn format_fills_auto_numbered_indexed_and_escaped_placeholders() {
 }
 
 fn type_literal(fields: Vec<(&str, TypeExpr)>) -> Expr {
-    Expr::TypeLiteral(Box::new(TypeExpr::Object(
+    lashlang::testing::ast_builders::type_literal(TypeExpr::Object(
         fields
             .into_iter()
             .map(|(name, ty)| TypeField {
@@ -342,7 +342,7 @@ fn type_literal(fields: Vec<(&str, TypeExpr)>) -> Expr {
                 optional: false,
             })
             .collect(),
-    )))
+    ))
 }
 
 #[tokio::test(flavor = "current_thread")]

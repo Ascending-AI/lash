@@ -1,8 +1,8 @@
 //! Runtime commit envelope and result types.
 
 use super::{
-    BlobRef, ClaimAuthority, GraphAppend, HydratedSessionCheckpoint, OperationId,
-    RealizedNodeTimestamp, SessionCheckpoint, StoreError, commit_identity,
+    BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
+    SessionCheckpoint, StoreError, commit_identity,
     ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
 use crate::SessionId;
@@ -100,20 +100,9 @@ pub struct RuntimeCommit {
     pub commit_budget: super::CommitBudget,
     pub session_id: SessionId,
     pub expected_head_revision: u64,
-    /// Current execution-lane authority required by a borrowed-lane commit.
-    ///
-    /// Integrator class (ADR 0051): **store and durable-substrate implementors**
-    /// enforce this transaction predicate before consulting a durable receipt.
-    ///
-    /// This is a transaction predicate, not semantic commit content: backends
-    /// validate it with the ordinary owner/generation/current-token/expiry
-    /// fence before receipt replay or mutation, and never rotate or release the
-    /// matching lease row.
-    #[serde(skip)]
-    pub session_execution_lease_fence: Option<ClaimAuthority>,
     /// The drive fence of the admission this commit's root was sealed under
-    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate like the lease
-    /// fence, never commit content: the backend refuses the commit
+    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate, never commit
+    /// content: the backend refuses the commit
     /// [`StoreError::StaleDriveFence`](super::StoreError::StaleDriveFence)
     /// unless it is still the session's current drive fence, checked in the
     /// commit's own transaction before anything is written. `None` for a
@@ -163,30 +152,28 @@ pub struct RuntimeCommit {
     /// Bounded, non-transcript evidence settled with this turn record.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
+    /// Terminal already computed by the turn driver. Nonturn operations have no outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TurnCommitOutcome>,
     pub turn_commit: RuntimeTurnCommitStamp,
-    pub completed_queue_claims: Vec<crate::QueuedWorkCompletion>,
-    pub completed_turn_input_claims: Vec<crate::TurnInputCompletion>,
-    /// Turn input the interrupted turn claimed at its terminal checkpoint and
-    /// withheld for a follow-on turn that its cancellation means never runs
-    /// (FIG-3531). The model never saw it, so it is never completed: in the
-    /// same transaction the backend releases each claim under its own fence,
-    /// and the cancellation's undelivered disposition then settles and
-    /// records the rows exactly as it does an unclaimed active-turn row.
-    /// Whole claims rather than completions: the release needs the claim
-    /// identity and the rows it covers. Meaningful only beside
-    /// `interrupted_turn_input_turn_id`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub undelivered_turn_input_claims: Vec<crate::turn_input_vocabulary::TurnInputClaim>,
-    /// Queued work — process wakes — the interrupted turn claimed at its
-    /// terminal checkpoint and withheld for a follow-on turn that its
-    /// cancellation means never runs (FIG-3543, ADR 0101 §10). The model never
-    /// saw it, so it is never completed and never dropped: in the same
-    /// transaction the backend releases each claim, which leaves every row at
-    /// its queue position with its redelivery floor untouched, and records
-    /// each wake on the cancellation as deferred. Meaningful only beside
-    /// `interrupted_turn_input_turn_id`.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub undelivered_queue_claims: Vec<crate::QueuedWorkClaim>,
+    /// What this commit does with the rows its root admitted (FIG-3927):
+    /// completions, releases and drops, each predicated on the row still
+    /// being bound to the root. Requires [`Self::drive_fence`].
+    ///
+    /// A cancelled turn hands the work it withheld from its terminal
+    /// checkpoint to its cancellation here (FIG-3531, FIG-3543): withheld
+    /// input is released or dropped by the undelivered disposition, withheld
+    /// wakes are always released, and the backend records each row on the
+    /// cancellation's outcome beside `interrupted_turn_input_turn_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ingress: Option<super::IngressSettlement>,
+    /// The session-command batches this commit applied (design §2.7). The
+    /// command lane takes no admission: each row must still exist and be
+    /// open, or the whole commit is refused
+    /// [`StoreError::SessionCommandWithdrawn`](super::StoreError::SessionCommandWithdrawn).
+    /// Requires [`Self::drive_fence`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applied_commands: Option<crate::QueuedWorkCompletion>,
     /// The follow-on the head owes once this commit publishes (ADR 0101 §3):
     /// the value the head holds after the write, not a delta. A frame-switch
     /// commit writes it, the follow-on's terminal commit clears or replaces
@@ -734,6 +721,96 @@ impl RuntimeUsageDelta {
     }
 }
 
+/// The terminal of a committed physical turn, independent of live observations.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCommitOutcome {
+    Completed,
+    FrameSwitch,
+    Cancelled,
+    Failed(TurnCommitFailureCause),
+}
+
+/// The typed stop cause of a failed turn. Cancellation has its own outcome.
+#[derive(
+    Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum TurnCommitFailureCause {
+    Incomplete,
+    InvalidInput,
+    MaxTurns,
+    ToolFailure,
+    ProviderError,
+    ContextOverflow,
+    PluginAbort,
+    RuntimeError,
+    SubmittedError,
+    ToolError,
+}
+
+impl TurnCommitOutcome {
+    /// Derive the durable label from the terminal produced by the turn driver.
+    pub fn from_terminal(outcome: &lash_sansio::TurnOutcome) -> Self {
+        use lash_sansio::{TurnOutcome, TurnStop};
+        match outcome {
+            TurnOutcome::Finished(_) => Self::Completed,
+            TurnOutcome::AgentFrameSwitch { .. } => Self::FrameSwitch,
+            TurnOutcome::Stopped(stop) => match stop {
+                TurnStop::Cancelled { .. } => Self::Cancelled,
+                TurnStop::Incomplete => Self::Failed(TurnCommitFailureCause::Incomplete),
+                TurnStop::InvalidInput => Self::Failed(TurnCommitFailureCause::InvalidInput),
+                TurnStop::MaxTurns => Self::Failed(TurnCommitFailureCause::MaxTurns),
+                TurnStop::ToolFailure => Self::Failed(TurnCommitFailureCause::ToolFailure),
+                TurnStop::ProviderError => Self::Failed(TurnCommitFailureCause::ProviderError),
+                TurnStop::ContextOverflow => Self::Failed(TurnCommitFailureCause::ContextOverflow),
+                TurnStop::PluginAbort => Self::Failed(TurnCommitFailureCause::PluginAbort),
+                TurnStop::RuntimeError => Self::Failed(TurnCommitFailureCause::RuntimeError),
+                TurnStop::SubmittedError { .. } => {
+                    Self::Failed(TurnCommitFailureCause::SubmittedError)
+                }
+                TurnStop::ToolError { .. } => Self::Failed(TurnCommitFailureCause::ToolError),
+            },
+        }
+    }
+
+    /// The checked SQL label for each outcome and failed cause.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::FrameSwitch => "frame_switch",
+            Self::Cancelled => "cancelled",
+            Self::Failed(TurnCommitFailureCause::Incomplete) => "failed_incomplete",
+            Self::Failed(TurnCommitFailureCause::InvalidInput) => "failed_invalid_input",
+            Self::Failed(TurnCommitFailureCause::MaxTurns) => "failed_max_turns",
+            Self::Failed(TurnCommitFailureCause::ToolFailure) => "failed_tool_failure",
+            Self::Failed(TurnCommitFailureCause::ProviderError) => "failed_provider_error",
+            Self::Failed(TurnCommitFailureCause::ContextOverflow) => "failed_context_overflow",
+            Self::Failed(TurnCommitFailureCause::PluginAbort) => "failed_plugin_abort",
+            Self::Failed(TurnCommitFailureCause::RuntimeError) => "failed_runtime_error",
+            Self::Failed(TurnCommitFailureCause::SubmittedError) => "failed_submitted_error",
+            Self::Failed(TurnCommitFailureCause::ToolError) => "failed_tool_error",
+        }
+    }
+}
+
+/// Refuse a receipt whose typed terminal disagrees with its indexed SQL label.
+pub fn validate_turn_commit_outcome_code(
+    receipt: &RuntimeCommitReceipt,
+    stored: Option<&str>,
+) -> Result<(), StoreError> {
+    let expected = receipt.outcome.as_ref().map(TurnCommitOutcome::as_str);
+    if expected != stored {
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "RuntimeCommitReceipt",
+            message: format!("outcome column {stored:?} differs from receipt {expected:?}"),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct RuntimeCommitReceipt {
     pub schema_version: u32,
@@ -758,6 +835,9 @@ pub struct RuntimeCommitReceipt {
     /// Bounded failure evidence owned by this durable turn settlement.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub failure_evidence: Vec<crate::TurnFailureEvidence>,
+    /// Typed terminal recorded in the same transaction as this receipt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<TurnCommitOutcome>,
     /// The follow-on the head owes after this commit (ADR 0101 §3), so a
     /// replayed switch commit returns the fact it wrote.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1070,6 +1150,66 @@ impl RuntimeCommit {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn durable_outcome_follows_every_terminal_stop_kind() {
+        use lash_sansio::{TurnOutcome, TurnStop};
+        let cases = [
+            (TurnStop::Incomplete, TurnCommitFailureCause::Incomplete),
+            (TurnStop::InvalidInput, TurnCommitFailureCause::InvalidInput),
+            (TurnStop::MaxTurns, TurnCommitFailureCause::MaxTurns),
+            (TurnStop::ToolFailure, TurnCommitFailureCause::ToolFailure),
+            (
+                TurnStop::ProviderError,
+                TurnCommitFailureCause::ProviderError,
+            ),
+            (
+                TurnStop::ContextOverflow,
+                TurnCommitFailureCause::ContextOverflow,
+            ),
+            (TurnStop::PluginAbort, TurnCommitFailureCause::PluginAbort),
+            (TurnStop::RuntimeError, TurnCommitFailureCause::RuntimeError),
+            (
+                TurnStop::SubmittedError {
+                    value: serde_json::Value::Null,
+                },
+                TurnCommitFailureCause::SubmittedError,
+            ),
+            (
+                TurnStop::ToolError {
+                    tool_name: "tool".into(),
+                    value: serde_json::Value::Null,
+                },
+                TurnCommitFailureCause::ToolError,
+            ),
+        ];
+        for (stop, cause) in cases {
+            let stored = TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(stop));
+            assert_eq!(stored, TurnCommitOutcome::Failed(cause));
+            assert!(stored.as_str().starts_with("failed_"));
+            let encoded = serde_json::to_value(&stored).expect("serialize stored outcome");
+            assert!(encoded.get("failed").is_some());
+            assert_eq!(
+                serde_json::from_value::<TurnCommitOutcome>(encoded)
+                    .expect("decode stored outcome"),
+                stored
+            );
+        }
+        assert_eq!(
+            TurnCommitOutcome::from_terminal(&TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: lash_sansio::TurnCancellationEvidence::internal("outcome-test"),
+            })),
+            TurnCommitOutcome::Cancelled,
+        );
+        assert_eq!(
+            TurnCommitOutcome::from_terminal(&TurnOutcome::Finished(
+                lash_sansio::TurnFinish::AssistantMessage {
+                    text: String::new()
+                },
+            )),
+            TurnCommitOutcome::Completed,
+        );
+    }
 
     #[test]
     fn append_identity_cannot_deserialize_half_populated() {

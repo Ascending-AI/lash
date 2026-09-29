@@ -121,12 +121,16 @@ pub struct RemoteProcessEventsRequest {
 
 #[cfg(any(feature = "core-conversions", test))]
 impl RemoteProcessEventsRequest {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let request =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         request.validate()?;
         Ok(request)
     }
@@ -159,12 +163,16 @@ pub struct RemoteProcessEventsResponse {
 
 #[cfg(any(feature = "core-conversions", test))]
 impl RemoteProcessEventsResponse {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let response = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let response =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         response.validate()?;
         Ok(response)
     }

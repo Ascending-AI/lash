@@ -124,6 +124,13 @@
     "FailureCode": {
       "type": "string"
     },
+    "RemoteAdmissionBoundary": {
+      "enum": [
+        "active_turn_checkpoint",
+        "idle"
+      ],
+      "type": "string"
+    },
     "RemoteAttachmentRef": {
       "properties": {
         "byte_len": {
@@ -1203,13 +1210,6 @@
       ],
       "type": "object"
     },
-    "RemoteQueuedWorkClaimBoundary": {
-      "enum": [
-        "active_turn_checkpoint",
-        "idle"
-      ],
-      "type": "string"
-    },
     "RemoteResponseTextMeta": {
       "properties": {
         "id": {
@@ -1746,6 +1746,50 @@
             "reason": {
               "enum": [
                 "session_mismatch"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "foreign_trigger_owner_scope"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "foreign_trigger_actor"
               ],
               "type": "string"
             },
@@ -2336,7 +2380,7 @@
               "type": "array"
             },
             "boundary": {
-              "$ref": "#/definitions/RemoteQueuedWorkClaimBoundary"
+              "$ref": "#/definitions/RemoteAdmissionBoundary"
             },
             "causes": {
               "items": {

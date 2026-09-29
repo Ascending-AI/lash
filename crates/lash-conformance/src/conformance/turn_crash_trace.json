@@ -14,12 +14,6 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "defer_orphaned_active_turn_inputs"
-    }
-  },
-  {
-    "seam": "store",
-    "operation": {
       "kind": "admit_root"
     }
   },
@@ -64,7 +58,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "claim_checkpoint_work",
+      "kind": "admit_at_checkpoint",
       "checkpoint": "afterwork"
     }
   },
@@ -83,7 +77,7 @@
   {
     "seam": "store",
     "operation": {
-      "kind": "claim_checkpoint_work",
+      "kind": "admit_at_checkpoint",
       "checkpoint": "beforecompletion"
     }
   },

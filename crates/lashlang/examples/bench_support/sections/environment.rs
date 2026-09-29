@@ -11,6 +11,8 @@ fn build_benchmark_host_environment() -> LashlangHostEnvironment {
     let mut resources = LashlangHostCatalog::tool_default(["echo", "boom", "missing_tool"]);
     lashlang::add_trigger_resource_operations(&mut resources)
         .expect("trigger resource operations are unique");
+    lashlang::add_trigger_register_tool_binding(&mut resources)
+        .expect("trigger register tool binding is unique");
     resources
         .add_trigger_source_constructor(
             ["cron", "Schedule"],

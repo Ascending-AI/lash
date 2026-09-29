@@ -28,8 +28,8 @@ pub use lash_core_ids::test_clock::TestClock;
 /// the drain policy itself set it explicitly — including
 /// `queued_work_redrive_ignores_a_changed_drain_policy`, which pins the shipped
 /// default on the successor.
-pub fn queued_work_claim_policy(max_rows: usize) -> crate::QueuedWorkClaimPolicy {
-    crate::QueuedWorkClaimPolicy {
+pub fn queued_work_admission_policy(max_rows: usize) -> crate::TurnLaneAdmissionPolicy {
+    crate::TurnLaneAdmissionPolicy {
         max_context_tokens: usize::MAX / 4,
         action_token_reserve: 1,
         max_rows,

@@ -8,10 +8,9 @@ use super::*;
 fn control_flow_append(list: &str, item: &str) -> Expr {
     Expr::Assign {
         target: crate::AssignTarget::variable(list.into()),
-        expr: Box::new(Expr::Binary {
-            left: Box::new(Expr::Variable(list.into())),
-            op: crate::ast::BinaryOp::Add,
-            right: Box::new(Expr::List(vec![Expr::String(item.into())])),
+        expr: Box::new(Expr::BuiltinCall {
+            name: "push".into(),
+            args: vec![Expr::Variable(list.into()), Expr::String(item.into())],
         }),
     }
 }
@@ -58,9 +57,9 @@ fn control_flow_while_once(counter: &str, body: Vec<Expr>) -> Vec<Expr> {
             expr: Box::new(Expr::Number(0.0)),
         },
         Expr::While {
-            condition: Box::new(Expr::Binary {
+            condition: Box::new(Expr::JavaScriptBinary {
                 left: Box::new(Expr::Variable(counter.into())),
-                op: crate::ast::BinaryOp::Less,
+                op: crate::ast::JavaScriptBinaryOp::Less,
                 right: Box::new(Expr::Number(1.0)),
             }),
             body: Box::new(Expr::Block(block)),
@@ -127,9 +126,9 @@ async fn a_cleanup_handler_left_by_break_must_not_rerun_its_finally() {
             None,
             Some(Expr::Assign {
                 target: crate::AssignTarget::variable("runs".into()),
-                expr: Box::new(Expr::Binary {
+                expr: Box::new(Expr::JavaScriptBinary {
                     left: Box::new(Expr::Variable("runs".into())),
-                    op: crate::ast::BinaryOp::Add,
+                    op: crate::ast::JavaScriptBinaryOp::Add,
                     right: Box::new(Expr::Number(1.0)),
                 }),
             }),

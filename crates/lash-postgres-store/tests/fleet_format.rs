@@ -34,7 +34,7 @@ impl FleetFormatDeployment for PostgresDeployment {
 
     async fn open_admitting(
         &self,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core_execution::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError> {
         PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
             self.scratch.pool.clone(),

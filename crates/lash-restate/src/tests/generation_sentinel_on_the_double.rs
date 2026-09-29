@@ -147,7 +147,7 @@ async fn l7_a_journal_replayed_under_another_generation_parks_before_any_effect(
         .expect("register the process")
         .id;
     ingress
-        .send_workflow_json(
+        .send_lash_workflow(
             "LashProcessWorkflow",
             process_id.as_str(),
             "run",

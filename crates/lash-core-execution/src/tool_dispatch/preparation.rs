@@ -137,7 +137,10 @@ pub async fn prepare_granted_tool_call_with_context(
 ///
 /// An orchestrating tool the registry still holds is the exception: it
 /// re-runs its body against its recorded nested effects, and its own
-/// preparation shapes those effects, so its live provider prepares it.
+/// preparation shapes those effects, so its live provider prepares it. A
+/// tool whose attempt may defer is the other: its preparation seals the
+/// declared start its recorded attempt carries (ADR 0116 §4), so its live
+/// provider prepares it too.
 pub async fn prepare_recorded_tool_call_with_context(
     context: &ToolDispatchContext<'_>,
     binding: &ToolExecutionGrant,
@@ -145,11 +148,13 @@ pub async fn prepare_recorded_tool_call_with_context(
     tool_call_id: Option<String>,
 ) -> ToolPreparationOutcome {
     pending.tool_name = binding.manifest().name.clone();
-    let preparation = if context.is_orchestrating_tool(&binding.manifest().id) {
-        ProviderPreparation::Live(None)
-    } else {
-        ProviderPreparation::Recorded
-    };
+    let tool_id = &binding.manifest().id;
+    let preparation =
+        if context.is_orchestrating_tool(tool_id) || context.attempt_may_defer(tool_id, None) {
+            ProviderPreparation::Live(None)
+        } else {
+            ProviderPreparation::Recorded
+        };
     prepare_authorized_tool_call_with_context(
         context,
         binding.manifest().clone(),

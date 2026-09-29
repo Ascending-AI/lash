@@ -68,20 +68,6 @@ pub(crate) fn store_area_test_support_witnesses() {
     });
     // FIG-2105-TEST-WITNESS-0012: lash_conformance::FenceIntegrityTarget [enum]
     type_witness::<lash_conformance::FenceIntegrityTarget>();
-    // FIG-2105-TEST-WITNESS-0013: lash_conformance::FenceIntegrityTarget::QueuedWorkClaimFence [variant]
-    variant_witness(|value: &lash_conformance::FenceIntegrityTarget| {
-        matches!(
-            value,
-            lash_conformance::FenceIntegrityTarget::QueuedWorkClaimFence { .. }
-        )
-    });
-    // FIG-2105-TEST-WITNESS-0014: lash_conformance::FenceIntegrityTarget::QueuedWorkClaimFence::batch_id [field]
-    field_witness(|value: &lash_conformance::FenceIntegrityTarget| {
-        if let lash_conformance::FenceIntegrityTarget::QueuedWorkClaimFence { batch_id, .. } = value
-        {
-            let _ = batch_id;
-        }
-    });
     // FIG-2105-TEST-WITNESS-0015: lash_conformance::FenceIntegrityTarget::SessionHeadRevision [variant]
     variant_witness(|value: &lash_conformance::FenceIntegrityTarget| {
         matches!(

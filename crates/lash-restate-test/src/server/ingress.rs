@@ -258,8 +258,10 @@ impl Routes {
             (HttpMethod::Get, ["health"] | ["restate", "health"]) => respond(200, ""),
             // Registering a deployment is the host's call into the Rust API
             // (`register`), not an admin request the double can act on: an
-            // in-process deployment is an `Endpoint`, not a URI to fetch.
-            (HttpMethod::Post, ["deployments"]) => respond_json(201, &json!({})),
+            // in-process deployment is an `Endpoint`, not a URI to fetch. The
+            // request is recorded for a test to read.
+            (HttpMethod::Post, ["deployments"]) => self.record_registration(&request.body),
+            (HttpMethod::Get, ["deployments"]) => self.list_deployments(),
             (HttpMethod::Delete, ["deployments", id]) => self.delete_deployment(id, query),
             (HttpMethod::Get, ["deployments", id]) => self.describe_deployment(id),
             (HttpMethod::Get, ["services", service]) => self.describe_service(service),
@@ -494,11 +496,45 @@ impl Routes {
                 200,
                 &json!({
                     "id": deployment.id.to_string(),
+                    "uri": deployment.uri,
                     "services": deployment.catalog.names().collect::<Vec<_>>(),
                 }),
             ),
             None => error(404, format!("deployment {id} not found")),
         }
+    }
+
+    /// `GET /deployments`: every registered deployment, its URI and the
+    /// services it serves, in `restate-server`'s shape.
+    fn list_deployments(&self) -> HttpResponse {
+        let deployments = self
+            .shared
+            .deployments()
+            .iter()
+            .map(|deployment| {
+                json!({
+                    "id": deployment.id.to_string(),
+                    "uri": deployment.uri,
+                    "services": deployment
+                        .catalog
+                        .names()
+                        .map(|name| json!({ "name": name, "revision": 1 }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>();
+        respond_json(200, &json!({ "deployments": deployments }))
+    }
+
+    /// `POST /deployments`: kept for the test to read, answered as created.
+    fn record_registration(&self, body: &[u8]) -> HttpResponse {
+        let request = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+        self.shared
+            .registration_requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(request);
+        respond_json(201, &json!({}))
     }
 
     /// `GET /services/{name}`: the deployment a new invocation of the

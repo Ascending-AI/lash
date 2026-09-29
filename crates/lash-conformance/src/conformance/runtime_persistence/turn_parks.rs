@@ -9,7 +9,7 @@
 //! keeps both and counts the refusal in `attempts`.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 
 fn park(
     session_id: &SessionId,
@@ -42,22 +42,13 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         None
     );
 
-    // The parked root holds its drive's input, bound to it, and parks.
+    // The parked root holds its input, bound to it as its answer of record,
+    // and parks.
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(&session_id, "parked"))
         .await
         .expect("enqueue the parked turn's input");
-    let lease = seal_claim_authority_for_test(&store, &session_id, "parking-owner").await;
-    let _drive = store
-        .claim_next_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &lease_owner("parking-owner"),
-            1,
-        )
-        .await
-        .expect("claim the drive")
-        .expect("the input is claimable");
+    let lease = seal_drive_fence_for_test(&store, &session_id, "parking-owner").await;
     store
         .bind_root_inputs(
             &session_id,
@@ -77,7 +68,7 @@ pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePer
         .await
         .expect("record the park");
     store
-        .supersede_claim_epoch_for_test(&lease)
+        .supersede_drive_epoch_for_test(&lease)
         .await
         .expect("seal a successor drive after parking");
     assert_eq!(

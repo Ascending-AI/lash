@@ -151,12 +151,21 @@ async fn string_values_preserve_quotes_and_escapes() {
 
 /// A tuple is an IR value the retired surface spelled `(a, b)`; TypeScript has
 /// no tuple literal (ADR 0096), so the value's own rules — immutable, not a
-/// list, distinct from a list under equality — are pinned against the AST.
+/// list, distinct from a list under equality — are pinned against a seeded
+/// runtime value.
 #[tokio::test(flavor = "current_thread")]
 async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
-    let pair = || lashlang::Expr::Tuple(vec![number(1.0), string("x")]);
+    // Nothing spells a tuple in TypeScript, so the value is seeded as a global
+    // the way a restored snapshot would carry one.
+    let pair = || lashlang::Expr::Variable("pair".into());
     let host = TestHost::default();
     let mut state = State::new();
+    state
+        .insert_global(
+            "pair",
+            Value::Tuple(vec![Value::Number(1.0), Value::String("x".into())].into()),
+        )
+        .expect("tuple global seeds");
     let value = finished(
         lashlang::execute(
             &lashlang_compile_program(&program(vec![finish(lashlang::Expr::Record(vec![
@@ -168,16 +177,16 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
                 ("empty_pair".into(), call("empty", vec![pair()])),
                 (
                     "tuple_eq".into(),
-                    lashlang::Expr::Binary {
-                        op: lashlang::BinaryOp::Equal,
+                    lashlang::Expr::JavaScriptBinary {
+                        op: lashlang::JavaScriptBinaryOp::StrictEqual,
                         left: Box::new(pair()),
                         right: Box::new(pair()),
                     },
                 ),
                 (
                     "tuple_not_list".into(),
-                    lashlang::Expr::Binary {
-                        op: lashlang::BinaryOp::Equal,
+                    lashlang::Expr::JavaScriptBinary {
+                        op: lashlang::JavaScriptBinaryOp::StrictEqual,
                         left: Box::new(pair()),
                         right: Box::new(list(vec![number(1.0), string("x")])),
                     },
@@ -202,6 +211,12 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
 
     let host = TestHost::default();
     let mut state = State::new();
+    state
+        .insert_global(
+            "pair",
+            Value::Tuple(vec![Value::Number(1.0), Value::String("x".into())].into()),
+        )
+        .expect("tuple global seeds");
     let err = lashlang::execute(
         &lashlang_compile_program(&finish_program(call("push", vec![pair(), number(3.0)])))
             .expect("the program compiles"),
@@ -219,25 +234,17 @@ async fn a_tuple_is_an_immutable_value_distinct_from_a_list() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn tuple_snapshot_round_trip_preserves_tuple_identity() {
-    let host = TestHost::default();
-    let mut state = State::new();
-    let outcome = lashlang::execute(
-        &lashlang_compile_program(&program(vec![lashlang::Expr::Assign {
-            target: lashlang::AssignTarget::variable("pair".into()),
-            expr: Box::new(lashlang::Expr::Tuple(vec![number(1.0), number(2.0)])),
-        }]))
-        .expect("the program compiles"),
-        &mut state,
-        &host,
-    )
-    .await
-    .expect("tuple assignment should run");
-    assert!(matches!(outcome, ExecutionOutcome::Continued));
-
-    let encoded = state
-        .snapshot()
-        .to_canonical_bytes()
-        .expect("snapshot encode");
+    // A stored snapshot can still carry a tuple from before the surface
+    // spelled one; the wire round trip must keep its identity.
+    let snapshot = lashlang::Snapshot::new(
+        [(
+            "pair".to_string(),
+            Value::Tuple(vec![Value::Number(1.0), Value::Number(2.0)].into()),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let encoded = snapshot.to_canonical_bytes().expect("snapshot encode");
     let snapshot = lashlang::Snapshot::from_canonical_bytes(&encoded).expect("snapshot decode");
     let restored = State::from_snapshot(snapshot);
     assert!(matches!(restored.globals()["pair"], Value::Tuple(_)));

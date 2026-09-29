@@ -112,11 +112,31 @@ pub enum ProcessInput {
         definition_key: String,
         create_request: Box<crate::SessionCreateRequest>,
         turn_input: Box<crate::TurnInput>,
-        output_contract: crate::ToolOutputContract,
+        /// What the runner answers when the child turn finishes.
+        result: SessionTurnResult,
     },
     External {
         #[serde(default)]
         metadata: serde_json::Value,
+    },
+}
+
+/// What a `ProcessInput::SessionTurn` runner answers with when the child's
+/// turn ends.
+///
+/// Failures and cancellations are the child's own under both modes: only a
+/// finished turn is projected differently.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SessionTurnResult {
+    /// The runner answers the child's `AssembledTurn`, with the process and
+    /// child-session ids beside it.
+    Turn,
+    /// The runner answers the child's final value, checked against `schema`
+    /// when one is given.
+    FinalValue {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schema: Option<serde_json::Value>,
     },
 }
 
@@ -132,12 +152,12 @@ impl Clone for ProcessInput {
                 definition_key,
                 create_request,
                 turn_input,
-                output_contract,
+                result,
             } => Self::SessionTurn {
                 definition_key: definition_key.clone(),
                 create_request: create_request.clone(),
                 turn_input: turn_input.clone(),
-                output_contract: output_contract.clone(),
+                result: result.clone(),
             },
             Self::External { metadata } => Self::External {
                 metadata: metadata.clone(),
@@ -756,6 +776,11 @@ pub struct ProcessRegistration {
     pub env_ref: Option<ProcessExecutionEnvRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wake_session_id: Option<SessionId>,
+    /// The parked call that consumes this process's terminal, when a
+    /// declared start registered it (ADR 0116 §3.6). The registrar writes the
+    /// hold with the row, and prune leaves a held row alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consumer_hold: Option<ConsumerHold>,
 }
 
 impl Clone for ProcessRegistration {
@@ -771,8 +796,27 @@ impl Clone for ProcessRegistration {
             provenance: self.provenance.clone(),
             env_ref: self.env_ref.clone(),
             wake_session_id: self.wake_session_id.clone(),
+            consumer_hold: self.consumer_hold.clone(),
         }
     }
+}
+
+/// A parked call's hold on the process whose terminal it consumes (ADR 0116
+/// §3.6).
+///
+/// A declared start registers its child with the hold, in the registration
+/// transaction, so the row cannot be pruned while the call may still redrive
+/// its start: a redrive always finds the child under its key, and a start
+/// whose receipt was lost can never register a second child. The call
+/// releases the hold once its wait has ended; the close of the owning scope
+/// releases every hold its calls still own, so an abandoned call leaks none.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsumerHold {
+    /// The consuming call's completion key id.
+    pub key: String,
+    /// The scope whose close releases the hold: the opener the call ran
+    /// under.
+    pub owner: ScopeId,
 }
 
 impl ProcessRegistration {
@@ -807,6 +851,7 @@ impl ProcessRegistration {
             provenance,
             env_ref: None,
             wake_session_id: None,
+            consumer_hold: None,
         }
     }
 
@@ -893,6 +938,12 @@ impl ProcessRegistration {
     /// implementors while persisting and coordinating durable process execution.
     pub fn with_wake_session_id(mut self, wake_session_id: Option<SessionId>) -> Self {
         self.wake_session_id = wake_session_id;
+        self
+    }
+
+    /// Registers the process under a parked call's hold (ADR 0116 §3.6).
+    pub fn with_consumer_hold(mut self, consumer_hold: Option<ConsumerHold>) -> Self {
+        self.consumer_hold = consumer_hold;
         self
     }
 

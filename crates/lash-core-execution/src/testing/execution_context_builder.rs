@@ -578,6 +578,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             clock: self.clock,
             process_lineage,
             turn_capture: None,
+            process_originator: None,
         });
 
         let tool_child_host = if self.route_tool_children {

@@ -1,31 +1,28 @@
-//! Dialect-independent queued-work claim logic shared by durable backends.
+//! Dialect-independent queued-work composition shared by durable backends.
 //!
 //! The SQL backends (sqlite, postgres) load candidate batch rows ordered by
-//! `enqueue_seq` and pre-filtered to batches that are not held by a live
-//! claim, then apply the same pure state machine: a delivery-policy boundary
-//! gate, compatibility/merge-key prefix grouping, and fencing-token / lease
-//! derivation. That state machine lives here so the backends own only
-//! their SQL reads and writes while the claim contract has a single
-//! implementation, exercised against every backend by the shared
-//! `runtime_persistence` conformance suite.
+//! `enqueue_seq` and pre-filtered to open batches no root admitted, then
+//! apply the same pure state machine: a delivery-policy boundary gate and
+//! compatibility/merge-key prefix grouping. That state machine lives here so
+//! the backends own only their SQL reads and writes while the composition
+//! rule has a single implementation, exercised against every backend by the
+//! shared `runtime_persistence` conformance suite.
 
-use super::LeaseOwnerIdentity;
-use crate::SessionId;
 use crate::{
-    DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkClaimPolicy, QueuedWorkKind, QueuedWorkPayload, StoreError, TurnCause,
+    AdmissionBoundary, DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkKind,
+    QueuedWorkPayload, StoreError, TurnCause, TurnLaneAdmissionPolicy,
 };
 
-/// Why a turn-work claim attempt acquired no rows.
+/// Why a turn-work admission took no rows.
 ///
-/// These are the refusal facts the claim state machine already computes while
-/// deciding a wake (see `record_turn_claim_decision`), plus the one only a
-/// backend can observe: whether a concurrent writer took the selected rows.
-/// Every empty automatic drain carries one, so a host never has to
-/// reconstruct the reason from side evidence.
+/// These are the refusal facts the composition state machine already
+/// computes while deciding a wake (see `record_turn_admission_decision`),
+/// plus the one only a backend can observe: whether a concurrent writer took
+/// the selected rows. Every empty automatic drain carries one, so a host never
+/// has to reconstruct the reason from side evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum QueuedWorkClaimRefusal {
-    /// The host's claim policy admitted zero rows.
+pub enum AdmissionRefusal {
+    /// The host's admission policy admitted zero rows.
     ZeroLimit,
     /// The durable queue holds no pending work for this lane: every row it ever
     /// held was consumed. Nothing is coming without a fresh enqueue.
@@ -35,24 +32,24 @@ pub enum QueuedWorkClaimRefusal {
     /// The head batch may not cross the active turn's delivery boundary.
     DeliveryBoundaryBlocked,
     /// Rows were selected, but the physically earliest candidate was withheld,
-    /// so no contiguous prefix remained for a backend that claims by prefix.
+    /// so no contiguous prefix remained for a backend that admits by prefix.
     ///
     /// No shipped backend reaches this today: the sqlite and postgres
     /// head-candidate queries never offer a withheld head to the prefix helper,
-    /// and the in-memory and perf stores claim by index instead of by prefix.
-    /// It guards a third-party prefix-claiming backend, whose selection this
+    /// and the in-memory and perf stores admit by index instead of by prefix.
+    /// It guards a third-party prefix-admitting backend, whose selection this
     /// same helper would otherwise silently truncate to nothing.
     HeadWithheld,
     /// The selection was legal, but another writer took the rows first.
-    ClaimRaceLost,
+    AdmissionRaceLost,
     /// A pending follow-on owns the session (ADR 0101 §3): nothing is
-    /// claimed until its turn commits. Not an error; the drain answers it
+    /// admitted until its turn commits. Not an error; the drain answers it
     /// after the follow-on.
     FollowOnPending,
 }
 
-impl QueuedWorkClaimRefusal {
-    /// The stable snake_case spelling used in claim-decision diagnostics.
+impl AdmissionRefusal {
+    /// The stable snake_case spelling used in admission-decision diagnostics.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ZeroLimit => "zero_limit",
@@ -60,31 +57,29 @@ impl QueuedWorkClaimRefusal {
             Self::CommandAtHead => "command_at_head",
             Self::DeliveryBoundaryBlocked => "delivery_boundary_blocked",
             Self::HeadWithheld => "head_withheld",
-            Self::ClaimRaceLost => "claim_race_lost",
+            Self::AdmissionRaceLost => "admission_race_lost",
             Self::FollowOnPending => "follow_on_pending",
         }
     }
 }
 
-/// The outcome the claim state machine recorded for one wake.
+/// The outcome the composition state machine recorded for one wake.
 ///
-/// Refusing variants carry the [`QueuedWorkClaimRefusal`] that reaches the host;
+/// Refusing variants carry the [`AdmissionRefusal`] that reaches the host;
 /// the remaining variants name why rows *were* selected and stay diagnostic.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TurnClaimOutcome {
-    Refused(QueuedWorkClaimRefusal),
-    InterruptedClaimRedrive,
+enum TurnAdmissionOutcome {
+    Refused(AdmissionRefusal),
     SingleRow,
     MaxPendingAgeReached,
     SingleEligibleRow,
     HostDrainPolicy,
 }
 
-impl TurnClaimOutcome {
+impl TurnAdmissionOutcome {
     fn as_str(self) -> &'static str {
         match self {
             Self::Refused(refusal) => refusal.as_str(),
-            Self::InterruptedClaimRedrive => "interrupted_claim_redrive",
             Self::SingleRow => "single_row",
             Self::MaxPendingAgeReached => "max_pending_age_reached",
             Self::SingleEligibleRow => "single_eligible_row",
@@ -93,76 +88,18 @@ impl TurnClaimOutcome {
     }
 }
 
-/// Candidate indices one claim may take, or the refusal that took none.
+/// Candidate indices one admission may take, or the refusal that took none.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TurnWorkClaimSelection {
+pub enum TurnWorkSelection {
     Selected { indices: Vec<usize> },
-    Refused { reason: QueuedWorkClaimRefusal },
+    Refused { reason: AdmissionRefusal },
 }
 
-/// The contiguous leading run one prefix-claiming backend may take, or its refusal.
+/// The contiguous leading run one prefix-admitting backend may take, or its refusal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnWorkClaimPrefix {
+pub enum TurnWorkPrefix {
     Selected { len: usize },
-    Refused { reason: QueuedWorkClaimRefusal },
-}
-
-/// What a diagnostic probe observed after the claim's candidate scan was empty.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnWorkEmptyScanDiagnostic {
-    Refused {
-        reason: QueuedWorkClaimRefusal,
-    },
-    /// A later statement snapshot found selectable work. The probe does not admit it.
-    BecameSelectable,
-}
-
-impl From<TurnWorkClaimPrefix> for TurnWorkEmptyScanDiagnostic {
-    fn from(prefix: TurnWorkClaimPrefix) -> Self {
-        match prefix {
-            TurnWorkClaimPrefix::Selected { .. } => Self::BecameSelectable,
-            TurnWorkClaimPrefix::Refused { reason } => Self::Refused { reason },
-        }
-    }
-}
-
-impl TurnWorkEmptyScanDiagnostic {
-    /// Preserve the empty scan's outcome even if the diagnostic snapshot changed.
-    /// Admission belongs to a subsequent claim attempt, never to this probe.
-    pub fn into_refusal(self) -> QueuedWorkClaimRefusal {
-        match self {
-            Self::Refused { reason } => reason,
-            Self::BecameSelectable => QueuedWorkClaimRefusal::Empty,
-        }
-    }
-}
-
-/// Whether a claim acquired rows, or why it did not.
-///
-/// An automatic drain names no batch ids, so the refusal itself is the answer
-/// the runtime hands back to the host.
-#[derive(Clone, Debug)]
-pub enum QueuedWorkClaimOutcome {
-    Claimed(QueuedWorkClaim),
-    Refused(QueuedWorkClaimRefusal),
-}
-
-impl QueuedWorkClaimOutcome {
-    /// The acquired claim, discarding the refusal evidence.
-    pub fn claim(self) -> Option<QueuedWorkClaim> {
-        match self {
-            Self::Claimed(claim) => Some(claim),
-            Self::Refused(_) => None,
-        }
-    }
-
-    /// The refusal, when this attempt acquired nothing.
-    pub fn refusal(&self) -> Option<QueuedWorkClaimRefusal> {
-        match self {
-            Self::Claimed(_) => None,
-            Self::Refused(refusal) => Some(*refusal),
-        }
-    }
+    Refused { reason: AdmissionRefusal },
 }
 
 /// Whether a durable queued-work row carries a session command or turn work.
@@ -201,56 +138,22 @@ pub struct PendingSessionWorkOrdering {
 }
 
 impl PendingSessionWorkOrdering {
-    /// Whether the command lane must drain before a boundary turn claim.
+    /// Whether the command lane must drain before a boundary turn admission.
     pub fn session_command_precedes_turn_input(self) -> bool {
         self.session_command.is_some()
     }
 }
 
-/// Claim-id spelling selected by each store family.
-///
-/// These prefixes are durable bytes. SQLite and Postgres share the production
-/// spellings; recording and performance stores retain their existing diagnostic
-/// dialects. Centralizing them prevents backend-local construction drift.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ClaimIdDialect {
-    QueuedWork,
-    TurnInput,
-    RecordingQueuedWork,
-    RecordingTurnInput,
-    PerformanceQueuedWork,
-    PerformanceTurnInput,
-}
-
-pub fn derive_claim_id(dialect: ClaimIdDialect, enqueue_seq: u64, fencing_token: u64) -> String {
-    let prefix = match dialect {
-        ClaimIdDialect::QueuedWork => "qwc",
-        ClaimIdDialect::TurnInput => "tic",
-        ClaimIdDialect::RecordingQueuedWork => "recording-qwc",
-        ClaimIdDialect::RecordingTurnInput => "recording-tic",
-        ClaimIdDialect::PerformanceQueuedWork => "perf-qwc",
-        ClaimIdDialect::PerformanceTurnInput => "perf-tic",
-    };
-    format!("{prefix}:{enqueue_seq}:{fencing_token}")
-}
-
-/// Decoded claim-relevant fields of one pending queued-work batch row.
+/// Decoded composition-relevant fields of one open queued-work batch row.
 ///
 /// Backends build these from their candidate rows, presented in
-/// `enqueue_seq` ascending order and already filtered to no live claim.
+/// `enqueue_seq` ascending order and already filtered to open rows no root
+/// admitted.
 #[derive(Clone, Debug)]
-pub struct ClaimCandidate {
-    /// Durable batch identity, used to name a row in claim diagnostics.
+pub struct TurnLaneCandidate {
+    /// Durable batch identity, used to name a row in admission diagnostics.
     pub batch_id: crate::BatchId,
     pub enqueue_seq: u64,
-    pub claim_fencing_token: u64,
-    /// Durable claim identity left by an interrupted predecessor generation.
-    /// Matching identities describe the exact batch composition that already
-    /// escaped into that generation's journaled command.
-    pub prior_claim_id: Option<String>,
-    /// Durable token paired with `prior_claim_id` by the queued-work claim
-    /// correlation invariant.
-    pub prior_claim_token: Option<String>,
     pub config_patch_command: bool,
     pub delivery_policy: DeliveryPolicy,
     pub kind: QueuedWorkKind,
@@ -260,13 +163,8 @@ pub struct ClaimCandidate {
     turn_causes: Vec<TurnCause>,
 }
 
-impl ClaimCandidate {
-    pub fn from_batch(
-        batch: &QueuedWorkBatch,
-        claim_fencing_token: u64,
-        prior_claim_id: Option<String>,
-        prior_claim_token: Option<String>,
-    ) -> Self {
+impl TurnLaneCandidate {
+    pub fn from_batch(batch: &QueuedWorkBatch) -> Self {
         let mut turn_causes = Vec::new();
         let config_patch_command = matches!(
             batch.items.as_slice(),
@@ -286,9 +184,6 @@ impl ClaimCandidate {
         Self {
             batch_id: batch.batch_id.clone(),
             enqueue_seq: batch.enqueue_seq,
-            claim_fencing_token,
-            prior_claim_id,
-            prior_claim_token,
             config_patch_command,
             delivery_policy: batch.delivery_policy,
             kind: batch.kind,
@@ -301,23 +196,23 @@ impl ClaimCandidate {
 }
 
 /// How many candidate rows a backend should scan when selecting up to
-/// `max_batches` claimable batches. Joinable groups are matched as a prefix,
-/// so scanning a bounded surplus keeps one round trip sufficient.
-pub fn claim_scan_limit(max_batches: usize) -> i64 {
+/// `max_batches` open batches. Joinable groups are matched as a prefix, so
+/// scanning a bounded surplus keeps one round trip sufficient.
+pub fn admission_scan_limit(max_batches: usize) -> i64 {
     i64::try_from(max_batches)
         .unwrap_or(i64::MAX)
         .min(i64::MAX - 32)
         + 32
 }
 
-/// A longer FIFO prefix remains queued and drains through later commits; bounding this claim
+/// A longer FIFO prefix remains queued and drains through later commits; bounding this run
 /// also bounds every SQL candidate scan that feeds it.
-pub const MAX_SESSION_COMMAND_BATCHES_PER_CLAIM: usize = 64;
+pub const MAX_SESSION_COMMAND_BATCHES_PER_RUN: usize = 64;
 
 /// Non-config commands remain exclusive. A leading `ApplyConfigPatch` extends
 /// through the complete adjacent config-patch prefix so one drain can apply N
 /// ordered patches in one head commit while completing all N batches.
-pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
+pub fn select_leading_session_command(candidates: &[TurnLaneCandidate]) -> usize {
     let Some(first) = candidates.first() else {
         return 0;
     };
@@ -329,7 +224,7 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
     }
     candidates
         .iter()
-        .take(MAX_SESSION_COMMAND_BATCHES_PER_CLAIM)
+        .take(MAX_SESSION_COMMAND_BATCHES_PER_RUN)
         .take_while(|candidate| {
             candidate.kind.work_class() == QueuedWorkClass::SessionCommand
                 && candidate.config_patch_command
@@ -337,32 +232,31 @@ pub fn select_leading_session_command(candidates: &[ClaimCandidate]) -> usize {
         .count()
 }
 
-/// Fresh claims return a leading prefix. Interrupted claims return every
-/// candidate carrying the head row's prior claim identity.
+/// An admission takes a leading prefix of the open candidates.
 ///
 /// * The queue head must be [`QueuedWorkClass::TurnWork`]. Earlier pending
 ///   session commands are never skipped or materialized as turn input.
-/// * An [`QueuedWorkClaimBoundary::ActiveTurnCheckpoint`] boundary only
+/// * An [`AdmissionBoundary::ActiveTurnCheckpoint`] boundary only
 ///   admits work whose head batch is
 ///   [`DeliveryPolicy::EarliestSafeBoundary`].
-/// * An absent merge key, or a control/cancel kind, claims exactly one batch.
+/// * An absent merge key, or a control/cancel kind, admits exactly one batch.
 /// * A batchable head extends through immediately following rows with the same
 ///   delivery policy, merge key, and authority/elevation, within the host's row
 ///   and age bounds. How much of that eligible prefix actually drains is the
 ///   host's [`QueuedDrainPolicy`](crate::QueuedDrainPolicy) decision.
-pub fn select_turn_work_claim_indices(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+pub fn select_turn_work_indices(
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
-) -> Result<TurnWorkClaimSelection, StoreError> {
+) -> Result<TurnWorkSelection, StoreError> {
     if policy.max_rows == 0 {
         return Ok(refuse(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
-            QueuedWorkClaimRefusal::ZeroLimit,
+            AdmissionRefusal::ZeroLimit,
         ));
     }
     let Some(first) = candidates.first() else {
@@ -371,7 +265,7 @@ pub fn select_turn_work_claim_indices(
             boundary,
             policy,
             now_epoch_ms,
-            QueuedWorkClaimRefusal::Empty,
+            AdmissionRefusal::Empty,
         ));
     };
     if first.kind.work_class() != QueuedWorkClass::TurnWork {
@@ -380,72 +274,20 @@ pub fn select_turn_work_claim_indices(
             boundary,
             policy,
             now_epoch_ms,
-            QueuedWorkClaimRefusal::CommandAtHead,
+            AdmissionRefusal::CommandAtHead,
         ));
     }
-    if boundary == QueuedWorkClaimBoundary::ActiveTurnCheckpoint
+    if boundary == AdmissionBoundary::ActiveTurnCheckpoint
         && first.delivery_policy != DeliveryPolicy::EarliestSafeBoundary
     {
-        if let Some(withheld_claim_id) = first.prior_claim_id.as_deref() {
-            let remaining_indices = candidates
-                .iter()
-                .enumerate()
-                .filter_map(|(index, candidate)| {
-                    (candidate.prior_claim_id.as_deref() != Some(withheld_claim_id))
-                        .then_some(index)
-                })
-                .collect::<Vec<_>>();
-            let remaining = remaining_indices
-                .iter()
-                .map(|index| candidates[*index].clone())
-                .collect::<Vec<_>>();
-            let selected =
-                select_turn_work_claim_indices(&remaining, boundary, policy, now_epoch_ms)?;
-            match selected {
-                TurnWorkClaimSelection::Selected { indices } => {
-                    return Ok(select(
-                        indices
-                            .into_iter()
-                            .map(|index| remaining_indices[index])
-                            .collect(),
-                    ));
-                }
-                TurnWorkClaimSelection::Refused { .. } => {}
-            }
-        }
         return Ok(refuse(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
-            QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
+            AdmissionRefusal::DeliveryBoundaryBlocked,
         ));
     }
-    if let Some(prior_claim_id) = first.prior_claim_id.as_deref() {
-        let selected = candidates
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| {
-                (candidate.prior_claim_id.as_deref() == Some(prior_claim_id)).then_some(index)
-            })
-            .collect::<Vec<_>>();
-        let rendered_tokens = selected.iter().fold(0usize, |total, index| {
-            total.saturating_add(rendered_token_upper_bound(std::slice::from_ref(
-                &candidates[*index],
-            )))
-        });
-        record_turn_claim_decision(
-            candidates,
-            boundary,
-            policy,
-            now_epoch_ms,
-            selected.len(),
-            rendered_tokens,
-            TurnClaimOutcome::InterruptedClaimRedrive,
-        );
-        return Ok(select(selected));
-    }
-
     if policy.action_token_reserve >= policy.max_context_tokens {
         return Err(StoreError::QueuedWorkActionReserveExhaustsContext {
             max_context_tokens: policy.max_context_tokens,
@@ -465,26 +307,26 @@ pub fn select_turn_work_claim_indices(
         });
     }
     if !first.kind.is_batchable() || first.merge_key.is_none() {
-        record_turn_claim_decision(
+        record_turn_admission_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            TurnClaimOutcome::SingleRow,
+            TurnAdmissionOutcome::SingleRow,
         );
         return Ok(select(vec![0]));
     }
     if now_epoch_ms.saturating_sub(first.enqueued_at_ms) >= policy.max_pending_age_ms {
-        record_turn_claim_decision(
+        record_turn_admission_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            TurnClaimOutcome::MaxPendingAgeReached,
+            TurnAdmissionOutcome::MaxPendingAgeReached,
         );
         return Ok(select(vec![0]));
     }
@@ -503,7 +345,7 @@ pub fn select_turn_work_claim_indices(
         compatible_prefix_len += 1;
     }
 
-    // Lash has now applied every claim law: what remains is a legal, strictly
+    // Lash has now applied every admission law: what remains is a legal, strictly
     // FIFO prefix that *may* share this turn. How much of it actually drains is
     // the host's `QueuedDrainPolicy` decision (FIG-1313), not kernel token
     // arithmetic. The shipped default drains the head alone.
@@ -511,14 +353,14 @@ pub fn select_turn_work_claim_indices(
         // A lone eligible row always drains: no selection is expressible, so
         // the policy is not consulted and its per-row projections are not
         // rendered.
-        record_turn_claim_decision(
+        record_turn_admission_decision(
             candidates,
             boundary,
             policy,
             now_epoch_ms,
             1,
             first_tokens,
-            TurnClaimOutcome::SingleEligibleRow,
+            TurnAdmissionOutcome::SingleEligibleRow,
         );
         return Ok(select(vec![0]));
     }
@@ -545,9 +387,9 @@ pub fn select_turn_work_claim_indices(
     // A non-head row larger than the whole window is not this drain's problem to
     // refuse: the selection simply stops before it. The fitting head still
     // drains, the oversized row becomes the head of a later wake, and the head
-    // check above refuses it there by name. Carrying it into this claim instead
-    // would fail a claim that could have made progress, and the
-    // interrupted-claim redrive would restore that doomed composition forever.
+    // check above refuses it there by name. Carrying it into this admission
+    // instead would fail an admission that could have made progress, and the
+    // root's recorded admission would replay that doomed composition forever.
     let selected = candidates[..selected]
         .iter()
         .position(|candidate| {
@@ -563,57 +405,55 @@ pub fn select_turn_work_claim_indices(
         selected,
         "queued drain policy selection"
     );
-    record_turn_claim_decision(
+    record_turn_admission_decision(
         candidates,
         boundary,
         policy,
         now_epoch_ms,
         selected,
         rendered_tokens,
-        TurnClaimOutcome::HostDrainPolicy,
+        TurnAdmissionOutcome::HostDrainPolicy,
     );
     Ok(select((0..selected).collect()))
 }
 
 /// A selection that acquired `indices`.
-fn select(indices: Vec<usize>) -> TurnWorkClaimSelection {
+fn select(indices: Vec<usize>) -> TurnWorkSelection {
     debug_assert!(!indices.is_empty(), "a selection must acquire rows");
-    TurnWorkClaimSelection::Selected { indices }
+    TurnWorkSelection::Selected { indices }
 }
 
 /// A selection that acquired nothing, recorded under `refusal`.
 fn refuse(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
-    refusal: QueuedWorkClaimRefusal,
-) -> TurnWorkClaimSelection {
-    record_turn_claim_decision(
+    refusal: AdmissionRefusal,
+) -> TurnWorkSelection {
+    record_turn_admission_decision(
         candidates,
         boundary,
         policy,
         now_epoch_ms,
         0,
         0,
-        TurnClaimOutcome::Refused(refusal),
+        TurnAdmissionOutcome::Refused(refusal),
     );
-    TurnWorkClaimSelection::Refused { reason: refusal }
+    TurnWorkSelection::Refused { reason: refusal }
 }
 
-/// SQL automatic claims pre-filter interrupted rows by the head claim ID, and
-/// exact-ID claims construct a contiguous candidate slice. In-memory automatic
-/// claims use [`select_turn_work_claim_indices`] directly so identity gaps are
-/// retained.
-pub fn select_turn_work_claim_prefix(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+/// SQL admissions take a contiguous prefix of their candidate scan. Stores
+/// that admit by index use [`select_turn_work_indices`] directly.
+pub fn select_turn_work_prefix(
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
-) -> Result<TurnWorkClaimPrefix, StoreError> {
-    match select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms)? {
-        TurnWorkClaimSelection::Refused { reason } => Ok(TurnWorkClaimPrefix::Refused { reason }),
-        TurnWorkClaimSelection::Selected { indices } => {
+) -> Result<TurnWorkPrefix, StoreError> {
+    match select_turn_work_indices(candidates, boundary, policy, now_epoch_ms)? {
+        TurnWorkSelection::Refused { reason } => Ok(TurnWorkPrefix::Refused { reason }),
+        TurnWorkSelection::Selected { indices } => {
             let len = indices
                 .into_iter()
                 .enumerate()
@@ -621,11 +461,11 @@ pub fn select_turn_work_claim_prefix(
                 .count();
             // Withholding the physically earliest row leaves no contiguous prefix.
             Ok(if len == 0 {
-                TurnWorkClaimPrefix::Refused {
-                    reason: QueuedWorkClaimRefusal::HeadWithheld,
+                TurnWorkPrefix::Refused {
+                    reason: AdmissionRefusal::HeadWithheld,
                 }
             } else {
-                TurnWorkClaimPrefix::Selected { len }
+                TurnWorkPrefix::Selected { len }
             })
         }
     }
@@ -638,7 +478,7 @@ pub fn select_turn_work_claim_prefix(
 /// deliberately overestimates ordinary model tokenizers while remaining safe
 /// without moving tokenizer selection from the host/provider boundary into
 /// core.
-fn rendered_token_upper_bound(candidates: &[ClaimCandidate]) -> usize {
+fn rendered_token_upper_bound(candidates: &[TurnLaneCandidate]) -> usize {
     let causes = candidates
         .iter()
         .flat_map(|candidate| candidate.turn_causes.iter().cloned())
@@ -646,14 +486,14 @@ fn rendered_token_upper_bound(candidates: &[ClaimCandidate]) -> usize {
     crate::render_turn_causes_prompt(&causes).map_or(0, |rendered| rendered.len())
 }
 
-fn record_turn_claim_decision(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+fn record_turn_admission_decision(
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
     selected: usize,
     rendered_tokens: usize,
-    outcome: TurnClaimOutcome,
+    outcome: TurnAdmissionOutcome,
 ) {
     let oldest_pending_age_ms = candidates
         .first()
@@ -673,96 +513,8 @@ fn record_turn_claim_decision(
         selected,
         rendered_tokens,
         outcome = outcome.as_str(),
-        "wake turn claim decision"
+        "wake turn admission decision"
     );
-}
-
-/// A freshly derived lease for a selected claim prefix.
-///
-/// The fencing token advances past the head batch's last observed token, the
-/// claim id is stable for (head batch, fencing token), and the lease token is
-/// an opaque proof-of-ownership digest the backend stamps on every claimed
-/// row. `session_lease_generation` is the caller's live session-execution-lease
-/// fencing token; the backend records it to decide when another generation may
-/// re-claim the row. Settlement is always keyed by claim id + lease token; a
-/// re-claim replaces those ownership values (see ADR 0029).
-#[derive(Clone, Debug)]
-pub struct WorkClaimLease {
-    pub claim_id: String,
-    pub lease_token: String,
-    pub fencing_token: u64,
-    pub session_lease_generation: u64,
-}
-
-impl WorkClaimLease {
-    pub fn derive_queued_work(
-        head: &ClaimCandidate,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        now_epoch_ms: u64,
-        session_lease_generation: u64,
-    ) -> Result<Self, StoreError> {
-        Self::derive(
-            ClaimIdDialect::QueuedWork,
-            head.enqueue_seq,
-            head.claim_fencing_token,
-            session_id,
-            owner,
-            now_epoch_ms,
-            session_lease_generation,
-        )
-    }
-
-    /// Derives byte-identical production claim authority for either durable
-    /// work family. Keeping the claim-id and lease-token seeds together makes
-    /// SQLite and PostgreSQL consume one byte contract.
-    #[allow(clippy::too_many_arguments)]
-    pub fn derive(
-        dialect: ClaimIdDialect,
-        enqueue_seq: u64,
-        claim_fencing_token: u64,
-        session_id: &SessionId,
-        owner: &LeaseOwnerIdentity,
-        now_epoch_ms: u64,
-        session_lease_generation: u64,
-    ) -> Result<Self, StoreError> {
-        let fencing_token = StoreError::checked_monotonic_increment(
-            "queued_work_claim_fencing_token",
-            claim_fencing_token,
-        )?;
-        let claim_id = derive_claim_id(dialect, enqueue_seq, fencing_token);
-        let lease_token = derive_claim_lease_token(session_id, owner, &claim_id, now_epoch_ms);
-        Ok(Self {
-            claim_id,
-            lease_token,
-            fencing_token,
-            session_lease_generation,
-        })
-    }
-}
-
-const QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION: u8 = 3;
-
-/// Strings are length-framed because session and owner identities are opaque UTF-8;
-/// the timestamp is fixed-width. Persisted tokens remain opaque at validation
-/// boundaries: release, settlement, and recovery compare the carried token with
-/// the stored token and never rederive it, so pre-v3 claims stay valid.
-pub fn derive_claim_lease_token(
-    session_id: &SessionId,
-    owner: &LeaseOwnerIdentity,
-    claim_id: &str,
-    now_epoch_ms: u64,
-) -> String {
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.queued-work-claim-lease",
-        QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION,
-    );
-    identity.string(session_id.as_str());
-    identity.string(&owner.owner_id);
-    identity.string(&owner.incarnation_id);
-    identity.string(claim_id);
-    identity.u64(now_epoch_ms);
-    crate::stable_hash::blake3_hex("lash-queued-work-claim-lease/v3", &identity.finish())
 }
 
 /// Derive the durable id for a newly enqueued batch.
@@ -770,7 +522,7 @@ pub fn derive_claim_lease_token(
 /// `nonce` disambiguates batches enqueued within the same millisecond;
 /// backends whose id uniqueness already comes from elsewhere pass `None`.
 pub fn derive_batch_id(
-    session_id: &SessionId,
+    session_id: &crate::SessionId,
     source_key: Option<&str>,
     now_epoch_ms: u64,
     nonce: Option<u64>,

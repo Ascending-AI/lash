@@ -75,6 +75,12 @@ impl std::fmt::Display for StoreBackend {
 pub enum StoreSchemaVerdict {
     /// The found version equals the version this build expects.
     Matches,
+    /// A newer expanded catalog remains readable under its recorded floor.
+    Expanded { found: i64 },
+    /// Admission or the tolerant shape check produced a typed refusal.
+    Refused {
+        refusal: crate::compat::CompatRefusal,
+    },
     /// A version was read that the next open will migrate to the expected
     /// version. The preflight itself remains read-only and performs no DDL.
     Migratable {
@@ -108,7 +114,10 @@ impl StoreSchemaVerdict {
     /// verdict behind evidence the probe does not have. It is not a pass
     /// either — see [`StoreSchemaVerdict::is_undecided`].
     pub fn refuses_open(&self) -> bool {
-        matches!(self, StoreSchemaVerdict::Mismatch { .. })
+        matches!(
+            self,
+            StoreSchemaVerdict::Mismatch { .. } | StoreSchemaVerdict::Refused { .. }
+        )
     }
 
     /// The counterpart to [`StoreSchemaVerdict::refuses_open`], and the reason
@@ -379,6 +388,8 @@ pub struct StoreSchemaDatabase {
     pub location: String,
     /// The version this build requires.
     pub expected: i64,
+    /// The catalog's recorded reader floor, when a stamp was readable.
+    pub min_reader: Option<i64>,
     /// What was read, and what that means.
     pub verdict: StoreSchemaVerdict,
 }
@@ -447,6 +458,14 @@ impl std::fmt::Display for StoreSchemaStatus {
             match &database.verdict {
                 StoreSchemaVerdict::Matches => {
                     writeln!(f, "{}: version {} (ok)", database.name, database.expected)?
+                }
+                StoreSchemaVerdict::Expanded { found } => writeln!(
+                    f,
+                    "{}: expanded version {found} under reader floor {:?} (ok)",
+                    database.name, database.min_reader
+                )?,
+                StoreSchemaVerdict::Refused { refusal } => {
+                    writeln!(f, "{}: refused: {refusal}", database.name)?
                 }
                 StoreSchemaVerdict::Migratable { found } => writeln!(
                     f,
@@ -708,6 +727,7 @@ mod tests {
             name: name.to_string(),
             location: format!("/tmp/{name}.db"),
             expected: 37,
+            min_reader: None,
             verdict,
         }
     }

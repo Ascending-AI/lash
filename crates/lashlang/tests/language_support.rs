@@ -25,7 +25,7 @@ pub(super) fn expect_string<'a>(
 // it is re-pointed at the IR rather than deleted with the syntax.
 
 fn type_literal(fields: Vec<(&str, TypeExpr, bool)>) -> Expr {
-    Expr::TypeLiteral(Box::new(TypeExpr::Object(
+    lashlang::testing::ast_builders::type_literal(TypeExpr::Object(
         fields
             .into_iter()
             .map(|(name, ty, optional)| TypeField {
@@ -34,7 +34,7 @@ fn type_literal(fields: Vec<(&str, TypeExpr, bool)>) -> Expr {
                 optional,
             })
             .collect(),
-    )))
+    ))
 }
 
 fn assign(name: &str, expr: Expr) -> Expr {
@@ -172,13 +172,11 @@ async fn type_is_usable_as_a_tool_call_argument() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn undefined_ref_in_type_produces_runtime_error() {
-    let program = Program::block(vec![Expr::Finish(Box::new(Expr::TypeLiteral(Box::new(
-        TypeExpr::Object(vec![TypeField {
-            name: "inner".into(),
-            ty: TypeExpr::Ref("Missing".into()),
-            optional: false,
-        }]),
-    ))))]);
+    let program = Program::block(vec![Expr::Finish(Box::new(type_literal(vec![(
+        "inner",
+        TypeExpr::Ref("Missing".into()),
+        false,
+    )])))]);
     let host = TestHost::default();
     let mut state = State::new();
     let err = lashlang::execute(

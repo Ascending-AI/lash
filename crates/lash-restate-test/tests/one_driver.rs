@@ -147,6 +147,15 @@ fn journaled_steps(backend: &RestateTestBackend, service: &str) -> Vec<(String, 
         .collect()
 }
 
+/// The root's `run` invocations and their steps: its scope close runs on the
+/// same key's `close` handler, which runs no turn (FIG-4035).
+fn root_runs(backend: &RestateTestBackend) -> Vec<(String, Vec<String>)> {
+    journaled_steps(backend, TURN_DRIVER_SERVICE)
+        .into_iter()
+        .filter(|(target, _)| target.ends_with("/run"))
+        .collect()
+}
+
 /// A host that submits from its own handler executes nothing: while the turn
 /// is held, only the engine's invocations carry the turn's steps, and one
 /// model call is in flight; once released, the turn ran exactly once.
@@ -204,7 +213,7 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
             "the host {target} executed the turn's steps {foreign:?}"
         );
     }
-    let engine = journaled_steps(&backend, TURN_DRIVER_SERVICE);
+    let engine = root_runs(&backend);
     assert_eq!(
         engine.len(),
         1,
@@ -233,7 +242,7 @@ async fn a_host_submission_leaves_the_engine_the_only_driver() {
         1
     );
     assert_eq!(
-        journaled_steps(&backend, TURN_DRIVER_SERVICE).len(),
+        root_runs(&backend).len(),
         1,
         "no second root invocation ran the turn again"
     );

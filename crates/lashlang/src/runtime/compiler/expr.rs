@@ -164,23 +164,6 @@ impl Compiler {
                 ));
                 return;
             }
-            if let [Expr::Binary { left, op, right }] = value_args
-                && is_numeric_binary_op(*op)
-                && let (Expr::Variable(slot_name), Some(Value::Number(right))) =
-                    (left.as_ref(), self.fold_compile_time_expr(right))
-            {
-                let template = self.push_format_template(template, value_args.len());
-                let slot = self.push_slot(slot_name);
-                self.code.push(Instruction::Intrinsic(
-                    IntrinsicOp::FormatCompiledSlotNumberBinary {
-                        template,
-                        slot,
-                        op: *op,
-                        right,
-                    },
-                ));
-                return;
-            }
             for (index, arg) in value_args.iter().enumerate() {
                 self.compile_expr(arg, &path.child(index as u32 + 1));
             }
@@ -323,24 +306,11 @@ impl Compiler {
                     self.code.push(Instruction::LoadName(name));
                 }
             }
-            Expr::Tuple(items) => {
-                for (index, item) in items.iter().enumerate() {
-                    self.compile_expr(item, &path.child(index as u32));
-                }
-                self.code.push(Instruction::BuildTuple(items.len()));
-            }
             Expr::List(items) => {
                 for (index, item) in items.iter().enumerate() {
                     self.compile_expr(item, &path.child(index as u32));
                 }
                 self.code.push(Instruction::BuildHeapList(items.len()));
-            }
-            Expr::ListComprehension { element, clauses } => {
-                self.compile_list_comprehension(
-                    super::entry::ListComprehensionElement::Value(element),
-                    clauses,
-                    path,
-                );
             }
             Expr::Record(entries) => {
                 for (index, (_, value)) in entries.iter().enumerate() {
@@ -368,14 +338,6 @@ impl Compiler {
                 self.compile_expr(duration, &path.child(0));
                 let instruction = self.code.len();
                 self.code.push(Instruction::SleepFor);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
-            Expr::SleepUntil(deadline) => {
-                self.compile_expr(deadline, &path.child(0));
-                let instruction = self.code.len();
-                self.code.push(Instruction::SleepUntil);
                 if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
@@ -515,10 +477,6 @@ impl Compiler {
                 self.compile_expr(index, &path.child(1));
                 self.code.push(Instruction::Index);
             }
-            Expr::Unary { op, expr } => {
-                self.compile_expr(expr, &path.child(0));
-                self.code.push(Instruction::Unary(*op));
-            }
             Expr::If {
                 condition,
                 then_block,
@@ -541,14 +499,6 @@ impl Compiler {
                 self.compile_expr(expr, &path.child(0));
                 self.code.push(Instruction::Print);
             }
-            Expr::Yield(value) => {
-                self.compile_expr(value, &path.child(0));
-                let instruction = self.code.len();
-                self.code.push(Instruction::ProcessYield);
-                if let Some(site) = self.lashlang_execution_site_for_expr(expr, path) {
-                    self.mark_lashlang_execution_site(instruction, site);
-                }
-            }
             Expr::Finish(value) => {
                 self.compile_expr(value, &path.child(0));
                 let instruction = self.code.len();
@@ -565,83 +515,6 @@ impl Compiler {
                     self.mark_lashlang_execution_site(instruction, site);
                 }
             }
-            Expr::TypeLiteral(ty) => self.compile_type_literal(ty),
-            Expr::Binary { left, op, right } => match op {
-                BinaryOp::And => {
-                    self.compile_expr(left, &path.child(0));
-                    let jump_to_false = self.emit_jump_if_false();
-                    self.compile_expr(right, &path.child(1));
-                    self.code.push(Instruction::ToBool);
-                    let jump_to_end = self.emit_jump();
-                    self.patch_jump(jump_to_false, self.code.len());
-                    self.code.push(Instruction::PushBool(false));
-                    self.patch_jump(jump_to_end, self.code.len());
-                }
-                BinaryOp::Or => {
-                    self.compile_expr(left, &path.child(0));
-                    let jump_to_true = self.emit_jump_if_true();
-                    self.compile_expr(right, &path.child(1));
-                    self.code.push(Instruction::ToBool);
-                    let jump_to_end = self.emit_jump();
-                    self.patch_jump(jump_to_true, self.code.len());
-                    self.code.push(Instruction::PushBool(true));
-                    self.patch_jump(jump_to_end, self.code.len());
-                }
-                _ => {
-                    if is_comparison_binary_op(*op) {
-                        if let (
-                            Expr::Binary {
-                                left: inner_left,
-                                op: binary_op,
-                                right: inner_right,
-                            },
-                            Some(Value::Number(compare_right)),
-                        ) = (left.as_ref(), self.fold_compile_time_expr(right))
-                            && is_numeric_binary_op(*binary_op)
-                            && let (Expr::Variable(name), Some(Value::Number(binary_right))) = (
-                                inner_left.as_ref(),
-                                self.fold_compile_time_expr(inner_right),
-                            )
-                        {
-                            let slot = self.push_slot(name);
-                            self.code.push(Instruction::SlotNumberBinaryCompare {
-                                slot,
-                                binary_op: *binary_op,
-                                binary_right,
-                                compare_op: *op,
-                                compare_right,
-                            });
-                            return;
-                        }
-                        if let (Expr::Variable(name), Some(Value::Number(right))) =
-                            (left.as_ref(), self.fold_compile_time_expr(right))
-                        {
-                            let slot = self.push_slot(name);
-                            self.code.push(Instruction::SlotNumberCompare {
-                                slot,
-                                op: *op,
-                                right,
-                            });
-                            return;
-                        }
-                    }
-                    if is_numeric_binary_op(*op)
-                        && let (Expr::Variable(name), Some(Value::Number(right))) =
-                            (left.as_ref(), self.fold_compile_time_expr(right))
-                    {
-                        let slot = self.push_slot(name);
-                        self.code.push(Instruction::SlotNumberBinary {
-                            slot,
-                            op: *op,
-                            right,
-                        });
-                        return;
-                    }
-                    self.compile_expr(left, &path.child(0));
-                    self.compile_expr(right, &path.child(1));
-                    self.code.push(Instruction::Binary(*op));
-                }
-            },
             Expr::JavaScriptUnary { op, expr } => {
                 self.compile_expr(expr, &path.child(0));
                 self.code.push(Instruction::JavaScriptUnary(*op));

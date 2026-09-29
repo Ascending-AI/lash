@@ -198,4 +198,27 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
     ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
     }
+
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        let process_id = process_id.to_string();
+        let key = key.to_string();
+        self.conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome(
+                    crate::conn::cached_execute(
+                        tx,
+                        process_sql().process.release_consumer_hold.sql(),
+                        params![process_id, key],
+                    )
+                    .map(|_| ())
+                    .map_err(process_sqlite_error),
+                ))
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
 }

@@ -198,19 +198,21 @@ fn range_loop(end: f64, body: Vec<Expr>) -> Expr {
 fn plus_one(offset: f64) -> Expr {
     builders::binary(
         builders::var("n"),
-        BinaryOp::Add,
+        JavaScriptBinaryOp::Add,
         builders::num(offset + 1.0),
     )
 }
 
-/// `rows = rows + [[<items>]]`
+/// `rows = push(rows, [[<items>]])`
 fn append_row(items: Vec<Expr>) -> Expr {
     builders::assign(
         "rows",
-        builders::binary(
-            builders::var("rows"),
-            BinaryOp::Add,
-            builders::list(vec![builders::list(items)]),
+        builders::builtin(
+            "push",
+            vec![
+                builders::var("rows"),
+                builders::list(vec![builders::list(items)]),
+            ],
         ),
     )
 }
@@ -415,7 +417,7 @@ async fn stress_collection_survives_a_general_concat() {
             builders::assign("y", builders::list(vec![builders::num(9.0)])),
             builders::assign(
                 "y",
-                builders::binary(builders::var("y"), BinaryOp::Add, builders::var("z")),
+                builders::concat(builders::var("y"), builders::var("z")),
             ),
             builders::finish(builders::list(vec![
                 builders::var("x"),
@@ -446,9 +448,7 @@ async fn stress_collection_survives_a_general_concat() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
-    // `acc = acc + other` where the right operand is a bare variable lowers to
-    // the fused slot form, which reads both slots without touching the stack.
-    // `x = [1]` / `other = [2]` / `acc = [0]` / `acc = acc + other` /
+    // `x = [1]` / `other = [2]` / `acc = [0]` / `acc = acc.concat(other)` /
     // `finish [x, acc]`
     let slot_form = || {
         builders::program(vec![
@@ -457,7 +457,7 @@ async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
             builders::assign("acc", builders::list(vec![builders::num(0.0)])),
             builders::assign(
                 "acc",
-                builders::binary(builders::var("acc"), BinaryOp::Add, builders::var("other")),
+                builders::concat(builders::var("acc"), builders::var("other")),
             ),
             builders::finish(builders::list(vec![
                 builders::var("x"),
@@ -472,8 +472,8 @@ async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
         unstressed_result(slot_form()).await.expect("baseline")
     );
 
-    // `kept = [[7]]` / `acc = []` / `for n in range(0, 6) { acc = acc + [[n]] }`
-    // / `finish [kept, acc]`
+    // `kept = [[7]]` / `acc = []` /
+    // `for n in range(0, 6) { acc = acc.concat([[n]]) }` / `finish [kept, acc]`
     let loop_form = || {
         builders::program(vec![
             builders::assign(
@@ -486,9 +486,8 @@ async fn stress_collection_survives_a_slot_concat_and_a_loop_concat() {
                 builders::builtin("range", vec![builders::num(0.0), builders::num(6.0)]),
                 builders::block(vec![builders::assign(
                     "acc",
-                    builders::binary(
+                    builders::concat(
                         builders::var("acc"),
-                        BinaryOp::Add,
                         builders::list(vec![builders::list(vec![builders::var("n")])]),
                     ),
                 )]),
@@ -745,7 +744,7 @@ async fn shared_binding_list_and_record_literals_stay_shared_after_snapshot_roun
 /// concatenation was durable, and encoded and decoded like any other.
 #[tokio::test(flavor = "current_thread")]
 async fn a_rejected_concat_leaves_the_accumulator_untouched() {
-    // `acc = [0]` / `other = [[1], [2], [3]]`, then `acc = acc + other`
+    // `acc = [0]` / `other = [[1], [2], [3]]`, then `acc = acc.concat(other)`
     let setup = compile_program_for_tests(builders::program(vec![
         builders::assign("acc", builders::list(vec![builders::num(0.0)])),
         builders::assign(
@@ -759,7 +758,7 @@ async fn a_rejected_concat_leaves_the_accumulator_untouched() {
     ]));
     let extend = compile_program_for_tests(builders::program(vec![builders::assign(
         "acc",
-        builders::binary(builders::var("acc"), BinaryOp::Add, builders::var("other")),
+        builders::concat(builders::var("acc"), builders::var("other")),
     )]));
 
     let mut state = State::new();

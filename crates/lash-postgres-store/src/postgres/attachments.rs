@@ -29,6 +29,12 @@ lash_store_sql::statements! {
         delete_deleted_session_roots = "DELETE FROM attachment_manifest AS manifest
              WHERE EXISTS (SELECT 1 FROM deleted_sessions AS deleted
                            WHERE deleted.session_id = manifest.session_id)
+               AND (
+                   (manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+                   OR ({{turn_attachment_owner(manifest.owner_kind)}} AND manifest.owner_id IS NOT NULL)
+                   OR ({{process_attachment_owner(manifest.owner_kind)}}
+                       AND manifest.owner_id ~ '^p_[0-9a-f]{12}7[0-9a-f]{3}[89ab][0-9a-f]{15}$')
+               )
                AND (manifest.committed_at_ms IS NULL OR NOT EXISTS (
                    SELECT 1 FROM graph_nodes AS node
                    WHERE node.session_id = manifest.session_id AND node.tombstoned = FALSE
@@ -136,14 +142,27 @@ pub(crate) fn attachment_sql() -> &'static AttachmentSql {
 /// The targeted probe and the condemn CAS read the same one so the fence and
 /// the probe cannot drift apart.
 pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> &'static str {
-    if process_registry_shared {
-        attachment_sql()
-            .manifest_process_owner
-            .select_live_root_proving_process_death
-            .sql()
-    } else {
-        attachment_sql().manifest.select_live_root.sql()
-    }
+    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
+        [false, true].map(|shared| {
+            let base = if shared {
+                attachment_sql()
+                    .manifest_process_owner
+                    .select_live_root_proving_process_death
+                    .sql()
+            } else {
+                attachment_sql().manifest.select_live_root.sql()
+            };
+            format!(
+                "SELECT 1 WHERE EXISTS ({base}) OR EXISTS (
+                    SELECT 1 FROM lash_attachment_manifest AS manifest
+                    WHERE manifest.attachment_id = $1
+                      AND NOT COALESCE(({}), FALSE)
+                )",
+                decodable_owner_sql()
+            )
+        })
+    });
+    &GUARDED[usize::from(process_registry_shared)]
 }
 
 /// The aged-intent forget this tier may issue, the negation of
@@ -151,14 +170,36 @@ pub(crate) fn live_attachment_ref_sql(process_registry_shared: bool) -> &'static
 pub(crate) fn forget_aged_uncommitted_attachment_intents_sql(
     process_registry_shared: bool,
 ) -> &'static str {
-    if process_registry_shared {
-        attachment_sql()
-            .manifest_process_owner
-            .delete_aged_uncommitted_proving_process_death
-            .sql()
-    } else {
-        attachment_sql().manifest.delete_aged_uncommitted.sql()
-    }
+    static GUARDED: LazyLock<[String; 2]> = LazyLock::new(|| {
+        [false, true].map(|shared| {
+            let base = if shared {
+                attachment_sql()
+                    .manifest_process_owner
+                    .delete_aged_uncommitted_proving_process_death
+                    .sql()
+            } else {
+                attachment_sql().manifest.delete_aged_uncommitted.sql()
+            };
+            format!("{base} AND ({})", decodable_owner_sql())
+        })
+    });
+    &GUARDED[usize::from(process_registry_shared)]
+}
+
+fn decodable_owner_sql() -> String {
+    let turn = lash_core_execution::store_backend_support::turn_attachment_owner_predicate_sql(
+        "manifest.owner_kind",
+    );
+    let process =
+        lash_core_execution::store_backend_support::process_attachment_owner_predicate_sql(
+            "manifest.owner_kind",
+        );
+    format!(
+        "(manifest.owner_kind IS NULL AND manifest.owner_id IS NULL)
+      OR ({turn} AND manifest.owner_id IS NOT NULL)
+      OR ({process}
+          AND manifest.owner_id ~ '^p_[0-9a-f]{{12}}7[0-9a-f]{{3}}[89ab][0-9a-f]{{15}}$')"
+    )
 }
 
 /// Advisory-lock namespace for the attachment GC fence. Both halves of the

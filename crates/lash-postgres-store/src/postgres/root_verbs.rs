@@ -117,19 +117,6 @@ pub(crate) async fn open_root_intent_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    write_root_terminal_conn(
-        tx,
-        &RootTerminal {
-            session_id: session.clone(),
-            root: request.root.clone(),
-            kind: RootTerminalKind::Cancelled,
-            cause,
-            head_revision: revision.map(|revision| revision as u64),
-            at_ms,
-            stopped_partial: None,
-        },
-    )
-    .await?;
     let mut inputs: Vec<String> = sqlx::query_scalar(sql.bound_inputs.sql())
         .bind(session.as_str())
         .bind(request.root.as_str())
@@ -183,13 +170,21 @@ pub(crate) async fn open_root_intent_tx(
                 .map_err(store_sqlx_error)?;
         }
     }
-    for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
-        sqlx::query(statement)
-            .bind(session.as_str())
-            .execute(&mut **tx)
-            .await
-            .map_err(store_sqlx_error)?;
-    }
+    // The verb settles the root's own input and batches first; its terminal
+    // write then releases whatever else the root still held (FIG-3927).
+    write_root_terminal_conn(
+        tx,
+        &RootTerminal {
+            session_id: session.clone(),
+            root: request.root.clone(),
+            kind: RootTerminalKind::Cancelled,
+            cause,
+            head_revision: revision.map(|revision| revision as u64),
+            at_ms,
+            stopped_partial: None,
+        },
+    )
+    .await?;
     for prior in plan.supersede {
         let mut next = prior.clone();
         next.state = ControlIntentState::Superseded { by: intent.id };

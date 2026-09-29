@@ -89,6 +89,7 @@ struct AppState {
     mock_provider_base_url: String,
     trace_dir: Option<PathBuf>,
     fail_once: bool,
+    witness: sqlx::PgPool,
 }
 
 impl AppState {
@@ -116,6 +117,7 @@ impl AppState {
                 .with_context(|| format!("create trace dir `{}`", dir.display()))?;
         }
         let fail_once = env("LASH_E2E_FAIL_ONCE", "0") == "1";
+        let witness = lash_restate_postgres_workers_e2e::witness::connect_witness().await?;
         Ok(Self {
             worker_id,
             storage,
@@ -125,6 +127,7 @@ impl AppState {
             mock_provider_base_url,
             trace_dir,
             fail_once,
+            witness,
         })
     }
 
@@ -138,6 +141,7 @@ impl AppState {
             mock_provider_base_url: self.mock_provider_base_url.clone(),
             trace_dir: self.trace_dir.clone(),
             fail_once: self.fail_once,
+            witness: self.witness.clone(),
         })
     }
 
@@ -380,7 +384,7 @@ impl AppState {
             .await?;
         let first_input = first.input_id().clone();
         let enqueue_session = session.clone();
-        let enqueue_pool = self.storage.pool().clone();
+        let enqueue_pool = self.witness.clone();
         let enqueue_workflow_id = request.workflow_id.clone();
         // The second input lands while the first root runs its frame switch.
         // A replayed invocation sends it again under the same id, which the
@@ -975,7 +979,7 @@ async fn wait_for_provider_scenario(
     while Instant::now() < deadline {
         let observed: bool = sqlx::query_scalar(
             "SELECT EXISTS (
-                SELECT 1 FROM lash_e2e_provider_calls
+                SELECT 1 FROM witness_provider_receipts
                 WHERE workflow_id = $1 AND scenario = $2
             )",
         )

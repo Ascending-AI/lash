@@ -249,14 +249,14 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_root_is_cancelled() ->
     );
     let pending = session.durable().pending_turn_inputs().await?;
     assert_eq!(pending.len(), 1);
-    // The parked drive keeps the input held under its sealed epoch until the
-    // input is withdrawn; no other root may drive it (FIG-3600).
+    // The parked root keeps the input bound to it until the root ends; no
+    // other root may drive it (FIG-3927).
     assert!(
         matches!(
             &pending[0].status,
-            lash_core::PendingTurnInputReadStatus::Held { drive_epoch } if *drive_epoch > 0
+            lash_core::PendingTurnInputReadStatus::Admitted { .. }
         ),
-        "the parked turn's input stays held: {:?}",
+        "the parked turn's input stays admitted to its root: {:?}",
         pending[0].status
     );
     let cancelled = session.cancel(crate::CancelTarget::Input(input_id)).await?;

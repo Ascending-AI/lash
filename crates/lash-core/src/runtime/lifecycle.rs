@@ -329,7 +329,6 @@ impl LashRuntime {
             runtime_lease_executor_id,
             shared_token_ledger: Arc::new(std::sync::Mutex::new(Vec::new())),
             unreported_usage_attempts: outstanding_unreported_attempts,
-            journaled_drive_claims: std::collections::BTreeSet::new(),
             engine_retries_root: false,
             admitted_turn_index: None,
             drive_root: None,
@@ -656,18 +655,11 @@ impl LashRuntime {
         commit
             .stamp_semantic_boundary()
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = commit_runtime_state_without_session_lease(
-            store,
-            commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await
-        .map_err(|source| {
-            session_commit_error("failed to record protocol configuration", source)
-        })?;
+        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+            .await
+            .map_err(|source| {
+                session_commit_error("failed to record protocol configuration", source)
+            })?;
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
         self.materialized_protocol_config_dirty = false;
@@ -744,16 +736,11 @@ impl LashRuntime {
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             // Lane-less host lifecycle boundary: `park` runs between turns and
             // owns no retained session-execution guard.
-            let result = commit_runtime_state_without_session_lease(
-                Arc::clone(&store),
-                commit,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-            .map_err(|source| session_commit_error("failed to persist runtime state", source))?;
+            let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+                .await
+                .map_err(|source| {
+                    session_commit_error("failed to persist runtime state", source)
+                })?;
             // Retire staged rows only against receipt-confirmed identities: an
             // unknown outcome leaves them staged with their identities intact.
             let confirmed_usage = result.committed_usage_delta_identities.clone();

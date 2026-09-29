@@ -15,6 +15,9 @@ whether a drifted binding's effect is served, so a positional journal
 Amended 2026-09-25 (FIG-3680): a command the journal holds nothing for refuses
 only writes under the run's namespace, so an orchestrating call that journaled
 no nested effect redrives by serving its presentation.
+Amended 2026-09-29 (FIG-3562): orchestrating tools are deleted, so the
+FIG-3680 empty-orchestration case no longer arises; see
+[Cells call only opaque tools](#amendment-fig-3562-2026-09-29-cells-call-only-opaque-tools).
 Amended 2026-09-25 (FIG-3725): a group tool child judges its own tool where it
 runs; see [Group tool children](#amendment-fig-3725-group-tool-children).
 Amended 2026-09-25 (FIG-3779): on Restate a drifted binding's recorded process
@@ -573,3 +576,16 @@ The recorded generation stays readable on every admission, so a later drain
 or migration can identify the generation a turn was admitted under. The
 process side of this cutover (a body's `replay_grammar`) is FIG-3571's
 generation fence for processes and lands separately.
+
+## Amendment (FIG-3562, 2026-09-29): cells call only opaque tools
+
+[ADR 0116](0116-tools-are-opaque.md) deletes orchestrating tools. The cases above that name an orchestrating
+call are historical: the FIG-3680 empty-orchestration redrive and its law
+`an_empty_orchestrating_call_redrives_from_its_cell`, and the drifted
+orchestrating binding (`agents.spawn`) that re-runs its body. A command whose
+namespace the journal holds nothing for still refuses writes, and a call
+settled in preparation still redrives by serving its presentation. The
+`CommandShape::ToolCall` merge of a tool call's own `process:await` rows is
+removed. `agents.spawn` is now an ordinary tool whose declared start journals
+`process:start:{key}` and `process:attach-terminal:{id}:{key}` under its
+command ([ADR 0116](0116-tools-are-opaque.md) §3), rows the frontier read already attributes to the tool call.

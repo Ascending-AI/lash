@@ -17,10 +17,10 @@
 #![allow(dead_code)]
 
 use crate::ast::{
-    AssignPathStep, AssignTarget, AstPath, AstString, BinaryOp, CatchClause, Declaration, Expr,
-    FunctionDecl, FunctionExpr, FunctionParam, LabelMetadata, ListComprehensionClause, ProcessDecl,
-    ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType, Program, ResourceRefExpr,
-    TryExpr, TypeDecl, TypeExpr, TypeField, UnaryOp,
+    AssignPathStep, AssignTarget, AstPath, AstString, CatchClause, Declaration, Expr, FunctionDecl,
+    FunctionExpr, FunctionParam, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
+    LabelMetadata, ProcessDecl, ProcessParam, ProcessSignalDecl, ProcessSignature, ProcessType,
+    Program, ResourceRefExpr, TryExpr, TypeExpr, TypeField,
 };
 use crate::span::Span;
 
@@ -101,14 +101,6 @@ pub fn with_declaration_spans(mut program: Program, spans: &[(usize, usize)]) ->
             )
         }));
     program
-}
-
-/// `type <name> = <ty>`
-pub fn type_decl(name: &str, ty: TypeExpr) -> Declaration {
-    Declaration::Type(TypeDecl {
-        name: name.into(),
-        ty,
-    })
 }
 
 /// `process <name>(<params>) { <body> }`, with no signals, return type or label.
@@ -261,10 +253,6 @@ pub fn list(items: Vec<Expr>) -> Expr {
     Expr::List(items)
 }
 
-pub fn tuple(items: Vec<Expr>) -> Expr {
-    Expr::Tuple(items)
-}
-
 pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
     Expr::Record(
         fields
@@ -272,10 +260,6 @@ pub fn record(fields: Vec<(&str, Expr)>) -> Expr {
             .map(|(name, value)| (AstString::from(name), value))
             .collect(),
     )
-}
-
-pub fn type_literal(ty: TypeExpr) -> Expr {
-    Expr::TypeLiteral(Box::new(ty))
 }
 
 /// `Process<(<params>), <output>>` — a known, checked process-callable type.
@@ -294,6 +278,95 @@ pub fn type_field(name: &str, ty: TypeExpr, optional: bool) -> TypeField {
         name: name.into(),
         ty,
         optional,
+    }
+}
+
+/// The record literal a `{$lash_type: <schema>}` type value takes, built with
+/// plain IR now that `Expr::TypeLiteral` is gone: the schema encoding is the
+/// JSON-schema shape `compile_schema_value` reads at validation time, so the
+/// same runtime path is exercised without the retired AST form.
+pub fn type_literal(ty: TypeExpr) -> Expr {
+    Expr::Record(vec![(
+        AstString::from(crate::LASH_TYPE_KEY),
+        type_schema(&ty),
+    )])
+}
+
+fn type_schema(ty: &TypeExpr) -> Expr {
+    let scalar = |name: &str| {
+        Expr::Record(vec![(
+            AstString::from("type"),
+            Expr::String(AstString::from(name)),
+        )])
+    };
+    match ty {
+        TypeExpr::Any | TypeExpr::Process(_) | TypeExpr::TriggerHandle(_) => {
+            Expr::Record(Vec::new())
+        }
+        TypeExpr::Str => scalar("string"),
+        TypeExpr::Int => scalar("integer"),
+        TypeExpr::Float => scalar("number"),
+        TypeExpr::Bool => scalar("boolean"),
+        TypeExpr::Dict => scalar("object"),
+        TypeExpr::Null => scalar("null"),
+        TypeExpr::Enum(values) => Expr::Record(vec![
+            (
+                AstString::from("type"),
+                Expr::String(AstString::from("string")),
+            ),
+            (
+                AstString::from("enum"),
+                Expr::List(
+                    values
+                        .iter()
+                        .map(|value| Expr::String(value.clone()))
+                        .collect(),
+                ),
+            ),
+        ]),
+        TypeExpr::List(inner) => Expr::Record(vec![
+            (
+                AstString::from("type"),
+                Expr::String(AstString::from("array")),
+            ),
+            (AstString::from("items"), type_schema(inner)),
+        ]),
+        TypeExpr::Object(fields) => Expr::Record(vec![
+            (
+                AstString::from("type"),
+                Expr::String(AstString::from("object")),
+            ),
+            (
+                AstString::from("properties"),
+                Expr::Record(
+                    fields
+                        .iter()
+                        .map(|field| (field.name.clone(), type_schema(&field.ty)))
+                        .collect(),
+                ),
+            ),
+            (
+                AstString::from("required"),
+                Expr::List(
+                    fields
+                        .iter()
+                        .filter(|field| !field.optional)
+                        .map(|field| Expr::String(field.name.clone()))
+                        .collect(),
+                ),
+            ),
+            (AstString::from("additionalProperties"), Expr::Bool(false)),
+        ]),
+        TypeExpr::Union(variants) => Expr::Record(vec![(
+            AstString::from("anyOf"),
+            Expr::List(variants.iter().map(type_schema).collect()),
+        )]),
+        // A named type is a variable bound to a `{$lash_type}` record; the
+        // schema a `Ref` contributes is that record's inner value.
+        TypeExpr::Ref(name) => Expr::Index {
+            target: Box::new(Expr::Variable(name.clone())),
+            index: Box::new(Expr::String(AstString::from(crate::LASH_TYPE_KEY))),
+        },
     }
 }
 
@@ -346,16 +419,24 @@ pub fn index(target: Expr, index: Expr) -> Expr {
     }
 }
 
-pub fn binary(left: Expr, op: BinaryOp, right: Expr) -> Expr {
-    Expr::Binary {
+pub fn binary(left: Expr, op: JavaScriptBinaryOp, right: Expr) -> Expr {
+    Expr::JavaScriptBinary {
         left: Box::new(left),
         op,
         right: Box::new(right),
     }
 }
 
-pub fn unary(op: UnaryOp, expr: Expr) -> Expr {
-    Expr::Unary {
+pub fn logical(left: Expr, op: JavaScriptLogicalOp, right: Expr) -> Expr {
+    Expr::JavaScriptLogical {
+        left: Box::new(left),
+        op,
+        right: Box::new(right),
+    }
+}
+
+pub fn unary(op: JavaScriptUnaryOp, expr: Expr) -> Expr {
+    Expr::JavaScriptUnary {
         op,
         expr: Box::new(expr),
     }
@@ -403,24 +484,6 @@ pub fn while_loop(condition: Expr, body: Expr) -> Expr {
     }
 }
 
-pub fn comprehension(element: Expr, clauses: Vec<ListComprehensionClause>) -> Expr {
-    Expr::ListComprehension {
-        element: Box::new(element),
-        clauses,
-    }
-}
-
-pub fn comprehension_for(binding: &str, iterable: Expr) -> ListComprehensionClause {
-    ListComprehensionClause::For {
-        binding: binding.into(),
-        iterable,
-    }
-}
-
-pub fn comprehension_if(condition: Expr) -> ListComprehensionClause {
-    ListComprehensionClause::If { condition }
-}
-
 pub fn try_expr(body: Expr, catch: Option<CatchClause>, finally: Option<Expr>) -> Expr {
     Expr::Try(Box::new(TryExpr {
         body: Box::new(body),
@@ -459,10 +522,6 @@ pub fn print(expr: Expr) -> Expr {
     Expr::Print(Box::new(expr))
 }
 
-pub fn yield_expr(expr: Expr) -> Expr {
-    Expr::Yield(Box::new(expr))
-}
-
 pub fn await_expr(expr: Expr) -> Expr {
     Expr::Await(Box::new(expr))
 }
@@ -473,10 +532,6 @@ pub fn unwrap(expr: Expr) -> Expr {
 
 pub fn sleep_for(expr: Expr) -> Expr {
     Expr::SleepFor(Box::new(expr))
-}
-
-pub fn sleep_until(expr: Expr) -> Expr {
-    Expr::SleepUntil(Box::new(expr))
 }
 
 pub fn wait_signal(name: &str) -> Expr {
@@ -494,6 +549,28 @@ pub fn function_call(name: &str, args: Vec<Expr>) -> Expr {
     Expr::FunctionCall {
         function: name.into(),
         args,
+    }
+}
+
+/// `left.concat(right)` — the `__typescript_stdlib` shape TypeScript lowering
+/// emits for `Array.prototype.concat`.
+pub fn concat(left: Expr, right: Expr) -> Expr {
+    builtin("__typescript_stdlib", vec![string("concat"), left, right])
+}
+
+/// `items.map(<param> => <body>)` — the `Expr::Map` shape TypeScript lowering
+/// emits for `Array.prototype.map`.
+pub fn map(items: Expr, param: &str, body: Expr) -> Expr {
+    Expr::Map {
+        items: Box::new(items),
+        function: Box::new(Expr::Function(Box::new(FunctionExpr {
+            name: None,
+            js_name: None,
+            receiver: None,
+            params: vec![AstString::from(param)],
+            captures: Vec::new(),
+            body: Box::new(body),
+        }))),
     }
 }
 

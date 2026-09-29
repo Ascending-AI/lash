@@ -48,22 +48,8 @@ fn every_expr_variant() -> Vec<Expr> {
             process: "proc".into(),
         },
         Expr::ResourceRef(ResourceRefExpr::unresolved(vec!["display".into()])),
-        Expr::TypeLiteral(Box::new(TypeExpr::Str)),
         Expr::Block(vec![var("b0"), var("b1")]),
-        Expr::Tuple(vec![var("t0"), var("t1")]),
         Expr::List(vec![var("l0"), var("l1")]),
-        Expr::ListComprehension {
-            element: Box::new(var("element")),
-            clauses: vec![
-                ListComprehensionClause::For {
-                    binding: "item".into(),
-                    iterable: var("iterable"),
-                },
-                ListComprehensionClause::If {
-                    condition: var("condition"),
-                },
-            ],
-        },
         Expr::LabelAnnotated {
             label: LabelMetadata {
                 title: "title".into(),
@@ -108,13 +94,11 @@ fn every_expr_variant() -> Vec<Expr> {
         },
         Expr::Await(Box::new(var("awaited"))),
         Expr::SleepFor(Box::new(var("sleep_for"))),
-        Expr::SleepUntil(Box::new(var("sleep_until"))),
         Expr::ResultUnwrap(Box::new(var("unwrapped"))),
         Expr::Print(Box::new(var("printed"))),
-        Expr::Yield(Box::new(var("yielded"))),
         Expr::Fail(Box::new(var("failed"))),
-        Expr::Unary {
-            op: UnaryOp::Not,
+        Expr::JavaScriptUnary {
+            op: JavaScriptUnaryOp::Not,
             expr: Box::new(var("unary")),
         },
         Expr::JavaScriptUnary {
@@ -167,9 +151,9 @@ fn every_expr_variant() -> Vec<Expr> {
             target: Box::new(var("index_target")),
             index: Box::new(var("index_index")),
         },
-        Expr::Binary {
+        Expr::JavaScriptBinary {
             left: Box::new(var("bin_left")),
-            op: BinaryOp::Add,
+            op: JavaScriptBinaryOp::Add,
             right: Box::new(var("bin_right")),
         },
         Expr::JavaScriptBinary {

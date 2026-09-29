@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use lash_core::Resolution;
 use restate_sdk::errors::TerminalError;
-use restate_sdk::serde::Json;
 
 use super::{GateRaceWinner, GateWait, first_of_gate_race};
 use crate::durable_wait::RestateDurableWaitAwaitRequest;
@@ -65,14 +64,14 @@ pub trait GroupChildCancelRace<'ctx>: Send + Sync + 'ctx {
 /// engine's own cancellation of the child's invocation, surfacing at this
 /// race, is the same decided cancel.
 pub(super) async fn race_group_child_cancel<'run, T>(
-    cancel: GateWait<'run, Json<Resolution>>,
+    cancel: GateWait<'run, crate::compat::Reply<Resolution>>,
     guarded: GateWait<'run, T>,
 ) -> Result<Option<T>, TerminalError> {
     match first_of_gate_race(&*guarded, &*cancel).await {
         Ok(GateRaceWinner::Guarded) => {}
         Ok(GateRaceWinner::Gate) => match cancel.await {
-            Ok(Json(resolution)) => {
-                if crate::effect_group::group_child_cancel_verdict(resolution) {
+            Ok(reply) => {
+                if crate::effect_group::group_child_cancel_verdict(reply.into_body()) {
                     return Ok(None);
                 }
             }
@@ -100,7 +99,7 @@ macro_rules! group_child_cancel_call {
         erase_gate_wait(
             $namespace
                 .durable_wait_workflow($ctx, address.workflow_key)
-                .await_resolution(Json(cancel.into()))
+                .await_resolution(cancel.into())
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call(),
         )
@@ -145,13 +144,13 @@ macro_rules! group_child_cancel_methods {
                 let event_address = RestateDurableWaitAddress::for_key(&request.key);
                 let event = namespace
                     .durable_wait_workflow(self, event_address.workflow_key)
-                    .await_resolution(Json(request.into()))
+                    .await_resolution(request.into())
                     .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
                 let event = erase_gate_wait(event.call());
                 let cancel = group_child_cancel_call!(self, namespace, cancel);
                 Ok(race_group_child_cancel(cancel, event)
                     .await?
-                    .map(|Json(resolution)| resolution))
+                    .map(crate::compat::Reply::into_body))
             })
         }
     };

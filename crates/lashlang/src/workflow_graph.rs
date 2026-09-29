@@ -21,7 +21,7 @@ use lash_sansio::core_support::Blake3DomainHasher;
 
 use crate::ast::{
     AssignTarget, AstString, Expr, FunctionDecl, ProcessOrigin, ProcessParam, ProcessSignalDecl,
-    TypeDecl, TypeExpr,
+    TypeExpr,
 };
 use crate::span::Span;
 
@@ -54,8 +54,10 @@ pub use projection::{
 /// `JavaScriptBinaryOp`; v18 graph documents are refused. Version 20
 /// (FIG-3652) adds the `JavaScriptUnaryOp::ToString` operator the lowerer now
 /// wraps template and concatenation operands in; v19 graph documents are
-/// refused.
-pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 20;
+/// refused. Version 21 (FIG-4038) retires the surface dialect's IR: the
+/// comprehension container kind and the declaration and expression spellings
+/// TypeScript never produces are gone; v20 graph documents are refused.
+pub const WORKFLOW_GRAPH_SCHEMA_VERSION: u32 = 21;
 
 /// A deterministic node identifier minted from structural owner and AST path.
 #[derive(
@@ -533,7 +535,6 @@ struct WorkflowGraphWire {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkflowDeclaration {
-    Type(#[serde(deserialize_with = "deserialize_strict")] TypeDecl),
     Process(WorkflowProcess),
     /// A declared pure function, carried through the document unprojected.
     ///
@@ -755,9 +756,7 @@ pub fn workflow_effect_from_ir(
             vec![Expr::String(name.clone())],
         ),
         Expr::SleepFor(value) => (WorkflowEffectKind::SleepFor, vec![value.as_ref().clone()]),
-        Expr::SleepUntil(value) => (WorkflowEffectKind::SleepUntil, vec![value.as_ref().clone()]),
         Expr::Print(value) => (WorkflowEffectKind::Print, vec![value.as_ref().clone()]),
-        Expr::Yield(value) => (WorkflowEffectKind::Yield, vec![value.as_ref().clone()]),
         Expr::Break => (WorkflowEffectKind::Break, Vec::new()),
         Expr::Continue => (WorkflowEffectKind::Continue, Vec::new()),
         _ => return None,
@@ -785,9 +784,7 @@ pub fn workflow_effect_to_ir(
             Expr::WaitSignal { name: name.clone() }
         }
         (WorkflowEffectKind::SleepFor, [value]) => Expr::SleepFor(Box::new(value.clone())),
-        (WorkflowEffectKind::SleepUntil, [value]) => Expr::SleepUntil(Box::new(value.clone())),
         (WorkflowEffectKind::Print, [value]) => Expr::Print(Box::new(value.clone())),
-        (WorkflowEffectKind::Yield, [value]) => Expr::Yield(Box::new(value.clone())),
         (WorkflowEffectKind::Break, []) => Expr::Break,
         (WorkflowEffectKind::Continue, []) => Expr::Continue,
         _ => return None,
@@ -867,9 +864,7 @@ pub enum WorkflowEffectKind {
     AwaitJoin,
     WaitSignal,
     SleepFor,
-    SleepUntil,
     Print,
-    Yield,
     Break,
     Continue,
 }
@@ -914,14 +909,6 @@ pub enum WorkflowContainer {
         condition: Expr,
         body: Box<WorkflowSubgraph>,
     },
-    ListComprehension {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        #[serde(deserialize_with = "deserialize_strict")]
-        binding: Option<AssignTarget>,
-        #[serde(deserialize_with = "deserialize_strict")]
-        clauses: Vec<WorkflowListComprehensionClause>,
-        element: Box<WorkflowSubgraph>,
-    },
 }
 
 impl WorkflowContainer {
@@ -938,7 +925,6 @@ impl WorkflowContainer {
             Self::For { body, .. } | Self::While { body, .. } => {
                 [Some(("body", body.as_ref())), None]
             }
-            Self::ListComprehension { element, .. } => [Some(("element", element.as_ref())), None],
         };
         children.into_iter().flatten()
     }
@@ -958,25 +944,9 @@ impl WorkflowContainer {
             Self::For { body, .. } | Self::While { body, .. } => {
                 [Some(("body", body.as_mut())), None]
             }
-            Self::ListComprehension { element, .. } => [Some(("element", element.as_mut())), None],
         };
         children.into_iter().flatten()
     }
-}
-
-/// One editable list-comprehension clause.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum WorkflowListComprehensionClause {
-    For {
-        binding: String,
-        #[serde(deserialize_with = "deserialize_strict")]
-        iterable: Expr,
-    },
-    If {
-        #[serde(deserialize_with = "deserialize_strict")]
-        condition: Expr,
-    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]

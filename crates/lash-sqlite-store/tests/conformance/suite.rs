@@ -33,6 +33,65 @@ use lash_sqlite_store::{SqliteDatabase, SqliteStoreSetOptions};
 use super::SUBSTRATE;
 use crate::backend_fixture::{Substrate, TestBackend, sync_await};
 
+lash_conformance::turn_commit_outcome_tests!({
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
+    (backend, factory)
+});
+
+struct ScopeLawTurnRunner(lash_restate_test::RestateTestBackend);
+
+#[async_trait::async_trait]
+impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
+    async fn run_turn(
+        &self,
+        admitted: lash_core_execution::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.0
+            .run_in_handler(
+                admitted,
+                Arc::new(move |scoped| {
+                    let attempt = Arc::clone(&attempt);
+                    Box::pin(async move {
+                        attempt(scoped).await;
+                    })
+                }),
+            )
+            .await
+            .expect("the joined-scope law runs inside a handler");
+    }
+
+    async fn run_crashed_then_redriven_turn(
+        &self,
+        _admitted: lash_core_execution::AdmittedScope,
+        _crashing: lash_conformance::ConformanceTurnAttempt,
+        _redrive: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        unreachable!("the joined-scope law does not crash a turn")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4023,
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the joined-scope law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner =
+        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_root(
+        "sqlite-joined-scope", effect_host, stores, runner,
+    ).await;
+}
+
 struct MultiSessionAdmissionStore {
     inner: Arc<dyn RuntimePersistence>,
     backend: TestBackend,
@@ -329,10 +388,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
     async fn inject_raw_value(&self, target: &FenceIntegrityTarget, value: i64) {
         let conn = self.connection(target);
         let changed = match target {
-            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => conn.execute(
-                "UPDATE queued_work_batches SET claim_fencing_token = ?1 WHERE batch_id = ?2",
-                rusqlite::params![value, batch_id],
-            ),
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn.execute(
                 "UPDATE session_head SET head_revision = ?1 WHERE session_id = ?2",
                 rusqlite::params![value, session_id.as_str()],
@@ -355,26 +410,6 @@ impl FenceIntegrityInjector for SqliteFenceIntegrityInjector {
     async fn observe_raw_value(&self, target: &FenceIntegrityTarget) -> FenceIntegrityObservation {
         let conn = self.connection(target);
         match target {
-            FenceIntegrityTarget::QueuedWorkClaimFence { batch_id } => conn
-                .query_row(
-                    "SELECT claim_fencing_token, claim_id, claim_token,
-                            claim_session_lease_generation
-                     FROM queued_work_batches WHERE batch_id = ?1",
-                    [batch_id],
-                    |row| {
-                        let value: i64 = row.get(0)?;
-                        let claim_id: Option<String> = row.get(1)?;
-                        let claim_token: Option<String> = row.get(2)?;
-                        let generation: i64 = row.get(3)?;
-                        Ok(FenceIntegrityObservation {
-                            value,
-                            mutation_fingerprint: format!(
-                                "{claim_id:?}:{claim_token:?}:{generation}"
-                            ),
-                        })
-                    },
-                )
-                .expect("observe SQLite queued-work fence"),
             FenceIntegrityTarget::SessionHeadRevision { session_id } => conn
                 .query_row(
                     "SELECT head_revision, head_json, leaf_node_id, checkpoint_ref
@@ -581,12 +616,6 @@ async fn sqlite_load_session_graph_accepts_healthy_non_empty_session() {
         .expect("loaded graph has a leaf");
     assert!(graph.nodes.iter().any(|node| node.node_id == leaf_node_id));
 }
-
-lash_conformance::signed_counter_write_domain_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let store = backend.store().await;
-    (backend, store)
-});
 
 lash_conformance::artifact_store_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();

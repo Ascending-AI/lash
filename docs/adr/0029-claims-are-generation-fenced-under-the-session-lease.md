@@ -9,7 +9,7 @@ accepted
 
 Superseded by [ADR
 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s FIG-3927
-amendment (2026-09-28), **not yet implemented**: no durable claim token takes
+amendment (2026-09-28), implemented: no durable claim token takes
 part in selecting or settling a turn. A fenced write under the session's
 drive fence binds an ingress row to its root (`admitted_root`,
 `admitted_by`), and a fenced commit of that root — or the root's terminal

@@ -2,10 +2,10 @@
   {
     "seed": 857,
     "operations": [
-      { "op": "claim_lease", "owner": 0 },
+      { "op": "seal_fence", "owner": 0 },
       { "op": "enqueue_work", "slot": 0, "value": 0, "coalesce": false },
       { "op": "enqueue_work", "slot": 1, "value": 1, "coalesce": false },
-      { "op": "claim_work", "selected": true, "selection": 1 },
+      { "op": "admit_work" },
       {
         "op": "commit",
         "component_mode": 1,
@@ -14,11 +14,11 @@
         "settle_inputs": false,
         "stale_head": false
       },
-      { "op": "claim_work", "selected": false, "selection": 0 },
+      { "op": "admit_work" },
       { "op": "crash" },
-      { "op": "claim_lease", "owner": 1 },
-      { "op": "settle_stale_work" },
-      { "op": "claim_work", "selected": false, "selection": 0 },
+      { "op": "seal_fence", "owner": 1 },
+      { "op": "settle_under_stale_fence" },
+      { "op": "admit_work" },
       {
         "op": "commit",
         "component_mode": 0,
@@ -32,9 +32,9 @@
   {
     "seed": 858,
     "operations": [
-      { "op": "claim_lease", "owner": 0 },
+      { "op": "seal_fence", "owner": 0 },
       { "op": "enqueue_turn_input", "slot": 0, "value": 0 },
-      { "op": "claim_turn_inputs", "max_inputs": 1 },
+      { "op": "admit_turn_inputs", "max_inputs": 1 },
       {
         "op": "commit",
         "component_mode": 0,
@@ -50,7 +50,7 @@
   {
     "seed": 859,
     "operations": [
-      { "op": "claim_lease", "owner": 0 },
+      { "op": "seal_fence", "owner": 0 },
       { "op": "record_usage", "slot": 0, "value": 7 },
       { "op": "stage_usage", "replay_last_commit": false },
       {

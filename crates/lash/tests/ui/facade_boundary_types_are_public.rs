@@ -11,18 +11,17 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    AdmissionId, CheckpointKind, ClaimAuthority, DriveEpochSeal, DriveEpochStore, GcReport,
-    GraphAppend, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
-    OperationId, OrphanedTurnInputScope, PendingFollowOn, PendingTurnInputBatch,
-    PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
-    QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RootStore, RootTerminal,
-    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
-    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SessionCheckpoint,
-    SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta, SessionNodeRecord,
-    StoreError, StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
-    load_persisted_session_state,
+    AdmissionId, AdmitRootRequest, CheckpointAdmission, CheckpointAdmissionRequest, DriveEpochSeal,
+    DriveEpochStore, DriveFence, GcReport, GraphAppend, IngressSettlement, IngressStore,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId, PendingFollowOn,
+    PendingTurnInputBatch, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome, RealizedNodeTimestamp, RootAdmission,
+    RootStore, RootTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
+    RuntimeSessionState, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    SessionCheckpoint, SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
+    SessionNodeRecord, StoreError, StoreMaintenance, StoredDriveEpoch, TurnCommitFailureCause,
+    TurnCommitOutcome, TurnCommitRecord, TurnInputCheckpointBoundary, TurnInputIngress,
+    TurnInputState, VacuumReport, commit_runtime_state_verified, load_persisted_session_state,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -35,7 +34,7 @@ use lash::runtime::AdvancedLashCoreBuilder;
 use lash::tools::{ToolActivation, ToolCallRecord, ToolOutputContract};
 use lash::turn::{AssistantOutput, TurnFailureCode, TurnFailureKind, TurnIssue};
 use lash::usage::{TokenLedgerEntry, TokenUsage};
-use lash::{ModelLimits, ModelSpec, QueuedWorkClaimRefusal};
+use lash::{ModelLimits, ModelSpec};
 
 struct FacadeStore;
 
@@ -107,7 +106,7 @@ impl SessionCommitStore for FacadeStore {
 
     async fn raise_pending_follow_on_attempts(
         &self,
-        _lease: &ClaimAuthority,
+        _fence: &DriveFence,
         follow_on_turn_id: &TurnId,
     ) -> Result<PendingFollowOn, StoreError> {
         Err(StoreError::FollowOnNotPending {
@@ -152,6 +151,7 @@ impl SessionCommitStore for FacadeStore {
                 .map(|delta| delta.identity.clone())
                 .collect(),
             failure_evidence: commit.failure_evidence.clone(),
+            outcome: commit.outcome.clone(),
             pending_follow_on: None,
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),
@@ -171,11 +171,11 @@ impl SessionCommitStore for FacadeStore {
 // Compile-only store: these segments exist to prove every capability trait
 // (and its signature vocabulary) is nameable through the facade.
 #[async_trait]
-impl TurnInputStore for FacadeStore {
+impl IngressStore for FacadeStore {
     async fn validate_turn_cancellation_binding(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
+        _fence: &DriveFence,
         _binding_id: &str,
         _admitted_scope: &lash::runtime::ExecutionScope,
     ) -> Result<(), StoreError> {
@@ -184,7 +184,7 @@ impl TurnInputStore for FacadeStore {
 
     async fn authorize_turn_cancel_closure(
         &self,
-        _session_execution_lease: &ClaimAuthority,
+        _fence: &DriveFence,
         _authorization: &lash::TurnCancelClosureAuthorization,
     ) -> Result<lash::TurnCancelClosureAuthorizationOutcome, StoreError> {
         unreachable!("compile-only facade store")
@@ -193,7 +193,7 @@ impl TurnInputStore for FacadeStore {
     async fn pending_turn_cancel_closures(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
+        _fence: &DriveFence,
         _binding_id: &str,
         _admitted_scope: &lash::runtime::ExecutionScope,
     ) -> Result<Vec<lash::TurnCancelClosureAuthorization>, StoreError> {
@@ -242,50 +242,58 @@ impl TurnInputStore for FacadeStore {
         unreachable!("compile-only facade store")
     }
 
-    async fn claim_active_turn_inputs(
+    async fn enqueue_queued_work_with_outcome(
         &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-        _turn_id: &TurnId,
-        _checkpoint: CheckpointKind,
-        _max_inputs: usize,
-    ) -> Result<Option<TurnInputClaim>, StoreError> {
-        Ok(None)
+        _batch: QueuedWorkBatchDraft,
+    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
+        unreachable!("compile-only facade store")
     }
 
-    async fn claim_next_turn_inputs(
+    async fn open_session_command_run(
         &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-        _max_inputs: usize,
-    ) -> Result<Option<TurnInputClaim>, StoreError> {
-        Ok(None)
-    }
-
-    async fn abandon_turn_input_claim(&self, _claim: &TurnInputClaim) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn orphaned_active_turn_ids(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _scope: OrphanedTurnInputScope<'_>,
-    ) -> Result<Vec<TurnId>, StoreError> {
+        _fence: &DriveFence,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         Ok(Vec::new())
     }
 
-    async fn repair_orphaned_active_turn_inputs(
+    async fn cancel_queued_work_batch(
         &self,
         _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _turn_id: &TurnId,
-        _observed: &lash::TurnCancelIntentSnapshot,
-        _settlement: Option<&lash::TurnCancelClosureSettlement>,
-    ) -> Result<lash::TurnCancelRepairResult, StoreError> {
-        Ok(lash::TurnCancelRepairResult::Applied(Default::default()))
+        _batch_id: &str,
+    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
+        Ok(None)
+    }
+
+    async fn queued_work_batch_completed(
+        &self,
+        _session_id: &SessionId,
+        _batch_id: &str,
+    ) -> Result<bool, StoreError> {
+        Ok(false)
+    }
+
+    async fn pending_session_work_ordering(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
+        Ok(lash_core::store::PendingSessionWorkOrdering {
+            session_command: None,
+            turn_input: None,
+        })
+    }
+
+    async fn list_queued_work(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_open_queued_work(
+        &self,
+        _session_id: &SessionId,
+    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
+        Ok(Vec::new())
     }
 }
 
@@ -312,6 +320,20 @@ impl RootStore for FacadeStore {
         &self,
         _session_id: &SessionId,
     ) -> Result<Option<lash::persistence::UnfinishedRoot>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn admit_root(
+        &self,
+        _request: &AdmitRootRequest,
+    ) -> Result<Option<RootAdmission>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn admit_at_checkpoint(
+        &self,
+        _request: &CheckpointAdmissionRequest,
+    ) -> Result<CheckpointAdmission, StoreError> {
         unreachable!("fixture runs no session drive")
     }
 
@@ -350,95 +372,6 @@ impl RootStore for FacadeStore {
 }
 
 #[async_trait]
-impl QueuedWorkStore for FacadeStore {
-    async fn enqueue_queued_work_with_outcome(
-        &self,
-        _batch: QueuedWorkBatchDraft,
-    ) -> Result<QueuedWorkEnqueueOutcome, StoreError> {
-        unreachable!("compile-only facade store")
-    }
-
-    async fn claim_leading_ready_session_command(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-    ) -> Result<Option<QueuedWorkClaim>, StoreError> {
-        Ok(None)
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-        _boundary: QueuedWorkClaimBoundary,
-        _policy: QueuedWorkClaimPolicy,
-    ) -> Result<QueuedWorkClaimOutcome, StoreError> {
-        Ok(QueuedWorkClaimOutcome::Refused(
-            QueuedWorkClaimRefusal::Empty,
-        ))
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        _session_id: &SessionId,
-        _session_execution_lease: &ClaimAuthority,
-        _owner: &LeaseOwnerIdentity,
-        _turn_id: &TurnId,
-        _checkpoint: CheckpointKind,
-        _max_inputs: usize,
-        _policy: QueuedWorkClaimPolicy,
-    ) -> Result<(Option<TurnInputClaim>, Option<QueuedWorkClaim>), StoreError> {
-        Ok((None, None))
-    }
-
-    async fn abandon_queued_work_claim(&self, _claim: &QueuedWorkClaim) -> Result<(), StoreError> {
-        Ok(())
-    }
-
-    async fn cancel_queued_work_batch(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> Result<Option<QueuedWorkBatch>, StoreError> {
-        Ok(None)
-    }
-
-    async fn queued_work_batch_completed(
-        &self,
-        _session_id: &SessionId,
-        _batch_id: &str,
-    ) -> Result<bool, StoreError> {
-        Ok(false)
-    }
-
-    async fn pending_session_work_ordering(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<lash_core::store::PendingSessionWorkOrdering, StoreError> {
-        Ok(lash_core::store::PendingSessionWorkOrdering {
-            session_command: None,
-            turn_input: None,
-        })
-    }
-
-    async fn list_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        Ok(Vec::new())
-    }
-
-    async fn list_pending_queued_work(
-        &self,
-        _session_id: &SessionId,
-    ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
-        Ok(Vec::new())
-    }
-}
-
-#[async_trait]
 impl StoreMaintenance for FacadeStore {
     async fn vacuum(&self) -> MaintenanceResult<VacuumReport> {
         Ok(VacuumReport::default())
@@ -463,7 +396,6 @@ fn persistence_types_are_nameable(
     RuntimeCommit {
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
-        session_execution_lease_fence: None,
         drive_fence: None,
         root_terminal: None,
         park_root: None,
@@ -488,11 +420,10 @@ fn persistence_types_are_nameable(
             })
             .collect(),
         failure_evidence: Vec::new(),
+        outcome: None,
         turn_commit: RuntimeTurnCommitStamp::new(operation),
-        completed_queue_claims: Vec::new(),
-        completed_turn_input_claims: Vec::new(),
-        undelivered_turn_input_claims: Vec::new(),
-        undelivered_queue_claims: Vec::new(),
+        ingress: None::<IngressSettlement>,
+        applied_commands: None,
         pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,
@@ -744,6 +675,10 @@ fn leaked_signature_types_are_homed(
 fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
 
 fn main() {
+    let _turn_commit_record = TurnCommitRecord {
+        operation_key: String::new(),
+        outcome: TurnCommitOutcome::Failed(TurnCommitFailureCause::ProviderError),
+    };
     assert_store_object(Arc::new(FacadeStore));
     let _ = SessionHeadMeta::assemble(
         &SessionId::from("facade"),

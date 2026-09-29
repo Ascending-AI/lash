@@ -9,8 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::ast::{
     AssignTarget, AstPath, AttributeAssignParts, AttributeStep, Declaration, Expr, LabelMetadata,
-    ListComprehensionClause, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, Program,
-    StructuralRole,
+    ProcessDecl, ProcessLiteralExpr, ProcessOrigin, Program, StructuralRole,
 };
 use crate::linker::WorkflowLinkAnalysis;
 use crate::span::Span;
@@ -18,11 +17,11 @@ use crate::span::Span;
 use super::{
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
     WorkflowBody, WorkflowBodySlot, WorkflowContainer, WorkflowDeclaration, WorkflowEdge,
-    WorkflowEdgeKind, WorkflowEffectKind, WorkflowGraph, WorkflowListComprehensionClause,
-    WorkflowNode, WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowOwnership,
-    WorkflowProcess, WorkflowProjection, WorkflowStatement, WorkflowSubgraph, WorkflowTerminalKind,
-    execution_sites, projected_node_type_facets, statement_list, workflow_call_from_ir,
-    workflow_effect_from_ir, workflow_node_id,
+    WorkflowEdgeKind, WorkflowEffectKind, WorkflowGraph, WorkflowNode, WorkflowNodeId,
+    WorkflowNodeKind, WorkflowNodeNameSource, WorkflowOwnership, WorkflowProcess,
+    WorkflowProjection, WorkflowStatement, WorkflowSubgraph, WorkflowTerminalKind, execution_sites,
+    projected_node_type_facets, statement_list, workflow_call_from_ir, workflow_effect_from_ir,
+    workflow_node_id,
 };
 
 /// A dialect's source text for one opaque statement.
@@ -133,7 +132,6 @@ impl Session<'_, '_> {
         let mut declarations = Vec::with_capacity(program.declarations.len());
         for (index, declaration) in program.declarations.iter().enumerate() {
             match declaration {
-                Declaration::Type(ty) => declarations.push(WorkflowDeclaration::Type(ty.clone())),
                 Declaration::Process(process) => declarations.push(WorkflowDeclaration::Process(
                     self.project_process(process, index as u32),
                 )),
@@ -394,10 +392,7 @@ impl Session<'_, '_> {
             && (!target.is_simple() || versions.is_known(target.root.as_str()))
             && !matches!(
                 expr.as_ref(),
-                Expr::If { .. }
-                    | Expr::For { .. }
-                    | Expr::While { .. }
-                    | Expr::ListComprehension { .. }
+                Expr::If { .. } | Expr::For { .. } | Expr::While { .. }
             )
         {
             return (
@@ -513,30 +508,6 @@ impl Session<'_, '_> {
                     outputs,
                 )
             }
-            Expr::ListComprehension { clauses, .. } => {
-                let mut element_versions = versions.clone();
-                for clause in clauses {
-                    if let ListComprehensionClause::For { binding, .. } = clause {
-                        element_versions.shadow(binding.as_str());
-                    }
-                }
-                let element_graph = self.project_body(
-                    body_in(WorkflowBodySlot::ComprehensionElement),
-                    owner,
-                    ownership,
-                    &mut element_versions,
-                );
-                let outputs = assignment_output(binding.as_ref(), versions);
-                (
-                    WorkflowNodeKind::Container(WorkflowContainer::ListComprehension {
-                        binding: binding.clone(),
-                        clauses: clauses.iter().map(workflow_clause_from_ir).collect(),
-                        element: Box::new(element_graph),
-                    }),
-                    "list comprehension".to_string(),
-                    outputs,
-                )
-            }
             Expr::Finish(_) => (
                 WorkflowNodeKind::Terminal {
                     terminal: WorkflowTerminalKind::Finish,
@@ -580,9 +551,7 @@ impl Session<'_, '_> {
                     Vec::new(),
                 )
             }
-            _ if (is_pure_value(value) || matches!(value, Expr::TypeLiteral(_)))
-                && binding.is_some() =>
-            {
+            _ if is_pure_value(value) && binding.is_some() => {
                 let outputs = assignment_output(binding.as_ref(), versions);
                 (
                     WorkflowNodeKind::Data {
@@ -646,7 +615,6 @@ fn expr_at<'p>(program: &'p Program, path: &AstPath) -> Option<&'p Expr> {
             match program.declarations.get(index as usize)? {
                 Declaration::Process(process) => &process.body,
                 Declaration::Function(function) => &function.body,
-                Declaration::Type(_) => return None,
             }
         }
     };
@@ -855,21 +823,6 @@ fn collect_free_variables(
             }
             collect_free_variables(body, &body_bound, variables);
         }
-        Expr::ListComprehension { element, clauses } => {
-            let mut clause_bound = bound.clone();
-            for clause in clauses {
-                match clause {
-                    ListComprehensionClause::For { binding, iterable } => {
-                        collect_free_variables(iterable, &clause_bound, variables);
-                        clause_bound.insert(binding.to_string());
-                    }
-                    ListComprehensionClause::If { condition } => {
-                        collect_free_variables(condition, &clause_bound, variables);
-                    }
-                }
-            }
-            collect_free_variables(element, &clause_bound, variables);
-        }
         _ => {
             for child in expression.children() {
                 collect_free_variables(child, bound, variables);
@@ -908,20 +861,6 @@ fn assignment_parts(expression: &Expr) -> (Option<AssignTarget>, &Expr) {
     match expression {
         Expr::Assign { target, expr } => (Some(target.clone()), expr),
         _ => (None, expression),
-    }
-}
-
-fn workflow_clause_from_ir(clause: &ListComprehensionClause) -> WorkflowListComprehensionClause {
-    match clause {
-        ListComprehensionClause::For { binding, iterable } => {
-            WorkflowListComprehensionClause::For {
-                binding: binding.to_string(),
-                iterable: iterable.clone(),
-            }
-        }
-        ListComprehensionClause::If { condition } => WorkflowListComprehensionClause::If {
-            condition: condition.clone(),
-        },
     }
 }
 
@@ -1012,10 +951,7 @@ fn effect_name(expression: &Expr, effect: &WorkflowEffectKind) -> String {
         WorkflowEffectKind::Break => "break",
         WorkflowEffectKind::Continue => "continue",
         // The remaining effects all carry a compiler execution-site descriptor.
-        WorkflowEffectKind::WaitSignal
-        | WorkflowEffectKind::SleepFor
-        | WorkflowEffectKind::SleepUntil
-        | WorkflowEffectKind::Yield => {
+        WorkflowEffectKind::WaitSignal | WorkflowEffectKind::SleepFor => {
             unreachable!("execution-site effects must have a compiler descriptor")
         }
     }
@@ -1038,7 +974,6 @@ fn data_name(expression: &Expr) -> String {
         Expr::BuiltinCall { name, .. } => builtin_name(name),
         Expr::List(_) => "list".to_string(),
         Expr::Record(_) => "record".to_string(),
-        Expr::Tuple(_) => "tuple".to_string(),
         Expr::Variable(name) => name.to_string(),
         _ => "data".to_string(),
     }
@@ -1046,12 +981,9 @@ fn data_name(expression: &Expr) -> String {
 
 fn computation_name(expression: &Expr) -> String {
     match expression {
-        Expr::Tuple(_) => "tuple computation",
         Expr::List(_) => "list computation",
         Expr::Record(_) => "record computation",
         Expr::BuiltinCall { name, .. } => return builtin_name(name),
-        Expr::Binary { .. } => "binary computation",
-        Expr::Unary { .. } => "unary computation",
         Expr::Field { .. } => "field computation",
         Expr::Index { .. } => "index computation",
         Expr::ResultUnwrap(_) => "result computation",

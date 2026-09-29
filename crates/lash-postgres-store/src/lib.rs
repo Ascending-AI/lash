@@ -18,11 +18,9 @@
 //! tables are not is rejected at open with a per-object diff rather than
 //! failing at the first query — or silently losing a guard, which is what a
 //! dropped unique index or a dropped cascade does. [`SchemaCheck`] controls
-//! whether a structural mismatch is fatal. The component-version stamp is a
-//! separate, unconditional gate: open admits a stamp inside the supported
-//! range [min supported, latest] and refuses anything outside it with a typed
-//! [`StoreError::SchemaVersionOutOfRange`] naming the found version and the
-//! range — no [`SchemaCheck`] relaxes it (FIG-3797).
+//! whether a structural mismatch is fatal. The compatibility row is a
+//! separate, unconditional gate: open admits its version and reader floor
+//! through the component descriptor and returns a typed refusal when needed.
 //! [`PostgresStorage::verify_schema_for`] exposes the same check against a bare
 //! pool so a host can gate its own migration CI on it. See ADR 0052.
 //!
@@ -39,32 +37,28 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core_execution::runtime::{
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
-    QueuedWorkClaimBoundary, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkEnqueueOutcome,
-    QueuedWorkItem, QueuedWorkKind,
+    AdmissionBoundary, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, TurnLaneAdmissionPolicy,
 };
 use lash_core_execution::store::queued_work::{
-    ClaimCandidate, MAX_SESSION_COMMAND_BATCHES_PER_CLAIM, QueuedWorkClaimOutcome,
-    QueuedWorkClaimRefusal, claim_scan_limit, derive_batch_id, select_leading_session_command,
-    select_turn_work_claim_prefix,
+    MAX_SESSION_COMMAND_BATCHES_PER_RUN, TurnLaneCandidate, admission_scan_limit, derive_batch_id,
+    select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
     HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
     RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
-use lash_core_execution::store_backend_support::lease_owner_from_columns;
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, ClaimAuthority, DeliveryPolicy, ExecutionScope, GcReport,
-    LeaseOwnerIdentity, PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange,
-    ProcessChangeCursor, ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt,
-    ProcessEventAppendRequest, ProcessExecutionWriteAuthority, ProcessExternalRef,
-    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
-    RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta, SessionNodeRecord,
-    SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
-    StoreError, StoreMaintenance, TokenLedgerEntry, TurnInputStore, VacuumReport,
-    facade_support::ProcessStartPlan, facade_support::ProcessTransition,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, IngressStore,
+    PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
+    ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStartOutcome, ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter,
+    SessionMeta, SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest,
+    SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance, TokenLedgerEntry,
+    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
     facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
 };
 use lash_core_execution::{
@@ -130,9 +124,9 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // prefix is unreachable garbage operators delete manually.
 //
 // Bumped to 12 for claim generation fencing (ADR 0029): `lash_queued_work_batches`
-// and `lash_pending_turn_inputs` replace their per-claim `claim_claimed_at_ms` /
-// `claim_expires_at_ms` columns with a single `claim_session_lease_generation`
-// pinning the session-execution-lease generation the claim was taken under. This
+// and `lash_pending_turn_inputs` replace their per-claim claimed-at and expiry
+// columns with a single column pinning the session-execution-lease generation
+// the claim was taken under (since replaced by root admission, FIG-3927). This
 // is a reject-and-recreate boundary; pre-12 databases are rejected at open.
 //
 // Bumped to 15 for FIG-546 owner-bound attachment intents, following the
@@ -626,9 +620,16 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // place under the version freeze). A catalog provisioned before the change
 // fails the open-time shape check and is recreated.
 //
-// Version 142 (FIG-433) adds staged turn capture, writer epochs, frame rows,
-// and sealed stopped partials. The version freeze rejects older catalogs.
-const SCHEMA_VERSION: i32 = 142;
+// Version 141 also admits process-definition and trigger registration in the
+// tool-intent submission ledger's kind constraint (FIG-4057, changed in place
+// under the version freeze). A catalog provisioned before the change rejects
+// both kinds; recreate it.
+//
+// Version 141 also holds staged turn capture, writer epochs, frame rows and
+// sealed stopped partials (ADR 0114, FIG-433, changed in place under the
+// version freeze). A catalog provisioned before them fails the open-time
+// shape check; recreate it.
+const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -855,7 +856,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -927,7 +928,7 @@ impl PostgresStorage {
         let (catalog_id, fleet_format) = ensure_schema(
             &pool,
             config.schema_check,
-            lash_core_execution::FleetFormat::writable_range(),
+            lash_core_execution::FleetFormat::writable(),
         )
         .await?;
         Ok(Self {
@@ -950,7 +951,7 @@ impl PostgresStorage {
     pub async fn from_pool_with_fleet_writable_range_for_testing(
         pool: PgPool,
         config: PostgresStoreConfig,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core_execution::compat::VersionRange,
     ) -> Result<Self, StoreError> {
         let (catalog_id, fleet_format) =
             ensure_schema(&pool, config.schema_check, writable).await?;
@@ -970,15 +971,15 @@ impl PostgresStorage {
     /// data precondition; only structural verification is skipped.
     #[cfg(feature = "testing")]
     pub async fn from_preverified_pool_for_testing(pool: PgPool) -> Result<Self, StoreError> {
-        let found_version: Option<i32> =
-            sqlx::query_scalar(crate::schema::SELECT_COMPONENT_VERSION)
-                .bind(SCHEMA_COMPONENT)
-                .fetch_optional(&pool)
-                .await
-                .map_err(store_sqlx_error)?;
-        if !crate::schema::supported_version(found_version) {
-            return Err(version_mismatch_error(None, found_version, None));
-        }
+        let descriptor = lash_core_execution::compat::descriptor(
+            lash_core_execution::compat::ComponentId::POSTGRES,
+        )
+        .ok_or_else(|| StoreError::Backend("missing PostgreSQL compatibility descriptor".into()))?;
+        lash_core_execution::compat::admit(
+            descriptor,
+            crate::schema::read_compat_stamp(&pool, true).await,
+        )
+        .map_err(|refusal| StoreError::Incompatible { refusal })?;
         let catalog_id = crate::schema::read_catalog_id(&pool)
             .await
             .map_err(store_sqlx_error)?
@@ -1032,22 +1033,14 @@ impl PostgresStorage {
         TEARDOWN_DDL
     }
 
-    /// The component schema version this build implements, as stamped in
-    /// `lash_schema_versions` — the newest version the supported range admits.
-    ///
-    /// Open refuses a stamp outside
-    /// `[Self::min_supported_schema_version, Self::schema_version]` with a
-    /// typed [`StoreError::SchemaVersionOutOfRange`], whichever direction it
-    /// differs in (FIG-3797).
+    /// The pre-1.0 DDL revision used by the migration ledger and shape artifact.
+    /// Compatibility admission reads the version and floor in
+    /// `lash_schema_versions` through the PostgreSQL descriptor.
     pub fn schema_version() -> i32 {
         SCHEMA_VERSION
     }
 
-    /// The oldest component schema version this build admits at open
-    /// (FIG-3797).
-    ///
-    /// For 1.0 the supported range is the single current version; a
-    /// compatibility release widens the floor when it declares one.
+    /// The pre-1.0 DDL planning floor, retained for the migration ledger.
     pub fn min_supported_schema_version() -> i32 {
         MIN_SUPPORTED_SCHEMA_VERSION
     }
@@ -1378,7 +1371,7 @@ impl PostgresSessionStore {
     }
 
     #[cfg(test)]
-    fn checkpoint_claim_counts(&self) -> (usize, usize) {
+    fn checkpoint_admission_counts(&self) -> (usize, usize) {
         (
             self.checkpoint_probe_count
                 .load(std::sync::atomic::Ordering::Relaxed),
@@ -1474,6 +1467,9 @@ mod root_verbs;
 mod runtime_persistence;
 #[path = "postgres/schema.rs"]
 mod schema;
+#[cfg(test)]
+#[path = "postgres/schema_compat_tests.rs"]
+mod schema_compat_tests;
 #[path = "postgres/schema_shape.rs"]
 mod schema_shape;
 #[path = "postgres/session_blob_reclaim.rs"]
@@ -1509,8 +1505,6 @@ mod trigger_listing_plan_tests;
 mod trigger_store;
 #[path = "postgres/turn_ingress.rs"]
 mod turn_ingress;
-#[path = "postgres/turn_input_settlement.rs"]
-mod turn_input_settlement;
 
 pub use backend::PostgresStoreSet;
 pub use migrate::{MigrationPhase, MigrationReport, MigrationStep};
@@ -1523,7 +1517,7 @@ pub use schema_shape::{
 };
 use {
     pending_turn_inputs::*, process_helpers::*, queued_work::*, schema::*, session_factory::*,
-    support::*, turn_input_settlement::*,
+    support::*,
 };
 
 // `tests/support/mod.rs` is also compiled into this crate's unit tests (as

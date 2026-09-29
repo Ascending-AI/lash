@@ -516,14 +516,16 @@ pub fn replay_collected_activities(
 /// the host to inspect.
 pub struct RemoteTurnActivitySink<W: Write + Send + 'static> {
     writer: Mutex<W>,
+    negotiated: crate::Negotiated,
     next_sequence: AtomicU64,
     errors: Mutex<Vec<String>>,
 }
 
 impl<W: Write + Send + 'static> RemoteTurnActivitySink<W> {
-    pub fn new(writer: W, first_sequence: u64) -> Self {
+    pub fn new(writer: W, first_sequence: u64, negotiated: crate::Negotiated) -> Self {
         Self {
             writer: Mutex::new(writer),
+            negotiated,
             next_sequence: AtomicU64::new(first_sequence),
             errors: Mutex::new(Vec::new()),
         }
@@ -560,7 +562,7 @@ impl<W: Write + Send + 'static> lash_core::facade_support::TurnActivitySink
             };
             let result = {
                 let mut writer = self.writer.lock_recover();
-                serde_json::to_writer(&mut *writer, &Envelope::new(remote))
+                serde_json::to_writer(&mut *writer, &Envelope::at(&self.negotiated, remote))
                     .and_then(|_| writer.write_all(b"\n").map_err(serde_json::Error::io))
                     .and_then(|_| writer.flush().map_err(serde_json::Error::io))
             };

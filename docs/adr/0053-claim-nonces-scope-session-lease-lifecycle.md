@@ -6,7 +6,7 @@ Accepted.
 
 Superseded by [ADR
 0101](0101-one-session-ingress-carries-every-admitted-item.md)'s FIG-3927
-amendment (2026-09-28), **not yet implemented**: the session-execution lease's
+amendment (2026-09-28), implemented: the session-execution lease's
 claim nonces and fencing generation go with the claims they fenced. The sealed
 drive fence is the one authority a fenced write checks, and a root's admission
 replaces claim identity. The nonce contract below records the regime the

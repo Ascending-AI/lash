@@ -12,8 +12,8 @@ use lash::runtime::{
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_restate::{
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
-    RestateIngressClient, RestateRuntimeEffectController,
+    Call, EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupSettlementTerminal,
+    Reply, RestateIngressClient, RestateRuntimeEffectController,
 };
 use serde::{Deserialize, Serialize};
 
@@ -186,18 +186,19 @@ fn validate_run_id(run_id: &str) -> Result<(), String> {
 }
 
 async fn ensure_group_is_new(ingress: &RestateIngressClient, run_id: &str) -> AppResult<()> {
-    let response: EffectGroupReadRankResponse = ingress
-        .call_object_json(
+    let response = ingress
+        .call_object_json::<_, Reply<EffectGroupReadRankResponse>>(
             "EffectGroupIndex",
             &group_key(run_id),
             "read_rank",
-            &EffectGroupReadRankRequest {
+            &Call::new(EffectGroupReadRankRequest {
                 rank: 1,
                 for_caller: false,
-            },
+            }),
         )
         .await
-        .map_err(|error| AppError::internal(format!("probe effect group rank one: {error}")))?;
+        .map_err(|error| AppError::internal(format!("probe effect group rank one: {error}")))?
+        .body;
     if matches!(response, EffectGroupReadRankResponse::UnknownGroup) {
         return Ok(());
     }
@@ -213,22 +214,23 @@ async fn read_effect_group_report(
     let group_key = group_key(&run_id);
     let mut settlements = Vec::with_capacity(CHILD_DURATIONS_MS.len());
     for rank in 1..=CHILD_DURATIONS_MS.len() as u64 {
-        let response: EffectGroupReadRankResponse = ingress
-            .call_object_json(
+        let response = ingress
+            .call_object_json::<_, Reply<EffectGroupReadRankResponse>>(
                 "EffectGroupIndex",
                 &group_key,
                 "read_rank",
-                &EffectGroupReadRankRequest {
+                &Call::new(EffectGroupReadRankRequest {
                     rank,
                     for_caller: false,
-                },
+                }),
             )
             .await
             .map_err(|error| {
                 AppError::internal(format!(
                     "read effect group {group_key} rank {rank}: {error}"
                 ))
-            })?;
+            })?
+            .body;
         let settlement = match response {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
             EffectGroupReadRankResponse::NotSettled => {

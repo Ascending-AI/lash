@@ -58,7 +58,7 @@ pub(crate) fn drive_epoch_conn(
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the
 /// caller's transaction.
-fn require_fence_conn(
+pub(super) fn require_fence_conn(
     conn: &Connection,
     session_id: &SessionId,
     fence: &DriveFence,
@@ -67,24 +67,18 @@ fn require_fence_conn(
     require_current_drive_fence(session_id, fence, &current)
 }
 
-/// Refuse `commit` unless every fence it presents is current, in its own
-/// transaction before anything is read or written: the execution lane it
-/// borrows (a queued run's commit must borrow one), and the drive fence of
-/// the admission its root was sealed under, which a successor's seal makes
-/// stale (ADR 0105 §2).
+/// Refuse `commit` unless the fence it presents is current, in its own
+/// transaction before anything is read or written: the drive fence of the
+/// admission its root was sealed under, which a successor's seal makes stale
+/// (ADR 0105 §2). A commit that settles ingress must present one
+/// ([`RuntimeCommit::validate_ingress_settlement`]).
+///
+/// [`RuntimeCommit::validate_ingress_settlement`]: lash_core_execution::store::RuntimeCommit::validate_ingress_settlement
 pub(super) fn require_commit_fences_conn(
     conn: &Connection,
     commit: &lash_core_execution::store::RuntimeCommit,
-    now: u64,
 ) -> Result<(), StoreError> {
-    if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
-        super::claim_support::ensure_session_execution_lease_conn(
-            conn,
-            &commit.session_id,
-            fence,
-            now,
-        )?;
-    }
+    commit.validate_ingress_settlement()?;
     match commit.drive_fence.as_ref() {
         Some(fence) => require_fence_conn(conn, &commit.session_id, fence),
         None => Ok(()),

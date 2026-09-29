@@ -1,3 +1,5 @@
+#[path = "protocol_drivers/budget_warning_runbook.rs"]
+mod budget_warning_runbook;
 #[path = "protocol_drivers/driver_mechanics.rs"]
 mod driver_mechanics;
 #[path = "protocol_drivers/prompt_history.rs"]

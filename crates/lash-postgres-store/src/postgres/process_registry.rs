@@ -239,6 +239,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         observers.sort();
         observers.dedup();
         let wake_session_id = registration.wake_session_id.clone();
+        let consumer_hold = registration.consumer_hold.clone();
         let start_key = registration.start_key.clone();
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         // While the process minted for a key is retained, a start under the
@@ -321,6 +322,9 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(record.lifetime.storage_label())
             .bind(cancel_requested_at_ms(&record))
             .bind(record_json)
+            .bind(consumer_hold.as_ref().map(|hold| hold.key.clone()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()))
+            .bind(consumer_hold.as_ref().map(|hold| hold.owner.storage_id()))
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -1113,6 +1117,20 @@ impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
         watermark: lash_core_execution::ProjectionWatermark,
     ) -> Result<Vec<ProcessId>, PluginError> {
         prune_api::prunable_terminal_processes(self, cutoff_epoch_ms, filter, watermark).await
+    }
+
+    async fn release_consumer_hold(
+        &self,
+        process_id: &ProcessId,
+        key: &str,
+    ) -> Result<(), PluginError> {
+        sqlx::query(process_sql().process.release_consumer_hold.sql())
+            .bind(process_id.as_str())
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map(drop)
+            .map_err(plugin_sqlx_error)
     }
 }
 impl lash_core_execution::ProcessClockRebind for PostgresProcessRegistry {

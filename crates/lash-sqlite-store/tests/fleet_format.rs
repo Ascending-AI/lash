@@ -28,7 +28,7 @@ impl FleetFormatDeployment for SqliteBackend {
 
     async fn open_admitting(
         &self,
-        writable: std::ops::RangeInclusive<u32>,
+        writable: lash_core_execution::compat::VersionRange,
     ) -> Result<FleetFormat, StoreError> {
         Store::open_with_fleet_writable_range_for_testing(&self.durable_core, writable)
             .await
@@ -39,7 +39,7 @@ impl FleetFormatDeployment for SqliteBackend {
         let conn = rusqlite::Connection::open(&self.durable_core)
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         conn.execute(
-            "UPDATE fleet_format SET format_version = ?1 WHERE singleton = 1",
+            "UPDATE lash_compat SET fleet_format = ?1 WHERE singleton = 1",
             rusqlite::params![i64::from(version)],
         )
         .map_err(|error| StoreError::Backend(error.to_string()))?;

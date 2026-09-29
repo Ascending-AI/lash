@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path as AxumPath, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{Html, Response};
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -21,9 +21,11 @@ use lash::{
     TurnInput, TurnOutput,
 };
 use lash_remote_protocol::{
-    Envelope, RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
+    Envelope, Negotiated, RemoteLiveReplayGap, RemoteSessionCursor, RemoteSessionObservation,
     RemoteSessionObservationEvent, RemoteSessionObservationEventPayload,
 };
+#[cfg(test)]
+use lash_remote_protocol::{Negotiation, REMOTE_PROTOCOL};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -32,6 +34,9 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::board::{BoardState, agent_owes_move};
 use crate::db::{ChatBranchPoint, ChatMessage, ChatModelSelection, ChatSummary};
+use crate::remote_protocol::negotiate_remote;
+#[cfg(test)]
+use crate::remote_protocol::test_remote_headers;
 use crate::state::{AppError, AppResult, AppStateData};
 use crate::ui::INDEX_HTML;
 
@@ -373,8 +378,10 @@ pub(crate) async fn fork_chat(
 pub(crate) async fn send_message(
     State(state): State<AppStateData>,
     AxumPath(chat_id): AxumPath<String>,
+    headers: HeaderMap,
     Json(request): Json<SendMessageRequest>,
 ) -> AppResult<Response> {
+    let (negotiated, accept_json) = negotiate_remote(&headers)?;
     let text = request.text.trim().to_string();
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
@@ -423,7 +430,8 @@ pub(crate) async fn send_message(
     let replay_cursor = session.observe().current_observation().cursor;
     let turn_id = TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4()));
     let (tx, rx) = mpsc::channel::<StreamItem>(64);
-    let mut replay = spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone());
+    let mut replay =
+        spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone(), negotiated);
     let run_state = state.clone();
     let task_turn_id = turn_id.clone();
     tokio::spawn(async move {
@@ -529,6 +537,7 @@ pub(crate) async fn send_message(
         .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
         .header(header::CACHE_CONTROL, "no-store")
         .header("x-lash-turn-id", turn_id.as_str())
+        .header("x-lash-protocol-accept", accept_json)
         .body(Body::from_stream(stream))
         .map_err(|err| AppError::internal(format!("build streaming response: {err}")))
 }
@@ -776,9 +785,10 @@ pub(crate) fn spawn_live_replay_forwarder(
     session: LashSession,
     cursor: SessionCursor,
     tx: mpsc::Sender<StreamItem>,
+    negotiated: Negotiated,
 ) -> JoinHandle<()> {
     tokio::spawn(async move {
-        forward_live_replay_until_commit(session, cursor, tx).await;
+        forward_live_replay_until_commit(session, cursor, tx, negotiated).await;
     })
 }
 
@@ -795,6 +805,7 @@ async fn forward_live_replay_until_commit(
     session: LashSession,
     cursor: SessionCursor,
     tx: mpsc::Sender<StreamItem>,
+    negotiated: Negotiated,
 ) {
     if tx
         .send(StreamItem::ReplayCursor {
@@ -842,7 +853,7 @@ async fn forward_live_replay_until_commit(
                 );
                 if tx
                     .send(StreamItem::Observation {
-                        event: Box::new(Envelope::new(event)),
+                        event: Box::new(Envelope::at(&negotiated, event)),
                     })
                     .await
                     .is_err()
@@ -856,8 +867,8 @@ async fn forward_live_replay_until_commit(
             RemoteSessionObservationStreamItem::Gap { observation, gap } => {
                 let _ = tx
                     .send(StreamItem::ReplayGap {
-                        observation: Box::new(Envelope::new(observation)),
-                        gap: Box::new(Envelope::new(gap)),
+                        observation: Box::new(Envelope::at(&negotiated, observation)),
+                        gap: Box::new(Envelope::at(&negotiated, gap)),
                     })
                     .await;
             }
@@ -1146,6 +1157,7 @@ mod zero_move_turn_tests {
         let response = Box::pin(send_message(
             State(state.clone()),
             AxumPath(chat_id.to_string()),
+            test_remote_headers(),
             Json(SendMessageRequest {
                 text: "I played X in the top left.".to_string(),
                 board,
@@ -1473,6 +1485,7 @@ finish("done through route");
         let response = Box::pin(send_message(
             State(state.clone()),
             AxumPath(chat.id.clone()),
+            test_remote_headers(),
             Json(SendMessageRequest {
                 text: "exercise live replay".to_string(),
                 board: crate::board::default_board(),
@@ -1482,6 +1495,21 @@ finish("done through route");
         ))
         .await
         .expect("send message");
+        let accept: Negotiation = serde_json::from_str(
+            response
+                .headers()
+                .get("x-lash-protocol-accept")
+                .expect("protocol Accept response header")
+                .to_str()
+                .expect("protocol Accept header text"),
+        )
+        .expect("protocol Accept JSON");
+        assert_eq!(
+            Negotiated::from_accept(REMOTE_PROTOCOL, &accept)
+                .expect("valid protocol Accept")
+                .selected(),
+            lash_remote_protocol::REMOTE_PROTOCOL_VERSION
+        );
         let turn_id = TurnId::from(
             response
                 .headers()
@@ -1559,22 +1587,29 @@ finish("done through route");
 
     #[test]
     fn replay_gap_stream_item_uses_remote_gap_payload() {
+        let negotiated = negotiate_remote(&test_remote_headers()).unwrap().0;
         let item = StreamItem::ReplayGap {
-            observation: Box::new(Envelope::new(RemoteSessionObservation {
-                // Standalone stream payloads carry one shared protocol envelope.
-                session_id: SessionId::from("session-1"),
-                cursor: "cursor-after".to_string(),
-                turn_index: 3,
-                usage: lash_remote_protocol::RemoteUsage::default(),
-            })),
-            gap: Box::new(Envelope::new(RemoteLiveReplayGap {
-                // Nested DTOs remain bare inside that envelope body.
-                session_id: SessionId::from("session-1"),
-                requested_cursor: "cursor-before".to_string(),
-                latest_cursor: "cursor-after".to_string(),
-                latest_revision: 7,
-                reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,
-            })),
+            observation: Box::new(Envelope::at(
+                &negotiated,
+                RemoteSessionObservation {
+                    // Standalone stream payloads carry one shared protocol envelope.
+                    session_id: SessionId::from("session-1"),
+                    cursor: "cursor-after".to_string(),
+                    turn_index: 3,
+                    usage: lash_remote_protocol::RemoteUsage::default(),
+                },
+            )),
+            gap: Box::new(Envelope::at(
+                &negotiated,
+                RemoteLiveReplayGap {
+                    // Nested DTOs remain bare inside that envelope body.
+                    session_id: SessionId::from("session-1"),
+                    requested_cursor: "cursor-before".to_string(),
+                    latest_cursor: "cursor-after".to_string(),
+                    latest_revision: 7,
+                    reason: lash_remote_protocol::RemoteLiveReplayGapReason::Trimmed,
+                },
+            )),
         };
         let value = serde_json::to_value(item).expect("json");
 

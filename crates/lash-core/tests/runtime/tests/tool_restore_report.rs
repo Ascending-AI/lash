@@ -597,7 +597,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         .expect("park the enqueue-only open");
 
     // The row is durable and undriven.
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
     assert_eq!(pending.len(), 1, "exactly one pending row was admitted");
@@ -802,18 +802,12 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("park the enqueue-only open");
 
-    // The refused drive left both accepted rows, the queued one and the one
-    // the refused turn sent, pending, and the tool surface untouched.
-    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    // The refused root answers both accepted rows, the queued one and the one
+    // the refused turn sent (FIG-4018), and leaves the tool surface untouched.
+    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
-    assert_eq!(pending.len(), 2, "no pending row was settled");
-    assert!(
-        pending
-            .iter()
-            .all(|row| row.input.state == lash_core::TurnInputState::DeferredNextTurn),
-        "no pending row was claimed: {pending:?}"
-    );
+    assert!(pending.is_empty(), "the refused root answered its inputs");
     assert_persisted_surface_unchanged(&store, persisted_generation).await;
 }
 

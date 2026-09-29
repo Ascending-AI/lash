@@ -1,0 +1,9 @@
+error[E0451]: fields `start` and `identity` of struct `lash::tools::DeclaredStart` are private
+ --> tests/ui/declared_start_is_sealed.rs:7:9
+  |
+6 |     DeclaredStart {
+  |     ------------- in this type
+7 |         start: Box::new(start),
+  |         ^^^^^ private field
+8 |         identity: Box::new(identity),
+  |         ^^^^^^^^ private field

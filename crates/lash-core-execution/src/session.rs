@@ -15,6 +15,7 @@ mod settlement_incorporation_tests;
 pub(crate) mod tool_execution;
 
 pub use execution_context::RuntimeExecutionContext;
+pub use execution_context::resolve_trigger_owner_scope;
 pub use execution_context::{RuntimeExecutionProcessEventContext, RuntimeExecutionTracing};
 pub(crate) use execution_context::{
     attach_process_invocation_correlation, attach_process_lineage,
@@ -812,6 +813,7 @@ impl Session {
             clock: Arc::clone(&self.services.clock),
             process_lineage: process_lineage_of(&turn_context),
             turn_capture: None,
+            process_originator: None,
         });
         Ok(RuntimeExecutionContext::new(
             SessionId::from(session_id.to_string()),

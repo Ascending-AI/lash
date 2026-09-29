@@ -160,6 +160,9 @@ pub struct ToolDispatchContext<'run> {
     /// §2.2): the turn's own, lent to the group children it opens with the
     /// rest of its live half. `None` outside a turn with a durable store.
     pub turn_capture: Option<Arc<dyn crate::TurnToolCapture>>,
+    /// Recorded process originator whose authority this dispatch inherits.
+    /// `None` outside process execution, where the session and frame own it.
+    pub process_originator: Option<crate::ProcessOriginator>,
 }
 
 impl ToolDispatchContext<'_> {
@@ -270,7 +273,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 5;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 6;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -327,6 +330,7 @@ pub enum RebindField {
     Clock,
     ProcessLineage,
     TurnCapture,
+    ProcessOriginator,
 }
 
 impl RebindField {
@@ -361,6 +365,7 @@ impl RebindField {
             Self::Clock => "clock",
             Self::ProcessLineage => "process_lineage",
             Self::TurnCapture => "turn_capture",
+            Self::ProcessOriginator => "process_originator",
         }
     }
 
@@ -412,7 +417,7 @@ impl RebindField {
             // the child's. A context the deployment built carries none, and a
             // start the child makes reads the enclosing process's recorded
             // lineage back from its row (FIG-3607 R2).
-            Self::ProcessLineage => RebindDisposition::Lent,
+            Self::ProcessLineage | Self::ProcessOriginator => RebindDisposition::Lent,
             // The turn's capture is lent with its live opener: the child's
             // attempts write the turn they run for. A context the deployment
             // built carries the same turn's capture over the session's store
@@ -456,6 +461,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::Clock,
     RebindField::ProcessLineage,
     RebindField::TurnCapture,
+    RebindField::ProcessOriginator,
 ];
 
 impl<'run> ToolDispatchContext<'run> {
@@ -495,6 +501,7 @@ impl<'run> ToolDispatchContext<'run> {
             clock: Arc::clone(&self.clock),
             process_lineage: self.process_lineage.clone(),
             turn_capture: self.turn_capture.clone(),
+            process_originator: self.process_originator.clone(),
         })
     }
 
@@ -549,6 +556,7 @@ impl<'run> ToolDispatchContext<'run> {
             clock: Arc::clone(&self.clock),
             process_lineage: self.process_lineage.clone(),
             turn_capture: self.turn_capture.clone(),
+            process_originator: self.process_originator.clone(),
         }
     }
 }

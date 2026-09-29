@@ -121,7 +121,7 @@ pub(crate) async fn read_state_projection(
         .await
         .map_err(AppError::internal)?;
     let queued_work = store
-        .list_pending_queued_work(session_id)
+        .list_open_queued_work(session_id)
         .await
         .map_err(AppError::internal)?;
     let turn_input_applications = store

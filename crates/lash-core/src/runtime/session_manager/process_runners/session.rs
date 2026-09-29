@@ -21,6 +21,7 @@ impl RuntimeSessionServices {
         lineage: crate::ProcessLineage,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
+        result: crate::SessionTurnResult,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
         scoped_effect_controller: crate::ScopedEffectController<'_>,
         cancellation: tokio_util::sync::CancellationToken,
@@ -62,7 +63,13 @@ impl RuntimeSessionServices {
                 let child_session_id = run.session_id.clone();
                 let state = process_terminal_state_for_turn(&run.turn);
                 Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    output_from_process_turn(&process_id, &child_session_id, run.turn, state),
+                    output_from_process_turn(
+                        &process_id,
+                        &child_session_id,
+                        run.turn,
+                        state,
+                        &result,
+                    ),
                 ))
             }
             Err(err) => {
@@ -328,11 +335,17 @@ fn process_turn_failure_raw(
     (!raw.is_empty()).then_some(serde_json::Value::Object(raw))
 }
 
+/// Project the child's ended turn onto the process's answer.
+///
+/// A cancelled or failed child answers its own cancellation or failure under
+/// every [`crate::SessionTurnResult`]. A finished child answers its assembled
+/// turn under `Turn`, and its final value under `FinalValue`.
 fn output_from_process_turn(
     process_id: &crate::ProcessId,
     child_session_id: &SessionId,
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
+    result: &crate::SessionTurnResult,
 ) -> crate::ToolCallOutput {
     if state == crate::ProcessStatus::Cancelled {
         let cancellation = match &turn.outcome {
@@ -356,11 +369,83 @@ fn output_from_process_turn(
     if state == crate::ProcessStatus::Failed {
         return crate::ToolCallOutput::failure(failure_from_process_turn(&turn));
     }
-    crate::ToolCallOutput::success(serde_json::json!({
-        "process_id": process_id,
-        "child_session_id": child_session_id,
-        "turn": turn,
-    }))
+    match result {
+        crate::SessionTurnResult::Turn => crate::ToolCallOutput::success(serde_json::json!({
+            "process_id": process_id,
+            "child_session_id": child_session_id,
+            "turn": turn,
+        })),
+        crate::SessionTurnResult::FinalValue { schema } => {
+            match final_value_of_turn(&turn)
+                .and_then(|value| checked_final_value(value, schema.as_ref()))
+            {
+                Ok(value) => crate::ToolCallOutput::success(value),
+                Err(failure) => crate::ToolCallOutput::failure(*failure),
+            }
+        }
+    }
+}
+
+/// The value a finished child answers under `FinalValue`: its final value, the
+/// value a terminal tool finished it with, or its trimmed assistant text.
+///
+/// A child that switched agent frames or stopped has no final value, and says
+/// so as a typed failure rather than as an empty success.
+fn final_value_of_turn(
+    turn: &crate::AssembledTurn,
+) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
+    match &turn.outcome {
+        crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value })
+        | crate::TurnOutcome::Finished(crate::TurnFinish::ToolValue { value, .. }) => {
+            Ok(value.clone())
+        }
+        crate::TurnOutcome::Finished(crate::TurnFinish::AssistantMessage { text }) => {
+            let text = [
+                text.as_str(),
+                turn.assistant_output.safe_text.as_str(),
+                turn.assistant_output.raw_text.as_str(),
+            ]
+            .into_iter()
+            .map(str::trim)
+            .find(|text| !text.is_empty())
+            .unwrap_or_default();
+            Ok(serde_json::Value::String(text.to_string()))
+        }
+        crate::TurnOutcome::AgentFrameSwitch { .. } => Err(Box::new(crate::ToolFailure::tool(
+            crate::ToolFailureClass::Execution,
+            "process_session_turn_frame_switch",
+            "the child switched agent frames instead of producing a final value",
+        ))),
+        crate::TurnOutcome::Stopped(_) => Err(Box::new(crate::ToolFailure::tool(
+            crate::ToolFailureClass::Internal,
+            "process_session_turn_stopped",
+            "the child turn stopped without producing a final value",
+        ))),
+    }
+}
+
+/// Checks the child's final value against the caller's declared schema. The
+/// child session has ended, so a mismatch fails the call rather than asking
+/// the child to repair it.
+fn checked_final_value(
+    value: serde_json::Value,
+    schema: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, Box<crate::ToolFailure>> {
+    let Some(schema) = schema else {
+        return Ok(value);
+    };
+    crate::LashSchema::new(schema.clone())
+        .validate(&value)
+        .map(|()| value)
+        .map_err(|error| {
+            Box::new(crate::ToolFailure::tool(
+                crate::ToolFailureClass::Execution,
+                "process_session_turn_result_schema_mismatch",
+                format!(
+                    "the child's final value did not match the declared output schema: {error}"
+                ),
+            ))
+        })
 }
 
 #[cfg(test)]

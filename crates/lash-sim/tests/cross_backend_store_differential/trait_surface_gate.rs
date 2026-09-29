@@ -69,12 +69,7 @@ fn harness_sources() -> Vec<String> {
 
 /// The gated store traits. `RuntimePersistence` is the blanket alias over the
 /// first five, so covering them covers the whole runtime-store surface.
-const GATED_SESSION_TRAITS: &[&str] = &[
-    "SessionCommitStore",
-    "TurnInputStore",
-    "QueuedWorkStore",
-    "StoreMaintenance",
-];
+const GATED_SESSION_TRAITS: &[&str] = &["SessionCommitStore", "IngressStore", "StoreMaintenance"];
 
 /// Fallible session-store methods the harness deliberately does not drive.
 ///
@@ -126,11 +121,6 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
          mid-run would collect blobs belonging to the other cases and report their loss as this \
          harness's own defect. Owned by the session_delete_blob_reclaim and \
          store_maintenance_outcome conformance suites, which each own their database",
-    ),
-    (
-        "repair_orphaned_active_turn_inputs",
-        "repair is authorized by a turn-cancellation intent snapshot this fixture cannot \
-         produce without a TurnCancellationAuthority; owned by the turn_control conformance suite",
     ),
     (
         "load_session_at",

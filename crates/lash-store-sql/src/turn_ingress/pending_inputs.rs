@@ -9,9 +9,7 @@ pub const TABLE: &str = "pending_turn_inputs";
 /// backends and once more as a per-backend `PENDING_TURN_INPUT_COLUMNS`
 /// constant. It is one list now, and a column added to it reaches every reader.
 pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingress_json,
-     state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-     claim_owner_id, claim_owner_incarnation_id,
-     claim_token, claim_session_lease_generation, run_spec_hash";
+     state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash";
 
 /// The columns written after allocation under the session's write authority.
 pub const INSERT_COLUMNS: &str =
@@ -26,24 +24,22 @@ pub const INSERT_COLUMNS: &str =
 pub const REPLAY_COLUMNS: &str = "input_id, submission_digest";
 
 /// The facts the settlement verdict
-/// [`require_settleable_turn_input`](lash_core::store_backend_support::require_settleable_turn_input)
+/// [`require_admitted_to_root`](lash_core::store_backend_support::require_admitted_to_root)
 /// consults, and nothing else.
 ///
 /// Narrow on purpose: this read runs once per settled input of every commit,
 /// and `input_json` and `ingress_json` are unbounded caller payloads that no
 /// part of the settlement decision looks at. Decoding them here would put the
 /// size of a user's submission on the commit path.
-pub const SETTLEMENT_COLUMNS: &str = "claim_id, claim_token, claim_session_lease_generation, state";
+pub const SETTLEMENT_COLUMNS: &str = "admitted_root, state";
 
 crate::statements! {
     /// `pending_turn_inputs` statements both backends issue verbatim.
     ///
-    /// Every statement that releases a claim spells the whole four-column
-    /// claim identity plus the generation, because
-    /// `ck_pending_turn_inputs_claim_identity_all_or_none` makes the
-    /// all-or-none shape load-bearing;
-    /// `every_release_statement_clears_the_whole_claim_identity` in this
-    /// crate's suite holds them to it.
+    /// Every write that binds a row predicates it open (`admitted_root IS
+    /// NULL`), and every write that settles or releases a bound row
+    /// predicates it on the root that holds it, so a row is only ever
+    /// answered by the root that admitted it (FIG-3927).
     pub struct PendingInputStatements @ "pending_turn_input" {
         /// Admit input `?2` of session `?3` at sequence `?1`, allocated from
         /// the session's shared counter under the session's write authority,
@@ -83,17 +79,13 @@ crate::statements! {
              WHERE input_id = ?1";
 
         select_by_id = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, run_spec_hash
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND input_id = ?2";
 
         /// The input session `?1` filed under source key `?2`.
         select_by_source_key = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, run_spec_hash
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
@@ -104,59 +96,64 @@ crate::statements! {
              FROM pending_turn_inputs
              WHERE session_id = ?1 AND source_key = ?2";
 
-        /// The `enqueue_seq` of session `?1`'s earliest next-turn input that
-        /// generation `?2` has not claimed, or `NULL`: where a claim of
-        /// queued work stops, at idle and at a checkpoint alike, because the
-        /// turn lane is one FIFO over both admission tables (ADR 0101 §5).
-        /// Unlike the next-turn claim scan, an open session command does not
-        /// hide the input: the command lane orders nothing in the turn lane.
+        /// The `enqueue_seq` of session `?1`'s earliest open next-turn input,
+        /// or `NULL`: where a composition of queued work stops, at idle and
+        /// at a checkpoint alike, because the turn lane is one FIFO over both
+        /// admission tables (ADR 0101 §5). Unlike the next-turn candidate
+        /// scan, an open session command does not hide the input: the command
+        /// lane orders nothing in the turn lane.
         earliest_next_turn_candidate_seq = "SELECT MIN(enqueue_seq) FROM pending_turn_inputs
              WHERE session_id = ?1
-               AND {{deferred_next_turn_turn_input_state(state)}}
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?2
-                    OR claim_owner_incarnation_id <> ?3
-               )";
+               AND {{undelivered_turn_input_state(state)}}
+               AND admitted_root IS NULL
+               AND {{deferred_next_turn_turn_input_state(state)}}";
 
-        /// Undelivered inputs with the epoch of a currently held claim.
+        /// Session `?1`'s undelivered inputs, open and admitted alike, with
+        /// the root that holds each admitted one.
         list_undelivered = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
-                    state, input_json, enqueued_at_ms, claim_id, claim_fencing_token,
-                    claim_owner_id, claim_owner_incarnation_id,
-                    claim_token, claim_session_lease_generation, run_spec_hash,
-                    (SELECT meta.drive_epoch
-                     FROM session_meta meta
-                     WHERE pending_turn_inputs.claim_token IS NOT NULL
-                       AND meta.session_id = ?1
-                       AND meta.drive_admission_id IS NOT NULL
-                       AND meta.drive_epoch
-                           = pending_turn_inputs.claim_session_lease_generation)
-                        AS live_claim_drive_epoch
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
              FROM pending_turn_inputs
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
              ORDER BY enqueue_seq ASC";
 
-        /// Settle input `?2` of session `?1` into state `?3`, releasing the
-        /// whole claim identity.
-        ///
-        /// Also the drop disposition of an interrupted turn's repair, which is
-        /// the same write: cancel the row and let go of the claim.
-        cancel = "UPDATE pending_turn_inputs
-             SET state = ?3,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = ?1 AND input_id = ?2";
+        /// Session `?1`'s inputs a checkpoint accepted into a running root,
+        /// each bound to that root until its commit settles it or its
+        /// terminal releases it: the rest of what the pending read lists
+        /// beside [`list_undelivered`](Self::list_undelivered) (FIG-4044).
+        list_accepted = "SELECT enqueue_seq, input_id, session_id, source_key, ingress_json,
+                    state, input_json, enqueued_at_ms, admitted_root, admitted_by, run_spec_hash
+             FROM pending_turn_inputs
+             WHERE session_id = ?1
+               AND {{accepted_turn_input_state(state)}}
+             ORDER BY enqueue_seq ASC";
 
-        /// Re-defer input `?2` of session `?1` to state `?3` under the
-        /// next-turn ingress `?4`, releasing the whole claim identity.
+        /// Session `?1`'s inputs root `?2` bound under step `?3`, in
+        /// `enqueue_seq` order: what a re-executed admission step reads back
+        /// instead of choosing again (FIG-3927).
+        select_admitted_by_step = "SELECT enqueue_seq, input_id, session_id, source_key,
+                    ingress_json, state, input_json, enqueued_at_ms, admitted_root,
+                    admitted_by, run_spec_hash
+             FROM pending_turn_inputs
+             WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
+             ORDER BY enqueue_seq ASC";
+
+        /// Withdraw open input `?2` of session `?1` into state `?3`.
+        ///
+        /// Only an open row is withdrawn: a row a root admitted is that
+        /// root's to settle or release, so the host's cancel changes nothing
+        /// and answers the root instead.
+        cancel = "UPDATE pending_turn_inputs
+             SET state = ?3
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root IS NULL";
+
+        /// Re-defer open input `?2` of session `?1` to state `?3` under the
+        /// next-turn ingress `?4`: the active-turn input an interrupted turn
+        /// never admitted.
         ///
         /// The ingress is rewritten, not preserved: a row pinned to a turn
-        /// that is over must stop naming it, or the next claim scan pins it to
-        /// the same dead turn (FIG-1573).
+        /// that is over must stop naming it, or the next admission pins it
+        /// to the same dead turn (FIG-1573).
         ///
         /// Only the mutable `ingress_json` moves. `submitted_ingress_json` and
         /// `submission_digest` are written once at admission and never
@@ -164,34 +161,23 @@ crate::statements! {
         /// this rewrite (FIG-3544).
         defer_to_next_turn = "UPDATE pending_turn_inputs
              SET state = ?3,
-                 ingress_json = ?4,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = ?1 AND input_id = ?2";
+                 ingress_json = ?4
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root IS NULL";
 
-        /// Claim input `?2` of session `?1` into state `?3` for claim `?4`,
-        /// owner `?5`/`?6`, lease token `?7`, generation `?8`, fencing token
-        /// `?9`, at `?10`.
+        /// Admit open input `?2` of session `?1` into state `?3`, bound to
+        /// root `?4` by step `?5`, at `?6`.
         ///
-        /// The claim is the row's admission, so it delivers the row's ingress
-        /// obligation in the same write (ADR 0109 §3): due, claimed by a relay
-        /// that asked for a drive, or stalled, it is delivered now.
+        /// The admission is the row's delivery, so it delivers the row's
+        /// ingress obligation in the same write (ADR 0109 §3): due, claimed
+        /// by a relay that asked for a drive, or stalled, it is delivered now.
         ///
-        /// The generation predicate stays on the statement as the backstop of
-        /// the shared claimability verdict (FIG-3381): the verdict decides over
-        /// the locked row, and a row count other than one is a disagreement
-        /// between the two, not a lost race.
-        claim = "UPDATE pending_turn_inputs
+        /// The open predicate is the write's backstop: the composition was
+        /// read in the same transaction, so a row count other than one is a
+        /// disagreement between the two, not a lost race.
+        admit = "UPDATE pending_turn_inputs
              SET state = ?3,
-                 claim_id = ?4,
-                 claim_owner_id = ?5,
-                 claim_owner_incarnation_id = ?6,
-                 claim_token = ?7,
-                 claim_fencing_token = ?9,
-                 claim_session_lease_generation = ?8,
+                 admitted_root = ?4,
+                 admitted_by = ?5,
                  obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN 'delivered' ELSE obligation_state END,
                  obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
@@ -201,55 +187,68 @@ crate::statements! {
                  obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
                      THEN NULL ELSE obligation_stall_reason END,
                  obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
-                     THEN ?10 ELSE obligation_settled_at_ms END
+                     THEN ?6 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1
                AND input_id = ?2
-               AND (
-                    claim_token IS NULL
-                    OR claim_session_lease_generation <> ?8
-                    OR claim_owner_incarnation_id <> ?6
-               )";
+               AND admitted_root IS NULL
+               AND {{undelivered_turn_input_state(state)}}";
 
-        /// Settle claimed input `?2` of session `?1` into `?3`, under claim
-        /// `?4` and lease token `?5` (ADR 0069 §5).
-        settle_claimed = "UPDATE pending_turn_inputs
+        /// Settle input `?2` of session `?1` into the terminal state `?3`
+        /// under root `?4`, which must hold it: completed when the root
+        /// delivered it, cancelled when the root drops it. The binding goes
+        /// with the settlement.
+        settle_admitted = "UPDATE pending_turn_inputs
              SET state = ?3,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = ?1
-               AND input_id = ?2
-               AND claim_id = ?4
-               AND claim_token = ?5";
+                 admitted_root = NULL,
+                 admitted_by = NULL
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root = ?4";
 
-        /// Settle unclaimed input `?2` of session `?1` into `?3`.
+        /// Hand input `?2` of session `?1` back open at its own position,
+        /// under root `?3`, which must hold it.
         ///
-        /// The same write as [`settle_claimed`](Self::settle_claimed) with the
-        /// other regime's predicate: the row must still be unclaimed and not
-        /// already terminal. The terminal set is named, never spelled, so it
-        /// cannot drift from
-        /// [`unclaimed_turn_input_is_settleable`](lash_core::store_backend_support::unclaimed_turn_input_is_settleable).
-        settle_unclaimed = "UPDATE pending_turn_inputs
-             SET state = ?3,
-                 claim_id = NULL,
-                 claim_owner_id = NULL,
-                 claim_owner_incarnation_id = NULL,
-                 claim_token = NULL,
-                 claim_session_lease_generation = 0
-             WHERE session_id = ?1
-               AND input_id = ?2
-               AND claim_id IS NULL
-               AND {{nonterminal_turn_input_state(state)}}";
+        /// An active-turn row names a turn that is over, so it is re-deferred
+        /// to the next turn in state `?4` under the next-turn ingress `?5`
+        /// (FIG-1573). A row handed back owes its session a drive again: a
+        /// delivered ingress obligation is due at once (ADR 0109 §3).
+        release_admitted = "UPDATE pending_turn_inputs
+             SET state = CASE WHEN {{active_turn_input_state(state)}} THEN ?4 ELSE state END,
+                 ingress_json = CASE WHEN {{active_turn_input_state(state)}}
+                     THEN ?5 ELSE ingress_json END,
+                 admitted_root = NULL,
+                 admitted_by = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1 AND input_id = ?2 AND admitted_root = ?3";
+
+        /// [`release_admitted`](Self::release_admitted) over every input root
+        /// `?2` of session `?1` still holds, with `?3`/`?4` the next-turn
+        /// state and ingress: the root's terminal write, after the
+        /// settlements its commit named (FIG-3927). No row stays bound to a
+        /// root that has terminal evidence.
+        release_root = "UPDATE pending_turn_inputs
+             SET state = CASE WHEN {{active_turn_input_state(state)}} THEN ?3 ELSE state END,
+                 ingress_json = CASE WHEN {{active_turn_input_state(state)}}
+                     THEN ?4 ELSE ingress_json END,
+                 admitted_root = NULL,
+                 admitted_by = NULL,
+                 obligation_state = CASE WHEN obligation_state = 'delivered'
+                     THEN 'due' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN 0 ELSE obligation_due_at_ms END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state = 'delivered'
+                     THEN NULL ELSE obligation_settled_at_ms END
+             WHERE session_id = ?1 AND admitted_root = ?2";
 
         /// Reclaim session `?1`'s withdrawn inputs: cancelled before any
         /// root took them. Every other settled input keeps its submission
         /// digest and receipt until session deletion, alongside the terminal
         /// evidence of the root that took it, so a retry under its id is
         /// validated against its digest and answered from that root for the
-        /// root's whole retained life (FIG-3837). An applied input stays even
-        /// when no claim bound it (a checkpoint delivery).
+        /// root's whole retained life (FIG-3837).
         delete_withdrawn = "DELETE FROM pending_turn_inputs
              WHERE session_id = ?1 AND {{cancelled_turn_input_state(state)}}
                AND NOT EXISTS (
@@ -265,14 +264,12 @@ crate::statements! {
 crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct PendingRootVerbStatements @ "pending_turn_input" {
+        /// Move input `?2` of session `?1`, bound to a root a verb ends, into
+        /// state `?3`, letting go of any admission: cancelled by a cancel,
+        /// re-deferred by a fork.
         input = "UPDATE pending_turn_inputs SET state = ?3,
-            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0
+            admitted_root = NULL, admitted_by = NULL
             WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
-        release_inputs = "UPDATE pending_turn_inputs SET
-            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0
-            WHERE session_id = ?1 AND claim_token IS NOT NULL";
     }
 }
 

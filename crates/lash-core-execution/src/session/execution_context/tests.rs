@@ -105,6 +105,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
         turn_capture: None,
+        process_originator: None,
     });
     let ctx = RuntimeExecutionContext::new(
         SessionId::from("session"),
@@ -172,6 +173,7 @@ fn test_execution_context_with_env_store(
         clock: std::sync::Arc::new(crate::SystemClock),
         process_lineage: None,
         turn_capture: None,
+        process_originator: None,
     });
     RuntimeExecutionContext::new(
         SessionId::from("session"),
@@ -204,6 +206,10 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
         crate::ProcessId::fixture("parent"),
         &parent,
         None,
+    );
+    assert_eq!(
+        context.dispatch.process_originator,
+        Some(parent.provenance.originator.clone())
     );
 
     let child = crate::ProcessRegistration::new(

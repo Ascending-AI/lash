@@ -112,35 +112,24 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
         },
     },
     DurableFaultMatrixRow {
-        id: "queued-work-claim-generation-supersession",
+        id: "stale-drive-fence-writes-nothing",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "After a successor generation re-claims queued work, the predecessor claim is rejected at commit without mutation.",
+        contract: "After a later drive seals, the earlier fence's root admission, checkpoint admission, settling commit and command commit are each refused without mutation.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
-            filter: "queued_work_claims_supersede_across_session_lease_generations",
+            filter: "a_stale_fence_writes_nothing",
             required_env: None,
         }),
     },
     DurableFaultMatrixRow {
-        id: "deferred-next-turn-generation-reclaim",
+        id: "settlement-predicated-on-the-root",
         kind: DurableFaultKind::LeaseLoss,
-        contract: "A failed turn's DeferredNextTurn claim is reclaimed by idle retry under a new session-lease generation while its stale completion is rejected.",
+        contract: "A commit settling a row bound to another root, or to none, is refused and writes nothing; the owning root still settles it once.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance_memory"),
-            filter: "turn_input_claims_supersede_across_session_lease_generations",
-            required_env: None,
-        }),
-    },
-    DurableFaultMatrixRow {
-        id: "same-generation-claim-bounded-scan",
-        kind: DurableFaultKind::LeaseLoss,
-        contract: "More than 32 same-generation claims cannot hide a later unclaimed queued-work, session-command, or turn-input row from bounded scans.",
-        evidence: FaultEvidence::CargoTest(CargoTestEvidence {
-            package: "lash-internal-sqlite-store",
-            test_target: Some("conformance_memory"),
-            filter: "same_generation_claim_scans_reach_rows_beyond_the_scan_surplus",
+            filter: "settlement_is_predicated_on_the_root",
             required_env: None,
         }),
     },
@@ -166,7 +155,7 @@ const DURABLE_FAULT_MATRIX: &[DurableFaultMatrixRow] = &[
     DurableFaultMatrixRow {
         id: "sqlite-backend-conformance",
         kind: DurableFaultKind::BackendPermutation,
-        contract: "Sqlite runs the backend conformance contract, including reopen, source-key, claim, lease, process change-feed ordering, process_change_feed_never_misses_concurrent_terminal_writers, drainage, watermark-bounded prune, and effect replay cases.",
+        contract: "Sqlite runs the backend conformance contract, including reopen, source-key, admission, lease, process change-feed ordering, process_change_feed_never_misses_concurrent_terminal_writers, drainage, watermark-bounded prune, and effect replay cases.",
         evidence: FaultEvidence::CargoTest(CargoTestEvidence {
             package: "lash-internal-sqlite-store",
             test_target: Some("conformance"),

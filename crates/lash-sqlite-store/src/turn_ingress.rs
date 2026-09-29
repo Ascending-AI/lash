@@ -1,4 +1,4 @@
-//! The SQLite half of the turn-ingress and claim family (FIG-3383).
+//! The SQLite half of the turn-ingress and admission family (FIG-3383).
 //!
 //! `lash-store-sql`'s `turn_ingress` module owns the column lists and every
 //! statement whose text both backends issue verbatim; this module owns the

@@ -24,6 +24,7 @@ pub use tokio_util::sync::CancellationToken;
 pub use lash_core_store::admitted_scope::wire as admitted_scope_wire;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
+pub use lash_core_store::compat;
 pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_manifest;
 #[cfg(any(test, feature = "testing"))]
@@ -282,7 +283,6 @@ pub mod facade_support {
     pub use crate::runtime::QueuedDrainSelection;
     pub use crate::runtime::QueuedWorkAuthority;
     pub use crate::runtime::QueuedWorkBatchingConfig;
-    pub use crate::runtime::QueuedWorkClaimPolicy;
     pub use crate::runtime::QueuedWorkKind;
     pub use crate::runtime::ReconciledUsageAttempt;
     pub use crate::runtime::RuntimeAwaitEventOptions;
@@ -319,6 +319,7 @@ pub mod facade_support {
     pub use crate::runtime::TurnInputAcceptanceReceipt;
     pub use crate::runtime::TurnIssue;
     pub use crate::runtime::TurnIssueSeverity;
+    pub use crate::runtime::TurnLaneAdmissionPolicy;
     pub use crate::runtime::TurnTerminal;
     pub use crate::runtime::TurnWorkDriver;
     pub use crate::runtime::UnreportedUsageAttempt;
@@ -572,6 +573,7 @@ pub use tool_result::{
     CancelHint, PendingAnnouncement, PendingCompletion, PendingResolver, TimeoutBehavior,
     ToolOutcome,
 };
+pub use tool_result::{DeclaredStart, DeclaredStartRefused};
 pub use triggers::{
     TriggerCommand, TriggerCommandOutcome, TriggerDeliveryReservation,
     TriggerDeliveryReservationOutcome, TriggerDeliveryRetentionCandidate, TriggerEffectResult,
@@ -582,6 +584,7 @@ pub use triggers::{
     TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
     TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
     TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    trigger_handle_outcome_value,
 };
 
 pub(crate) mod facade_ops {}
@@ -736,11 +739,14 @@ pub use process_registry::{
 };
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
+/// Intent realization publishes the execution environment a declared trigger
+/// subscription names, under the realizing scope's artifact owner (FIG-3116).
+pub use runtime::publish_process_execution_env;
 pub use runtime::{
-    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, Ancestry,
-    ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
+    AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
+    Ancestry, ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
-    CaptureWatermark, CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock,
+    CaptureWatermark, CausalRef, ChargeSafetyRefusalEvidence, CheckpointAdmittedSet, Clock,
     ClockWallTime, CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
     DeclaredProcessIdentity, DefinitionRef, DeliveryPolicy, DrainMode, DrainModePolicy,
     EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
@@ -753,37 +759,36 @@ pub use runtime::{
     MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndApplication,
     ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
-    ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity,
-    ProcessInfraError, ProcessInput, ProcessLifecycle, ProcessLineage, ProcessListFilter,
-    ProcessListMode, ProcessLiveReferenceView, ProcessObserverBy, ProcessObserverRegistry,
-    ProcessOpScope, ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome,
-    ProcessOutcomeObserver, ProcessProvenance, ProcessPruneReport, ProcessQuery, ProcessRecord,
-    ProcessRegistrar, ProcessRegistration, ProcessRegistrationDisposition,
-    ProcessRegistrationOutcome, ProcessRegistrationProbe, ProcessRegistry, ProcessRegistryBinding,
-    ProcessRegistryCursor, ProcessResumeRefusal, ProcessRetention, ProcessRunOutcome,
-    ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService, ProcessSessionDeleteReport,
-    ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions,
-    ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTerminalPublication, ProcessTerminalSpec, ProcessTerminalWait,
-    ProcessTombstone, ProcessToolIntents, ProcessValueSelector, ProcessWakeDelivery,
-    ProcessWakeOutbox, ProcessWakeSpec, ProcessWorkSubstrate, ProcessWorkWiring,
-    ProjectionWatermark, ProtocolSessionExtension, ProtocolSessionExtensionHandle,
-    QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessDriveStep, ProcessEffectOutcome,
+    ProcessEngine, ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration,
+    ProcessEngineRegistry, ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt,
+    ProcessEventAppendRequest, ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog,
+    ProcessEventPage, ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode,
+    ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessHandleView, ProcessId,
+    ProcessIdMint, ProcessIdentity, ProcessInfraError, ProcessInput, ProcessLifecycle,
+    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
+    ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessProvenance,
+    ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
+    ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessRegistrationProbe,
+    ProcessRegistry, ProcessRegistryBinding, ProcessRegistryCursor, ProcessResumeRefusal,
+    ProcessRetention, ProcessRunOutcome, ProcessScopeFenceHosts, ProcessSegmentKey, ProcessService,
+    ProcessSessionDeleteReport, ProcessSignature, ProcessSpawnProvenance, ProcessStartDeclaration,
+    ProcessStartOptions, ProcessStartOutcome, ProcessStartReceipt, ProcessStartRequest,
+    ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTerminalPublication,
+    ProcessTerminalSpec, ProcessTerminalWait, ProcessTombstone, ProcessToolIntents,
+    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeOutbox, ProcessWakeSpec,
+    ProcessWorkSubstrate, ProcessWorkWiring, ProjectionWatermark, ProtocolSessionExtension,
+    ProtocolSessionExtensionHandle, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest,
+    QueuedDrainSelection, QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkKind,
     RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecordedRender,
     RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome, ResolvedRun, RunDefinition,
     RunDefinitions, RunOverrides, RunShapeError, RunSpec, RunSpecHash, RuntimeAttribution,
@@ -806,35 +811,33 @@ pub use runtime::{
     TurnCancelRequestRecord, TurnCancellationAuthority, TurnContext, TurnControlAttachment,
     TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError, TurnEvent,
     TurnFailureCause, TurnFailureEvidence, TurnFailurePartialOutput, TurnFailureSettlement,
-    TurnInput, TurnInputApplication, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputClaimData, TurnInputClaimMode, TurnInputCompletion, TurnInputCompletionData,
-    TurnInputIngress, TurnInputSettlementClaim, TurnInputState, UnreportedLedgerAttempt,
-    UsageDispositionError, WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup,
-    WakeDeliveryClaimOutcome, WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport,
-    WakeDeliveryState, WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry,
-    WorkCadenceError, WorkCadencePolicy, admit_session_state_generation, apply_parent_end_plan,
-    effect_groups_unsupported, end_parent_scope, end_session_roots, lifetime, mint_process_id,
-    parent_end_delivery_key, parent_end_requester, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation,
+    TurnInput, TurnInputAdmissionMode, TurnInputApplication, TurnInputCheckpointBoundary,
+    TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputState,
+    TurnLaneAdmissionPolicy, UnreportedLedgerAttempt, UsageDispositionError, WaitKind, WaitState,
+    WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
+    WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
+    WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
+    admit_session_state_generation, apply_parent_end_plan, effect_groups_unsupported,
+    end_parent_scope, end_session_roots, lifetime, mint_process_id, parent_end_delivery_key,
+    parent_end_requester, park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{
-    ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, artifact_owner_is_permanently_retired,
-    artifact_staging_owner_edge_is_missing, load_process_execution_env,
-    materialize_process_event_semantics, prepare_process_event_append,
+    AdmissionBoundary, AdmittedQueuedWork, ProcessEventSemantics, QueuedCheckpointTurnInput,
+    QueuedCheckpointWork, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkCompletion,
+    QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkPayload, RuntimeSubject, TurnWorkPayload,
+    artifact_owner_is_permanently_retired, artifact_staging_owner_edge_is_missing,
+    load_process_execution_env, materialize_process_event_semantics, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
-    require_event_replay, settle_started_process_engine_artifacts,
-    settle_started_process_execution_env,
+    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
+    settle_started_process_engine_artifacts, settle_started_process_execution_env,
 };
+pub use runtime::{ConsumerHold, SessionTurnResult};
 pub(crate) use session::Session;
 pub use session::{
     ExecRequest, RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, tool_dispatch_surface,
+    ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,
@@ -845,25 +848,23 @@ pub(crate) use session_model::RuntimeSessionPolicy;
 pub use session_model::{ChargeSafetyPolicy, NoProgressBudget, SessionPolicy, TurnBudget};
 pub use session_model::{ProtocolEvent, SessionHistoryRecord};
 pub use store::{
-    AppendRequestIdentity, AttachmentCondemnation, AttachmentCondemnationPhase,
+    AdmissionRefusal, AppendRequestIdentity, AttachmentCondemnation, AttachmentCondemnationPhase,
     AttachmentCondemnationProvenance, AttachmentCondemnationRecord, AttachmentDeleteArming,
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwner,
     AttachmentOwnerKind, AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
-    BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, ClaimAuthority,
-    CommitBudget, CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage,
-    DurableSurface, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
-    GcReport, HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseOwnerIdentity,
+    BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget,
+    CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
+    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, IngressStore, LeaseOwnerIdentity,
     MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
-    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
-    QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
+    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, RetentionBound,
     RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity, ScanCoverage, SemanticBoundaryOperation, SessionAdmission,
     SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionMeta,
     SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
     StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnCancelRepairDecision,
-    TurnCancelRepairResult, TurnInputAdmission, TurnInputStore, VacuumReport, WorkClaim,
-    WorkCompletion, WriterPin, compare_releases, release_stamp_advances,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnInputAdmission, VacuumReport,
+    WriterPin, compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

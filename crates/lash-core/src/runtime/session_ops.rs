@@ -311,19 +311,11 @@ impl LashRuntime {
         // drivers, so this handle owns no retained execution guard.
         //
         // Structurally excluded from `state::commit_in_lane_context`: this site
-        // is strictly lane-less (never carries a `BorrowedDriveAuthority`) and
+        // is strictly lane-less (never carries a `DriveFence`) and
         // interleaves in-memory protocol session rollback
         // (`restore_protocol_session_from_state`) on commit failure or
         // `AppendAncestorNotActive` stale-branch response.
-        let result = match super::commit_runtime_state_without_session_lease(
-            Arc::clone(&store),
-            commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await
+        let result = match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await
         {
             Ok(result) => result,
             Err(crate::StoreError::AppendAncestorNotActive { required_node_id }) => {
@@ -827,32 +819,24 @@ impl LashRuntime {
             // Lane-less host plugin-operation boundary. In-turn lifecycle
             // graph appends use `session_manager::graph` and carry an explicit
             // borrowed guard instead of reaching this runtime-owned path.
-            let result = match super::commit_runtime_state_without_session_lease(
-                store,
-                commit,
-                &self.runtime_lease_owner,
-                &self.runtime_lease_executor_id,
-                self.host.core.control.lease_timings,
-                Arc::clone(&self.host.core.clock),
-            )
-            .await
-            {
-                Ok(result) => result,
-                Err(err) => {
-                    let persistence_error =
-                        format!("failed to persist plugin runtime events: {err}");
-                    if let Err(rollback_err) = self
-                        .rollback_plugin_runtime_event_append(state_before_append)
-                        .await
-                    {
-                        return Err(PluginOperationInvokeError::Failed(format!(
-                            "{persistence_error}; failed to restore protocol session: \
+            let result =
+                match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+                    Ok(result) => result,
+                    Err(err) => {
+                        let persistence_error =
+                            format!("failed to persist plugin runtime events: {err}");
+                        if let Err(rollback_err) = self
+                            .rollback_plugin_runtime_event_append(state_before_append)
+                            .await
+                        {
+                            return Err(PluginOperationInvokeError::Failed(format!(
+                                "{persistence_error}; failed to restore protocol session: \
                              {rollback_err}"
-                        )));
+                            )));
+                        }
+                        return Err(PluginOperationInvokeError::Failed(persistence_error));
                     }
-                    return Err(PluginOperationInvokeError::Failed(persistence_error));
-                }
-            };
+                };
             self.state.apply_persisted_commit_result(result);
             self.state.mark_node_ids_persisted(persisted_node_ids);
         }
@@ -891,20 +875,13 @@ impl LashRuntime {
             })?;
         // Lane-less host plugin-operation snapshot. Turn-scoped service calls
         // are classified at the session-manager call sites instead.
-        let result = super::commit_runtime_state_without_session_lease(
-            store,
-            commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
-        )
-        .await
-        .map_err(|err| {
-            PluginOperationInvokeError::Failed(format!(
-                "failed to persist plugin operation state: {err}"
-            ))
-        })?;
+        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+            .await
+            .map_err(|err| {
+                PluginOperationInvokeError::Failed(format!(
+                    "failed to persist plugin operation state: {err}"
+                ))
+            })?;
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
         Ok(())

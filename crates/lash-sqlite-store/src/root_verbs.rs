@@ -126,18 +126,6 @@ pub(crate) fn open_root_intent_conn(
         params![session.as_str()],
     )
     .map_err(sqlite_error)?;
-    write_root_terminal_conn(
-        tx,
-        &RootTerminal {
-            session_id: session.clone(),
-            root: request.root.clone(),
-            kind: RootTerminalKind::Cancelled,
-            cause,
-            head_revision: revision.map(|revision| revision as u64),
-            at_ms,
-            stopped_partial: None,
-        },
-    )?;
     let mut inputs: Vec<String> = {
         let mut stmt = tx
             .prepare_cached(sql.bound_inputs.sql())
@@ -183,10 +171,20 @@ pub(crate) fn open_root_intent_conn(
             .map_err(sqlite_error)?;
         }
     }
-    for statement in [sql.release_inputs.sql(), sql.release_batches.sql()] {
-        crate::conn::cached_execute(tx, statement, params![session.as_str()])
-            .map_err(sqlite_error)?;
-    }
+    // The verb settles the root's own input and batches first; its terminal
+    // write then releases whatever else the root still held (FIG-3927).
+    write_root_terminal_conn(
+        tx,
+        &RootTerminal {
+            session_id: session.clone(),
+            root: request.root.clone(),
+            kind: RootTerminalKind::Cancelled,
+            cause,
+            head_revision: revision.map(|revision| revision as u64),
+            at_ms,
+            stopped_partial: None,
+        },
+    )?;
     for prior in plan.supersede {
         let mut next = prior.clone();
         next.state = ControlIntentState::Superseded { by: intent.id };

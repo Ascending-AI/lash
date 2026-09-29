@@ -234,18 +234,14 @@ impl LashRuntime {
                 fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
-        let result = super::commit_runtime_state_without_session_lease(
-            store,
-            commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            std::sync::Arc::clone(&self.host.core.clock),
-        )
-        .await
-        .map_err(|source| {
-            super::session_commit_error("failed to record the reopen-seeded session config", source)
-        })?;
+        let result = crate::store::commit_runtime_state_verified(store.as_ref(), commit)
+            .await
+            .map_err(|source| {
+                super::session_commit_error(
+                    "failed to record the reopen-seeded session config",
+                    source,
+                )
+            })?;
         if result.receipt_replayed {
             // A receipt proves this seed settled once, not that its config is
             // still current. A delayed retry may race a later config command;

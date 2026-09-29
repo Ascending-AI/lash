@@ -800,3 +800,12 @@ resurrection. Retiring the live opener's entire scope to retire one group is not
 available, and retirement stays group-atomic (N3 above). Mid-aggregate VM
 suspension is required only if command accounting shows a bounded aggregate cannot
 meet the controller budget, and no universal tool-result byte cap follows.
+
+## Amendment (FIG-3562, 2026-09-29): no tool body opens a nested group
+
+`call_tool_batch` above names the retired whole-batch effect. After [ADR 0116](0116-tools-are-opaque.md), no
+tool body dispatches tools. The nested group key
+`{scope_id}:group:{parent_effect_id}:{batch_id}` remains for language
+aggregates under a parent effect (RLM `Promise.all`, Lashlang process
+aggregates). Protocol-standard `batch` never forms one: its members join the
+turn step's one top-level group beside the response's native calls ([ADR 0116](0116-tools-are-opaque.md) §2).

@@ -97,7 +97,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         "config-command-coalescing:incarnation",
     );
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-coalescing-executor",
@@ -108,26 +108,27 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         .acquired()
         .expect("config-command session lease");
     let claim = store
-        .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+        .open_session_command_run(&lease)
         .await
-        .expect("claim leading config commands")
-        .expect("config command claim");
+        .expect("claim leading config commands");
 
-    assert_eq!(claim.batches.len(), 3);
+    assert_eq!(claim.len(), 3);
     assert_eq!(
-        claim
-            .session_commands()
-            .expect("claim contains only config commands")
-            .len(),
+        crate::AdmittedQueuedWork {
+            session_id: request.session_id.clone(),
+            batches: claim.clone(),
+        }
+        .session_commands()
+        .expect("the run contains only config commands")
+        .len(),
         3,
-        "all adjacent config commands must share one backend claim"
+        "all adjacent config commands must share one command run"
     );
     let completed_batch_ids = claim
-        .batches
         .iter()
         .map(|batch| batch.batch_id.clone())
         .collect::<Vec<_>>();
-    commit_session_command_claim(store.as_ref(), &request, claim).await;
+    commit_session_command_claim(store.as_ref(), &request, &lease, claim).await;
     for batch_id in completed_batch_ids {
         assert!(
             store
@@ -155,7 +156,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         .create_store(&request)
         .await
         .expect("create bounded config-command store");
-    let total = crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_CLAIM + 3;
+    let total = crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN + 3;
     for index in 0..total {
         store
             .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
@@ -181,7 +182,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         "config-command-claim-bound:incarnation",
     );
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
             "config-command-claim-bound-executor",
@@ -192,30 +193,28 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         .acquired()
         .expect("bounded config-command session lease");
     let first = store
-        .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+        .open_session_command_run(&lease)
         .await
-        .expect("claim first bounded command prefix")
-        .expect("first bounded command prefix");
+        .expect("claim first bounded command prefix");
     assert_eq!(
-        first.batches.len(),
-        crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_CLAIM
+        first.len(),
+        crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN
     );
-    commit_session_command_claim(store.as_ref(), &request, first).await;
+    commit_session_command_claim(store.as_ref(), &request, &lease, first).await;
 
     let second = store
-        .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+        .open_session_command_run(&lease)
         .await
-        .expect("claim remaining bounded command prefix")
-        .expect("remaining bounded command prefix");
-    assert_eq!(second.batches.len(), 3);
-    commit_session_command_claim(store.as_ref(), &request, second).await;
+        .expect("claim remaining bounded command prefix");
+    assert_eq!(second.len(), 3);
+    commit_session_command_claim(store.as_ref(), &request, &lease, second).await;
 
     assert!(
         store
-            .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+            .open_session_command_run(&lease)
             .await
             .expect("check bounded command queue exhaustion")
-            .is_none(),
+            .is_empty(),
         "a longer config-command run must drain completely over multiple commits"
     );
 }
@@ -223,9 +222,10 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
 async fn commit_session_command_claim(
     store: &dyn crate::RuntimePersistence,
     request: &crate::SessionStoreCreateRequest,
-    claim: crate::QueuedWorkClaim,
+    fence: &crate::store::DriveFence,
+    run: Vec<crate::QueuedWorkBatch>,
 ) {
-    commit_session_command_claim_with(store, request, claim, |_| {}).await;
+    commit_session_command_claim_with(store, request, fence, run, |_| {}).await;
 }
 
 /// [`commit_session_command_claim`], with `adjust` applied to the state the
@@ -237,7 +237,8 @@ async fn commit_session_command_claim(
 async fn commit_session_command_claim_with(
     store: &dyn crate::RuntimePersistence,
     request: &crate::SessionStoreCreateRequest,
-    claim: crate::QueuedWorkClaim,
+    fence: &crate::store::DriveFence,
+    run: Vec<crate::QueuedWorkBatch>,
     adjust: impl FnOnce(&mut crate::RuntimeSessionState),
 ) {
     let mut state = crate::load_persisted_session_state(store)
@@ -250,21 +251,24 @@ async fn commit_session_command_claim_with(
         });
     state.ensure_agent_frame_initialized();
     adjust(&mut state);
-    let first_batch_id = claim
-        .batches
+    let first_batch_id = run
         .first()
-        .expect("command claim has a batch")
+        .expect("the command run has a batch")
         .batch_id
         .clone();
-    let commit = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
+    let mut commit = crate::RuntimeCommit::persisted_state_with_operation_for_testing(
         &state,
         &[],
         crate::OperationId::new(
             crate::ExecutionScope::queue_drain(&request.session_id, first_batch_id),
             "session-command",
         ),
-    )
-    .completing_queue_claim(claim.completion());
+    );
+    commit.drive_fence = Some(Box::new(fence.clone()));
+    commit.applied_commands = Some(crate::QueuedWorkCompletion {
+        session_id: request.session_id.clone(),
+        batch_ids: run.iter().map(|batch| batch.batch_id.clone()).collect(),
+    });
     store
         .commit_runtime_state(commit)
         .await
@@ -481,7 +485,7 @@ async fn hold_config_settlement_lease(
 ) {
     let owner = crate::LeaseOwnerIdentity::opaque("config-blocker", "config-blocker:incarnation");
     store
-        .seal_claim_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
+        .seal_drive_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
         .await
         .expect("claim the competing writer lease")
         .acquired()
@@ -660,7 +664,7 @@ where
     let owner =
         crate::LeaseOwnerIdentity::opaque("superseding-writer", "superseding-writer:incarnation");
     let lease = store
-        .seal_claim_epoch_for_test(&request.session_id, &owner, "superseding-executor", 600_000)
+        .seal_drive_epoch_for_test(&request.session_id, &owner, "superseding-executor", 600_000)
         .await
         .expect("claim superseding session lease")
         .acquired()
@@ -689,13 +693,11 @@ where
 
     // The second writer drains the facade writer's command...
     let claim = store
-        .claim_leading_ready_session_command(&request.session_id, &lease.fence(), &owner)
+        .open_session_command_run(&lease)
         .await
-        .expect("claim facade config command")
-        .expect("facade config command claim");
+        .expect("claim facade config command");
     assert!(
         claim
-            .batches
             .iter()
             .any(|batch| batch.batch_id == command_batch.batch_id),
         "the superseding writer drains the facade writer's command"
@@ -709,7 +711,7 @@ where
         .build()
         .expect("superseding model");
     let newer_model = superseding_model.clone();
-    commit_session_command_claim_with(store.as_ref(), &request, claim, move |state| {
+    commit_session_command_claim_with(store.as_ref(), &request, &lease, claim, move |state| {
         state.policy.model = newer_model;
     })
     .await;

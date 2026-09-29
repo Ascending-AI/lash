@@ -46,7 +46,9 @@ fn tool_call_completed_observation_projects_frame_switch_without_seed_bodies() {
 
     let remote =
         RemoteSessionObservationEvent::from_core(1, event).expect("project remote observation");
-    let wire = remote.encode_json().expect("encode remote observation");
+    let wire = remote
+        .encode_json(&crate::negotiation::test_negotiated())
+        .expect("encode remote observation");
     let wire_text = String::from_utf8(wire.clone()).expect("JSON is UTF-8");
     assert!(!wire_text.contains(MESSAGE_SEED_BODY));
     assert!(!wire_text.contains(PLUGIN_SEED_BODY));

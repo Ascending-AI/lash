@@ -1,11 +1,11 @@
-//! The prepare phase: refresh the resident graph, materialize the claimed
+//! The prepare phase: refresh the resident graph, materialize the admitted
 //! input, normalize its items, and run the context transform that produces the
 //! message sequence the execute phase drives.
 
 use super::*;
 
-/// Everything the prepare phase needs to turn a claimed [`TurnInput`] into a
-/// driven physical turn.
+/// Everything the prepare phase needs to turn an admitted [`TurnInput`] into
+/// a driven physical turn.
 ///
 /// The accept phase builds one of these and the prepare phase consumes it; the
 /// fields are the phase's inputs in the order the phase reads them.
@@ -18,16 +18,14 @@ pub(in crate::runtime) struct TurnPrepareContext<'sinks, 'run> {
     pub(in crate::runtime) sinks: TurnSinks<'sinks>,
     pub(in crate::runtime) scoped_effect_controller: ScopedEffectController<'run>,
     pub(in crate::runtime) local_stop: LocalTurnStop,
-    pub(in crate::runtime) queued_claims: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) turn_input_claims: Vec<crate::TurnInputClaim>,
-    pub(in crate::runtime) materialize_initial_claims: bool,
-    pub(in crate::runtime) lease: TurnLeaseScope<'sinks>,
+    pub(in crate::runtime) admissions: LogicalTurnAdmissions,
+    pub(in crate::runtime) materialize_initial_admissions: bool,
+    pub(in crate::runtime) drive_fence: Option<&'sinks DriveFence>,
 }
 
 impl LashRuntime {
-    /// Bring the resident session up to the durable head under `lease`: reload
-    /// invalidated resident state, then the graph unless this lease already
-    /// holds it current.
+    /// Bring the resident session up to the durable head: reload invalidated
+    /// resident state, then the graph.
     ///
     /// Either adoption drops the running root's resident evidence (FIG-1875:
     /// the head wins for every fact it carries) — but it also reverts the
@@ -38,22 +36,12 @@ impl LashRuntime {
     /// that ran it. Re-installing the captured record afterwards makes the
     /// outcome identical either way; between roots the record is absent and
     /// nothing is restored.
-    pub(in crate::runtime) async fn refresh_resident_head_under_lease(
-        &mut self,
-        session_execution_lease: Option<&DriveClaimGuard>,
-    ) -> Result<(), RuntimeError> {
+    pub(in crate::runtime) async fn refresh_resident_head(&mut self) -> Result<(), RuntimeError> {
         let resolved_run = self.state.authority.resolved_run.clone();
-        self.reload_invalidated_resident_session_state_under_lease(session_execution_lease)
-            .await?;
-        let lease_continuity = session_execution_lease.and_then(DriveClaimGuard::continuity);
-        let resident_graph_is_current = self
-            .resident_session
-            .graph_is_current_under(lease_continuity);
-        if !resident_graph_is_current {
-            self.refresh_session_graph_from_store()
-                .await
-                .map_err(session_head_refresh_error)?;
-        }
+        self.reload_invalidated_resident_session().await?;
+        self.refresh_session_graph_from_store()
+            .await
+            .map_err(session_head_refresh_error)?;
         if let Some(resolved) = resolved_run {
             self.install_resolved_run(&resolved);
         }
@@ -81,39 +69,33 @@ impl LashRuntime {
             sinks: TurnSinks { observer },
             scoped_effect_controller,
             local_stop,
-            queued_claims,
-            mut turn_input_claims,
-            materialize_initial_claims,
-            lease:
-                TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+            mut admissions,
+            materialize_initial_admissions,
+            drive_fence,
         } = context;
         // A direct turn's admission already adopted the head it was admitted
         // on and recorded its index (FIG-3682): re-reading the live head here
         // would undo that on a replay after the turn's own commit.
         let admitted_turn_index = self.admitted_turn_index.take();
         if admitted_turn_index.is_none() {
-            self.refresh_resident_head_under_lease(session_execution_lease)
-                .await?;
+            self.refresh_resident_head().await?;
         }
         // `load_session` refreshes the committed graph/head, checkpoint,
         // config, frames, and token ledger. It does not cover pending turn
         // inputs, queued work, or trigger deliveries; those remain external
-        // ingress and are picked up by their fenced claim paths.
+        // ingress and are picked up by their fenced admission paths.
         let input_trace_turn_id = input.trace_turn_id.clone();
-        let pending_turn_input = materialize_initial_claims
-            .then(|| turn_input_claims.first())
+        let pending_turn_input = materialize_initial_admissions
+            .then(|| admissions.turn_inputs.first())
             .flatten()
-            .map(crate::TurnInputClaim::materialize_turn_input);
+            .map(crate::AdmittedTurnInputs::materialize_turn_input);
         if let Some(work) = pending_turn_input.as_ref()
             && input.items.is_empty()
         {
             let turn_context = input.turn_context.clone();
             input = work.clone();
-            // Retain host controls installed on the initially materialized input. The claim is
-            // rematerialized here to refresh durable payloads, not to erase live run policy.
+            // Retain host controls installed on the initially materialized input. The admission
+            // is rematerialized here to refresh durable payloads, not to erase live run policy.
             input.turn_context = turn_context;
             if input.trace_turn_id.is_none() {
                 input.trace_turn_id = input_trace_turn_id;
@@ -178,7 +160,6 @@ impl LashRuntime {
                     self.host.core.durability.commit_budget,
                 );
                 turn_pipeline.apply_prepared_messages(&messages);
-                let claims = LogicalTurnClaims::new(queued_claims, turn_input_claims);
                 return Box::pin(self.finish_turn(TurnCommitContext {
                     finish: TurnFinishInput {
                         turn_pipeline,
@@ -188,13 +169,10 @@ impl LashRuntime {
                         turn_index,
                         trace_turn_id,
                     },
-                    claims: &claims,
+                    admissions: &admissions,
                     scoped_effect_controller: &scoped_effect_controller,
                     honoured_cancel: None,
-                    lease: TurnLeaseScope {
-                        guard: session_execution_lease,
-                        release_policy: session_execution_lease_release_policy,
-                    },
+                    drive_fence,
                     turn_control: &turn_control,
                     observer,
                 }))
@@ -247,10 +225,11 @@ impl LashRuntime {
         let base_messages = base_read_model.messages;
         let base_render_cache = base_read_model.prompt_render_cache;
         let mut turn_delta = Vec::new();
-        let initial_turn_causes: Vec<_> = queued_claims
+        let initial_turn_causes: Vec<_> = admissions
+            .queued
             .iter()
-            .filter(|_| materialize_initial_claims)
-            .flat_map(|claim| claim.materialize_queued_checkpoint_work().turn_causes)
+            .filter(|_| materialize_initial_admissions)
+            .flat_map(|queued| queued.materialize_queued_checkpoint_work().turn_causes)
             .collect();
         turn_delta.extend(
             initial_turn_causes
@@ -258,9 +237,10 @@ impl LashRuntime {
                 .map(crate::TurnCause::to_event_message),
         );
 
-        let turn_input_id = turn_input_claims
+        let turn_input_id = admissions
+            .turn_inputs
             .iter()
-            .flat_map(|claim| claim.inputs.iter().map(|input| input.input_id.clone()))
+            .flat_map(|admitted| admitted.inputs.iter().map(|input| input.input_id.clone()))
             .next();
         let user_id = turn_input_id
             .as_deref()
@@ -307,9 +287,10 @@ impl LashRuntime {
             });
         }
         let mut initial_turn_input_applications = Vec::new();
-        for claim in &mut turn_input_claims {
-            claim.record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
-            initial_turn_input_applications.extend(claim.applications.iter().cloned());
+        for admitted in &mut admissions.turn_inputs {
+            admitted
+                .record_initial_turn_application(&crate::TurnId::from(&trace_turn_id), &user_id);
+            initial_turn_input_applications.extend(admitted.applications.iter().cloned());
         }
         if !initial_turn_input_applications.is_empty() {
             turn_observation_cursor(&scoped_effect_controller, &trace_turn_id, "prepare").observe(
@@ -331,7 +312,7 @@ impl LashRuntime {
             Arc::clone(&self.host.core.clock),
         );
         let manager = self
-            .runtime_session_services_for_turn(session_execution_lease, &turn_graph_appends)
+            .runtime_session_services_for_turn(drive_fence, &turn_graph_appends)
             .map_err(|err| {
                 RuntimeError::new(RuntimeErrorCode::PluginSessionManager, err.to_string())
             })?;
@@ -453,12 +434,8 @@ impl LashRuntime {
                 sinks: TurnSinks { observer },
                 scoped_effect_controller,
                 local_stop,
-                initial_queue_claims: queued_claims,
-                initial_turn_input_claims: turn_input_claims,
-                lease: TurnLeaseScope {
-                    guard: session_execution_lease,
-                    release_policy: session_execution_lease_release_policy,
-                },
+                initial_admissions: admissions,
+                drive_fence,
             },
             turn_graph_appends,
         ))

@@ -37,6 +37,34 @@ lash_conformance::attachment_adoption_tests!({
 /// Fresh, empty attachment byte stores for the root-set laws, each a
 /// filesystem store in its own directory under `root`: PostgreSQL keeps no
 /// attachment bytes of its own.
+/// `commit` as `root`'s final commit under `fence`: it completes every row
+/// the root admitted and writes the root's terminal.
+fn finishing_root(
+    commit: lash_core_execution::RuntimeCommit,
+    fence: &lash_core_execution::store::DriveFence,
+    root: &str,
+    admission: &lash_core_execution::store::RootAdmission,
+) -> lash_core_execution::RuntimeCommit {
+    let root = lash_core_execution::TurnId::from(root);
+    let mut settlement = lash_core_execution::store::IngressSettlement::new(root.clone());
+    settlement
+        .completed_batches
+        .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+    settlement
+        .completed_inputs
+        .extend(admission.inputs.as_ref().map(|inputs| inputs.completion()));
+    let mut commit = lash_core_execution::testing::store_fixtures::settling_commit_for_test(
+        commit, fence, settlement,
+    );
+    commit.root_terminal = Some(Box::new(lash_core_execution::store::RootTerminalWrite {
+        commit: lash_core_execution::store::TurnCommitId::new(root.clone(), 0),
+        turn: lash_core_execution::store::PhysicalTurn::derive_turn_id(&root, 0),
+        root,
+        stop: None,
+    }));
+    commit
+}
+
 fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentBytesFactory {
     let root = root.path().to_path_buf();
     let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
@@ -75,9 +103,9 @@ use lash_conformance::{
     ReopenableProcessRegistry, ReopenableRuntimePersistence, ReopenableTriggerStore,
 };
 use lash_core_execution::store::RuntimePersistenceDecorator;
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt as _;
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt as _;
 use lash_core_execution::{
-    ProcessExecutionEnvStore, ProcessRegistry, QueuedWorkStore, RuntimePersistence,
+    IngressStore, ProcessExecutionEnvStore, ProcessRegistry, RuntimePersistence,
     SessionCommitStore, SessionStoreFactory, StoreError, TriggerStore,
 };
 use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
@@ -309,19 +337,6 @@ async fn double_law_backend(
     ((attachments, backend), stores, host, runner)
 }
 
-/// The restored-claim conformance fixture uses this PostgreSQL backend while
-/// FIG-3862 replaces its legacy claim path.
-async fn pg_law_backend(
-    storage: &PostgresStorage,
-) -> (
-    (tempfile::TempDir, lash_restate_test::RestateTestBackend),
-    lash_core_execution::Backend,
-) {
-    let (guard, _, _, _) = double_law_backend(storage).await;
-    let backend = guard.1.lash_backend();
-    (guard, backend)
-}
-
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
     let url = database_url()?;
     let database_lock = SharedDatabaseLock::acquire(&url).await;
@@ -391,18 +406,6 @@ lash_conformance::fence_integrity_tests!({
             }
         }
     })
-});
-
-lash_conformance::signed_counter_write_domain_tests!({
-    let Some((database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres signed-write conformance: database is not configured");
-        return;
-    };
-    reset(storage.pool()).await;
-    (
-        database_lock,
-        Arc::new(storage.session_store("signed-write-available")) as Arc<dyn RuntimePersistence>,
-    )
 });
 
 /// Block until at least `at_least` backends are queued on `session_id`'s
@@ -921,7 +924,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("enqueue original wake");
     let owner = lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock", "test");
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &SessionId::from(session_id),
             &owner,
             "wake-executor-1",
@@ -931,20 +934,18 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("seal target drive")
         .acquired()
         .expect("drive sealed");
-    let claim = store
-        .claim_ready_queued_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
-        .expect("claim source-lock wake")
-        .expect("source-lock wake claim");
+    let admission = lash_core_execution::testing::store_fixtures::admit_root_for_test(
+        &store,
+        &lease,
+        &lash_core_execution::TurnId::from("wake-source-root"),
+        lash_core_execution::store::AdmittedHead::Batch(first.batch_id.clone()),
+    )
+    .await
+    .expect("admit source-lock wake")
+    .expect("source-lock wake admission");
     assert_eq!(
-        claim.batches[0].batch_id, first.batch_id,
+        admission.batch_ids(),
+        vec![first.batch_id.clone()],
         "the original wake heads the lane"
     );
 
@@ -1008,10 +1009,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
             )
         };
         completion_store
-            .commit_runtime_state(
-                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-                    .completing_queue_claim(claim.completion()),
-            )
+            .commit_runtime_state(finishing_root(
+                lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+                &lease,
+                "wake-source-root",
+                &admission,
+            ))
             .await
     });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -1120,7 +1123,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let second_owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("wake-source-lock-second", "test");
     let second_lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &SessionId::from(session_id),
             &second_owner,
             "wake-executor-2",
@@ -1130,20 +1133,18 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("claim target for second sequence")
         .acquired()
         .expect("second-sequence target lease");
-    let second_claim = store
-        .claim_ready_queued_work(
-            &SessionId::from(session_id),
-            &second_lease.fence(),
-            &second_owner,
-            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .map(lash_core_execution::QueuedWorkClaimOutcome::claim)
-        .expect("claim second wake sequence")
-        .expect("second wake sequence claim");
+    let second_admission = lash_core_execution::testing::store_fixtures::admit_root_for_test(
+        &store,
+        &second_lease,
+        &lash_core_execution::TurnId::from("wake-source-second-root"),
+        lash_core_execution::store::AdmittedHead::Batch(second.batch_id.clone()),
+    )
+    .await
+    .expect("admit second wake sequence")
+    .expect("second wake sequence admission");
     assert_eq!(
-        second_claim.batches[0].batch_id, second.batch_id,
+        second_admission.batch_ids(),
+        vec![second.batch_id.clone()],
         "the second sequence heads the lane"
     );
     let state = lash_core_execution::store::load_persisted_session_state(store.as_ref())
@@ -1151,10 +1152,12 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         .expect("load target state before second wake settlement")
         .expect("persisted target state");
     store
-        .commit_runtime_state(
-            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(second_claim.completion()),
-        )
+        .commit_runtime_state(finishing_root(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+            &second_lease,
+            "wake-source-second-root",
+            &second_admission,
+        ))
         .await
         .expect("consume second wake sequence");
     let fence_rows: i64 = sqlx::query_scalar(
@@ -1268,14 +1271,88 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
 
     let error = result.expect_err("unknown Postgres attachment owner kind must refuse");
     assert!(
-        matches!(
-            error,
-            StoreError::StoredDataCorrupt {
-                record_kind: "AttachmentManifest owner kind",
-                ref message,
-            } if message == "unknown attachment owner kind `unknown`"
-        ),
-        "Postgres must return the canonical attachment-owner corruption refusal, got {error:?}"
+        matches!(error, StoreError::Incompatible { .. }),
+        "Postgres must return the typed attachment-owner incompatibility, got {error:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn gc_keeps_an_attachment_whose_owner_does_not_decode() {
+    let Some((_database_lock, storage)) = storage().await else {
+        eprintln!("skipping PostgreSQL GC owner test: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         DROP CONSTRAINT IF EXISTS ck_attachment_manifest_owner_kind,
+         DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("allow future owner fixture");
+    sqlx::query(
+        "INSERT INTO lash_attachment_manifest
+         (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
+         VALUES ('future-owner-root', 'future-owner-session', 'uri', 1, 'future', 'opaque'),
+                ('invalid-process-root', 'future-owner-session', 'uri', 1, 'process', 'p_invalid')",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("seed undecodable owners");
+    sqlx::query("INSERT INTO lash_deleted_sessions (session_id) VALUES ('future-owner-session')")
+        .execute(storage.pool())
+        .await
+        .expect("seed deleted session");
+
+    let factory = storage.session_store_factory_with_shared_process_registry();
+    let mut rooted = Vec::new();
+    for name in ["future-owner-root", "invalid-process-root"] {
+        let id = lash_core_execution::AttachmentId::parse(name).expect("attachment id");
+        rooted.push(
+            lash_core_execution::AttachmentRootSet::has_live_attachment_ref(&factory, &id, 100)
+                .await
+                .expect("probe unknown owner"),
+        );
+    }
+    let refs = lash_core_execution::AttachmentRootSet::live_attachment_refs(&factory, 100)
+        .await
+        .expect("reconcile roots");
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM lash_attachment_manifest
+         WHERE session_id = 'future-owner-session'",
+    )
+    .fetch_one(storage.pool())
+    .await
+    .expect("count retained roots");
+
+    sqlx::query("DELETE FROM lash_attachment_manifest WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove fixture");
+    sqlx::query("DELETE FROM lash_deleted_sessions WHERE session_id = 'future-owner-session'")
+        .execute(storage.pool())
+        .await
+        .expect("remove deleted session");
+    sqlx::query(
+        "ALTER TABLE lash_attachment_manifest
+         ADD CONSTRAINT ck_attachment_manifest_owner_kind
+             CHECK (owner_kind IN ('turn', 'process')),
+         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+             CHECK (
+                 (owner_kind IS NULL AND owner_id IS NULL)
+                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
+             )",
+    )
+    .execute(storage.pool())
+    .await
+    .expect("restore owner checks");
+
+    assert_eq!(rooted, vec![true, true]);
+    assert_eq!(count, 2, "reconciliation must retain both roots");
+    assert!(refs.contains(&lash_core_execution::AttachmentId::parse("future-owner-root").unwrap()));
+    assert!(
+        refs.contains(&lash_core_execution::AttachmentId::parse("invalid-process-root").unwrap())
     );
 }
 
@@ -1398,7 +1475,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let owner =
         lash_core_execution::LeaseOwnerIdentity::opaque("clock-test", "clock-test-incarnation");
     let _lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &SessionId::from(SESSION_ID),
             &owner,
             "clock-executor",
@@ -1419,7 +1496,6 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
     let (commit, _) = lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[])
         .with_operation(operation)
         .expect("stamp clock test commit");
-    let commit = commit;
     store
         .commit_runtime_state(commit)
         .await
@@ -1469,11 +1545,7 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     // reds trunk on every schema bump that reaches main before the pin is
     // advanced. This assertion keeps the real invariant: the live database
     // must record the version the compiled store expects.
-    assert_eq!(
-        current_version,
-        PostgresStorage::schema_version(),
-        "live component version must match the compiled store schema version"
-    );
+    assert_eq!(current_version, 1, "the 1.0 compatibility stamp changed");
     let payload_hash_nullable: String = sqlx::query_scalar(
         "SELECT is_nullable FROM information_schema.columns
          WHERE table_schema = 'public'
@@ -1509,23 +1581,24 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
         ),
         "usage identity uniqueness must include the payload encoding version and canonical hash: {usage_identity_constraint}"
     );
-    let stale_version = current_version - 1;
-    // Force the recorded component version to a stale value.
+    let newer_version = current_version + 1;
+    // A newer catalog whose floor passed this build must refuse adoption.
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version) VALUES ('lash-postgres-store', $1)
-         ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
+        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'",
     )
-    .bind(stale_version)
+    .bind(newer_version)
     .execute(&pool)
     .await
-    .expect("write stale schema version");
+    .expect("raise reader floor");
 
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     // Restore the correct version BEFORE asserting so a failed assert never leaves
     // the shared database wedged for other cases.
     sqlx::query(
-        "UPDATE lash_schema_versions SET version = $1 WHERE component = 'lash-postgres-store'",
+        "UPDATE lash_schema_versions SET version = $1, min_reader = $1
+         WHERE component = 'lash-postgres-store'",
     )
     .bind(current_version)
     .execute(&pool)
@@ -1533,13 +1606,12 @@ async fn postgres_from_pool_enforces_schema_version_gate_when_configured() {
     .expect("restore schema version");
 
     let message = match result {
-        Ok(_) => panic!("from_pool must reject a stale schema version"),
+        Ok(_) => panic!("from_pool must reject a raised reader floor"),
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains(&format!("version {stale_version}"))
-            && message.contains(&format!("expected {current_version}")),
-        "expected a schema-version mismatch error, got: {message}"
+        message.contains("reader floor") && message.contains(&newer_version.to_string()),
+        "expected a reader-floor refusal, got: {message}"
     );
 }
 
@@ -1566,8 +1638,8 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
     let result = PostgresStorage::from_pool(pool.clone()).await;
 
     sqlx::query(
-        "INSERT INTO lash_schema_versions (component, version)
-         VALUES ('lash-postgres-store', $1)
+        "INSERT INTO lash_schema_versions (component, version, min_reader)
+         VALUES ('lash-postgres-store', $1, $1)
          ON CONFLICT (component) DO UPDATE SET version = EXCLUDED.version",
     )
     .bind(current_version)
@@ -1580,8 +1652,7 @@ async fn postgres_from_pool_rejects_unstamped_existing_schema_when_configured() 
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains("has no version stamp")
-            && message.contains(&format!("expected {current_version}")),
+        message.contains("unstamped") || message.contains("stamp"),
         "expected an unstamped-schema error, got: {message}"
     );
 }
@@ -1776,10 +1847,10 @@ lash_conformance::trigger_retention_fault_tests!({
     (database_lock, store, fault)
 });
 
+#[path = "conformance/admission_crash_cells.rs"]
+mod admission_crash_cells;
 #[path = "conformance/process_retention.rs"]
 mod process_retention;
-#[path = "conformance/restored_claim_cede.rs"]
-mod restored_claim_cede;
 include!("conformance/append_identity.rs");
 #[path = "conformance/injectors.rs"]
 mod injectors;
@@ -1791,6 +1862,18 @@ lash_conformance::session_read_view_tests!({
     reset(storage.pool()).await;
     (
         _database_lock,
+        Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
+    )
+});
+
+lash_conformance::turn_commit_outcome_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres turn outcome conformance: database URL is not set");
+        return;
+    };
+    reset(storage.pool()).await;
+    (
+        database_lock,
         Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
     )
 });
@@ -1843,8 +1926,10 @@ mod root_control {
     }; [
     (a_terminal_root_never_reparks, "s7b-0"),
     (one_unfinished_root_per_session, "root-one-unfinished"),
+    (admission_delivers_every_row_it_binds, "root-admission-delivers"),
     (a_root_admission_is_idempotent_across_new_rows_and_fences, "root-admission-idempotent"),
-    (a_diverged_root_parks_once_holds_claims_blocks_admission_and_completes_after_restore, "s7b-15"),
+    (a_root_admission_survives_a_worker_crash_without_widening, "drive-admission-commit-crash"),
+    (a_diverged_root_parks_once_holds_its_admitted_rows_blocks_admission_and_completes_after_restore, "s7b-15"),
     (an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempotently_with_no_evidence, "s7b-13"),
     (a_parked_roots_fence_stays_current_until_a_verb, "s7b-14"),
 
@@ -1852,10 +1937,13 @@ mod root_control {
     (redrive_under_a_restored_build_completes_once_and_clears_the_park, "s7b-9"),
     (a_stale_redrive_is_fenced_by_a_later_cancel, "s7b-10"),
     (root_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
+    (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
     (a_root_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
     (cancel_fork_and_close_raise_the_drive_epoch_and_redrive_does_not, "s7b-12"),
 
     (cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next, "s7b-1"),
+    (no_row_stays_bound_after_a_roots_verb_close_or_lost_end, "root-verb-unbinds"),
+    (a_refused_root_ends_once_and_its_next_input_admits_a_new_root, "refused-root-end"),
     (fork_releases_the_old_owner_before_the_new_root_drives_in_original_order_on_a_fresh_journal, "s7b-2"),
     (verbs_are_park_id_cas, "s7b-3"),
     (redrive_under_the_same_build_reparks_the_same_park_with_attempts_plus_one, "s7b-4"),
@@ -1877,4 +1965,19 @@ mod root_control {
     (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
     (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
     ]);
+
+    lash_conformance::root_answers_its_rows_tests!({
+        let Some((lock, storage)) = storage().await else {
+            return;
+        };
+        reset(storage.pool()).await;
+        let ((attachments, double), stores, host, runner) = double_law_backend(&storage).await;
+        (
+            (lock, storage, attachments, double),
+            "pg-root-rows",
+            host,
+            stores,
+            runner,
+        )
+    });
 }

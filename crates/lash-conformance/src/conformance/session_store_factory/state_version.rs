@@ -1,4 +1,4 @@
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -48,13 +48,11 @@ pub(super) async fn session_state_version_admission_contract(
         .expect("stamp newer marker above an undecodable payload");
 
     let owner = crate::LeaseOwnerIdentity::opaque("state-admission-owner", "incarnation");
-    let no_lease = crate::ClaimAuthority {
-        session_id: request.session_id.clone(),
-        owner: owner.clone(),
-        executor_id: "state-admission-executor".to_string(),
-        lease_token: "not-a-live-token".to_string(),
-        fencing_token: 1,
-    };
+    let no_lease = lash_core::store_backend_support::sealed_drive_fence(
+        request.session_id.clone(),
+        1,
+        crate::store::AdmissionId::new("not-a-live-admission"),
+    );
     let ordering_error = store
         .admit_session_state(&no_lease)
         .await
@@ -65,7 +63,7 @@ pub(super) async fn session_state_version_admission_contract(
     );
 
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &request.session_id,
             &owner,
             "state-admission-executor",
@@ -90,7 +88,7 @@ pub(super) async fn session_state_version_admission_contract(
         "newer marker must win over payload decoding, got {recovery_error:?}"
     );
     let admission_error = store
-        .admit_session_state(&lease.fence())
+        .admit_session_state(&lease)
         .await
         .expect_err("newer session generation must refuse admission");
     assert!(matches!(
@@ -117,7 +115,7 @@ pub(super) async fn session_state_version_admission_contract(
             }
         ));
         let error = store
-            .admit_session_state(&lease.fence())
+            .admit_session_state(&lease)
             .await
             .expect_err("snapshot-era state cannot enter a plugin-state runtime");
         assert!(matches!(

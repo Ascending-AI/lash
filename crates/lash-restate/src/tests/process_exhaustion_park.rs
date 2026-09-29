@@ -128,6 +128,7 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
             session_driver: crate::RestateSessionDriverSlot::new(),
             build_generation: lash_core::engine::BuildGeneration::for_test("exhaustion-park"),
             namespace: crate::RestateNamespace::default(),
+            fleet: crate::object_state::FleetView::default(),
         },
     )
     .build();

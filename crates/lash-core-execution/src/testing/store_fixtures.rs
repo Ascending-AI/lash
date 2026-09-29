@@ -1,10 +1,11 @@
 use crate::*;
 
 pub use lash_core_store::testing::store_fixtures::{
-    DriveClaimTestOutcome, RuntimePersistenceTestClaimExt, append_conformance_event_node,
+    DriveSealTestOutcome, RuntimePersistenceTestDriveExt, admit_at_checkpoint_for_test,
+    admit_root_for_test, admit_root_request_for_test, append_conformance_event_node,
     bind_conformance_session, commit_conformance_state, commit_runtime_state_for_test,
-    durable_admission, durable_turn_address, durable_turn_scope, seal_claim_authority_for_test,
-    session_store_request,
+    durable_admission, durable_turn_address, durable_turn_scope, seal_drive_fence_for_test,
+    session_store_request, settling_commit_for_test,
 };
 
 /// The store-backed admitted scope for a registered process row: the
@@ -30,7 +31,7 @@ pub async fn recorded_process_admission(
 pub async fn authorize_completion_deferral_for_test(
     store: &dyn RuntimePersistence,
     authority: &crate::TurnCancellationAuthority,
-    fence: &ClaimAuthority,
+    fence: &crate::store::DriveFence,
     mut commit: RuntimeCommit,
 ) -> Result<RuntimeCommit, RuntimeError> {
     let store_error =
@@ -84,6 +85,6 @@ pub async fn authorize_completion_deferral_for_test(
             .await?,
     );
     commit.interrupted_turn_cancel_intent = Some(observed);
-    commit.session_execution_lease_fence = Some(fence.clone());
+    commit.drive_fence = Some(Box::new(fence.clone()));
     Ok(commit)
 }

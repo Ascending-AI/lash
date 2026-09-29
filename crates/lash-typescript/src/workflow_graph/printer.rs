@@ -32,9 +32,9 @@
 //! surfaced to a user.
 
 use lashlang::{
-    AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
+    AssignPathStep, AssignTarget, Declaration, Expr, FunctionDecl, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, MethodKey, ProcessDecl,
-    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
+    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -181,11 +181,6 @@ impl<'p> Printer<'p> {
                 // the authored `const <binding> = async (..) => ..` keeps its
                 // name.
                 Declaration::Process(_) => {}
-                Declaration::Type(_) => {
-                    return Err(TypeScriptSourceError::Unrepresentable {
-                        kind: "a type declaration",
-                    });
-                }
                 Declaration::Function(function) => {
                     out.push_str(&self.function_declaration(function)?);
                     bound.push(function.name.to_string());
@@ -877,15 +872,11 @@ impl<'p> Printer<'p> {
             }
             Expr::Await(value) => Ok(format!("await {}", self.unary_operand(value)?)),
             Expr::SleepFor(value) => Ok(format!("await sleep({})", self.expression(value)?)),
-            Expr::SleepUntil(_) => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "an absolute sleep deadline",
-            }),
             Expr::WaitSignal { name } => Ok(format!(
                 "await waitSignal({})",
                 string_literal(name.as_str())
             )),
             Expr::Print(value) => Ok(format!("print({})", self.expression(value)?)),
-            Expr::Yield(value) => Ok(format!("yield {}", self.expression(value)?)),
             Expr::Finish(value) => Ok(format!("finish({})", self.expression(value)?)),
             Expr::Fail(value) => Ok(format!("fail({})", self.expression(value)?)),
             Expr::FunctionCall { function, args } => {
@@ -958,13 +949,6 @@ impl<'p> Printer<'p> {
                 self.member_target(target)?,
                 self.expression(index)?
             )),
-            Expr::Unary { op, expr } => {
-                let op = match op {
-                    UnaryOp::Negate => "-",
-                    UnaryOp::Not => "!",
-                };
-                Ok(format!("{op}{}", self.unary_operand(expr)?))
-            }
             Expr::JavaScriptUnary { op, expr } => {
                 let op = match op {
                     JavaScriptUnaryOp::Plus => "+",
@@ -978,12 +962,6 @@ impl<'p> Printer<'p> {
                 };
                 Ok(format!("{op}{}", self.unary_operand(expr)?))
             }
-            Expr::Binary { left, op, right } => Ok(format!(
-                "({} {} {})",
-                self.expression(left)?,
-                lash_binary_op(*op)?,
-                self.expression(right)?
-            )),
             Expr::JavaScriptBinary { left, op, right } => Ok(format!(
                 "({} {} {})",
                 self.binary_operand(left)?,
@@ -1032,20 +1010,11 @@ impl<'p> Printer<'p> {
             Expr::Throw(_) | Expr::Return(_) => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a jump in expression position",
             }),
-            // The lens is a source-language projection: these shapes only reach
-            // it from a producer other than the TypeScript front-end.
-            Expr::Tuple(_) => Err(TypeScriptSourceError::Unrepresentable { kind: "a tuple" }),
-            Expr::ListComprehension { .. } => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a list comprehension",
-            }),
             // A failed host operation throws in TypeScript, so the unwrap the
             // lowerer wraps every module call in has no spelling of its own.
             Expr::ResultUnwrap(value) => self.expression(value),
             Expr::Map { .. } => Err(TypeScriptSourceError::Unrepresentable {
                 kind: "a bare map intrinsic",
-            }),
-            Expr::TypeLiteral(_) => Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a type literal",
             }),
         }
     }
@@ -1266,10 +1235,9 @@ impl<'p> Printer<'p> {
 
     fn unary_operand(&self, expression: &Expr) -> Printed {
         match expression {
-            Expr::Binary { .. }
-            | Expr::JavaScriptBinary { .. }
-            | Expr::JavaScriptLogical { .. }
-            | Expr::If { .. } => self.expression(expression),
+            Expr::JavaScriptBinary { .. } | Expr::JavaScriptLogical { .. } | Expr::If { .. } => {
+                self.expression(expression)
+            }
             _ => self.member_target(expression),
         }
     }
@@ -1677,29 +1645,6 @@ fn is_typescript_identifier(name: &str) -> bool {
             character == '_' || character == '$' || character.is_ascii_alphanumeric()
         })
         && !crate::reserved_words().contains(&name)
-}
-
-fn lash_binary_op(op: BinaryOp) -> Result<&'static str, TypeScriptSourceError> {
-    Ok(match op {
-        BinaryOp::Add => "+",
-        BinaryOp::Subtract => "-",
-        BinaryOp::Multiply => "*",
-        BinaryOp::Divide => "/",
-        BinaryOp::Modulo => "%",
-        BinaryOp::Equal => "===",
-        BinaryOp::NotEqual => "!==",
-        BinaryOp::Less => "<",
-        BinaryOp::LessEqual => "<=",
-        BinaryOp::Greater => ">",
-        BinaryOp::GreaterEqual => ">=",
-        BinaryOp::And => "&&",
-        BinaryOp::Or => "||",
-        BinaryOp::In => {
-            return Err(TypeScriptSourceError::Unrepresentable {
-                kind: "a Lashlang `in` test",
-            });
-        }
-    })
 }
 
 fn javascript_binary_op(op: JavaScriptBinaryOp) -> &'static str {

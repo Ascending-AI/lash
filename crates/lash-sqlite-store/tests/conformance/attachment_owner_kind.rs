@@ -7,8 +7,12 @@ fn sqlite_attachment_owner_kind_sql_derives_from_the_enum() {
             include_str!("../../src/persistence/mod.rs"),
         ),
         (
-            "persistence/claim_support.rs",
-            include_str!("../../src/persistence/claim_support.rs"),
+            "persistence/admission.rs",
+            include_str!("../../src/persistence/admission.rs"),
+        ),
+        (
+            "persistence/ingress_settlement.rs",
+            include_str!("../../src/persistence/ingress_settlement.rs"),
         ),
         (
             "persistence/maintenance.rs",

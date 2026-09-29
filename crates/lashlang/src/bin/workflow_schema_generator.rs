@@ -190,7 +190,7 @@ mod tests {
             .iter()
             .filter(|variant| variant["properties"]["kind"]["enum"] == json!(["container"]))
             .collect::<Vec<_>>();
-        assert_eq!(containers.len(), 4);
+        assert_eq!(containers.len(), 3);
         assert!(containers.iter().all(|variant| {
             variant["additionalProperties"] == json!(false)
                 && variant["required"]

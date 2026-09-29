@@ -1,6 +1,5 @@
 //! Shared durable-counter corruption and exhaustion conformance.
 
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
 use std::future::Future;
@@ -9,7 +8,6 @@ use std::sync::Arc;
 /// A raw durable counter selected by the shared fence-integrity fixture.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FenceIntegrityTarget {
-    QueuedWorkClaimFence { batch_id: String },
     SessionHeadRevision { session_id: SessionId },
     TriggerRevision { subscription_id: String },
 }
@@ -41,81 +39,8 @@ where
     Make: Fn(&'static str) -> Fut,
     Fut: Future<Output = FenceIntegrityHandles>,
 {
-    negative_claim_fence(make("fence-negative-claim").await).await;
     negative_session_head_revision(make("fence-negative-head").await).await;
-    divergent_claim_fences_advance_per_row(make("fence-divergent-rows").await).await;
-    exhausted_claim_fence(make("fence-exhausted-head").await, true).await;
-    exhausted_claim_fence(make("fence-exhausted-tail").await, false).await;
     exhausted_trigger_revision(make("fence-exhausted-trigger").await).await;
-}
-
-/// SQL-only write-direction checks for public `u64` values that must fit the
-/// durable signed domain before any query can observe a wrapped negative.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::RuntimePersistence>) {
-    let too_large = (i64::MAX as u64) + 1;
-    let generation_owner = crate::LeaseOwnerIdentity::opaque(
-        "signed-write-generation",
-        "signed-write-generation:incarnation",
-    );
-    let forged = crate::ClaimAuthority {
-        session_id: SessionId::from("signed-write-generation"),
-        owner: generation_owner.clone(),
-        executor_id: "signed-write-generation-executor".to_string(),
-        lease_token: "forged-generation".to_string(),
-        fencing_token: too_large,
-    };
-    let generation_error = store
-        .claim_checkpoint_work(
-            &SessionId::from("signed-write-generation"),
-            &forged,
-            &generation_owner,
-            &crate::TurnId::from("signed-write-generation-turn"),
-            crate::CheckpointKind::AfterWork,
-            1,
-            crate::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect_err("unrepresentable session generation must refuse before query");
-    assert!(matches!(
-        generation_error,
-        crate::StoreError::MonotonicCounterOverflow {
-            counter: "session_lease_generation",
-            current,
-        } if current == too_large
-    ));
-}
-
-fn queued_draft(session_id: &SessionId, label: &str) -> crate::QueuedWorkBatchDraft {
-    crate::conformance::helpers::process_wake_work(
-        session_id,
-        &format!("fence-integrity:{label}"),
-        1,
-        label,
-        crate::DeliveryPolicy::EarliestSafeBoundary,
-    )
-    .with_merge_key("fence-integrity")
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn claim_lease(
-    store: &Arc<dyn crate::RuntimePersistence>,
-    session_id: &SessionId,
-) -> (crate::LeaseOwnerIdentity, crate::ClaimAuthority) {
-    let owner = crate::LeaseOwnerIdentity::opaque("fence-owner", "fence-owner:incarnation");
-    let lease = store
-        .seal_claim_epoch_for_test(session_id, &owner, "claim-lease-executor", 60_000)
-        .await
-        .expect("claim fence-integrity session lease")
-        .acquired()
-        .expect("fence-integrity session lease is free");
-    (owner, lease)
 }
 
 fn assert_corrupt(
@@ -137,41 +62,6 @@ fn assert_corrupt(
         }
         other => panic!("expected StoredDataCorrupt for {record_kind}.{field}, got {other:?}"),
     }
-}
-
-fn assert_overflow(error: crate::StoreError, counter: &'static str) {
-    assert!(matches!(
-        error,
-        crate::StoreError::MonotonicCounterOverflow {
-            counter: actual,
-            current,
-        } if actual == counter && current == i64::MAX as u64
-    ));
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn negative_claim_fence(handles: FenceIntegrityHandles) {
-    let session_id = "fence-negative-claim";
-    let batch = handles
-        .runtime
-        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "negative"))
-        .await
-        .expect("enqueue negative-fence row");
-    let target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: batch.batch_id.to_string(),
-    };
-    handles.injector.inject_raw_value(&target, -1).await;
-    let before = handles.injector.observe_raw_value(&target).await;
-    let error = handles
-        .runtime
-        .list_queued_work(&SessionId::from(session_id))
-        .await
-        .expect_err("negative queued-work claim fence must refuse");
-    assert_corrupt(error, "QueuedWorkBatch", "claim_fencing_token", -1);
-    assert_eq!(handles.injector.observe_raw_value(&target).await, before);
 }
 
 #[expect(
@@ -206,122 +96,6 @@ async fn negative_session_head_revision(handles: FenceIntegrityHandles) {
         .expect_err("negative session-head revision must refuse");
     assert_corrupt(error, "SessionHeadMeta", "head_revision", -1);
     assert_eq!(handles.injector.observe_raw_value(&target).await, before);
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn divergent_claim_fences_advance_per_row(handles: FenceIntegrityHandles) {
-    let session_id = "fence-divergent-rows";
-    let first = handles
-        .runtime
-        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "first"))
-        .await
-        .expect("enqueue first divergent row");
-    let second = handles
-        .runtime
-        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "second"))
-        .await
-        .expect("enqueue second divergent row");
-    let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: first.batch_id.to_string(),
-    };
-    let second_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: second.batch_id.to_string(),
-    };
-    handles.injector.inject_raw_value(&first_target, 5).await;
-    handles.injector.inject_raw_value(&second_target, 41).await;
-    let (owner, lease) = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
-    let claim = handles
-        .runtime
-        .claim_ready_queued_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(2),
-        )
-        .await
-        .expect("claim divergent fence rows")
-        .claim()
-        .expect("divergent fence rows are claimable");
-    assert_eq!(claim.batches.len(), 2);
-    assert_eq!(
-        handles
-            .injector
-            .observe_raw_value(&first_target)
-            .await
-            .value,
-        6
-    );
-    assert_eq!(
-        handles
-            .injector
-            .observe_raw_value(&second_target)
-            .await
-            .value,
-        42
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn exhausted_claim_fence(handles: FenceIntegrityHandles, exhausted_head: bool) {
-    let session_id = if exhausted_head {
-        "fence-exhausted-head"
-    } else {
-        "fence-exhausted-tail"
-    };
-    let first = handles
-        .runtime
-        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "first"))
-        .await
-        .expect("enqueue first exhausted fixture row");
-    let second = handles
-        .runtime
-        .enqueue_queued_work(queued_draft(&SessionId::from(session_id), "second"))
-        .await
-        .expect("enqueue second exhausted fixture row");
-    let first_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: first.batch_id.to_string(),
-    };
-    let second_target = FenceIntegrityTarget::QueuedWorkClaimFence {
-        batch_id: second.batch_id.to_string(),
-    };
-    handles.injector.inject_raw_value(&first_target, 5).await;
-    handles.injector.inject_raw_value(&second_target, 9).await;
-    let exhausted = if exhausted_head {
-        &first_target
-    } else {
-        &second_target
-    };
-    handles.injector.inject_raw_value(exhausted, i64::MAX).await;
-    let first_before = handles.injector.observe_raw_value(&first_target).await;
-    let second_before = handles.injector.observe_raw_value(&second_target).await;
-    let (owner, lease) = claim_lease(&handles.runtime, &SessionId::from(session_id)).await;
-    let error = handles
-        .runtime
-        .claim_ready_queued_work(
-            &SessionId::from(session_id),
-            &lease.fence(),
-            &owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(2),
-        )
-        .await
-        .expect_err("any exhausted selected row must refuse the whole claim");
-    assert_overflow(error, "queued_work_claim_fencing_token");
-    assert_eq!(
-        handles.injector.observe_raw_value(&first_target).await,
-        first_before
-    );
-    assert_eq!(
-        handles.injector.observe_raw_value(&second_target).await,
-        second_before
-    );
 }
 
 #[expect(

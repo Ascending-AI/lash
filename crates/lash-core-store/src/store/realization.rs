@@ -108,6 +108,7 @@ mod tests {
                     .map(|delta| delta.identity.clone())
                     .collect(),
                 failure_evidence: commit.failure_evidence.clone(),
+                outcome: commit.outcome.clone(),
                 pending_follow_on: None,
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
@@ -117,11 +118,11 @@ mod tests {
 
         async fn raise_pending_follow_on_attempts(
             &self,
-            lease: &super::super::ClaimAuthority,
+            fence: &super::super::DriveFence,
             follow_on_turn_id: &crate::TurnId,
         ) -> Result<super::super::PendingFollowOn, StoreError> {
             Err(StoreError::FollowOnNotPending {
-                session_id: lease.session_id.clone(),
+                session_id: fence.session().clone(),
                 follow_on_turn_id: follow_on_turn_id.clone(),
             })
         }

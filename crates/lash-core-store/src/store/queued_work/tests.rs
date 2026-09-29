@@ -1,64 +1,46 @@
 use super::*;
-use crate::TurnId;
+use crate::{SessionId, TurnId};
 use proptest::{
     collection::vec,
     prelude::*,
     test_runner::{Config, RngSeed, TestRunner},
 };
 
-// The claim-law tests below assert on selection sizes alone; these shadows
+// The admission-law tests below assert on selection sizes alone; these shadows
 // keep them reading that way while the real functions also carry the
 // refusal. Refusal coverage lives in `each_refusal_names_the_scenario_that_produces_it`.
-fn select_turn_work_claim_prefix(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+fn select_turn_work_prefix(
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
 ) -> Result<usize, StoreError> {
-    super::select_turn_work_claim_prefix(candidates, boundary, policy, now_epoch_ms).map(|prefix| {
+    super::select_turn_work_prefix(candidates, boundary, policy, now_epoch_ms).map(|prefix| {
         match prefix {
-            TurnWorkClaimPrefix::Selected { len } => len,
-            TurnWorkClaimPrefix::Refused { .. } => 0,
+            TurnWorkPrefix::Selected { len } => len,
+            TurnWorkPrefix::Refused { .. } => 0,
         }
     })
 }
 
-fn select_turn_work_claim_indices(
-    candidates: &[ClaimCandidate],
-    boundary: QueuedWorkClaimBoundary,
-    policy: &QueuedWorkClaimPolicy,
+fn select_turn_work_indices(
+    candidates: &[TurnLaneCandidate],
+    boundary: AdmissionBoundary,
+    policy: &TurnLaneAdmissionPolicy,
     now_epoch_ms: u64,
 ) -> Result<Vec<usize>, StoreError> {
-    super::select_turn_work_claim_indices(candidates, boundary, policy, now_epoch_ms).map(
-        |selection| match selection {
-            TurnWorkClaimSelection::Selected { indices } => indices,
-            TurnWorkClaimSelection::Refused { .. } => Vec::new(),
-        },
-    )
+    super::select_turn_work_indices(candidates, boundary, policy, now_epoch_ms).map(|selection| {
+        match selection {
+            TurnWorkSelection::Selected { indices } => indices,
+            TurnWorkSelection::Refused { .. } => Vec::new(),
+        }
+    })
 }
 
-#[test]
-fn claim_id_dialects_preserve_existing_spelling() {
-    let cases = [
-        (ClaimIdDialect::QueuedWork, "qwc:7:3"),
-        (ClaimIdDialect::TurnInput, "tic:7:3"),
-        (ClaimIdDialect::RecordingQueuedWork, "recording-qwc:7:3"),
-        (ClaimIdDialect::RecordingTurnInput, "recording-tic:7:3"),
-        (ClaimIdDialect::PerformanceQueuedWork, "perf-qwc:7:3"),
-        (ClaimIdDialect::PerformanceTurnInput, "perf-tic:7:3"),
-    ];
-    for (dialect, expected) in cases {
-        assert_eq!(derive_claim_id(dialect, 7, 3), expected);
-    }
-}
-
-fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
-    ClaimCandidate {
+fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> TurnLaneCandidate {
+    TurnLaneCandidate {
         batch_id: format!("qwb-{enqueue_seq}").into(),
         enqueue_seq,
-        claim_fencing_token: 0,
-        prior_claim_id: None,
-        prior_claim_token: None,
         config_patch_command: false,
         delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
         kind: QueuedWorkKind::Turn,
@@ -69,11 +51,11 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
     }
 }
 
-/// The turn cause a durable process wake renders into the claim's
+/// The turn cause a durable process wake renders into the admission's
 /// model-visible prompt, the only queued work the token bound measures.
 /// Identifiers stay short (the process id is a minted-form fixture id, the
 /// rest single words) so one default row renders under the tiny windows some
-/// claim laws below use, while several rows together do not.
+/// admission laws below use, while several rows together do not.
 fn wake_cause(sequence: u64, text: &str) -> TurnCause {
     TurnCause {
         id: format!("w{sequence}"),
@@ -89,7 +71,7 @@ fn wake_cause(sequence: u64, text: &str) -> TurnCause {
     }
 }
 
-fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
+fn rendered_candidate_strategy() -> impl Strategy<Value = TurnLaneCandidate> {
     let merge_key = prop_oneof![
         Just(None),
         Just(Some("wake".to_string())),
@@ -145,12 +127,9 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
     )
         .prop_map(
             |(enqueue_seq, merge_key, kind, delivery_policy, authority, turn_causes)| {
-                ClaimCandidate {
+                TurnLaneCandidate {
                     batch_id: format!("qwb-{enqueue_seq}").into(),
                     enqueue_seq,
-                    claim_fencing_token: 0,
-                    prior_claim_id: None,
-                    prior_claim_token: None,
                     config_patch_command: false,
                     delivery_policy,
                     kind,
@@ -163,8 +142,8 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         )
 }
 
-fn policy(max_context_tokens: usize, action_token_reserve: usize) -> QueuedWorkClaimPolicy {
-    QueuedWorkClaimPolicy {
+fn policy(max_context_tokens: usize, action_token_reserve: usize) -> TurnLaneAdmissionPolicy {
+    TurnLaneAdmissionPolicy {
         max_context_tokens,
         action_token_reserve,
         max_rows: 64,
@@ -186,101 +165,70 @@ fn each_refusal_names_the_scenario_that_produces_it() {
     let mut boundary_blocked = candidate(1, None);
     boundary_blocked.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
 
-    let cases: Vec<(&str, Vec<ClaimCandidate>, QueuedWorkClaimBoundary, _, _)> = vec![
+    let cases: Vec<(&str, Vec<TurnLaneCandidate>, AdmissionBoundary, _, _)> = vec![
         (
             "a host policy that admits no rows",
             vec![candidate(1, None)],
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             zero_row_policy,
-            QueuedWorkClaimRefusal::ZeroLimit,
+            AdmissionRefusal::ZeroLimit,
         ),
         (
             "an exhausted queue",
             Vec::new(),
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             policy(1_000, 100),
-            QueuedWorkClaimRefusal::Empty,
+            AdmissionRefusal::Empty,
         ),
         (
             "a session command at the queue head",
             vec![command_head],
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             policy(1_000, 100),
-            QueuedWorkClaimRefusal::CommandAtHead,
+            AdmissionRefusal::CommandAtHead,
         ),
         (
             "a head that may not cross the active turn boundary",
             vec![boundary_blocked],
-            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            AdmissionBoundary::ActiveTurnCheckpoint,
             policy(1_000, 100),
-            QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
+            AdmissionRefusal::DeliveryBoundaryBlocked,
         ),
     ];
-    for (scenario, candidates, boundary, claim_policy, expected) in cases {
+    for (scenario, candidates, boundary, admission_policy, expected) in cases {
         let selection =
-            super::select_turn_work_claim_indices(&candidates, boundary, &claim_policy, 1_000)
-                .expect("claim laws hold");
+            super::select_turn_work_indices(&candidates, boundary, &admission_policy, 1_000)
+                .expect("admission laws hold");
         assert_eq!(
             selection,
-            TurnWorkClaimSelection::Refused { reason: expected },
+            TurnWorkSelection::Refused { reason: expected },
             "{scenario}"
         );
         let prefix =
-            super::select_turn_work_claim_prefix(&candidates, boundary, &claim_policy, 1_000)
-                .expect("claim laws hold");
+            super::select_turn_work_prefix(&candidates, boundary, &admission_policy, 1_000)
+                .expect("admission laws hold");
         assert_eq!(
             prefix,
-            TurnWorkClaimPrefix::Refused { reason: expected },
+            TurnWorkPrefix::Refused { reason: expected },
             "{scenario}"
         );
     }
-
-    // A withheld head leaves a legal selection that no prefix-claiming
-    // backend can take: the rows it may claim do not start at the head.
-    let mut withheld_head = candidate(1, None);
-    withheld_head.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
-    withheld_head.prior_claim_id = Some("qwc:1:1".to_string());
-    let candidates = vec![withheld_head, candidate(2, None)];
-    let selection = super::select_turn_work_claim_indices(
-        &candidates,
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-        &policy(1_000, 100),
-        1_000,
-    )
-    .expect("claim laws hold");
-    assert_eq!(
-        selection,
-        TurnWorkClaimSelection::Selected { indices: vec![1] }
-    );
-    let prefix = super::select_turn_work_claim_prefix(
-        &candidates,
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
-        &policy(1_000, 100),
-        1_000,
-    )
-    .expect("claim laws hold");
-    assert_eq!(
-        prefix,
-        TurnWorkClaimPrefix::Refused {
-            reason: QueuedWorkClaimRefusal::HeadWithheld
-        }
-    );
 }
 
 /// The spellings travel into host logs and metrics labels, and they are the
-/// same strings the claim-decision diagnostics have always emitted.
+/// same strings the admission-decision diagnostics have always emitted.
 #[test]
 fn refusal_spellings_are_stable() {
     let cases = [
-        (QueuedWorkClaimRefusal::ZeroLimit, "zero_limit"),
-        (QueuedWorkClaimRefusal::Empty, "empty"),
-        (QueuedWorkClaimRefusal::CommandAtHead, "command_at_head"),
+        (AdmissionRefusal::ZeroLimit, "zero_limit"),
+        (AdmissionRefusal::Empty, "empty"),
+        (AdmissionRefusal::CommandAtHead, "command_at_head"),
         (
-            QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
+            AdmissionRefusal::DeliveryBoundaryBlocked,
             "delivery_boundary_blocked",
         ),
-        (QueuedWorkClaimRefusal::HeadWithheld, "head_withheld"),
-        (QueuedWorkClaimRefusal::ClaimRaceLost, "claim_race_lost"),
+        (AdmissionRefusal::HeadWithheld, "head_withheld"),
+        (AdmissionRefusal::AdmissionRaceLost, "admission_race_lost"),
     ];
     for (refusal, expected) in cases {
         assert_eq!(refusal.as_str(), expected);
@@ -291,9 +239,9 @@ fn refusal_spellings_are_stable() {
 fn absent_merge_key_never_merges() {
     let candidates = vec![candidate(1, None), candidate(2, None)];
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             &policy(1_000, 100),
             1_000,
         )
@@ -305,13 +253,13 @@ fn absent_merge_key_never_merges() {
 #[test]
 fn matching_key_groups_prefix_up_to_row_bound() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-    let mut claim_policy = policy(1_000, 100);
-    claim_policy.max_rows = 1;
+    let mut admission_policy = policy(1_000, 100);
+    admission_policy.max_rows = 1;
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
+            AdmissionBoundary::Idle,
+            &admission_policy,
             1_000,
         )
         .unwrap(),
@@ -331,9 +279,9 @@ fn authority_and_elevation_are_independent_compatibility_gates() {
         vec![first.clone(), different_elevation],
     ] {
         assert_eq!(
-            select_turn_work_claim_prefix(
+            select_turn_work_prefix(
                 &candidates,
-                QueuedWorkClaimBoundary::Idle,
+                AdmissionBoundary::Idle,
                 &policy(1_000, 100),
                 1_000
             )
@@ -352,17 +300,17 @@ fn control_kind_is_a_command_barrier() {
     assert!(!first.kind.is_batchable());
     let candidates = vec![first, candidate(2, Some("wake"))];
     assert_eq!(select_leading_session_command(&candidates), 1);
-    let selection = super::select_turn_work_claim_prefix(
+    let selection = super::select_turn_work_prefix(
         &candidates,
-        QueuedWorkClaimBoundary::Idle,
+        AdmissionBoundary::Idle,
         &policy(1_000, 100),
         1_000,
     )
     .unwrap();
     assert_eq!(
         selection,
-        TurnWorkClaimPrefix::Refused {
-            reason: QueuedWorkClaimRefusal::CommandAtHead
+        TurnWorkPrefix::Refused {
+            reason: AdmissionRefusal::CommandAtHead
         }
     );
 }
@@ -380,9 +328,9 @@ fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
         vec![first.clone(), command],
     ] {
         assert_eq!(
-            select_turn_work_claim_prefix(
+            select_turn_work_prefix(
                 &candidates,
-                QueuedWorkClaimBoundary::Idle,
+                AdmissionBoundary::Idle,
                 &policy(1_000, 100),
                 1_000
             )
@@ -393,7 +341,7 @@ fn merge_key_delivery_and_work_class_mismatches_break_prefix() {
 }
 
 #[test]
-fn all_mode_claims_the_whole_compatible_prefix_without_token_arithmetic() {
+fn all_mode_admits_the_whole_compatible_prefix_without_token_arithmetic() {
     let candidates = vec![
         candidate(1, Some("wake")),
         candidate(2, Some("wake")),
@@ -401,27 +349,27 @@ fn all_mode_claims_the_whole_compatible_prefix_without_token_arithmetic() {
     ];
     // One row fits this deliberately tiny window; the three together do not,
     // as the default token-bounded drain shows.
-    let mut claim_policy = policy(131, 30);
+    let mut admission_policy = policy(131, 30);
     assert_ne!(
-        select_turn_work_claim_indices(
+        select_turn_work_indices(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
+            AdmissionBoundary::Idle,
+            &admission_policy,
             1_000,
         )
         .unwrap(),
         vec![0, 1, 2],
         "the three rows must render past the window"
     );
-    claim_policy.drain_policy =
+    admission_policy.drain_policy =
         std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
     // `All` is a host statement that the provider is the authority on what
     // fits, so Lash coalesces every compatible row anyway.
     assert_eq!(
-        select_turn_work_claim_indices(
+        select_turn_work_indices(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
+            AdmissionBoundary::Idle,
+            &admission_policy,
             1_000,
         )
         .unwrap(),
@@ -455,13 +403,13 @@ fn a_custom_policy_selection_is_clamped_to_the_legal_prefix() {
     }
 
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
-    let mut claim_policy = policy(1_000, 100);
-    claim_policy.drain_policy = std::sync::Arc::new(GreedyPolicy);
+    let mut admission_policy = policy(1_000, 100);
+    admission_policy.drain_policy = std::sync::Arc::new(GreedyPolicy);
     assert_eq!(
-        select_turn_work_claim_indices(
+        select_turn_work_indices(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
+            AdmissionBoundary::Idle,
+            &admission_policy,
             1_000,
         )
         .unwrap(),
@@ -487,13 +435,8 @@ fn a_custom_policy_selection_is_clamped_to_the_legal_prefix() {
     empty_policy.drain_policy = std::sync::Arc::new(EmptyPolicy);
     // A policy cannot starve its own queue: the head always drains.
     assert_eq!(
-        select_turn_work_claim_indices(
-            &candidates,
-            QueuedWorkClaimBoundary::Idle,
-            &empty_policy,
-            1_000,
-        )
-        .unwrap(),
+        select_turn_work_indices(&candidates, AdmissionBoundary::Idle, &empty_policy, 1_000,)
+            .unwrap(),
         vec![0]
     );
 }
@@ -505,16 +448,16 @@ fn an_oversized_non_head_row_clamps_the_drain_instead_of_failing_it() {
     let mut second = candidate(2, Some("wake"));
     second.turn_causes = vec![wake_cause(2, &"b".repeat(4_000))];
     let third = candidate(3, Some("wake"));
-    let mut claim_policy = policy(1_000, 100);
-    claim_policy.drain_policy =
+    let mut admission_policy = policy(1_000, 100);
+    admission_policy.drain_policy =
         std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
     // The fitting head still drains: the selection stops before the
-    // oversized row rather than failing a claim that can make progress.
+    // oversized row rather than failing an admission that can make progress.
     assert_eq!(
-        select_turn_work_claim_indices(
+        select_turn_work_indices(
             &[first.clone(), second.clone(), third],
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
+            AdmissionBoundary::Idle,
+            &admission_policy,
             1_000,
         )
         .unwrap(),
@@ -522,10 +465,10 @@ fn an_oversized_non_head_row_clamps_the_drain_instead_of_failing_it() {
     );
     // On the next wake the oversized row is the head, and it is refused
     // there by name rather than wedging the queue silently.
-    let error = select_turn_work_claim_indices(
+    let error = select_turn_work_indices(
         &[second, first],
-        QueuedWorkClaimBoundary::Idle,
-        &claim_policy,
+        AdmissionBoundary::Idle,
+        &admission_policy,
         1_000,
     )
     .expect_err("an oversized head row must be refused by name");
@@ -543,41 +486,6 @@ fn an_oversized_non_head_row_clamps_the_drain_instead_of_failing_it() {
         }
         other => panic!("unexpected error: {other:?}"),
     }
-}
-
-#[test]
-fn an_interrupted_redrive_never_consults_the_drain_policy() {
-    #[derive(Debug)]
-    struct PanickingPolicy;
-    impl crate::QueuedDrainPolicy for PanickingPolicy {
-        fn name(&self) -> &str {
-            "test_panicking"
-        }
-
-        fn select_drain(
-            &self,
-            _request: &crate::QueuedDrainRequest<'_>,
-        ) -> crate::QueuedDrainSelection {
-            panic!("replayed drains must serve the journaled selection");
-        }
-    }
-
-    let mut first = candidate(1, Some("wake"));
-    first.prior_claim_id = Some("qwc:1:1".to_string());
-    let mut second = candidate(2, Some("wake"));
-    second.prior_claim_id = Some("qwc:1:1".to_string());
-    let mut claim_policy = policy(1_000, 100);
-    claim_policy.drain_policy = std::sync::Arc::new(PanickingPolicy);
-    assert_eq!(
-        select_turn_work_claim_indices(
-            &[first, second],
-            QueuedWorkClaimBoundary::Idle,
-            &claim_policy,
-            1_000,
-        )
-        .unwrap(),
-        vec![0, 1]
-    );
 }
 
 #[test]
@@ -612,9 +520,9 @@ fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
     let mut first = candidate(1, Some("wake"));
     first.turn_causes = vec![wake_cause(1, &"a".repeat(800))];
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &[first],
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             &policy(1_000, 300),
             1_000
         )
@@ -628,9 +536,9 @@ fn row_that_cannot_fit_context_fails_loudly() {
     let mut first = candidate(7, Some("wake"));
     first.turn_causes = vec![wake_cause(7, &"a".repeat(1_001))];
     assert!(matches!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &[first],
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             &policy(1_000, 300),
             1_000
         ),
@@ -646,9 +554,9 @@ fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
     let mut first = candidate(1, None);
     first.delivery_policy = DeliveryPolicy::AfterCurrentTurnCommit;
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &[first],
-            QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
+            AdmissionBoundary::ActiveTurnCheckpoint,
             &policy(1_000, 100),
             1_000,
         )
@@ -658,15 +566,15 @@ fn active_turn_checkpoint_boundary_gates_on_delivery_policy() {
 }
 
 #[test]
-fn leading_session_command_blocks_turn_work_claim() {
+fn leading_session_command_blocks_turn_work_admission() {
     let mut command = candidate(1, None);
     command.kind = QueuedWorkKind::Control;
     let candidates = vec![command, candidate(2, None)];
     assert_eq!(select_leading_session_command(&candidates), 1);
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             &policy(1_000, 100),
             1_000
         )
@@ -676,7 +584,7 @@ fn leading_session_command_blocks_turn_work_claim() {
 }
 
 #[test]
-fn adjacent_config_commands_share_one_claim_but_not_other_commands() {
+fn adjacent_config_commands_share_one_admission_but_not_other_commands() {
     let mut first = candidate(1, None);
     first.kind = QueuedWorkKind::Control;
     first.config_patch_command = true;
@@ -692,87 +600,18 @@ fn adjacent_config_commands_share_one_claim_but_not_other_commands() {
 }
 
 #[test]
-fn overdue_head_is_claimed_alone_at_claim_time() {
+fn overdue_head_is_admitted_alone_at_admission_time() {
     let candidates = vec![candidate(1, Some("wake")), candidate(2, Some("wake"))];
     assert_eq!(
-        select_turn_work_claim_prefix(
+        select_turn_work_prefix(
             &candidates,
-            QueuedWorkClaimBoundary::Idle,
+            AdmissionBoundary::Idle,
             &policy(1_000, 100),
             2_000
         )
         .unwrap(),
         1
     );
-}
-
-#[test]
-fn lease_derivation_is_deterministic_and_advances_fencing() {
-    let head = ClaimCandidate {
-        batch_id: "qwb-7".into(),
-        enqueue_seq: 7,
-        claim_fencing_token: 2,
-        prior_claim_id: None,
-        prior_claim_token: None,
-        config_patch_command: false,
-        delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-        kind: QueuedWorkKind::Turn,
-        authority: QueuedWorkAuthority::default(),
-        merge_key: None,
-        enqueued_at_ms: 0,
-        turn_causes: Vec::new(),
-    };
-    let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
-    let lease =
-        WorkClaimLease::derive_queued_work(&head, &SessionId::from("session"), &owner, 1_000, 5)
-            .expect("derive lease");
-    assert_eq!(lease.fencing_token, 3);
-    assert_eq!(lease.claim_id, "qwc:7:3");
-    assert_eq!(lease.session_lease_generation, 5);
-    let again =
-        WorkClaimLease::derive_queued_work(&head, &SessionId::from("session"), &owner, 1_000, 5)
-            .expect("derive lease again");
-    assert_eq!(lease.lease_token, again.lease_token);
-    assert_eq!(
-        lease.lease_token,
-        "e6868c695c13e62c7dec54445896e7fcc9a88e863ddd380318c041ec1364b521"
-    );
-}
-
-#[test]
-fn lease_token_framing_distinguishes_opaque_identity_boundaries() {
-    let head = ClaimCandidate {
-        batch_id: "qwb-7".into(),
-        enqueue_seq: 7,
-        claim_fencing_token: 2,
-        prior_claim_id: None,
-        prior_claim_token: None,
-        config_patch_command: false,
-        delivery_policy: DeliveryPolicy::EarliestSafeBoundary,
-        kind: QueuedWorkKind::Turn,
-        authority: QueuedWorkAuthority::default(),
-        merge_key: None,
-        enqueued_at_ms: 0,
-        turn_causes: Vec::new(),
-    };
-    let left = WorkClaimLease::derive_queued_work(
-        &head,
-        &SessionId::from("a:b"),
-        &LeaseOwnerIdentity::opaque("c", "incarnation"),
-        1_000,
-        5,
-    )
-    .expect("derive left lease");
-    let right = WorkClaimLease::derive_queued_work(
-        &head,
-        &SessionId::from("a"),
-        &LeaseOwnerIdentity::opaque("b:c", "incarnation"),
-        1_000,
-        5,
-    )
-    .expect("derive right lease");
-
-    assert_ne!(left.lease_token, right.lease_token);
 }
 
 #[test]
@@ -805,23 +644,4 @@ fn pending_session_ordering_drains_commands_first() {
     assert!(precedes(Some(key(10, 1)), Some(key(10, 1))));
     assert!(precedes(Some(key(10, 1)), None));
     assert!(!precedes(None, Some(key(10, 1))));
-}
-
-#[test]
-fn empty_scan_diagnostic_preserves_refusal_and_names_became_selectable() {
-    let selected = TurnWorkEmptyScanDiagnostic::from(TurnWorkClaimPrefix::Selected { len: 1 });
-    assert_eq!(selected, TurnWorkEmptyScanDiagnostic::BecameSelectable);
-    assert_eq!(selected.into_refusal(), QueuedWorkClaimRefusal::Empty);
-    for reason in [
-        QueuedWorkClaimRefusal::ZeroLimit,
-        QueuedWorkClaimRefusal::Empty,
-        QueuedWorkClaimRefusal::CommandAtHead,
-        QueuedWorkClaimRefusal::DeliveryBoundaryBlocked,
-        QueuedWorkClaimRefusal::HeadWithheld,
-        QueuedWorkClaimRefusal::ClaimRaceLost,
-    ] {
-        let diagnostic = TurnWorkEmptyScanDiagnostic::from(TurnWorkClaimPrefix::Refused { reason });
-        assert_eq!(diagnostic, TurnWorkEmptyScanDiagnostic::Refused { reason });
-        assert_eq!(diagnostic.into_refusal(), reason);
-    }
 }

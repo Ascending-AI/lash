@@ -4,7 +4,8 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
 mod trigger_scope;
-use trigger_scope::{missing_process_execution_error, resolve_trigger_owner_scope};
+use trigger_scope::missing_process_execution_error;
+pub use trigger_scope::resolve_trigger_owner_scope;
 
 use tokio_util::sync::CancellationToken;
 
@@ -893,11 +894,12 @@ impl<'run> RuntimeExecutionContext<'run> {
     ) -> Self {
         // The lineage the process's body starts children under (FIG-3607 R1),
         // on the dispatch every start made inside this run realizes through.
-        if self.dispatch.process_lineage.is_none() {
-            let mut dispatch = (*self.dispatch).clone();
+        let mut dispatch = (*self.dispatch).clone();
+        if dispatch.process_lineage.is_none() {
             dispatch.process_lineage = Some(registration.lineage(&process_id));
-            self.dispatch = Arc::new(dispatch);
         }
+        dispatch.process_originator = Some(registration.provenance.originator.clone());
+        self.dispatch = Arc::new(dispatch);
         self.process_execution = Some(RuntimeProcessExecution {
             process_id,
             originator: registration.provenance.originator.clone(),
@@ -1349,7 +1351,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         .await
     }
 
-    fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+    pub(crate) fn inherited_process_execution_env_ref(
+        &self,
+    ) -> Option<crate::ProcessExecutionEnvRef> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.env_ref.clone())

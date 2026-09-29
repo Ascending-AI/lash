@@ -36,6 +36,11 @@ the shell tools are historical. Amended 2026-09-26 (FIG-3607): `processes.start`
 declares the Lifetime its host's policy chooses from the start's context
 ([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)).
 
+Amended 2026-09-29 (FIG-3562, [ADR 0116](0116-tools-are-opaque.md)): the
+orchestrating and internal capability classes are deleted, and a pending
+attempt may declare exactly one start through `PendingResolver::DeclaredStart`.
+See [the amendment at the end](#amendment-fig-3562-2026-09-29-one-execution-seam-no-orchestrating-lane).
+
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side
 effect performed while a tool runs. Pretending that those operations compose
@@ -431,3 +436,28 @@ alike ([ADR 0065](0065-concurrent-settlement-is-a-durable-group-at-the-effect-ho
 registered `GroupExecutors`). No caller-closure route is reintroduced: a caller
 vector can answer only first dispatch, and retry, drain, a resuming process and a
 fresh handler execution all run with no caller in scope.
+
+## Amendment (FIG-3562, 2026-09-29): one execution seam, no orchestrating lane
+
+[ADR 0116](0116-tools-are-opaque.md) replaces the two capability classes above with one. A tool body is a leaf
+`ToolProvider::execute(ToolCall) -> ToolAttemptOutcome` that sees only
+`AttemptContext`. The law now reads: *if you need a result that arrives later,
+return Pending; if you need to cause durable work, return an intent.* The
+orchestrating lane (`OrchestratingToolDef`, `OrchestrationContext`, its unsafe
+capability constructor, its typed source key and the cross-lane collision
+laws), the orchestration-body determinism contract and its lint, and the
+internal `ProcessInput::ToolCall` body class are deleted. A
+`ProcessInput::ToolCall` runs an ordinary recorded attempt. Protocol-standard
+`batch` is sugar that the standard driver expands into the turn step's one
+top-level tool group ([ADR 0116](0116-tools-are-opaque.md) §2). `spawn_agent` is an ordinary tool that returns
+Pending carrying one `DeclaredStart` ([ADR 0116](0116-tools-are-opaque.md) §3, §4).
+
+`ToolAttemptOutcome::Pending` still cannot carry `ToolIntents`.
+`PendingResolver::DeclaredStart` is the second runtime-executed carve-out on
+the pending return, beside `PendingAnnouncement`. It holds exactly one
+same-session start, sealed with a recoverable launch obligation at the
+child's cancel linearization point, and a non-final attempt's declaration is
+discarded with it. Every sentence above and in "The protected phase" that
+says `batch` or `spawn_agent` has no `ToolAttempt` frame is superseded: every
+tool child is an attempt. The structural rule, that a recorded body emits no
+commands into an ordinal-addressed journal, stands.

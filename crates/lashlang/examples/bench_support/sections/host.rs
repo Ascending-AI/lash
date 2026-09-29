@@ -139,7 +139,7 @@ fn bench_call(name: &str, args: &Record) -> Result<Value, ExecutionHostError> {
         }
         "list_process_handles" => Ok(process_handles_record()),
         "continue_as" => Ok(continue_as_record(args)),
-        "triggers.register" => Ok(trigger_register_record(args)),
+        "tool:register_trigger" => Ok(trigger_register_record(args)),
         "triggers.list" => Ok(trigger_list_value(args)),
         "triggers.disable" => Ok(trigger_mutation_record(args, "disabled")),
         _ => Err(unknown_tool(name)),

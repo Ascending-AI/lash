@@ -5,9 +5,9 @@ set -euo pipefail
 #
 # No container, no token, no network beyond loopback: a SQLite scratch store
 # set, a scripted provider and a local restate-server, the zero-infra effect
-# engine `scripts/ci/with-service.sh restate` runs (ADR 0104 section 4). One TypeScript row, as runbooks/RULES.md requires since FIG-3023,
-# with its own artifact directory and its own fresh data directory (the harness
-# makes one per run).
+# engine `scripts/ci/with-service.sh restate` runs (ADR 0104 section 4).
+# The RLM TypeScript row and standard-protocol row have separate artifact
+# directories; the harness makes a fresh data directory for each session.
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
@@ -165,9 +165,8 @@ if control["control_stop"] != "provider_error":
 if control["control_stop"] == observed["overflow_stop"]:
     fail(f"overflow and provider error collapsed into one outcome: {control}")
 
-# The same session continues after the overflow. Plugin-owned recovery is not
-# a gate here: the standard-compaction plugin serves standard-protocol
-# sessions only (FIG-4029), and standard sessions own plugin recovery.
+# The RLM sessions continue after the overflow. Their outcome gates stay
+# independent of the standard protocol's plugin recovery.
 for name, value in (("injected", observed), ("classified", classified)):
     if value["continued_is_success"] is not True:
         fail(f"[{name}] the session did not continue after the overflow: {value}")
@@ -180,10 +179,35 @@ for name, value in (("injected", observed), ("classified", classified)):
 if classified["overflow_stop"] != observed["overflow_stop"]:
     fail(f"the classifier arm produced a different stop: {classified}")
 
+standard = checkpoint("standard_plugin_recovered")
+if standard.get("protocol") != "standard":
+    fail(f"the recovery arm did not use the standard protocol: {standard}")
+if standard["oversized_tool_result_bytes"] < 256 * 1024 or standard["provider_calls"] < 4:
+    fail(f"the standard arm did not overflow after a real tool result: {standard}")
+if standard["overflow_stop"] != "context_overflow" or standard["overflow_is_context_overflow"] is not True:
+    fail(f"the standard arm lost its overflow outcome: {standard}")
+if standard["plugin_recovery_pending"] is not True:
+    fail(f"the standard plugin did not persist the pending marker: {standard}")
+if standard["plugin_recovery_completed"] is not True:
+    fail(f"the standard plugin did not persist completion: {standard}")
+if standard["plugin_recovery_summary_chars"] <= 0:
+    fail(f"the standard plugin produced no recovery summary: {standard}")
+if standard["recovery_frame_reason"] != "compaction" or standard["recovery_frame_moved"] is not True:
+    fail(f"the standard session did not enter a new compaction frame: {standard}")
+if standard["continued_is_success"] is not True or standard["continued_is_context_overflow"] is not False:
+    fail(f"the standard session did not continue after recovery: {standard}")
+if not standard.get("continued_assistant_message"):
+    fail(f"the standard continuation has no assistant answer: {standard}")
+
+standard_dir = row.parent / "standard"
+standard_dir.mkdir(exist_ok=True)
+(standard_dir / "03-observed.jsonl").write_text(json.dumps(standard) + "\n", encoding="utf-8")
+
 print(
     f"context-overflow-recovery [{dialect}] gates: mid-turn overflow (injected + "
     "classified), own outcome, distinct from provider_error, session continued"
 )
+print("context-overflow-recovery [standard] gates: plugin recovery pending + completed, summary, compaction frame, session continued")
 PY
 
-echo "context-overflow-recovery e2e passed: rows=1 dialect=$dialect" | tee -a "$run_log"
+echo "context-overflow-recovery e2e passed: rows=2 rlm_dialect=$dialect" | tee -a "$run_log"

@@ -7,7 +7,7 @@
 //!
 //! Reopen and recovery laws use distinct outer handles over one substrate.
 //! The runtime-persistence recovery laws certify store behavior only across
-//! claim, checkpoint, commit, and settlement boundaries. The distinct
+//! admission, checkpoint, commit, and settlement boundaries. The distinct
 //! [`turn_crash_matrix_level_1`] suite executes a real scripted turn through
 //! conformance-owned store, provider, and effect-controller decorators; its
 //! golden trace generates the crash points and its outcome table supplies the
@@ -36,6 +36,7 @@ mod await_event_cold;
 mod law_backend;
 pub(crate) use law_backend::{LawBackend, StoreLawBackend, law_session_store};
 pub use law_backend::{backend_over, recording_backend_over};
+mod admission_support;
 mod admitted_head_redrive;
 mod cancelled_turn_withheld_input;
 mod cell_binding_drift;
@@ -75,8 +76,8 @@ mod process_trigger_retention;
 mod queued_after_commit_redrive;
 pub mod registration_macro_support;
 mod release_stamp;
-mod restored_claim_cede;
 mod retention;
+mod root_answers_its_rows;
 mod root_control;
 mod root_start_marker;
 mod root_terminal;
@@ -95,6 +96,11 @@ mod session_ingress;
 mod session_store_factory;
 mod session_store_factory_enumeration;
 mod session_store_factory_failure_evidence;
+mod turn_commit_outcome;
+pub use turn_commit_outcome::{
+    cancelled as turn_commit_cancelled, completed as turn_commit_completed,
+    failed as turn_commit_failed, frame_switch as turn_commit_frame_switch,
+};
 mod session_store_factory_vacuum;
 mod store_contract_state_machine;
 mod store_maintenance_outcome;
@@ -115,6 +121,7 @@ mod turn_park_feed;
 mod turn_runner;
 mod wake_delivery;
 
+pub(crate) use admission_support::*;
 pub use admitted_head_redrive::*;
 pub use artifact_store::*;
 pub use attachment_owner::*;
@@ -151,7 +158,6 @@ pub use process_registry::*;
 pub use process_trigger_retention::*;
 pub use queued_after_commit_redrive::*;
 pub use release_stamp::{ReleaseStampDeployment, release_stamp_conformance};
-pub use restored_claim_cede::RESTORED_CLAIM_CEDE_SESSION_ID;
 pub use retention::*;
 pub use root_start_marker::*;
 pub use runtime_persistence::*;

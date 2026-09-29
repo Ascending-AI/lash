@@ -1,7 +1,5 @@
 use crate::session_sql::session_sql;
 use crate::*;
-use lash_core_execution::store::claim_plan::TurnLaneStop;
-use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmptyScanDiagnostic};
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -102,22 +100,6 @@ pub(crate) async fn ensure_session_not_deleted_tx(
         })
     } else {
         Ok(())
-    }
-}
-
-/// The claim-candidate scan for `boundary`, rendered once at startup.
-///
-/// The boundary is a closed two-variant choice, so it selects a named statement
-/// rather than splicing a predicate: an optional boundary filter cannot seek
-/// the `(session_id, enqueue_seq)` primary key cleanly, and this query is the
-/// claim path's hottest.
-fn postgres_queued_work_claim_candidates_sql(boundary: QueuedWorkClaimBoundary) -> &'static str {
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    match boundary {
-        QueuedWorkClaimBoundary::Idle => sql.queued_batches_postgres.claim_candidates_idle.sql(),
-        QueuedWorkClaimBoundary::ActiveTurnCheckpoint => {
-            sql.queued_batches_postgres.claim_candidates_boundary.sql()
-        }
     }
 }
 
@@ -318,15 +300,15 @@ async fn lock_process_wake_source_tx(
 /// for a wake whose row is leaving the queue in this transaction.
 ///
 /// The one home of the invariant that every terminal transition of a wake —
-/// claim settlement and host cancel — raises the floor with the row's
+/// settlement by its root and host cancel — raises the floor with the row's
 /// removal (FIG-1065, FIG-3545). The wake source's advisory lock serializes
 /// the fence against a concurrent enqueue of the same source, which takes
 /// the same lock before it reads the floor. Callers write the fence before
 /// the delete.
-async fn raise_wake_redelivery_fence_tx(
+pub(crate) async fn raise_wake_redelivery_fence_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
-    wake: &lash_core_execution::store::claim_plan::TerminalProcessWake,
+    wake: &lash_core_execution::store::TerminalProcessWake,
 ) -> Result<(), StoreError> {
     // A validated wake batch always names its source key, so the advisory
     // lock is always taken; the `None` arm is a corrupt-row path that still
@@ -384,19 +366,18 @@ async fn read_session_state_version_tx(
     lash_core_execution::store::resolve_session_state_version(marker, fleet)
 }
 
-mod claim_support;
-pub(crate) use claim_support::admit_root_postgres;
-mod commit_claims;
+mod admission;
+pub(crate) use admission::{
+    admit_at_checkpoint_postgres, admit_root_postgres, open_session_command_run_postgres,
+};
 pub(crate) mod drive_epoch;
+mod ingress_settlement;
 mod maintenance;
 mod queued_work;
-#[cfg(test)]
-mod refusal_probe_tests;
 mod session_commit;
+pub(crate) mod turn_cancel;
 mod turn_input;
 pub(crate) mod turn_park;
 pub(crate) mod turn_park_feed;
 
-use claim_support::*;
-use commit_claims::complete_queued_work_claims_tx;
-pub(crate) use commit_claims::complete_turn_input_claims_tx;
+use turn_cancel::*;

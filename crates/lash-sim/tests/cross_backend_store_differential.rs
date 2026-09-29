@@ -19,10 +19,10 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::facade_support::ToolStateFacadeOps;
-use lash_core::runtime::{QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary};
+use lash_core::runtime::QueuedWorkBatchDraft;
 use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_core::{
     AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, EffectAddress,
     ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity,
@@ -31,18 +31,18 @@ use lash_core::{
     RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
     SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
     SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput,
-    TurnInputApplication, TurnInputClaim, TurnInputIngress, TurnInputStateKind,
+    TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
 use sqlx::{Connection, PgConnection, PgPool};
 
+#[path = "cross_backend_store_differential/admission_cases.rs"]
+mod admission_cases;
 #[path = "cross_backend_store_differential/attachment_seeding.rs"]
 mod attachment_seeding;
 #[path = "cross_backend_store_differential/checkpoint_cases.rs"]
 mod checkpoint_cases;
-#[path = "cross_backend_store_differential/claim_cases.rs"]
-mod claim_cases;
 #[path = "cross_backend_store_differential/coalesced_batch_oracles.rs"]
 mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/corrupt_input_cases.rs"]
@@ -97,10 +97,9 @@ enum CaseName {
     NodelessLeafMove,
     StaleExpectedHeadRevision,
     IdenticalAndMutatedTurnCommitReplay,
-    SettleClaimBeforeSuccessorReclaim,
-    TurnInputClaimSupersededAfterReclaim,
-    QueuedWorkClaimSupersededAfterReclaim,
-    SameGenerationHeldClaimDeferral,
+    TurnInputAdmissionAfterHandoff,
+    QueuedWorkAdmissionAfterHandoff,
+    UnfinishedRootRefusesRival,
     CheckpointBodiesThenRefOnly,
     CheckpointBodiesThenCleared,
     MissingCheckpointComponentRef,
@@ -109,13 +108,14 @@ enum CaseName {
     ForeignLineageFork,
     Rewind,
     AttachmentAdoption,
-    QueuedWorkClaimAndAbandon,
+    QueuedWorkAdmissionReleased,
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
     LostRootRecovery,
+    RefusedRootEnd,
     PendingFollowOnRaise,
-    RootClaimReplay,
+    RootAdmissionReplay,
     RefusedSurfaceOnDeletedSession,
     SessionCloseLedger,
     RootCancelLedger,
@@ -147,16 +147,13 @@ impl CaseName {
             Self::NodelessLeafMove => "nodeless_commit_cannot_move_leaf",
             Self::StaleExpectedHeadRevision => "stale_expected_head_revision",
             Self::IdenticalAndMutatedTurnCommitReplay => "identical_and_mutated_turn_commit_replay",
-            Self::SettleClaimBeforeSuccessorReclaim => {
-                "settle_claim_after_session_lease_handoff_before_reclaim"
+            Self::TurnInputAdmissionAfterHandoff => {
+                "turn_input_admission_settles_only_under_the_live_fence"
             }
-            Self::TurnInputClaimSupersededAfterReclaim => {
-                "turn_input_claim_superseded_after_successor_reclaim"
+            Self::QueuedWorkAdmissionAfterHandoff => {
+                "queued_work_admission_settles_only_under_the_live_fence"
             }
-            Self::QueuedWorkClaimSupersededAfterReclaim => {
-                "queued_work_claim_superseded_after_successor_reclaim"
-            }
-            Self::SameGenerationHeldClaimDeferral => "same_generation_held_claim_defers",
+            Self::UnfinishedRootRefusesRival => "unfinished_root_refuses_a_rival_admission",
             Self::CheckpointBodiesThenRefOnly => "checkpoint_bodies_then_ref_only",
             Self::CheckpointBodiesThenCleared => "checkpoint_bodies_then_cleared",
             Self::MissingCheckpointComponentRef => "missing_checkpoint_component_ref",
@@ -165,13 +162,14 @@ impl CaseName {
             Self::ForeignLineageFork => "fork_accepts_foreign_lineage",
             Self::Rewind => "rewind_fork_delete_source_refork",
             Self::AttachmentAdoption => "attachment_intent_adopted_by_commit",
-            Self::QueuedWorkClaimAndAbandon => "queued_work_claim_abandon_preserves_fencing_token",
+            Self::QueuedWorkAdmissionReleased => "queued_work_admission_released_by_root_terminal",
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
             Self::LostRootRecovery => "lost_root_recovery",
+            Self::RefusedRootEnd => "refused_root_end",
             Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
-            Self::RootClaimReplay => "root_claim_replays_exact_result_after_lease_handoff",
+            Self::RootAdmissionReplay => "root_admission_replays_exact_result_after_drive_handoff",
             Self::RefusedSurfaceOnDeletedSession => {
                 "refused_surface_on_deleted_session_leaves_no_residue"
             }
@@ -180,9 +178,9 @@ impl CaseName {
             Self::SessionCloseLedger => "session_close_ledger_closes_roots_and_tracks_its_intent",
             Self::CorruptGraphNodeRefusals => "corrupt_graph_node_refuses_every_reader",
             Self::CorruptPendingTurnInputRefusals => {
-                "corrupt_pending_turn_input_refuses_list_and_claim"
+                "corrupt_pending_turn_input_refuses_list_and_admission"
             }
-            Self::CorruptQueuedWorkRefusals => "corrupt_queued_work_refuses_list_and_claim",
+            Self::CorruptQueuedWorkRefusals => "corrupt_queued_work_refuses_list_and_admission",
             Self::CorruptPriorCheckpointRefusals => {
                 "corrupt_prior_checkpoint_refuses_read_modify_write"
             }
@@ -238,35 +236,37 @@ enum StoreOperation {
     UnpinLeaf,
     EnqueueNextTurnInput,
     EnqueueQueuedWork,
-    EnqueueClaimableQueuedWork,
+    EnqueueAdmittableQueuedWork,
     AcquireSessionLease {
         slot: LeaseSlot,
         owner: &'static str,
     },
-    ClaimNextTurnInput {
+    /// Admit the differential root headed by the case's open `head` under
+    /// `lease`. A later admission of the same root, under any fence, must
+    /// return the recorded admission unchanged.
+    AdmitRoot {
+        lease: LeaseSlot,
+        head: HeadKind,
+    },
+    /// Admit a second root, headed by the case's next-turn input, while the
+    /// differential root is unfinished: every backend must refuse it
+    /// `UnfinishedRootConflict` and write nothing.
+    AdmitRivalRoot {
         lease: LeaseSlot,
     },
-    ClaimQueuedWork {
+    /// End the differential root handing every row it admitted back open.
+    EndRootReleasing {
         lease: LeaseSlot,
     },
-    AbandonQueuedWorkClaim,
-    /// Re-claim the ready lane while this generation holds its only row.
-    /// Every backend must report no newly claimed rows — the shared claim
-    /// planner's deferral agreement check (FIG-1065).
-    ClaimWhileHeld {
+    /// End the differential root completing every row it admitted, under
+    /// `lease`. Under a superseded fence every backend must refuse it
+    /// `StaleDriveFence` and write nothing.
+    EndRootCompleting {
         lease: LeaseSlot,
+        expected_head_revision: u64,
     },
-    /// Snapshots the claims a successor-generation reclaim will supersede, so
-    /// a later stale settlement can present the superseded authority.
-    RetainStaleClaims,
     ReleaseSessionLease {
         lease: LeaseSlot,
-    },
-    CommitStaleTurnInputClaim {
-        expected_head_revision: u64,
-    },
-    CommitStaleQueuedWorkClaim {
-        expected_head_revision: u64,
     },
     /// SQLite and PostgreSQL discard the live store/factory and reopen through
     /// an independent connection. In-memory has no independent durable
@@ -324,7 +324,7 @@ impl StoreOperation {
             Self::UnpinLeaf => "unpin_leaf",
             Self::EnqueueNextTurnInput => "enqueue_next_turn_input",
             Self::EnqueueQueuedWork => "enqueue_queued_work",
-            Self::EnqueueClaimableQueuedWork => "enqueue_claimable_queued_work",
+            Self::EnqueueAdmittableQueuedWork => "enqueue_admittable_queued_work",
             Self::AcquireSessionLease {
                 slot: LeaseSlot::First,
                 ..
@@ -333,18 +333,25 @@ impl StoreOperation {
                 slot: LeaseSlot::Successor,
                 ..
             } => "acquire_successor_session_lease_generation",
-            Self::ClaimNextTurnInput { .. } => "claim_next_turn_input",
-            Self::ClaimQueuedWork { .. } => "claim_queued_work",
-            Self::AbandonQueuedWorkClaim => "abandon_queued_work_claim",
-            Self::ClaimWhileHeld { .. } => "claim_while_held",
-            Self::RetainStaleClaims => "retain_stale_claims",
+            Self::AdmitRoot {
+                lease: LeaseSlot::First,
+                ..
+            } => "admit_root_under_first_fence",
+            Self::AdmitRoot {
+                lease: LeaseSlot::Successor,
+                ..
+            } => "admit_root_under_successor_fence",
+            Self::AdmitRivalRoot { .. } => "admit_rival_root_while_unfinished",
+            Self::EndRootReleasing { .. } => "end_root_releasing_its_rows",
+            Self::EndRootCompleting {
+                lease: LeaseSlot::First,
+                ..
+            } => "end_root_completing_under_first_fence",
+            Self::EndRootCompleting {
+                lease: LeaseSlot::Successor,
+                ..
+            } => "end_root_completing_under_successor_fence",
             Self::ReleaseSessionLease { .. } => "release_first_session_lease_generation",
-            Self::CommitStaleTurnInputClaim { .. } => {
-                "commit_stale_claim_before_successor_reclaims_row"
-            }
-            Self::CommitStaleQueuedWorkClaim { .. } => {
-                "commit_stale_queued_work_claim_after_successor_reclaims_row"
-            }
             Self::ColdReopenSession => "cold_reopen_session",
             Self::DeleteSession => "delete_session",
             Self::AttemptAdmission => "attempt_admission",
@@ -435,7 +442,7 @@ fn differential_frame_key(node_id: &str) -> lash_core::FrameKey {
 fn is_frame_alias(node_id: &str) -> bool {
     matches!(
         node_id,
-        "active-frame" | "collision" | "root" | "stale-claim-node"
+        "active-frame" | "collision" | "root" | "root-end-node"
     )
 }
 
@@ -470,6 +477,19 @@ enum LeaseSlot {
     First,
     Successor,
 }
+
+/// Which open row heads the differential root's admission.
+#[derive(Clone, Copy, Debug)]
+enum HeadKind {
+    /// The case's next-turn input.
+    Input,
+    /// The case's first open turn-work batch.
+    Batch,
+}
+
+/// The root the admission cases admit, and the rival they refuse.
+const DIFFERENTIAL_ROOT_ID: &str = "differential-root";
+const RIVAL_ROOT_ID: &str = "differential-rival-root";
 
 fn append(nodes: Vec<NodeSpec>, leaf_node_id: Option<&'static str>) -> GraphSpec {
     GraphSpec {
@@ -625,7 +645,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
                 },
             ],
         },
-        claim_cases::settle_claim_before_successor_reclaim(),
+        admission_cases::turn_input_admission_after_handoff(),
         checkpoint_cases::bodies_then_ref_only(),
         checkpoint_cases::bodies_then_cleared(),
         checkpoint_cases::missing_component_ref(),
@@ -634,15 +654,15 @@ fn generated_cases() -> Vec<GeneratedCase> {
         fork_cases::foreign_lineage_case(),
         fork_cases::rewind_case(),
         session_lifecycle_cases::attachment_adoption_case(),
-        claim_cases::queued_work_claim_and_abandon(),
-        claim_cases::same_generation_held_claim_deferral(),
-        claim_cases::queued_work_claim_superseded_after_reclaim(),
-        claim_cases::turn_input_claim_superseded_after_reclaim(),
+        admission_cases::queued_work_admission_released(),
+        admission_cases::unfinished_root_refuses_rival(),
+        admission_cases::queued_work_admission_after_handoff(),
         session_lifecycle_cases::delete_then_attempt_admission_case(),
         surface_sweep::surface_sweep_case(),
         surface_sweep::lost_root_recovery_case(),
+        surface_sweep::refused_root_end_case(),
         surface_sweep::pending_follow_on_raise_case(),
-        surface_sweep::root_claim_replay_case(),
+        surface_sweep::root_admission_replay_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         surface_sweep::session_close_ledger_case(),
         surface_sweep::root_control_case(false),
@@ -858,10 +878,10 @@ fn checkpoint_from_spec(
     }
 }
 
-/// The claimable turn work the generated sequences enqueue: one durable
+/// The admittable turn work the generated sequences enqueue: one durable
 /// process wake with a fixed `(process, sequence)` source, so a repeated
 /// enqueue in one sequence is the same idempotent source on every backend.
-fn claim_observability_wake(session_id: &SessionId) -> lash_core::runtime::ProcessWakeDelivery {
+fn admission_observability_wake(session_id: &SessionId) -> lash_core::runtime::ProcessWakeDelivery {
     let process_id = || lash_core::runtime::ProcessId::fixture("differential-process");
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
@@ -882,7 +902,7 @@ fn claim_observability_wake(session_id: &SessionId) -> lash_core::runtime::Proce
         },
         process_caused_by: None,
         authority: lash_core::runtime::QueuedWorkAuthority::default(),
-        input: "exercise queued-work claim state".to_string(),
+        input: "exercise queued-work admission state".to_string(),
         created_at_ms: 1,
     }
 }
@@ -945,8 +965,6 @@ type QueuedWorkBatchRow = (
     Option<String>,
     Option<String>,
     Option<String>,
-    i64,
-    i64,
 );
 type QueuedWorkItemRow = (String, i64, String);
 
@@ -1037,12 +1055,13 @@ struct BackendRunner {
     lifecycle_backend: lash::Backend,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
-    first_lease: Option<lash_core::ClaimAuthority>,
-    successor_lease: Option<lash_core::ClaimAuthority>,
-    stale_turn_input_claim: Option<TurnInputClaim>,
-    retained_stale_turn_input_claim: Option<TurnInputClaim>,
-    queued_work_claim: Option<QueuedWorkClaim>,
-    stale_queued_work_claim: Option<QueuedWorkClaim>,
+    first_lease: Option<lash_core::store::DriveFence>,
+    successor_lease: Option<lash_core::store::DriveFence>,
+    /// The differential root's recorded admission.
+    admission: Option<lash_core::store::RootAdmission>,
+    /// Stored `turn_commit_hash` -> backend-neutral hash, for the settling
+    /// commits whose identity names backend-minted batch ids.
+    neutral_commit_hashes: BTreeMap<String, String>,
     current_frame_node_id: Option<lash_core::FrameNodeId>,
     current_leaf_node_id: Option<String>,
     checkpoint_component_refs: Option<CheckpointComponentRefs>,
@@ -1135,7 +1154,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn lease(&self, slot: LeaseSlot) -> &lash_core::ClaimAuthority {
+    fn lease(&self, slot: LeaseSlot) -> &lash_core::store::DriveFence {
         match slot {
             LeaseSlot::First => self.first_lease.as_ref(),
             LeaseSlot::Successor => self.successor_lease.as_ref(),
@@ -1143,7 +1162,122 @@ impl BackendRunner {
         .expect("generated sequence acquired lease before use")
     }
 
-    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::ClaimAuthority) {
+    #[expect(
+        clippy::expect_used,
+        reason = "test support: the generated sequence admits the root before it ends it"
+    )]
+    fn recorded_admission(&self) -> lash_core::store::RootAdmission {
+        self.admission
+            .clone()
+            .expect("generated sequence admitted the differential root before ending it")
+    }
+
+    /// The case's open row of `kind`, read rather than assumed: backends mint
+    /// their own batch ids.
+    async fn open_head(
+        &self,
+        kind: HeadKind,
+    ) -> Result<lash_core::store::AdmittedHead, StoreError> {
+        match kind {
+            HeadKind::Input => Ok(lash_core::store::AdmittedHead::Input(
+                lash_core::InputId::from(format!("{}:input", self.session_id)),
+            )),
+            HeadKind::Batch => self
+                .store()
+                .list_open_queued_work(&self.session_id)
+                .await?
+                .into_iter()
+                .filter(|batch| batch.work_class() == lash_core::store::QueuedWorkClass::TurnWork)
+                .min_by_key(|batch| batch.enqueue_seq)
+                .map(|batch| lash_core::store::AdmittedHead::Batch(batch.batch_id))
+                .ok_or_else(|| {
+                    StoreError::Backend(format!("{} has no open turn-work head", self.name))
+                }),
+        }
+    }
+
+    /// Admit the differential root under `fence`. The first admission is
+    /// recorded; every later one, under any fence, must return it unchanged.
+    async fn admit_differential_root(
+        &mut self,
+        fence: &lash_core::store::DriveFence,
+        kind: HeadKind,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
+        let head = match &self.admission {
+            Some(recorded) => recorded.head.clone(),
+            None => self.open_head(kind).await?,
+        };
+        let admission = self
+            .store()
+            .admit_root(
+                &lash_core::testing::store_fixtures::admit_root_request_for_test(
+                    fence,
+                    &lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                    head,
+                ),
+            )
+            .await?
+            .ok_or_else(|| {
+                StoreError::Backend(format!(
+                    "{} did not admit the generated root at its head",
+                    self.name
+                ))
+            })?;
+        match &self.admission {
+            Some(recorded) => assert_eq!(
+                serde_json::to_value(recorded).ok(),
+                serde_json::to_value(&admission).ok(),
+                "{}: a re-admission must return the recorded admission",
+                self.name
+            ),
+            None => self.admission = Some(admission),
+        }
+        Ok(None)
+    }
+
+    /// Land the differential root's final commit settling `settlement` under
+    /// `fence`, with the root's terminal in the same commit.
+    async fn end_differential_root(
+        &mut self,
+        fence: &lash_core::store::DriveFence,
+        expected_head_revision: u64,
+        settlement: lash_core::store::IngressSettlement,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
+        let root = lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID);
+        let graph = GraphSpec {
+            nodes: vec![NodeSpec::new("root-end-node", None, "root-end")],
+            leaf_node_id: Some("root-end-node"),
+        };
+        let mut commit = lash_core::testing::store_fixtures::settling_commit_for_test(
+            runtime_commit(
+                &self.session_id,
+                expected_head_revision,
+                &graph,
+                None,
+                self.current_frame_node_id.clone(),
+                HydratedSessionCheckpoint::default(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            fence,
+            settlement,
+        );
+        commit.root_terminal = Some(Box::new(lash_core::store::RootTerminalWrite {
+            commit: lash_core::store::TurnCommitId::new(root.clone(), 0),
+            turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
+            root,
+            stop: None,
+        }));
+        if let Some((stored, neutral)) = admission_cases::backend_neutral_commit_hash(&commit) {
+            self.neutral_commit_hashes.insert(stored, neutral);
+        }
+        self.store()
+            .commit_runtime_state(commit)
+            .await
+            .map(|result| Some(result.into()))
+    }
+
+    fn put_lease(&mut self, slot: LeaseSlot, lease: lash_core::store::DriveFence) {
         match slot {
             LeaseSlot::First => self.first_lease = Some(lease),
             LeaseSlot::Successor => self.successor_lease = Some(lease),
@@ -1353,14 +1487,14 @@ impl BackendRunner {
                 )
                 .await
                 .map(|_| None),
-            StoreOperation::EnqueueClaimableQueuedWork => self
+            StoreOperation::EnqueueAdmittableQueuedWork => self
                 .store()
                 .enqueue_queued_work(
                     lash_core::runtime::process_wake_batch_draft_with_delivery_policy(
-                        claim_observability_wake(&self.session_id),
+                        admission_observability_wake(&self.session_id),
                         DeliveryPolicy::AfterCurrentTurnCommit,
                     )
-                    .with_merge_key("cross-backend-claim-observability"),
+                    .with_merge_key("cross-backend-admission-observability"),
                 )
                 .await
                 .map(|_| None),
@@ -1386,160 +1520,90 @@ impl BackendRunner {
                         )));
                     }
                 };
-                let lease = lash_core::ClaimAuthority::from_drive_fence(&fence);
                 if matches!(slot, LeaseSlot::Successor) {
                     let first = self.lease(LeaseSlot::First);
                     assert!(
-                        lease.fencing_token > first.fencing_token,
+                        fence.epoch() > first.epoch(),
                         "{} reused drive epoch",
                         self.name
                     );
                 }
-                self.put_lease(*slot, lease);
+                self.put_lease(*slot, fence);
                 Ok(None)
             }
-            StoreOperation::ClaimNextTurnInput { lease } => {
-                let lease = self.lease(*lease);
-                let owner = lease.owner.clone();
-                let store = self.store();
-                let mut claim = store
-                    .claim_next_turn_inputs(&self.session_id, &lease.fence(), &owner, 1)
-                    .await?
-                    .ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "{} did not return the generated turn-input claim",
-                            self.name
-                        ))
-                    })?;
-                claim.record_initial_turn_application(
-                    &lash_core::TurnId::from("claim-turn"),
-                    "claim-message",
-                );
-                self.stale_turn_input_claim = Some(claim);
-                Ok(None)
+            StoreOperation::AdmitRoot { lease, head } => {
+                let fence = self.lease(*lease).clone();
+                self.admit_differential_root(&fence, *head).await
             }
-            StoreOperation::ClaimQueuedWork { lease } => {
-                let lease = self.lease(*lease);
-                let owner = lease.owner.clone();
-                let claim = self
-                    .store()
-                    .claim_ready_queued_work(
-                        &self.session_id,
-                        &lease.fence(),
-                        &owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(1),
-                    )
-                    .await?
-                    .claim()
-                    .ok_or_else(|| {
-                        StoreError::Backend(format!(
-                            "{} did not return the generated queued-work claim",
-                            self.name
-                        ))
-                    })?;
-                self.queued_work_claim = Some(claim);
-                Ok(None)
-            }
-            StoreOperation::AbandonQueuedWorkClaim => {
-                let claim = self
-                    .queued_work_claim
-                    .as_ref()
-                    .expect("generated sequence claimed queued work before abandonment")
-                    .clone();
+            StoreOperation::AdmitRivalRoot { lease } => {
+                let fence = self.lease(*lease).clone();
+                let head = self.open_head(HeadKind::Input).await?;
                 self.store()
-                    .abandon_queued_work_claim(&claim)
-                    .await
-                    .map(|_| None)
-            }
-            StoreOperation::ClaimWhileHeld { lease } => {
-                let lease = self.lease(*lease);
-                let owner = lease.owner.clone();
-                let outcome = self
-                    .store()
-                    .claim_ready_queued_work(
-                        &self.session_id,
-                        &lease.fence(),
-                        &owner,
-                        QueuedWorkClaimBoundary::Idle,
-                        lash_core::testing::queued_work_claim_policy(1),
+                    .admit_root(
+                        &lash_core::testing::store_fixtures::admit_root_request_for_test(
+                            &fence,
+                            &lash_core::TurnId::from(RIVAL_ROOT_ID),
+                            head,
+                        ),
                     )
-                    .await?;
-                assert!(
-                    outcome.claim().is_none(),
-                    "{} must report no newly claimed rows when this generation \
-                     re-claims while it holds the lane's only row",
-                    self.name
-                );
-                Ok(None)
-            }
-            StoreOperation::RetainStaleClaims => {
-                self.retained_stale_turn_input_claim = self.stale_turn_input_claim.clone();
-                self.stale_queued_work_claim = self.queued_work_claim.clone();
-                Ok(None)
+                    .await
+                    .map(|admission| {
+                        panic!(
+                            "{}: a rival root must be refused while the differential root is \
+                             unfinished, got {admission:?}",
+                            self.name
+                        )
+                    })
             }
             StoreOperation::ReleaseSessionLease { lease } => self
                 .store()
-                .supersede_claim_epoch_for_test(self.lease(*lease))
+                .supersede_drive_epoch_for_test(self.lease(*lease))
                 .await
                 .map(|_| None),
-            StoreOperation::CommitStaleTurnInputClaim {
-                expected_head_revision,
-            } => {
-                let claim = self
-                    .retained_stale_turn_input_claim
-                    .as_ref()
-                    .or(self.stale_turn_input_claim.as_ref())
-                    .expect("generated sequence claimed input before stale settlement");
-                let graph = GraphSpec {
-                    nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
-                    leaf_node_id: Some("stale-claim-node"),
-                };
-                self.store()
-                    .commit_runtime_state(
-                        runtime_commit(
-                            &self.session_id,
-                            *expected_head_revision,
-                            &graph,
-                            None,
-                            self.current_frame_node_id.clone(),
-                            HydratedSessionCheckpoint::default(),
-                            Vec::new(),
-                            Vec::new(),
-                        )
-                        .completing_turn_input_claim(claim.completion()),
-                    )
-                    .await
-                    .map(|result| Some(result.into()))
+            StoreOperation::EndRootReleasing { lease } => {
+                let fence = self.lease(*lease).clone();
+                let admission = self.recorded_admission();
+                let mut settlement = lash_core::store::IngressSettlement::new(
+                    lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                );
+                settlement.released.extend(
+                    admission
+                        .input_ids()
+                        .into_iter()
+                        .map(lash_core::store::IngressRowId::Input),
+                );
+                settlement.released.extend(
+                    admission
+                        .queued
+                        .iter()
+                        .flat_map(|queued| queued.batch_ids())
+                        .map(lash_core::store::IngressRowId::Batch),
+                );
+                let head = self.store().load_session_head_meta().await?;
+                self.end_differential_root(
+                    &fence,
+                    head.map_or(0, |head| head.head_revision),
+                    settlement,
+                )
+                .await
             }
-            StoreOperation::CommitStaleQueuedWorkClaim {
+            StoreOperation::EndRootCompleting {
+                lease,
                 expected_head_revision,
             } => {
-                let claim = self
-                    .stale_queued_work_claim
-                    .as_ref()
-                    .or(self.queued_work_claim.as_ref())
-                    .expect("generated sequence claimed queued work before stale settlement");
-                let graph = GraphSpec {
-                    nodes: vec![NodeSpec::new("stale-claim-node", None, "stale-claim")],
-                    leaf_node_id: Some("stale-claim-node"),
-                };
-                self.store()
-                    .commit_runtime_state(
-                        runtime_commit(
-                            &self.session_id,
-                            *expected_head_revision,
-                            &graph,
-                            None,
-                            self.current_frame_node_id.clone(),
-                            HydratedSessionCheckpoint::default(),
-                            Vec::new(),
-                            Vec::new(),
-                        )
-                        .completing_queue_claim(claim.completion()),
-                    )
+                let fence = self.lease(*lease).clone();
+                let admission = self.recorded_admission();
+                let mut settlement = lash_core::store::IngressSettlement::new(
+                    lash_core::TurnId::from(DIFFERENTIAL_ROOT_ID),
+                );
+                if let Some(inputs) = &admission.inputs {
+                    settlement.completed_inputs.push(inputs.completion());
+                }
+                if let Some(queued) = &admission.queued {
+                    settlement.completed_batches.push(queued.completion());
+                }
+                self.end_differential_root(&fence, *expected_head_revision, settlement)
                     .await
-                    .map(|result| Some(result.into()))
             }
             StoreOperation::ColdReopenSession => {
                 let request = self.create_request();
@@ -1861,7 +1925,14 @@ impl BackendRunner {
         // digest; the raw changed-table set is the comparison instead.
         let durable_state = match comparison {
             ComparisonMode::Decoded => {
-                Some(self.raw_reader.observe(self.clock.timestamp_ms()).await)
+                let mut state = self.raw_reader.observe(self.clock.timestamp_ms()).await;
+                for receipt in &mut state.runtime_turn_commits {
+                    if let Some(neutral) = self.neutral_commit_hashes.get(&receipt.turn_commit_hash)
+                    {
+                        receipt.turn_commit_hash.clone_from(neutral);
+                    }
+                }
+                Some(state)
             }
             ComparisonMode::RawOnly => None,
         };
@@ -2191,10 +2262,8 @@ async fn runners_for_case_with_clock(
             reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
-            stale_turn_input_claim: None,
-            retained_stale_turn_input_claim: None,
-            queued_work_claim: None,
-            stale_queued_work_claim: None,
+            admission: None,
+            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2221,10 +2290,8 @@ async fn runners_for_case_with_clock(
             reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
-            stale_turn_input_claim: None,
-            retained_stale_turn_input_claim: None,
-            queued_work_claim: None,
-            stale_queued_work_claim: None,
+            admission: None,
+            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2251,10 +2318,8 @@ async fn runners_for_case_with_clock(
             reopened_postgres_pool: None,
             first_lease: None,
             successor_lease: None,
-            stale_turn_input_claim: None,
-            retained_stale_turn_input_claim: None,
-            queued_work_claim: None,
-            stale_queued_work_claim: None,
+            admission: None,
+            neutral_commit_hashes: BTreeMap::new(),
             current_frame_node_id: None,
             current_leaf_node_id: None,
             checkpoint_component_refs: None,
@@ -2323,7 +2388,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "nodeless_commit_cannot_move_leaf",
             "stale_expected_head_revision",
             "identical_and_mutated_turn_commit_replay",
-            "settle_claim_after_session_lease_handoff_before_reclaim",
+            "turn_input_admission_settles_only_under_the_live_fence",
             "checkpoint_bodies_then_ref_only",
             "checkpoint_bodies_then_cleared",
             "missing_checkpoint_component_ref",
@@ -2332,23 +2397,23 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "fork_accepts_foreign_lineage",
             "rewind_fork_delete_source_refork",
             "attachment_intent_adopted_by_commit",
-            "queued_work_claim_abandon_preserves_fencing_token",
-            "same_generation_held_claim_defers",
-            "queued_work_claim_superseded_after_successor_reclaim",
-            "turn_input_claim_superseded_after_successor_reclaim",
+            "queued_work_admission_released_by_root_terminal",
+            "unfinished_root_refuses_a_rival_admission",
+            "queued_work_admission_settles_only_under_the_live_fence",
             "delete_then_attempt_admission",
             "store_surface_sweep",
             "lost_root_recovery",
+            "refused_root_end",
             "pending_follow_on_raise_and_clear",
-            "root_claim_replays_exact_result_after_lease_handoff",
+            "root_admission_replays_exact_result_after_drive_handoff",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "session_close_ledger_closes_roots_and_tracks_its_intent",
             "root_cancel_ledger",
             "root_fork_ledger",
             "stale_handle_after_delete",
             "corrupt_graph_node_refuses_every_reader",
-            "corrupt_pending_turn_input_refuses_list_and_claim",
-            "corrupt_queued_work_refuses_list_and_claim",
+            "corrupt_pending_turn_input_refuses_list_and_admission",
+            "corrupt_queued_work_refuses_list_and_admission",
             "corrupt_prior_checkpoint_refuses_read_modify_write",
         ]
     );

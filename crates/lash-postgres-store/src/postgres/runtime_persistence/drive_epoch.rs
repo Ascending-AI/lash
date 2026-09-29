@@ -21,9 +21,19 @@ pub(crate) async fn drive_epoch_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
 ) -> Result<StoredDriveEpoch, StoreError> {
-    let row = sqlx::query(session_sql().meta.select_drive_epoch.sql())
+    read_drive_epoch(tx, session_id, session_sql().meta.select_drive_epoch.sql()).await
+}
+
+/// The session's stored drive epoch, read by `statement`: the plain read or
+/// its row-locked fork.
+async fn read_drive_epoch(
+    connection: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    statement: &str,
+) -> Result<StoredDriveEpoch, StoreError> {
+    let row = sqlx::query(statement)
         .bind(session_id.as_str())
-        .fetch_optional(&mut **tx)
+        .fetch_optional(&mut *connection)
         .await
         .map_err(store_sqlx_error)?
         .ok_or_else(|| StoreError::DriveEpochUnavailable {
@@ -46,14 +56,55 @@ pub(crate) async fn drive_epoch_tx(
 }
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the
-/// caller's transaction.
+/// caller's transaction and row-locked until it ends: a seal in flight is
+/// waited for and its epoch read, and a later seal waits for the write this
+/// check fences (FIG-4044).
 pub(super) async fn require_fence_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
     fence: &DriveFence,
 ) -> Result<(), StoreError> {
-    let current = drive_epoch_tx(tx, session_id).await?;
+    let current = read_drive_epoch(
+        tx,
+        session_id,
+        session_sql().meta_postgres.select_drive_epoch_locked.sql(),
+    )
+    .await?;
     require_current_drive_fence(session_id, fence, &current)
+}
+
+/// Refuse `fence` unless it is the session's current drive fence, for a read
+/// that writes nothing and so holds no lock (FIG-3927 N4).
+pub(super) async fn require_fence_conn(
+    connection: &mut sqlx::PgConnection,
+    session_id: &SessionId,
+    fence: &DriveFence,
+) -> Result<(), StoreError> {
+    let current = read_drive_epoch(
+        connection,
+        session_id,
+        session_sql().meta.select_drive_epoch.sql(),
+    )
+    .await?;
+    require_current_drive_fence(session_id, fence, &current)
+}
+
+/// Refuse `commit` unless the fence it presents is current, in its own
+/// transaction before anything is read or written: the drive fence of the
+/// admission its root was sealed under, which a successor's seal makes stale
+/// (ADR 0105 §2). A commit that settles ingress must present one
+/// ([`RuntimeCommit::validate_ingress_settlement`]).
+///
+/// [`RuntimeCommit::validate_ingress_settlement`]: lash_core_execution::store::RuntimeCommit::validate_ingress_settlement
+pub(super) async fn require_commit_fences_tx(
+    tx: &mut PgTx<'_>,
+    commit: &lash_core_execution::store::RuntimeCommit,
+) -> Result<(), StoreError> {
+    commit.validate_ingress_settlement()?;
+    match commit.drive_fence.as_ref() {
+        Some(fence) => require_fence_tx(tx, &commit.session_id, fence).await,
+        None => Ok(()),
+    }
 }
 
 impl PostgresSessionStore {

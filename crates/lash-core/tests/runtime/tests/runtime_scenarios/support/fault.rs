@@ -10,24 +10,29 @@ impl RuntimeScenarioContext {
         }
     }
 
+    /// A completion of the scenario root's admitted work by any other root
+    /// is refused: an admitted row is settled only by its own root.
     async fn stale_queue_completion_fault(&mut self) {
         self.ensure_lease().await;
-        let claim = self
-            .turn_claim
+        let admission = self
+            .admission
             .as_ref()
             .expect("stale queue-completion fault requires a prior TurnWorkClaim phase");
-        let mut stale_completion = claim.completion();
-        stale_completion.lease_token.push_str(":stale");
+        let mut foreign =
+            lash_core::store::IngressSettlement::new(TurnId::from("runtime-scenario-foreign-root"));
+        foreign
+            .completed_batches
+            .extend(admission.queued.as_ref().map(|queued| queued.completion()));
+        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+        commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        commit.ingress = Some(foreign);
         let err = self
             .store()
-            .commit_runtime_state(
-                RuntimeCommit::persisted_state_for_test(&self.state, &[])
-                    .completing_queue_claim(stale_completion),
-            )
+            .commit_runtime_state(commit)
             .await
             .expect_err("stale queue-completion fault should reject the commit");
         assert!(
-            matches!(err, StoreError::QueuedWorkClaimSuperseded { .. }),
+            matches!(err, StoreError::IngressRowNotAdmitted { .. }),
             "{} stale queue-completion fault produced the wrong error: {err:?}",
             self.name
         );

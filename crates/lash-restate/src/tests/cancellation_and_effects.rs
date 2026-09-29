@@ -1017,14 +1017,12 @@ pub(super) async fn restate_effect_host_checks_revocation_then_awaits_resolution
         HttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered("false"),
+            body: HttpResponseBody::buffered(crate::wire::reply_json(&false)),
         },
         HttpResponse {
             status: 200,
             headers: vec![("content-type".to_string(), "application/json".to_string())],
-            body: HttpResponseBody::buffered(
-                serde_json::to_string(&expected).expect("encode resolution"),
-            ),
+            body: HttpResponseBody::buffered(crate::wire::reply_json(&expected)),
         },
     ]));
     let host = RestateEffectHost::new_for_test(RestateConnection::with_transport(
@@ -1079,11 +1077,11 @@ impl HttpTransport for AwaitEventCancellationTransport {
         let url = request.url.clone();
         self.requests.lock_recover().push(request);
         let body = if url.ends_with("/is_revoked") {
-            "false".to_string()
+            crate::wire::reply_json(&false)
         } else if url.ends_with("/await_resolution") {
             return std::future::pending().await;
         } else if url.ends_with("/resolve") {
-            serde_json::to_string(&self.resolve_outcome).expect("encode resolve outcome")
+            crate::wire::reply_json(&self.resolve_outcome)
         } else {
             return Err(LlmTransportError::new(format!(
                 "unexpected await-event cancellation request: {url}"
@@ -1138,8 +1136,11 @@ pub(super) async fn restate_effect_host_cancellation_records_and_returns_the_dur
             .iter()
             .find(|request| request.url.ends_with("/resolve"))
             .expect("cancellation must resolve through the durable index");
+        let call: serde_json::Value =
+            serde_json::from_slice(&resolve.body).expect("decode cancellation resolve call");
         let request: RestateDurableWaitResolveRequest =
-            serde_json::from_slice(&resolve.body).expect("decode cancellation resolve request");
+            serde_json::from_value(call["body"].clone())
+                .expect("decode cancellation resolve request");
         assert_eq!(request.key, key);
         assert_eq!(request.resolution, Resolution::Cancelled);
     }

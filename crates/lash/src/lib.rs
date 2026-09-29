@@ -145,17 +145,16 @@ pub use lash_core::store::{
     UndecodableObligation, session_delete::SessionCleanup,
 };
 pub use lash_core::{
-    AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
+    AdmissionRefusal, AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
     FrameKey, InputId, InputItem, LlmCallRecord, LocalTurnStop, ModelLimits, ModelLimitsError,
     ModelSpec, ModelSpecBuilder, NoProgressBudget, NodeId, OmittedToolCalls, PendingTurnInput,
     PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
     PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
     ProcessId, QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
-    QueuedWorkBatchingConfig, QueuedWorkClaimRefusal, Resolution, ResolveOutcome,
-    SessionCreateRequest, SessionError, SessionId, SessionListFilter, SessionRelationKind,
-    SessionStartPoint, SessionSummary, TurnActivity, TurnActivityId, TurnBudget,
-    TurnCancelRepairDecision, TurnCancelRepairResult, TurnCause, TurnEvent, TurnFailureEvidence,
+    QueuedWorkBatchingConfig, Resolution, ResolveOutcome, SessionCreateRequest, SessionError,
+    SessionId, SessionListFilter, SessionRelationKind, SessionStartPoint, SessionSummary,
+    TurnActivity, TurnActivityId, TurnBudget, TurnCause, TurnEvent, TurnFailureEvidence,
     TurnFailurePartialOutput, TurnFailureSettlement, TurnId, TurnInput, TurnInputApplication,
     facade_support::GenerationOverlay, facade_support::PluginStack, facade_support::SessionCommand,
     facade_support::SessionCommandReceipt, facade_support::SessionConfigPatch,
@@ -300,6 +299,7 @@ pub mod tools {
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
         facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
     };
+    pub use lash_core::{DeclaredStart, DeclaredStartRefused};
     pub use lash_core::{
         InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
         InternalProcessToolDef, InternalProcessToolImplementation,
@@ -370,22 +370,20 @@ pub mod direct {
 /// Session persistence types and services.
 pub mod persistence {
     pub use lash_core::CheckpointKind;
-    pub use lash_core::QueuedWorkClaimOutcome;
     pub use lash_core::facade_support::FileAttachmentStore;
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
-        ActiveTurnIngress, DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-        LiveReplayOutcome, LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
-        PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, ProcessWakeSource,
-        QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
-        QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkClaim, QueuedWorkClaimBoundary,
-        QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
-        QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload,
-        RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
-        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory,
-        TurnInputCheckpointBoundary, TurnInputClaim, TurnInputClaimData, TurnInputClaimMode,
-        TurnInputCompletion, TurnInputCompletionData, TurnInputIngress, TurnInputSettlementClaim,
-        TurnInputState, TurnInputStateKind, TurnWorkPayload,
+        ActiveTurnIngress, AdmissionBoundary, AdmittedQueuedWork, AdmittedTurnInputs,
+        DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest, LiveReplayOutcome,
+        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
+        PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork,
+        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
+        QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
+        QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
+        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory, TurnInputAdmissionMode,
+        TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData,
+        TurnInputIngress, TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy,
+        TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// A build generation's drain marks and remaining work (FIG-3799): the
@@ -406,36 +404,40 @@ pub mod persistence {
     pub use lash_core::{
         AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     };
-    /// Queued-work ordering values and claim-selection helpers.
+    /// Queued-work ordering values and admission-selection helpers.
     pub mod queued_work {
         /// Stable queued-work ordering values and selection helpers for store implementations.
         pub use lash_core::store::queued_work::{
-            PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass, claim_scan_limit,
-            derive_batch_id, select_leading_session_command, select_turn_work_claim_prefix,
+            PendingSessionWorkOrdering, PendingWorkOrderingKey, QueuedWorkClass,
+            admission_scan_limit, derive_batch_id, select_leading_session_command,
+            select_turn_work_prefix,
         };
     }
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
-    /// of [`RuntimePersistence`], implemented by every store a runtime drives.
+    /// of [`RuntimePersistence`], implemented by every store a runtime drives,
+    /// and the fence it yields, the one authority every drive write presents.
     pub use lash_core::store::{
-        AdmissionId, DriveEpochSeal, DriveEpochStore, RootStartNonce, StoredDriveEpoch,
+        AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, RootStartNonce, StoredDriveEpoch,
     };
-    /// A root's recorded admission of the turn-lane run it drives, and the
-    /// session's one unfinished root (FIG-3927).
+    /// A root's recorded admission of the turn-lane run it drives, what its
+    /// checkpoints admit, how a commit settles the rows its root holds, and
+    /// the session's one unfinished root (FIG-3927).
     pub use lash_core::store::{
-        AdmitRootRequest, AdmittedHead, RootAdmission, RootAdmissionAnswer, RootAdmissionRefusal,
-        UnfinishedRoot,
+        AdmitRootRequest, AdmittedHead, CheckpointAdmission, CheckpointAdmissionRequest,
+        IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, RootAdmission, RootAdmissionAnswer,
+        RootAdmissionRefusal, UnfinishedRoot,
     };
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
-        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
-        OrphanedTurnInputScope, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent,
-        ParkFeedPage, ParkId, ParkReason, ParkReasonCode, ParkSummary, PendingFollowOn,
-        PersistedSessionRead, PhysicalTurn, ProcessPark, ProcessParkKey, ProcessParkQuery,
-        RuntimeCommit, RuntimeCommitReceipt, RuntimePersistenceDecorator, RuntimeTurnCommitStamp,
-        RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SemanticBoundaryOperation, SessionCheckpoint,
-        SessionHead, SessionHeadMeta, SessionHeadPayload, TurnPark, TurnParkQuery, TurnParkTarget,
-        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        load_persisted_session_state,
+        HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
+        ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReason,
+        ParkReasonCode, ParkSummary, PendingFollowOn, PersistedSessionRead, PhysicalTurn,
+        ProcessPark, ProcessParkKey, ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt,
+        RuntimePersistenceDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta,
+        RuntimeUsageDeltaIdentity, SemanticBoundaryOperation, SessionCheckpoint, SessionHead,
+        SessionHeadMeta, SessionHeadPayload, TurnCommitFailureCause, TurnCommitOutcome,
+        TurnCommitRecord, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
+        UnsettledTurnCounts, commit_runtime_state_verified, load_persisted_session_state,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the
@@ -467,20 +469,20 @@ pub mod persistence {
         facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
-        BlobRef, CURRENT_SESSION_STATE_VERSION, ClaimAuthority, DurableItem, DurablePayload,
-        DurableScan, DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome,
-        ExecutedCallRecord, FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore,
-        GcReport, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
-        MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
+        DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
+        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+        IngressStore, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
+        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
-        ProtocolEvent, QueuedWorkStore, RetentionBound, RetentionReport, RuntimePersistence,
-        ScanCoverage, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
-        SessionCommitStore, SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodePayload,
-        SessionNodeRecord, SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
+        ProtocolEvent, RetentionBound, RetentionReport, RuntimePersistence, ScanCoverage,
+        SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCommitStore,
+        SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
+        SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
         StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
         StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-        StoreSchemaVerdict, TurnInputAdmission, TurnInputStore, VacuumReport, WorkClaim,
-        WorkCompletion, facade_support::SessionNodeProjection,
+        StoreSchemaVerdict, TurnInputAdmission, VacuumReport,
+        facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
@@ -660,7 +662,10 @@ pub mod secrets {
 /// protocol error type live at this root; everything else has exactly one
 /// home in a domain sub-namespace.
 pub mod remote {
-    pub use lash_remote_protocol::{Envelope, REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
+    pub use lash_remote_protocol::{
+        Envelope, Negotiated, Negotiation, REMOTE_PROTOCOL, REMOTE_PROTOCOL_VERSION,
+        RemoteProtocolError, answer,
+    };
 
     /// LLM request/response envelopes: messages, attachments, tool specs,
     /// output specs, and provider metadata.
@@ -734,7 +739,7 @@ pub mod remote {
             RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRuntimeAttribution,
             RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
             RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-            RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteSessionTurnResult, RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
@@ -804,8 +809,8 @@ pub mod remote {
     /// Token usage accounting and the streaming turn-activity vocabulary.
     pub mod usage {
         pub use lash_remote_protocol::queued_events::{
-            RemoteMessageOrigin, RemoteMessageRole, RemotePart, RemotePartAttachment,
-            RemotePartKind, RemotePluginMessage, RemoteQueuedWorkClaimBoundary, RemoteTurnCause,
+            RemoteAdmissionBoundary, RemoteMessageOrigin, RemoteMessageRole, RemotePart,
+            RemotePartAttachment, RemotePartKind, RemotePluginMessage, RemoteTurnCause,
             RemoteTurnOutputSource,
         };
         pub use lash_remote_protocol::usage_activity::{
@@ -825,6 +830,7 @@ pub mod process {
         ProcessObservationHub, ProcessObservationItem, ProcessObservationProjection,
         ProcessObservationSnapshot, ProcessObservationSubscription,
     };
+    pub use lash_core::SessionTurnResult;
     /// Materialized event semantics returned to custom process registries.
     pub use lash_core::runtime::ProcessEventSemantics;
     pub use lash_core::runtime::publish_process_execution_env;
@@ -941,21 +947,22 @@ pub mod runtime {
     /// Runtime host configuration, control, observation, and effect contracts.
     pub use lash_core::runtime::{
         AdmittedScope, ApplyConfigPatch, AssembledTurn, AssistantResponseHookEvents,
-        AssistantStreamHookState, AwaitEventResolver, CheckpointClaimSet, CompletionKeyPreparation,
-        DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
-        EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
-        GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy, NoSessionWork,
-        NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
-        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
-        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-        RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
-        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
-        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
-        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
-        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
-        SessionWorkEngine, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
-        ToolIntentSubmissionGuard, TurnCancelWait, TurnContext, TurnControlBinding,
-        WorkCadenceError, WorkCadencePolicy, effect_groups_unsupported,
+        AssistantStreamHookState, AwaitEventResolver, CheckpointAdmittedSet,
+        CompletionKeyPreparation, DirectCompletionClient, EffectAddress, EffectGroupHandle,
+        EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors,
+        GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord,
+        LoserPolicy, NoSessionWork, NoopEventSink, NoopTurnActivitySink, ProcessCommand,
+        ProcessEffectOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
+        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
+        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
+        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
+        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkEngine, SleepSpec,
+        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
+        TurnContext, TurnControlBinding, WorkCadenceError, WorkCadencePolicy,
+        effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

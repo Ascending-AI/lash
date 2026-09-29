@@ -98,6 +98,23 @@ lash_store_sql::statements! {
         /// concurrent admission cannot move it inside this transaction.
         select_state_version_for_update = "SELECT session_state_version FROM session_meta WHERE session_id = ?1 FOR UPDATE";
 
+        /// The shared `select_drive_epoch`, row-locked for the rest of the
+        /// fenced write's transaction (FIG-4044).
+        ///
+        /// The lock is the fork. SQLite's fenced writes run under the
+        /// database's single-writer lock; here `READ COMMITTED` would let a
+        /// seal raise the epoch between the fence check and the write it
+        /// fences. Locked, the read waits for an in-flight seal and sees the
+        /// epoch it committed, and a later seal waits for the write. The lock
+        /// is exclusive rather than shared because a fenced write may go on
+        /// to lock the row for update itself (`admit_root` reads the state
+        /// version `FOR UPDATE`): two shared holders upgrading would
+        /// deadlock, where exclusive holders simply queue.
+        select_drive_epoch_locked = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
+            EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
+                AND kind IN ('cancel', 'fork') AND state IN ('pending', 'failed_retryable'))
+            FROM session_meta WHERE session_id = ?1 FOR NO KEY UPDATE";
+
         exists_materialized = "SELECT EXISTS(
                  SELECT 1 FROM sessions WHERE session_id = ?1
                  UNION ALL
@@ -634,7 +651,7 @@ lash_store_sql::statements! {
                  FROM settled_park AS park
                  CROSS JOIN settled_park_clock AS clock
              )
-             SELECT turn_commit_hash, result_json,
+             SELECT turn_commit_hash, result_json, outcome_code,
                         request_identity_hash, identity_encoding_version,
                         requested_node_count
                  FROM runtime_turn_commits

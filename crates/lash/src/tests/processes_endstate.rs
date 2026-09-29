@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 
 use lashlang::testing::ast_builders as b;
 
@@ -646,7 +646,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let lease = store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-owner",
@@ -670,12 +670,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         &physical_scope,
     )?;
     store
-        .validate_turn_cancellation_binding(
-            &session_id,
-            &lease.fence(),
-            &binding_id,
-            &physical_scope,
-        )
+        .validate_turn_cancellation_binding(&session_id, &lease, &binding_id, &physical_scope)
         .await?;
     let turn_id = lash_core::TurnId::from("process-prune-closure-turn");
     let address = lash_core::facade_support::TurnAddress::new(&session_id, &turn_id);
@@ -707,10 +702,10 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         terminal_key,
         lash_core::TurnCancelClosureProposal::CompletionSealed,
         lash_core::TurnCancelIntentSnapshot::Absent,
-        &lease.fence(),
+        &lease,
     )?;
     store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await?;
 
     let refusal = core
@@ -731,17 +726,22 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     );
 
     let settlement = authority.settle_authorized_closure(&authorization).await?;
-    store
-        .repair_orphaned_active_turn_inputs(
-            &session_id,
-            &lease.fence(),
-            &turn_id,
-            &lash_core::TurnCancelIntentSnapshot::Absent,
-            Some(&settlement),
-        )
-        .await?
-        .into_applied()
-        .expect("the exact current owner consumes the closure authorization");
+    // The exact current owner's commit consumes the closure authorization.
+    let state = lash_core::RuntimeSessionState {
+        session_id: session_id.clone(),
+        ..lash_core::RuntimeSessionState::new(lash_core::SessionPolicy::new(
+            lash_core::TurnBudget::Unbounded,
+        ))
+    };
+    let mut commit = lash_core::RuntimeCommit::persisted_state_for_test(&state, &[])
+        .deferring_interrupted_turn_inputs(
+            turn_id.clone(),
+            settlement.effective_cancellation().cloned(),
+        );
+    commit.interrupted_turn_cancel_intent = Some(lash_core::TurnCancelIntentSnapshot::Absent);
+    commit.turn_cancel_closure_settlement = Some(settlement);
+    commit.drive_fence = Some(Box::new(lease.clone()));
+    store.commit_runtime_state(commit).await?;
     let report = core
         .processes()
         .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
@@ -759,7 +759,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
         })
         .await?;
     let late_lease = late_store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &late_session_id,
             &lash_core::LeaseOwnerIdentity::opaque(
                 "process-prune-closure-late-owner",
@@ -780,7 +780,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     late_store
         .validate_turn_cancellation_binding(
             &late_session_id,
-            &late_lease.fence(),
+            &late_lease,
             &late_binding_id,
             &late_scope,
         )
@@ -814,10 +814,10 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
             .await?,
         lash_core::TurnCancelClosureProposal::CompletionSealed,
         lash_core::TurnCancelIntentSnapshot::Absent,
-        &late_lease.fence(),
+        &late_lease,
     )?;
     let late_result = late_store
-        .authorize_turn_cancel_closure(&late_lease.fence(), &late_authorization)
+        .authorize_turn_cancel_closure(&late_lease, &late_authorization)
         .await;
     assert!(
         matches!(
@@ -1793,6 +1793,266 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         serde_json::json!({ "resumed": { "after_delete": true } })
     );
     wait_for_terminal(&core, &process_id, lash_core::ProcessStatus::Completed).await;
+    Ok(())
+}
+
+struct CalendarTriggerSurfacePlugin;
+
+impl lash_core::facade_support::SessionPlugin for CalendarTriggerSurfacePlugin {
+    fn id(&self) -> &'static str {
+        "calendar-triggers"
+    }
+
+    fn register(
+        &self,
+        _reg: &mut lash_core::facade_support::PluginRegistrar,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
+}
+
+/// A resident `calendar.Changed` source: contributing it through the factory's
+/// extension points puts `calendar.Change` in both the cell's link surface and
+/// the process engine's host environment.
+struct CalendarTriggerSurfaceFactory;
+
+impl lash_core::facade_support::PluginFactory for CalendarTriggerSurfaceFactory {
+    fn id(&self) -> &'static str {
+        "calendar-triggers"
+    }
+
+    fn extension_contributions(&self) -> Vec<lash_core::plugin::PluginExtensionContribution> {
+        let mut resources = crate::rlm::LashlangHostCatalog::new();
+        resources
+            .add_trigger_source_constructor(
+                ["calendar", "Changed"],
+                crate::rlm::TypeExpr::Object(vec![]),
+                crate::rlm::NamedDataType::object(
+                    "calendar.Change",
+                    vec![crate::rlm::TypeField {
+                        name: "id".into(),
+                        ty: crate::rlm::TypeExpr::Str,
+                        optional: false,
+                    }],
+                )
+                .expect("valid calendar event type"),
+            )
+            .expect("calendar trigger source is unique");
+        vec![
+            crate::rlm::lashlang_surface_extension(&crate::rlm::LashlangSurfaceContribution::new(
+                crate::rlm::LashlangAbilities::default(),
+                crate::rlm::LashlangLanguageFeatures::default(),
+                resources,
+            ))
+            .expect("calendar surface contribution encodes"),
+        ]
+    }
+
+    fn build(
+        &self,
+        _ctx: &lash_core::facade_support::PluginSessionContext,
+    ) -> std::result::Result<
+        Arc<dyn lash_core::facade_support::SessionPlugin>,
+        lash_core::PluginError,
+    > {
+        Ok(Arc::new(CalendarTriggerSurfacePlugin))
+    }
+}
+
+/// FIG-3116: `triggers.register` is an ordinary declaring leaf tool now.
+/// Driven only through `send()`: the cell's recorded call is
+/// `register_trigger`, it declares a `register_trigger` intent, and the
+/// subscription installs when that intent is realized — so an occurrence
+/// emitted in a later turn still starts the lifted target and delivers the
+/// event.
+#[tokio::test]
+async fn rlm_trigger_register_is_a_leaf_tool_and_fires_in_a_later_turn() -> Result<()> {
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+        .provider(queued_text_provider(vec![
+            typescript_block(
+                r#"
+const remember = async (change: calendar.Change) => change.id;
+const handle = await triggers.register({
+  source: calendar.Changed({}),
+  target: remember,
+  inputs: (event) => ({ change: event })
+});
+finish(handle.id);
+"#,
+            ),
+            typescript_block("finish(\"second turn\");"),
+        ]))
+        .model(mock_model_spec())
+        .plugin(Arc::new(CalendarTriggerSurfaceFactory))
+        .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    let session = core.session("rlm-trigger-leaf").open().await?;
+
+    let events = Arc::new(RecordingEvents::default());
+    let result = session
+        .send(TurnInput::text("register the trigger"))
+        .output_into(events.as_ref())
+        .await?;
+
+    assert!(
+        matches!(result.outcome, TurnOutcome::Finished(..)),
+        "{:#?} errors={:?}",
+        result.outcome,
+        result.errors
+    );
+    let recorded = events.snapshot().await;
+    assert_eq!(
+        result.tool_calls.len(),
+        1,
+        "calls={:?} outcome={:#?} errors={:?} final={:?}",
+        result.tool_calls,
+        result.outcome,
+        result.errors,
+        result.final_value()
+    );
+    assert_eq!(result.tool_calls[0].tool, "register_trigger");
+    let intent_kinds = recorded
+        .iter()
+        .filter_map(|activity| match &activity.event {
+            TurnEvent::ToolIntentOutcome { outcome, .. } => outcome.kind(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        intent_kinds,
+        vec![lash_core::ToolIntentKind::RegisterTrigger],
+        "the register call must declare exactly the register_trigger intent"
+    );
+
+    let subscriptions = core
+        .triggers()
+        .subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await?;
+    assert_eq!(subscriptions.len(), 1, "{subscriptions:?}");
+    assert_eq!(subscriptions[0].source_type.as_str(), "calendar.Changed");
+    let subscription_key = subscriptions[0].subscription_key.clone();
+    assert_eq!(
+        result.final_value(),
+        Some(&serde_json::json!(subscription_key)),
+        "the realized trigger handle answers the cell"
+    );
+
+    // The subscription outlives its declaring turn: a second turn runs, then
+    // an occurrence still starts the lifted target with the event as input.
+    session
+        .send(TurnInput::text("second turn"))
+        .output()
+        .await?;
+
+    let report = core
+        .triggers()
+        .emit(
+            lash_core::TriggerOccurrenceRequest::new(
+                "calendar.Changed",
+                subscriptions[0].source_key.clone(),
+                serde_json::json!({ "id": "change-7" }),
+                "calendar-occurrence-1",
+            )
+            .with_source(serde_json::json!({})),
+            runtime_operation_scope(&core, "calendar-emit").await,
+        )
+        .await?;
+    let started = report.started_process_ids();
+    assert_eq!(started.len(), 1, "{report:?}");
+    wait_for_terminal(&core, &started[0], lash_core::ProcessStatus::Completed).await;
+    let output = core.processes().await_output(&started[0]).await?;
+    let output = output.into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
+        panic!("triggered process did not succeed: {output:#?}");
+    };
+    assert_eq!(value.to_json_value(), serde_json::json!("change-7"));
+    Ok(())
+}
+
+/// FIG-3116: a durable process body reaches the same leaf tool. The
+/// registration the started process declares carries the session's authority
+/// and fires the lifted target like a cell-declared one.
+#[tokio::test]
+async fn rlm_process_body_registers_a_trigger_through_the_leaf_tool() -> Result<()> {
+    let backend = double_backend().await;
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    .provider(queued_text_provider(vec![typescript_block(
+        r#"
+const remember = async (change: calendar.Change) => change.id;
+const registrar = async () => {
+  const handle = await triggers.register({
+    source: calendar.Changed({}),
+    target: remember,
+    inputs: (event) => ({ change: event })
+  });
+  return handle.id;
+};
+const h = await processes.start({ definition: registrar });
+finish(await h);
+"#,
+    )]))
+    .model(mock_model_spec())
+    // ADR 0095: the `processes` module is catalogue presence, so a cell that
+    // authors `processes.start` needs this factory installed.
+    .plugin(Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::session_or_starter,
+        ),
+    ))
+    .plugin(Arc::new(CalendarTriggerSurfaceFactory))
+    .build(crate::testing::runtime_lease_owner())?;
+    serve_processes(&core);
+    let session = core.session("rlm-process-registers-trigger").open().await?;
+
+    let result = session
+        .send(TurnInput::text("run the registrar"))
+        .output()
+        .await?;
+    assert!(
+        matches!(result.result.outcome, TurnOutcome::Finished(..)),
+        "{:#?} errors={:?}",
+        result.result.outcome,
+        result.result.errors
+    );
+
+    let subscriptions = core
+        .triggers()
+        .subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await?;
+    assert_eq!(subscriptions.len(), 1, "{subscriptions:?}");
+    assert_eq!(subscriptions[0].source_type.as_str(), "calendar.Changed");
+    assert_eq!(
+        result.final_value(),
+        Some(&serde_json::json!(subscriptions[0].subscription_key)),
+        "the process body's register call answers the realized handle"
+    );
+
+    let report = core
+        .triggers()
+        .emit(
+            lash_core::TriggerOccurrenceRequest::new(
+                "calendar.Changed",
+                subscriptions[0].source_key.clone(),
+                serde_json::json!({ "id": "change-9" }),
+                "calendar-occurrence-2",
+            )
+            .with_source(serde_json::json!({})),
+            runtime_operation_scope(&core, "calendar-emit-2").await,
+        )
+        .await?;
+    let started = report.started_process_ids();
+    assert_eq!(started.len(), 1, "{report:?}");
+    wait_for_terminal(&core, &started[0], lash_core::ProcessStatus::Completed).await;
+    let output = core
+        .processes()
+        .await_output(&started[0])
+        .await?
+        .into_tool_output();
+    let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
+        panic!("triggered process did not succeed: {output:#?}");
+    };
+    assert_eq!(value.to_json_value(), serde_json::json!("change-9"));
     Ok(())
 }
 

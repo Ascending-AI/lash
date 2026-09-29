@@ -215,6 +215,145 @@ fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
     })
 }
 
+async fn host_register_trigger_realizes_and_fires(backend: lash_core::Backend) -> Result<()> {
+    let store = backend.trigger_store();
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        backend.process_env_store().as_ref(),
+        &lash_core::ArtifactOwner::host("ingress-registration-fixture"),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ),
+    )
+    .await?;
+    let (core, _, _) = ingress_core(backend).await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+    let register =
+        lash_core::ToolIntent::RegisterTrigger(Box::new(lash_core::RegisterTriggerIntent {
+            session_id: SessionId::from(SESSION),
+            owner_scope: lash_core::TriggerOwnerScope::session(SESSION),
+            actor: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(SESSION)),
+            env_spec: None,
+            draft: lash_core::TriggerSubscriptionDraft::for_process(
+                "test/host-ingress-registration",
+                env_ref,
+                "intent.ingress.trigger",
+                "intent-ingress-source",
+                lash_core::ProcessInput::Engine {
+                    kind: "testing-fixture".to_string(),
+                    payload: serde_json::json!({"process": "host-ingress-registration"}),
+                },
+                lash_core::ProcessIdentity::labelled(
+                    "testing-fixture",
+                    Some("host-ingress-registration"),
+                ),
+            )
+            .with_payload_schema(lash_core::LashSchema::any()),
+        }));
+    let outcome = ingress
+        .submit(ingress.key("host-register-call", 0), register)
+        .await;
+    assert!(
+        matches!(
+            &outcome,
+            crate::tools::ToolIntentIngressOutcome::Admitted {
+                outcome: lash_core::ToolIntentExecutionOutcome::Executed {
+                    kind: lash_core::ToolIntentKind::RegisterTrigger,
+                    ..
+                },
+                replayed: false,
+            }
+        ),
+        "host registration must realize: {outcome:?}"
+    );
+    let subscriptions = store
+        .list_subscriptions(lash_core::TriggerSubscriptionFilter::default())
+        .await?;
+    assert_eq!(subscriptions.len(), 1);
+
+    let emitted = ingress
+        .submit(
+            ingress.key("host-fire-call", 0),
+            trigger_intent(&SessionId::from(SESSION)),
+        )
+        .await;
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome:
+            lash_core::ToolIntentExecutionOutcome::Executed {
+                kind: lash_core::ToolIntentKind::EmitTrigger,
+                result,
+                ..
+            },
+        ..
+    } = emitted
+    else {
+        panic!("registered trigger must fire: {emitted:?}");
+    };
+    let report: lash_core::facade_support::TriggerEmitReport =
+        serde_json::from_value(result).expect("trigger report decodes");
+    assert_eq!(report.started_process_ids().len(), 1);
+    let occurrences = store
+        .list_occurrences(lash_core::TriggerOccurrenceFilter::default())
+        .await?;
+    assert_eq!(occurrences.len(), 1);
+    let deliveries = store
+        .list_deliveries_by_occurrence_id(&occurrences[0].occurrence_id)
+        .await?;
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(
+        deliveries[0].subscription.subscription_id,
+        subscriptions[0].subscription_id
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn host_register_trigger_realizes_and_fires_in_memory() -> Result<()> {
+    Box::pin(host_register_trigger_realizes_and_fires(
+        memory_store_backend().await,
+    ))
+    .await
+}
+
+#[tokio::test]
+async fn host_register_trigger_realizes_and_fires_in_sqlite() -> Result<()> {
+    let directory = tempfile::tempdir().expect("SQLite test directory");
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::open(directory.path())
+            .await
+            .expect("open SQLite store set"),
+    );
+    Box::pin(host_register_trigger_realizes_and_fires(
+        lash_conformance::recording_backend_over(stores),
+    ))
+    .await
+}
+
+#[tokio::test]
+#[allow(
+    clippy::disallowed_methods,
+    reason = "the test host reads the optional PostgreSQL service URL"
+)]
+async fn host_register_trigger_realizes_and_fires_in_postgres() -> Result<()> {
+    let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") else {
+        eprintln!("skipping PostgreSQL ingress trigger test: database URL is not set");
+        return Ok(());
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
+    let attachments = tempfile::tempdir().expect("PostgreSQL attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            attachments.path(),
+        )),
+    ));
+    Box::pin(host_register_trigger_realizes_and_fires(
+        lash_conformance::recording_backend_over(stores),
+    ))
+    .await
+}
+
 /// The host front door realizes the fifth intent kind through the trigger
 /// router, and re-submitting the same identity cannot emit a second time.
 #[tokio::test]
@@ -299,6 +438,125 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
         1,
         "a re-submitted identity cannot reserve a second delivery"
     );
+    Ok(())
+}
+
+/// A host front door confers only its own session's registration authority:
+/// a `register_trigger` intent claiming another owner scope or actor is
+/// refused with a typed refusal before admission and installs nothing
+/// (FIG-3116).
+#[tokio::test]
+async fn register_trigger_intent_claiming_foreign_authority_is_refused() -> Result<()> {
+    let backend = memory_store_backend().await;
+    let store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
+    let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
+        backend.process_env_store().as_ref(),
+        &lash_core::ArtifactOwner::host("process-execution-env-fixture"),
+        &lash_core::ProcessExecutionEnvSpec::new(
+            lash_core::PluginOptions::default(),
+            lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+        ),
+    )
+    .await?;
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        ingress_backend(
+            backend,
+            Some(Arc::new(KeyJournalController::default())),
+            None,
+        ),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .plugin(lash_core::testing::process_engine_plugin_fixture())
+    .build(crate::testing::runtime_lease_owner())?;
+    let _session = core.session(SESSION).open().await?;
+    let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
+
+    let draft = || {
+        lash_core::TriggerSubscriptionDraft::for_process(
+            "test/intent-ingress-registration",
+            env_ref.clone(),
+            "intent.ingress.trigger",
+            "intent-ingress-source",
+            lash_core::ProcessInput::Engine {
+                kind: "testing-fixture".to_string(),
+                payload: serde_json::json!({"process": "intent-ingress-registration"}),
+            },
+            lash_core::ProcessIdentity::labelled(
+                "testing-fixture",
+                Some("intent-ingress-registration"),
+            ),
+        )
+        .with_payload_schema(lash_core::LashSchema::any())
+    };
+    let session_id = SessionId::from(SESSION);
+    let register = |owner_scope, actor| {
+        lash_core::ToolIntent::RegisterTrigger(Box::new(lash_core::RegisterTriggerIntent {
+            session_id: session_id.clone(),
+            owner_scope,
+            actor,
+            env_spec: None,
+            draft: draft(),
+        }))
+    };
+    let own_owner = lash_core::TriggerOwnerScope::session(SESSION);
+    let own_actor =
+        lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id.clone()));
+
+    let forged_owner = lash_core::TriggerOwnerScope::session("some-other-session");
+    assert_eq!(
+        ingress
+            .submit(
+                ingress.key("foreign-owner-register", 0),
+                register(forged_owner.clone(), own_actor.clone()),
+            )
+            .await,
+        crate::tools::ToolIntentIngressOutcome::Refused {
+            refusal: crate::tools::ToolIntentIngressRefusal::ForeignTriggerOwnerScope {
+                expected: own_owner.clone(),
+                recorded: forged_owner,
+            }
+        },
+        "a forged owner scope is refused before admission"
+    );
+
+    let forged_actors = [
+        lash_core::ProcessOriginator::host_scoped("host-binding-elsewhere"),
+        lash_core::ProcessOriginator::session(lash_core::SessionScope::new("some-other-session")),
+        // A frame id is an elevation this front door cannot confer.
+        lash_core::ProcessOriginator::session(lash_core::SessionScope::for_agent_frame(
+            session_id.clone(),
+            lash_core::FrameNodeId::new("forged-frame").expect("non-empty frame id"),
+        )),
+    ];
+    for (index, forged_actor) in forged_actors.into_iter().enumerate() {
+        assert_eq!(
+            ingress
+                .submit(
+                    ingress.key(format!("foreign-actor-register-{index}"), 0),
+                    register(own_owner.clone(), forged_actor.clone()),
+                )
+                .await,
+            crate::tools::ToolIntentIngressOutcome::Refused {
+                refusal: crate::tools::ToolIntentIngressRefusal::ForeignTriggerActor {
+                    expected: own_actor.clone(),
+                    recorded: forged_actor,
+                }
+            },
+            "a forged actor is refused before admission"
+        );
+    }
+
+    assert_eq!(
+        store
+            .list_subscriptions(lash_core::TriggerSubscriptionFilter::default())
+            .await?
+            .len(),
+        0,
+        "refused registrations install nothing"
+    );
+
     Ok(())
 }
 
@@ -1241,6 +1499,22 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
             crate::tools::ToolIntentIngressRefusal::IntentSessionMismatch {
                 expected: SESSION.to_string(),
                 recorded: "foreign".to_string(),
+            },
+            &["expected", "recorded"][..],
+        ),
+        (
+            crate::tools::ToolIntentIngressRefusal::ForeignTriggerOwnerScope {
+                expected: lash_core::TriggerOwnerScope::session(SESSION),
+                recorded: lash_core::TriggerOwnerScope::session("foreign"),
+            },
+            &["expected", "recorded"][..],
+        ),
+        (
+            crate::tools::ToolIntentIngressRefusal::ForeignTriggerActor {
+                expected: lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+                    SESSION,
+                )),
+                recorded: lash_core::ProcessOriginator::host_scoped("foreign"),
             },
             &["expected", "recorded"][..],
         ),

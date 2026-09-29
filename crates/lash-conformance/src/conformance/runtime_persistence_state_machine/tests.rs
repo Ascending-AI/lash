@@ -52,11 +52,11 @@ impl crate::store::RuntimePersistenceDecorator for DroppingQueueListing {
         Ok(self.dropped(Listing::Total, batches))
     }
 
-    async fn list_pending_queued_work(
+    async fn list_open_queued_work(
         &self,
         session_id: &SessionId,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::StoreError> {
-        let batches = self.inner.list_pending_queued_work(session_id).await?;
+        let batches = self.inner.list_open_queued_work(session_id).await?;
         Ok(self.dropped(Listing::Pending, batches))
     }
 }
@@ -124,6 +124,6 @@ async fn assert_model_agreement_attributes_pending_queue_store_seam_drop() {
 
     assert_eq!(
         assert_model_agreement(store.as_ref(), &model).await,
-        Err("pending queued-work projection differs from live-claim model".to_string())
+        Err("open queued-work projection differs from the admission model".to_string())
     );
 }

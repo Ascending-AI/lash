@@ -12,7 +12,12 @@ pub(super) fn missing_process_execution_error() -> crate::RuntimeEffectControlle
     )
 }
 
-pub(super) fn resolve_trigger_owner_scope(
+/// The owner scope a trigger command issued from `root_session_id` belongs
+/// under, given the originator of the process execution it runs inside (when
+/// it runs inside one). The registration tool and the host-operation path
+/// resolve through this one ruling so a subscription owns the same scope
+/// whichever route declared it.
+pub fn resolve_trigger_owner_scope(
     root_session_id: &SessionId,
     originator: Option<&crate::ProcessOriginator>,
 ) -> Result<crate::TriggerOwnerScope, crate::PluginError> {

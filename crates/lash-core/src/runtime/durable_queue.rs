@@ -247,7 +247,7 @@ impl DurableSessionOps {
         store: &Arc<dyn crate::RuntimePersistence>,
     ) -> Result<Vec<crate::QueuedWorkBatch>, crate::RuntimeError> {
         store
-            .list_pending_queued_work(&self.session_id)
+            .list_open_queued_work(&self.session_id)
             .await
             .map_err(store_error)
     }
@@ -358,63 +358,6 @@ impl DurableSessionOps {
             .await;
         }
         Ok(batch)
-    }
-
-    /// Release a held queued-work claim without completing it.
-    ///
-    /// This is token-authorised release, not interference with a live
-    /// claimant: the store matches both `claim_id` and `claim_token`, so a
-    /// non-holder is refused. It is the lever a host pulls after stopping its
-    /// own queued-work driver mid-claim, returning the batches to the pending
-    /// queue at once instead of waiting out the claim's lease.
-    pub async fn abandon_queued_work_claim(
-        &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
-        claim: &crate::QueuedWorkClaim,
-    ) -> Result<(), crate::RuntimeError> {
-        store
-            .abandon_queued_work_claim(claim)
-            .await
-            .map_err(store_error)?;
-        self.publish_queue_changed(
-            store,
-            SessionQueueEventKind::Enqueued,
-            claim
-                .batches
-                .iter()
-                .map(|batch| batch.batch_id.to_string())
-                .collect(),
-            None,
-        )
-        .await;
-        Ok(())
-    }
-
-    /// Release a held pending-turn-input claim without completing it. The
-    /// turn-input counterpart of
-    /// [`abandon_queued_work_claim`](Self::abandon_queued_work_claim), with the
-    /// same `claim_id`/`claim_token` authorisation.
-    pub async fn abandon_turn_input_claim(
-        &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
-        claim: &crate::TurnInputClaim,
-    ) -> Result<(), crate::RuntimeError> {
-        store
-            .abandon_turn_input_claim(claim)
-            .await
-            .map_err(store_error)?;
-        self.publish_queue_changed(
-            store,
-            SessionQueueEventKind::Enqueued,
-            claim
-                .inputs
-                .iter()
-                .map(|input| input.input_id.to_string())
-                .collect(),
-            None,
-        )
-        .await;
-        Ok(())
     }
 
     /// Does this session still have durable live session metadata?

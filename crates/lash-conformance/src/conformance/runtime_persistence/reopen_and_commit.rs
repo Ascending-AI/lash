@@ -376,7 +376,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     .expect("commit state");
     state.head_revision = initial_commit.head_revision;
 
-    let application_lease = seal_claim_authority_for_test(
+    let application_lease = seal_drive_fence_for_test(
         &factory.open,
         &SessionId::from("root"),
         "reopen-applications",
@@ -398,25 +398,34 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
             )
             .await
             .expect("enqueue reopen application");
-        let mut claim = factory
+        let head = factory
             .open
-            .claim_next_turn_inputs(
-                &SessionId::from("root"),
-                &application_lease.fence(),
-                &lease_owner("reopen-applications"),
-                1,
-            )
+            .list_pending_turn_inputs(&SessionId::from("root"))
             .await
-            .expect("claim reopen application")
-            .expect("reopen application claim");
+            .expect("list the reopen application")
+            .remove(0)
+            .input;
+        let admission = admitted_root(
+            &factory.open,
+            &application_lease,
+            turn_id,
+            lash_core::store::AdmittedHead::Input(head.input_id),
+        )
+        .await;
+        let mut claim = *admission.inputs.expect("the root admits its input");
         claim.record_initial_turn_application(
             &crate::TurnId::from(turn_id),
             &format!("reopen-application-message-{turn_index}"),
         );
         expected_applications.extend(claim.applications.clone());
 
-        let mut commit = RuntimeCommit::persisted_state_for_test(&state, &[])
-            .completing_turn_input_claim(claim.completion());
+        let mut settlement = lash_core::store::IngressSettlement::new(TurnId::from(turn_id));
+        settlement.completed_inputs.push(claim.completion());
+        let mut commit = final_commit(
+            RuntimeCommit::persisted_state_for_test(&state, &[]),
+            &application_lease,
+            settlement,
+        );
         commit.turn_commit =
             RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", turn_id, "final"));
         let result = factory
@@ -553,36 +562,27 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
     );
 
     let session_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "wake-owner").await;
-    let claim = store
-        .claim_ready_queued_work(
-            &SessionId::from("root"),
-            &session_lease.fence(),
-            &lease_owner("wake-owner"),
-            QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("claim wake")
-        .claim()
-        .expect("wake claim");
+        seal_drive_fence_for_test(&store, &SessionId::from("root"), "wake-owner").await;
+    let admission = admitted_root(
+        &store,
+        &session_lease,
+        "wake-root",
+        lash_core::store::AdmittedHead::Batch(first.batch_id.clone()),
+    )
+    .await;
+    let claim = admission.queued.as_ref().expect("the root admits the wake");
     assert_eq!(claim.batches.len(), 1);
     assert_eq!(claim.batches[0].items.len(), 1);
     assert!(matches!(
         claim.batches[0].items[0].payload,
         QueuedWorkPayload::ProcessWake { .. }
     ));
-    let state = RuntimeSessionState {
-        session_id: SessionId::from("root"),
-        ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
-    };
-    store
-        .commit_runtime_state(
-            RuntimeCommit::persisted_state_for_test(&state, &[])
-                .completing_queue_claim(claim.completion()),
-        )
-        .await
-        .expect("wake delivery completion commits");
+    end_root(
+        &store,
+        &session_lease,
+        completing_admission("wake-root", &admission),
+    )
+    .await;
     assert!(
         store
             .list_queued_work(&SessionId::from("root"))
@@ -727,7 +727,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
         .expect("first commit hash");
 
     let _session_lease =
-        seal_claim_authority_for_test(&store, &SessionId::from("root"), "provider-turn").await;
+        seal_drive_fence_for_test(&store, &SessionId::from("root"), "provider-turn").await;
     let first = store
         .commit_runtime_state(stamped_commit.clone())
         .await

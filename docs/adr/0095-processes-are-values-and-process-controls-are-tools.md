@@ -13,7 +13,11 @@ made TypeScript the sole RLM dialect. The Lashlang `process (…) { }` literal
 and the other "both dialects" wording below are historical; the process
 literal is the TypeScript async arrow. The shipped process-control tools are
 `processes.start`, `await`, `emit`, `signal`, `cancel`, `list` and `register`;
-there is no `create` tool, and trigger operations are host operations
+there is no `create` tool. `triggers.register` is a declaring leaf tool
+(`tool:register_trigger`) on the same pattern: it validates the registration
+and declares `ToolIntent::RegisterTrigger`, and the subscription installs when
+the intent is realized. The other trigger operations (`list`, `update`,
+`enable`, `disable`, `delete`, `revive`, `prune`) remain host operations
 (`lashlang::TriggerHostOperation`) declared with the same `x-lash` contract
 vocabulary rather than catalogue tools.
 

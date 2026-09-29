@@ -48,6 +48,7 @@ lash-core = { workspace = true }
 lash = { workspace = true, features = ["rlm", "restate"] }
 lash-llm-tools = { workspace = true }
 lash-plugin-process-controls = { workspace = true }
+lash-plugin-standard-compaction = { workspace = true }
 lash-postgres-store = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-provider-openai = { workspace = true }

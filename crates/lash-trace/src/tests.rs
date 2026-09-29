@@ -401,3 +401,33 @@ fn jsonl_trace_sink_recovers_from_torn_tail() {
 
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn trace_reader_skips_unknown_kinds_and_counts_them() {
+    let mut known = serde_json::to_value(TraceRecord::new(
+        TraceContext::default(),
+        TraceEvent::Custom {
+            name: "known".to_string(),
+            payload: serde_json::Value::Null,
+        },
+    ))
+    .expect("known trace");
+    known["future_optional"] = serde_json::json!({"ignored": true});
+    let mut future = known.clone();
+    future["type"] = serde_json::json!("future_observation");
+    future["extra"] = serde_json::json!({"optional": true});
+    let text = format!("{known}\n{future}\n{known}\n");
+    let read = parse_trace_jsonl_records(&text).expect("read trace");
+    assert_eq!(read.records.len(), 2);
+    assert_eq!(read.skipped_unknown_kinds, 1);
+
+    let mut malformed = known.clone();
+    malformed.as_object_mut().unwrap().remove("name");
+    let error = parse_trace_jsonl_records(&format!("{known}\n{malformed}\n"))
+        .expect_err("known malformed kind must refuse");
+    assert_eq!(error.line, 2);
+
+    let mut unsupported = future;
+    unsupported["schema_version"] = serde_json::json!(TRACE_SCHEMA_VERSION + 1);
+    assert!(parse_trace_jsonl_records(&format!("{unsupported}\n")).is_err());
+}

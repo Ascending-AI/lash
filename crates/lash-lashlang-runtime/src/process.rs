@@ -725,11 +725,11 @@ async fn execute_lashlang(
         }
         match execution {
             Ok(lashlang::VmRunOutcome::Complete(output)) => {
-                vm.flush_profile(compiled.as_ref(), env);
+                vm.flush_profile(env);
                 return process_lashlang_execution_result(Ok(output)).into();
             }
             Err(err) => {
-                vm.flush_profile(compiled.as_ref(), env);
+                vm.flush_profile(env);
                 return process_lashlang_execution_result(Err(err)).into();
             }
             Ok(lashlang::VmRunOutcome::EffectCompleted) => {

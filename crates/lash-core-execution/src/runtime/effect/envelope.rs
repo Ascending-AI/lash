@@ -437,9 +437,9 @@ pub enum RuntimeEffectCommand {
         draft: Box<crate::PendingTurnInputDraft>,
     },
     /// Admit the turn-lane run a root is headed by (FIG-3927). The outcome
-    /// journals the admitted rows with their content and settlement
-    /// authority, and the base the root was admitted on, so a replaying root
-    /// drives the same rows from the same head and never reads pending rows.
+    /// journals the admitted rows with their content, and the base the root
+    /// was admitted on, so a replaying root drives the same rows from the
+    /// same head and never reads open rows.
     /// The envelope names only the head: the drive fence is captured by the
     /// local executor, so the envelope hashes the same under every epoch.
     AdmitRoot {
@@ -870,18 +870,19 @@ fn boxed_process_execution_context_is_empty(context: &ProcessExecutionContext) -
 
 type CheckpointOutcome = Result<CheckpointDelivery, RuntimeEffectControllerError>;
 
+/// What a checkpoint's turn holds once the checkpoint committed (FIG-3927):
+/// every queued-work admission the turn made so far, and the active-turn
+/// input its checkpoints admitted.
+///
+/// Checkpoint replay skips the local executor that admitted these rows, so
+/// they are journaled with the delivery: the replaying turn settles exactly
+/// the rows its root holds in its final commit, and never reads the queue.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct CheckpointClaimSet {
-    // Checkpoint replay skips the local executor that acquired these claims.
-    // Journal them with the delivery so the replaying turn carries the same
-    // settlement authority into its atomic final commit. Outcomes written by
-    // older binaries have no claim set: one queued-work row and one active
-    // turn-input row per in-flight turn can be redelivered by the next lease
-    // generation, without loss.
+pub struct CheckpointAdmittedSet {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub queued_work_claims: Vec<crate::QueuedWorkClaim>,
+    pub queued_work: Vec<crate::AdmittedQueuedWork>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_input_claim: Option<crate::TurnInputClaim>,
+    pub turn_inputs: Option<crate::AdmittedTurnInputs>,
     /// What the turn's opener had incorporated when this checkpoint committed
     /// (ADR 0099 §6, §13). Replay serves a completed cell from the journal
     /// without re-running the incorporations it made, and the checkpoint that
@@ -894,6 +895,14 @@ pub struct CheckpointClaimSet {
         skip_serializing_if = "crate::session::IncorporationLedger::is_empty"
     )]
     pub incorporation: crate::session::IncorporationLedger,
+}
+
+/// The replay-key suffix of a parked call's cancel obligation (ADR 0116
+/// §3.4): the process cancel a cancelled or timed-out wait owes is journaled
+/// beneath `{call id}:cancel-work` under the call's lineage, so every redrive
+/// re-issues the same command.
+pub fn tool_cancel_work_replay_suffix(call_id: &str) -> String {
+    format!("{call_id}:cancel-work")
 }
 
 impl ProcessCommand {
@@ -1092,12 +1101,14 @@ pub type RuntimeDirectLlmOutcome = (
     Option<crate::LlmCallRecord>,
 );
 
-/// The first execution's decision about the head a root claimed.
+/// The first execution's decision about the head a root admitted: drive it,
+/// or park because the session head moved under the root before it
+/// committed. The head is bound to the root alone (FIG-3927), so no other
+/// driver can have answered it.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AdmittedHeadVerdict {
     Ready,
-    Ceded,
     Diverged { live_revision: u64 },
 }
 
@@ -1213,8 +1224,8 @@ pub enum RuntimeEffectOutcome {
     AcceptTurnInput {
         accepted: Box<crate::PendingTurnInput>,
     },
-    /// The root's recorded admission, journaled so replay drives the same
-    /// rows under the same settlement authority (FIG-3927).
+    /// The root's recorded admission, journaled so replay drives and settles
+    /// the same rows (FIG-3927).
     AdmitRoot {
         answer: crate::store::RootAdmissionAnswer,
     },
@@ -1250,7 +1261,7 @@ pub enum RuntimeEffectOutcome {
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
-        claims: Box<CheckpointClaimSet>,
+        admitted: Box<CheckpointAdmittedSet>,
     },
     SyncExecutionEnvironment {
         result: Result<Option<ExecutionEnvironmentSync>, String>,
@@ -1611,9 +1622,9 @@ impl RuntimeEffectOutcome {
 
     pub fn into_checkpoint(
         self,
-    ) -> Result<(CheckpointOutcome, CheckpointClaimSet), RuntimeEffectControllerError> {
+    ) -> Result<(CheckpointOutcome, CheckpointAdmittedSet), RuntimeEffectControllerError> {
         match self {
-            Self::Checkpoint { result, claims } => Ok((result, *claims)),
+            Self::Checkpoint { result, admitted } => Ok((result, *admitted)),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::Checkpoint,
                 other.kind(),

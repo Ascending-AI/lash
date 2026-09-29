@@ -5,7 +5,7 @@ use crate::object_state::StampedValue;
 
 fn stamped(body: serde_json::Value) -> Vec<u8> {
     serde_json::to_vec(&StampedValue {
-        format: crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+        format: u32::from(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
         body,
     })
     .expect("encode a stamped registry row")
@@ -63,10 +63,15 @@ pub(super) async fn the_session_index_answers_a_turn_gate_peek_in_one_shared_rea
         "a pristine index holds an open gate"
     );
 
-    let mut state = BTreeMap::from([(
-        crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
-        metadata(false),
-    )]);
+    let mut state = BTreeMap::from([
+        super::process_await_redrive::fresh_compat_record(
+            crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+        ),
+        (
+            crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+            metadata(false),
+        ),
+    ]);
     assert_eq!(
         peek_turn_gate(&gate, &state).await,
         Ok(RestateTurnGatePeek::Open(None)),

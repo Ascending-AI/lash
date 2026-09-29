@@ -12,7 +12,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::prompt::RemotePromptLayer;
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
-use crate::tools::RemoteToolOutputContract;
 use crate::turn_input::RemoteTurnInput;
 use crate::turn_result::RemoteCausalRef;
 
@@ -270,13 +269,33 @@ pub enum RemoteProcessInput {
         #[serde(default)]
         create_request: serde_json::Value,
         turn_input: RemoteTurnInput,
-        #[serde(default, skip_serializing_if = "RemoteToolOutputContract::is_static")]
-        output_contract: RemoteToolOutputContract,
+        #[serde(default, skip_serializing_if = "RemoteSessionTurnResult::is_turn")]
+        result: RemoteSessionTurnResult,
     },
     External {
         #[serde(default)]
         metadata: serde_json::Value,
     },
+}
+
+/// What a remote `SessionTurn` process answers when its child turn ends.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RemoteSessionTurnResult {
+    /// The child's assembled turn.
+    #[default]
+    Turn,
+    /// The child's final value, checked against `schema` when one is given.
+    FinalValue {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        schema: Option<serde_json::Value>,
+    },
+}
+
+impl RemoteSessionTurnResult {
+    pub(crate) fn is_turn(&self) -> bool {
+        matches!(self, Self::Turn)
+    }
 }
 
 impl RemoteProcessInput {
@@ -311,17 +330,10 @@ impl RemoteProcessInput {
                 definition_key,
                 create_request: _,
                 turn_input,
-                output_contract,
+                result: _,
             } => {
                 require_non_empty(type_name, "definition_key", definition_key)?;
-                turn_input.validate()?;
-                match output_contract {
-                    RemoteToolOutputContract::Static => Ok(()),
-                    RemoteToolOutputContract::FromInputSchema {
-                        input_field,
-                        default_schema: _,
-                    } => require_non_empty(type_name, "output_contract.input_field", input_field),
-                }
+                turn_input.validate()
             }
             Self::External { metadata: _ } => Ok(()),
         }

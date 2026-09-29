@@ -18,13 +18,12 @@ pub use crate::plugin::{
 };
 pub use crate::runtime::NormalizedItem;
 pub use crate::runtime::assembly::LlmStreamAccumulator;
-pub use crate::runtime::drive_claim::trace_commit_cas_rejected;
 pub use crate::runtime::effect::{RuntimeEffectControllerHandle, TurnCancelWait};
 pub use crate::runtime::io::normalize_input_items;
 pub use crate::runtime::turn_input_ingress::ingress_message_id;
 pub use crate::runtime::turn_loop::ResidentSessionState;
 pub use crate::runtime::turn_queue::{
-    QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload,
+    AdmissionBoundary, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkPayload,
     SessionCommandSettlement, process_wake_batch_draft,
 };
 pub use crate::runtime::usage::{merge_ledger_entry_saturating, nonzero_usage};

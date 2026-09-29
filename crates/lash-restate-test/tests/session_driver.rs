@@ -29,9 +29,7 @@ use lash_core::{
     RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
     RuntimeErrorCode, ScopedEffectController, SessionDriver, SessionId, SessionWorkEngine, TurnId,
 };
-use lash_restate::{
-    LASH_SESSION_DRIVE_VERSION, RestateSessionDriveRequest, RestateTurnDriveRequest,
-};
+use lash_restate::{Call, Reply, RestateSessionDriveRequest, RestateTurnDriveRequest};
 use lash_restate_test::protocol::MessageType;
 use lash_restate_test::{
     CrashPoint, RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
@@ -238,50 +236,64 @@ impl SessionDriver for ScriptedDriver {
         &self,
         _controller: ScopedEffectController<'_>,
         admitted: Admitted,
-    ) -> Result<RootOutcome, DriveAbort> {
-        let root = admitted.root().clone();
-        let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
-        {
-            let mut ledgers = self.ledgers.lock().unwrap();
-            let ledger = ledgers.entry(admitted.session().clone()).or_default();
-            ledger.root_runs += 1;
-            match script {
-                Some(RootScript::Refuse) => {
-                    return Err(DriveAbort::Refused(runtime_error(format!(
-                        "root {root} is refused"
-                    ))));
+    ) -> lash_core::engine::RootRunEnd {
+        lash_core::engine::RootRunEnd::owing_nothing(
+            async {
+                let root = admitted.root().clone();
+                let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
+                {
+                    let mut ledgers = self.ledgers.lock().unwrap();
+                    let ledger = ledgers.entry(admitted.session().clone()).or_default();
+                    ledger.root_runs += 1;
+                    match script {
+                        Some(RootScript::Refuse) => {
+                            return Err(DriveAbort::Refused(runtime_error(format!(
+                                "root {root} is refused"
+                            ))));
+                        }
+                        Some(RootScript::Supersede) => {
+                            return Ok(RootOutcome::Refused {
+                                root,
+                                verdict: SealVerdict::Superseded { epoch: 2 },
+                            });
+                        }
+                        Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
+                        Some(RootScript::RefusedRetryable) => {
+                            self.scripts.lock().unwrap().remove(item_of(&root));
+                            return Err(DriveAbort::Refused(RuntimeError::new(
+                                RuntimeErrorCode::SessionExecutionLaneBusy,
+                                format!("root {root} met the session lane still held"),
+                            )));
+                        }
+                        None => {}
+                    }
+                    // Idempotent, like a commit fenced by its admission: a redrive of
+                    // a root that already consumed its item consumes nothing.
+                    if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
+                        ledger.open.pop_front();
+                        ledger.consumed.push(root.as_str().to_owned());
+                    }
                 }
-                Some(RootScript::Supersede) => {
-                    return Ok(RootOutcome::Refused {
-                        root,
-                        verdict: SealVerdict::Superseded { epoch: 2 },
-                    });
-                }
-                Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
-                Some(RootScript::RefusedRetryable) => {
-                    self.scripts.lock().unwrap().remove(item_of(&root));
-                    return Err(DriveAbort::Refused(RuntimeError::new(
-                        RuntimeErrorCode::SessionExecutionLaneBusy,
-                        format!("root {root} met the session lane still held"),
-                    )));
-                }
-                None => {}
+                Ok(RootOutcome::Committed {
+                    outcome: lash_core::facade_support::TurnOutcome::Finished(
+                        lash_core::facade_support::TurnFinish::AssistantMessage {
+                            text: format!("answered {}", root.as_str()),
+                        },
+                    ),
+                    root,
+                })
             }
-            // Idempotent, like a commit fenced by its admission: a redrive of
-            // a root that already consumed its item consumes nothing.
-            if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
-                ledger.open.pop_front();
-                ledger.consumed.push(root.as_str().to_owned());
-            }
-        }
-        Ok(RootOutcome::Committed {
-            outcome: lash_core::facade_support::TurnOutcome::Finished(
-                lash_core::facade_support::TurnFinish::AssistantMessage {
-                    text: format!("answered {}", root.as_str()),
-                },
-            ),
-            root,
-        })
+            .await,
+        )
+    }
+
+    async fn close_root(
+        &self,
+        _controller: lash_core::ScopedEffectController<'_>,
+        _session: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> Result<(), lash_core::engine::DriveAbort> {
+        Ok(())
     }
 }
 
@@ -495,6 +507,95 @@ async fn a_schedule_committed_while_a_drive_runs_is_admitted_by_the_next_invocat
     assert_eq!(driver.ledger(&session).consumed, ["a", "b"]);
 }
 
+/// A send that lands exactly as the drive finishes — committed after that
+/// drive's last admission read the ledger, asked for before it returned —
+/// is still admitted (FIG-4036): its ask joins the one drive the engine
+/// sends once the running drive ended, never the running drive alone, and
+/// that drive's first admission takes it. Its waiter follows that drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_send_as_the_drive_finishes_is_admitted_by_one_drive_behind_it() {
+    let (backend, driver, _installation) = fixture(0x4036).await;
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    let session = SessionId::from("drive-finishing");
+    driver.accept(&session, "a");
+    let gate = driver.gate("ingress:a:1", 1);
+    engine
+        .request_drive(&session, request("ingress:a:1"))
+        .await
+        .expect("the first ask is accepted");
+    tokio::time::timeout(Duration::from_secs(20), gate.reached.notified())
+        .await
+        .expect("the drive reaches its last admission");
+    driver.accept(&session, "b");
+    engine
+        .request_drive(&session, request("ingress:b:1"))
+        .await
+        .expect("the ask as the drive finishes is accepted");
+    engine
+        .request_drive(&session, request("ingress:b:1"))
+        .await
+        .expect("a repeated ask is accepted");
+    gate.release.notify_one();
+    let waited = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.await_drive(&session, &request("ingress:b:1")),
+    )
+    .await
+    .expect("the send's drive ends")
+    .expect("the send's drive outcome");
+    assert_eq!(waited.stop, DriveStop::Idle);
+    assert_eq!(driver.ledger(&session).consumed, ["a", "b"]);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert!(
+        backend
+            .server()
+            .inbox_high_water(SESSION_DRIVER_SERVICE, "drive-finishing")
+            <= 1,
+        "at most one drive waited behind the running one: {:?}",
+        backend.server().invocations()
+    );
+}
+
+/// Asks for one session's drive, back to back, each after its item
+/// committed, queue at most one drive behind the running one, and every
+/// item is admitted (FIG-4036).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn back_to_back_asks_queue_at_most_one_drive() {
+    const ASKS: usize = 32;
+    let (backend, driver, _installation) = fixture(0x4037).await;
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    let session = SessionId::from("drive-back-to-back");
+    let items: Vec<String> = (0..ASKS).map(|index| format!("item-{index:02}")).collect();
+    for item in &items {
+        driver.accept(&session, item);
+        engine
+            .request_drive(&session, request(&format!("ingress:{item}:1")))
+            .await
+            .expect("the ask is accepted");
+    }
+    for item in &items {
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            engine.await_drive(&session, &request(&format!("ingress:{item}:1"))),
+        )
+        .await
+        .expect("the ask's drive ends")
+        .expect("the ask's drive outcome");
+    }
+    settle(&backend).await;
+    assert_eq!(driver.ledger(&session).consumed, items);
+    no_drive_failed(&backend);
+    assert!(
+        backend
+            .server()
+            .inbox_high_water(SESSION_DRIVER_SERVICE, "drive-back-to-back")
+            <= 1,
+        "at most one drive waited behind the running one: {:?}",
+        backend.server().invocations()
+    );
+}
+
 /// One request id is one drive: a repeated schedule of it attaches to the
 /// first invocation, so an item committed after that drive's last admission
 /// stays open until another request drives the session. This is why every
@@ -557,44 +658,56 @@ async fn one_session_drives_one_request_at_a_time() {
     assert_eq!(second.stop, DriveStop::Idle);
 }
 
-/// A request stamped with another generation is refused before either
-/// handler journals anything.
+/// A call on a wire this build does not read is refused before either
+/// handler journals anything (ADR 0115 §3.1). A request carries no drain
+/// stamp: only its wire range is checked.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_request_of_another_generation_is_refused_before_any_journal_command() {
+async fn a_call_on_a_wire_this_build_does_not_read_is_refused_before_any_journal_command() {
     let (backend, driver, _installation) = fixture(15).await;
     let session = SessionId::from("drive-generation");
     driver.accept(&session, "a");
     let ingress = backend.ingress();
-    for version in [0, LASH_SESSION_DRIVE_VERSION + 1] {
-        let refused = ingress
-            .call_object_json::<_, DriveOutcome>(
-                SESSION_DRIVER_SERVICE,
-                session.as_str(),
-                "drive",
-                &RestateSessionDriveRequest {
-                    drive_version: version,
+    let newer = lash_restate::VersionRange::new(
+        lash_restate::RESTATE_WIRE_VERSION + 1,
+        lash_restate::RESTATE_WIRE_VERSION + 1,
+    )
+    .expect("a wire range");
+    let refused = ingress
+        .call_object_json::<_, Reply<DriveOutcome>>(
+            SESSION_DRIVER_SERVICE,
+            session.as_str(),
+            "drive",
+            &Call {
+                wire: newer,
+                body: RestateSessionDriveRequest {
                     request: DriveRequest {
                         session: session.clone(),
-                        request: request(&format!("generation-{version}")),
+                        request: request("newer-wire"),
                         build_generation: lash_core::engine::BuildGeneration::for_test("any"),
                     },
                 },
-            )
-            .await;
-        assert!(refused.is_err(), "generation {version} is refused");
-        let turn = ingress
-            .call_workflow_json::<_, RootOutcome>(
-                TURN_DRIVER_SERVICE,
-                &format!("{}:{}a", session.as_str().len(), session.as_str()),
-                "run",
-                &RestateTurnDriveRequest {
-                    drive_version: version,
+            },
+        )
+        .await;
+    let refusal = refused.expect_err("a disjoint wire is refused by LashSession");
+    assert!(
+        refusal.to_string().contains("lash.wire_unsupported"),
+        "{refusal}"
+    );
+    let turn = ingress
+        .call_workflow_json::<_, Reply<RootOutcome>>(
+            TURN_DRIVER_SERVICE,
+            &format!("{}:{}a", session.as_str().len(), session.as_str()),
+            "run",
+            &Call {
+                wire: newer,
+                body: RestateTurnDriveRequest {
                     sender_generation: Some(lash_core::engine::BuildGeneration::for_test("any")),
                     admitted: admission_body::admitted(
                         session.clone(),
                         TurnId::from("a"),
-                        request("generation"),
-                        lash_core::engine::AdmissionId::new("generation"),
+                        request("newer-wire"),
+                        lash_core::engine::AdmissionId::new("newer-wire"),
                         0,
                         lash_core::engine::BuildGeneration::for_test("any"),
                         lash_core::engine::AdmittedWork::Queued {
@@ -602,10 +715,14 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
                         },
                     ),
                 },
-            )
-            .await;
-        assert!(turn.is_err(), "generation {version} is refused by LashTurn");
-    }
+            },
+        )
+        .await;
+    let refusal = turn.expect_err("a disjoint wire is refused by LashTurn");
+    assert!(
+        refusal.to_string().contains("lash.wire_unsupported"),
+        "{refusal}"
+    );
     settle(&backend).await;
     for view in backend.server().invocations() {
         let journaled: Vec<_> = backend

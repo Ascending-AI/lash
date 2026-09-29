@@ -1215,14 +1215,17 @@ struct RuntimeCommitIntent<'a> {
     usage_deltas: &'a [crate::store::RuntimeUsageDelta],
     #[serde(skip_serializing_if = "failure_evidence_is_empty")]
     failure_evidence: &'a [crate::TurnFailureEvidence],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    outcome: Option<&'a super::TurnCommitOutcome>,
     completed_queue_batches: Vec<CompletedQueueIntent<'a>>,
     completed_turn_inputs: Vec<CompletedTurnInputIntent<'a>>,
-    /// Withheld input a cancelled turn settles through the undelivered
-    /// disposition (FIG-3531). Absent from every other commit's identity.
+    /// Admitted input a commit hands back or drops (FIG-3531, FIG-3927):
+    /// the rows of [`IngressSettlement::released`](super::IngressSettlement)
+    /// and `dropped`. Absent from every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     undelivered_turn_inputs: Vec<&'a crate::InputId>,
-    /// Withheld wakes a cancelled turn defers (FIG-3543). Absent from every
-    /// other commit's identity.
+    /// Admitted wakes a commit hands back (FIG-3543, FIG-3927). Absent from
+    /// every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     undelivered_queue_batches: Vec<&'a crate::BatchId>,
     /// The follow-on the head owes after this commit (ADR 0101 §3). Absent
@@ -1264,25 +1267,31 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
             checkpoint: CheckpointIntent::from(&commit.checkpoint),
             usage_deltas: &commit.usage_deltas,
             failure_evidence: &commit.failure_evidence,
+            outcome: commit.outcome.as_ref(),
             completed_queue_batches: commit
-                .completed_queue_claims
+                .ingress
                 .iter()
+                .flat_map(|ingress| ingress.completed_batches.iter())
+                .chain(commit.applied_commands.iter())
                 .map(CompletedQueueIntent::from)
                 .collect(),
             completed_turn_inputs: commit
-                .completed_turn_input_claims
+                .ingress
                 .iter()
+                .flat_map(|ingress| ingress.completed_inputs.iter())
                 .map(CompletedTurnInputIntent::from)
                 .collect(),
-            undelivered_turn_inputs: commit
-                .undelivered_turn_input_claims
-                .iter()
-                .flat_map(|claim| claim.inputs.iter().map(|input| &input.input_id))
+            undelivered_turn_inputs: undelivered_rows(commit)
+                .filter_map(|row| match row {
+                    super::IngressRowId::Input(input) => Some(input),
+                    super::IngressRowId::Batch(_) => None,
+                })
                 .collect(),
-            undelivered_queue_batches: commit
-                .undelivered_queue_claims
-                .iter()
-                .flat_map(|claim| claim.batches.iter().map(|batch| &batch.batch_id))
+            undelivered_queue_batches: undelivered_rows(commit)
+                .filter_map(|row| match row {
+                    super::IngressRowId::Batch(batch) => Some(batch),
+                    super::IngressRowId::Input(_) => None,
+                })
                 .collect(),
             pending_follow_on: commit.pending_follow_on.as_ref(),
             interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),
@@ -1362,6 +1371,16 @@ impl<'a> From<&'a HydratedSessionCheckpoint> for CheckpointIntent<'a> {
                 .collect(),
         }
     }
+}
+
+/// The admitted rows a commit hands back or drops, in settlement order. The
+/// settling root and the disposition are not identity: the root is fixed by
+/// the operation's scope and the disposition by the cancellation evidence.
+fn undelivered_rows(commit: &RuntimeCommit) -> impl Iterator<Item = &super::IngressRowId> {
+    commit
+        .ingress
+        .iter()
+        .flat_map(|ingress| ingress.released.iter().chain(ingress.dropped.iter()))
 }
 
 #[derive(serde::Serialize)]

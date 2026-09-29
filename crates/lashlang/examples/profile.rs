@@ -100,21 +100,6 @@ fn main() {
     }
     println!("iterations: {iterations}");
     println!("program_expressions: {program_expressions}");
-    let compile_stats = profile.compile_stats();
-    println!(
-        "compile_type_literals_total: {}",
-        compile_stats.type_literals_total
-    );
-    println!(
-        "compile_type_literals_const_folded: {}",
-        compile_stats.type_literals_const_folded
-    );
-    println!(
-        "compile_type_literals_dynamic: {}",
-        compile_stats.type_literals_dynamic
-    );
-    println!("compile_type_ref_sites: {}", compile_stats.type_ref_sites);
-    println!();
     println!("instruction_hotspots:");
     for stat in profile.instruction_stats().iter().take(12) {
         println!(

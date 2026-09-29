@@ -34,6 +34,7 @@ fn peer_record(
         provenance,
         env_ref,
         wake_session_id: _,
+        consumer_hold: _,
     } = registration;
     Ok(RemoteProcessRecord {
         process_id: lash_sansio::ProcessId::fixture("registration-parity"),

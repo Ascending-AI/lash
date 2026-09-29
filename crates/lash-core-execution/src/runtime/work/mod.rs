@@ -169,11 +169,36 @@ pub trait SessionDriver: Send + Sync {
     /// Run `admitted`'s root to its terminal through `controller`, which
     /// serves [`drive_root_scope`](crate::engine::drive_root_scope): the
     /// recorded `SealDriveAdmission` step, then the root's turns and commits.
+    ///
+    /// The run does not close the root's scope. When it made the root's
+    /// terminal evidence durable, [`RootRunEnd::owed_close`] names the root
+    /// whose close the engine then runs through
+    /// [`close_root`](Self::close_root) (FIG-4035).
+    ///
+    /// [`RootRunEnd::owed_close`]: crate::engine::RootRunEnd::owed_close
     async fn run_root(
         &self,
         controller: crate::ScopedEffectController<'_>,
         admitted: crate::engine::Admitted,
-    ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort>;
+    ) -> crate::engine::RootRunEnd;
+
+    /// Close the lifetime scope of `root` of `session`, whose terminal
+    /// evidence is durable: the root's recorded `CloseRootScope` step
+    /// through `controller`, which serves the
+    /// [`drive_root_scope`](crate::engine::drive_root_scope) of the admitted
+    /// root whose run owed it (FIG-4035).
+    ///
+    /// It opens no runtime of the session, so it runs beside the session's
+    /// next root: the engine runs it in a journal of its own, never one the
+    /// session's drive awaits. The close is the immediate delivery of the
+    /// `ScopeClose` obligation the terminal commit armed (ADR 0109 §3), so a
+    /// close this never runs is still delivered once, by the relay.
+    async fn close_root(
+        &self,
+        controller: crate::ScopedEffectController<'_>,
+        session: &SessionId,
+        root: &crate::TurnId,
+    ) -> Result<(), crate::engine::DriveAbort>;
 }
 
 /// Deployment port for durable process work.
@@ -479,8 +504,17 @@ mod tests {
             &self,
             _controller: crate::ScopedEffectController<'_>,
             _admitted: crate::engine::Admitted,
-        ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort> {
+        ) -> crate::engine::RootRunEnd {
             unreachable!("the probe never runs a root")
+        }
+
+        async fn close_root(
+            &self,
+            _controller: crate::ScopedEffectController<'_>,
+            _session: &SessionId,
+            _root: &crate::TurnId,
+        ) -> Result<(), crate::engine::DriveAbort> {
+            unreachable!("the probe never closes a root")
         }
     }
 

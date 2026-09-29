@@ -150,22 +150,9 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     )
     .await;
 
-    // Any strict subset of the four-column claim identity must be rejected —
-    // including a claim id/token pair with no owner.
-    for fields in [
-        "claim_id",
-        "claim_owner_id",
-        "claim_owner_incarnation_id",
-        "claim_token",
-        "claim_id, claim_token",
-        "claim_id, claim_owner_id, claim_token",
-        "claim_owner_id, claim_owner_incarnation_id",
-    ] {
-        let values = fields
-            .split(',')
-            .map(|_| "'half'")
-            .collect::<Vec<_>>()
-            .join(", ");
+    // A row is open or admitted to a root by a recorded step: a root without
+    // its step, or a step without its root, is unrepresentable (FIG-3927).
+    for (fields, values) in [("admitted_root", "'root'"), ("admitted_by", "'admit'")] {
         assert_check_rejects(
             &mut connection,
             &format!(
@@ -175,10 +162,34 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
                  ) VALUES (1, 'pending', 'session', '{{\"scope\":\"next_turn\"}}',
                            'deferred_next_turn', '{{}}', '{{}}', 'digest', 0, {values})"
             ),
-            "ck_pending_turn_inputs_claim_identity_all_or_none",
+            "ck_pending_turn_inputs_admission_all_or_none",
+        )
+        .await;
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_queued_work_batches (enqueue_seq,
+                     batch_id, session_id, delivery_policy, work_kind, authority_json,
+                     enqueued_at_ms, {fields}
+                 ) VALUES (1, 'batch', 'session', 'earliest_safe_boundary', 'turn',
+                           '{{}}', 0, {values})"
+            ),
+            "ck_queued_work_batches_admission_all_or_none",
         )
         .await;
     }
+    // A settled input is answered, so no root holds it.
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
+             input_id, session_id, ingress_json, state, input_json,
+             submitted_ingress_json, submission_digest, enqueued_at_ms,
+             admitted_root, admitted_by
+         ) VALUES (1, 'settled', 'session', '{\"scope\":\"next_turn\"}',
+                   'completed', '{}', '{}', 'digest', 0, 'root', 'admit')",
+        "ck_pending_turn_inputs_settled_unadmitted",
+    )
+    .await;
 
     assert_check_rejects(
         &mut connection,
@@ -198,30 +209,6 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
              enqueued_at_ms
          ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0)",
         "ck_queued_work_batches_delivery_policy",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             enqueued_at_ms, claim_id
-         ) VALUES (1,
-             'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
-             'claim'
-         )",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
-    )
-    .await;
-    assert_check_rejects(
-        &mut connection,
-        "INSERT INTO lash_queued_work_batches (enqueue_seq,
-             batch_id, session_id, delivery_policy, work_kind, authority_json,
-             enqueued_at_ms, claim_token
-         ) VALUES (1,
-             'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0,
-             'token'
-         )",
-        "ck_queued_work_batches_claim_id_token_all_or_none",
     )
     .await;
 

@@ -41,7 +41,7 @@ struct AdmittedRoot {
     session_id: SessionId,
     root: TurnId,
     store: Arc<dyn crate::store::RuntimePersistence>,
-    lease: crate::ClaimAuthority,
+    lease: crate::store::DriveFence,
     admission: crate::store::RootAdmission,
 }
 
@@ -94,7 +94,7 @@ impl AdmittedRoot {
                     .batch_id,
             ),
         };
-        let lease = lash_core::testing::store_fixtures::seal_claim_authority_for_test(
+        let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
             &store,
             &session_id,
             &format!("{}-{name}", fixture.prefix),
@@ -102,13 +102,11 @@ impl AdmittedRoot {
         .await;
         let admission = store
             .admit_root(&crate::store::AdmitRootRequest {
-                session_id: session_id.clone(),
-                lease: lease.fence(),
-                owner: lease.owner.clone(),
+                fence: lease.clone(),
                 root: TurnId::from(name),
                 head,
                 max_inputs: 64,
-                policy: lash_core::testing::queued_work_claim_policy(64),
+                policy: lash_core::testing::queued_work_admission_policy(64),
                 base: crate::store::SessionHeadRef {
                     generation: 0,
                     revision: 0,
@@ -143,26 +141,14 @@ impl AdmittedRoot {
         state.ensure_agent_frame_initialized();
         let root = self.root.clone();
         let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
-        commit.session_execution_lease_fence = Some(self.lease.authority());
-        commit.drive_fence = Some(Box::new(self.lease.drive_fence()));
+        commit.drive_fence = Some(Box::new(self.lease.clone()));
         commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
             commit: crate::store::TurnCommitId::new(root.clone(), 0),
             turn: lash_core::store::PhysicalTurn::derive_turn_id(&root, 0),
-            root,
+            root: root.clone(),
             stop: None,
         }));
-        commit.completed_turn_input_claims = self
-            .admission
-            .inputs
-            .iter()
-            .map(|claim| claim.completion())
-            .collect();
-        commit.completed_queue_claims = self
-            .admission
-            .queued
-            .iter()
-            .map(|claim| claim.completion())
-            .collect();
+        commit.ingress = Some(super::completing_admission(root.as_str(), &self.admission));
         self.store
             .commit_runtime_state(commit)
             .await

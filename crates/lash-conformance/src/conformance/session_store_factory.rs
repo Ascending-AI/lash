@@ -9,7 +9,7 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -232,7 +232,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
         "read-only-session-writer:incarnation",
     );
     let held = writer
-        .seal_claim_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
+        .seal_drive_epoch_for_test(&SessionId::from(SESSION_ID), &owner, "live-writer", 60_000)
         .await
         .expect("claim live writer lease")
         .acquired()
@@ -275,12 +275,12 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
     );
 
     let current = writer
-        .drive_epoch(&held.session_id)
+        .drive_epoch(held.session())
         .await
         .expect("reader leaves drive epoch available");
-    assert_eq!(current.epoch, held.fencing_token);
+    assert_eq!(current.epoch, held.epoch());
     writer
-        .supersede_claim_epoch_for_test(&held)
+        .supersede_drive_epoch_for_test(&held)
         .await
         .expect("release live writer after inspection");
 
@@ -440,132 +440,67 @@ async fn session_store_factory_claimable_queued_work_peek(
         ))
         .await
         .expect("enqueue claim-fenced next-turn input");
-    let first_owner = crate::LeaseOwnerIdentity::opaque("peek-fence-first", "incarnation");
-    let first_lease = fenced_store
-        .seal_claim_epoch_for_test(
-            &fenced_request.session_id,
-            &first_owner,
-            "session-store-factory-claimable-queued-work-peek-executor",
-            60_000,
-        )
+    let first_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
+        &fenced_store,
+        &fenced_request.session_id,
+        "peek-fence-first",
+    )
+    .await;
+    let wake = fenced_store
+        .list_open_queued_work(&fenced_request.session_id)
         .await
-        .expect("claim first session execution lease")
-        .acquired()
-        .expect("first session execution lease is acquired");
-    fenced_store
-        .claim_ready_queued_work(
-            &fenced_request.session_id,
-            &first_lease.fence(),
-            &first_owner,
-            crate::QueuedWorkClaimBoundary::Idle,
-            crate::testing::queued_work_claim_policy(1),
-        )
-        .await
-        .expect("claim queued work under first generation")
-        .claim()
-        .expect("queued work claim under first generation exists");
-    fenced_store
-        .claim_next_turn_inputs(
-            &fenced_request.session_id,
-            &first_lease.fence(),
-            &first_owner,
-            1,
-        )
-        .await
-        .expect("claim next-turn input under first generation")
-        .expect("next-turn input claim under first generation exists");
-    assert!(
-        fenced_store
-            .claim_ready_queued_work(
-                &fenced_request.session_id,
-                &first_lease.fence(),
-                &first_owner,
-                crate::QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(1),
-            )
-            .await
-            .expect("re-scan live queued-work claim")
-            .claim()
-            .is_none(),
-        "a live same-generation queued-work claim is fenced"
-    );
-    assert!(
-        fenced_store
-            .claim_next_turn_inputs(
-                &fenced_request.session_id,
-                &first_lease.fence(),
-                &first_owner,
-                1,
-            )
-            .await
-            .expect("re-scan live turn-input claim")
-            .is_none(),
-        "a live same-generation turn-input claim is fenced"
-    );
+        .expect("list the open wake")
+        .remove(0);
+    let admission = crate::conformance::admitted_root(
+        &fenced_store,
+        &first_lease,
+        "claimable-peek-root",
+        crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
+    )
+    .await;
+    assert_eq!(admission.batch_ids(), vec![wake.batch_id.clone()]);
     assert!(
         factory
             .has_claimable_queued_work(&fenced_request)
             .await
-            .expect("conservatively peek live claims")
+            .expect("conservatively peek admitted rows")
             == Some(true),
-        "a live claim must keep bounded recovery armed rather than create a false negative"
+        "an unfinished root's rows must keep bounded recovery armed rather than create a false negative"
     );
 
     fenced_store
-        .supersede_claim_epoch_for_test(&first_lease)
+        .supersede_drive_epoch_for_test(&first_lease)
         .await
-        .expect("expire the first generation deterministically");
+        .expect("supersede the first drive deterministically");
     assert!(
         factory
             .has_claimable_queued_work(&fenced_request)
             .await
-            .expect("peek expired claims")
+            .expect("peek after the drive is superseded")
             == Some(true),
-        "expired claims remain visible to the conservative recovery peek"
+        "an unfinished root's rows stay visible to the conservative recovery peek"
     );
-    let successor = crate::LeaseOwnerIdentity::opaque("peek-fence-successor", "incarnation");
-    let successor_lease = fenced_store
-        .seal_claim_epoch_for_test(
-            &fenced_request.session_id,
-            &successor,
-            "session-store-factory-claimable-queued-work-peek-executor-2",
-            60_000,
-        )
-        .await
-        .expect("claim successor session execution lease")
-        .acquired()
-        .expect("expired generation is superseded");
+    let successor_lease = crate::testing::store_fixtures::seal_drive_fence_for_test(
+        &fenced_store,
+        &fenced_request.session_id,
+        "peek-fence-successor",
+    )
+    .await;
     assert!(
-        successor_lease.fencing_token > first_lease.fencing_token,
-        "successor lease must advance the fencing generation"
+        successor_lease.epoch() > first_lease.epoch(),
+        "the successor's seal must advance the drive epoch"
     );
-    assert!(
-        fenced_store
-            .claim_ready_queued_work(
-                &fenced_request.session_id,
-                &successor_lease.fence(),
-                &successor,
-                crate::QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(1),
-            )
-            .await
-            .expect("reclaim queued work under successor generation")
-            .claim()
-            .is_some(),
-        "a superseded queued-work claim is claimable"
-    );
-    assert!(
-        fenced_store
-            .claim_next_turn_inputs(
-                &fenced_request.session_id,
-                &successor_lease.fence(),
-                &successor,
-                1,
-            )
-            .await
-            .expect("reclaim turn input under successor generation")
-            .is_some(),
-        "a superseded turn-input claim is claimable"
+    let resumed = crate::conformance::admitted_root(
+        &fenced_store,
+        &successor_lease,
+        "claimable-peek-root",
+        crate::store::AdmittedHead::Batch(wake.batch_id.clone()),
+    )
+    .await;
+    assert_eq!(
+        serde_json::to_value(&resumed).expect("encode the resumed admission"),
+        serde_json::to_value(&admission).expect("encode the recorded admission"),
+        "the successor resumes the unfinished root's recorded admission"
     );
 }
 
@@ -818,7 +753,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .expect("open process-owned session for closure pin")
         .expect("process-owned session exists");
     let lease = pinned_store
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &pinned_request.session_id,
             &crate::LeaseOwnerIdentity::opaque(
                 "process-prune-conformance-owner",
@@ -844,7 +779,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     pinned_store
         .validate_turn_cancellation_binding(
             &pinned_request.session_id,
-            &lease.fence(),
+            &lease,
             &binding_id,
             &physical_scope,
         )
@@ -882,11 +817,11 @@ pub async fn process_prune_deletes_owned_session_stores(
             .expect("mint process-owned terminal key"),
         crate::TurnCancelClosureProposal::CompletionSealed,
         crate::TurnCancelIntentSnapshot::Absent,
-        &lease.fence(),
+        &lease,
     )
     .expect("construct process-owned closure authorization");
     pinned_store
-        .authorize_turn_cancel_closure(&lease.fence(), &authorization)
+        .authorize_turn_cancel_closure(&lease, &authorization)
         .await
         .expect("persist process-owned closure authorization");
 
@@ -926,18 +861,15 @@ pub async fn process_prune_deletes_owned_session_stores(
         .settle_authorized_closure(&authorization)
         .await
         .expect("settle process-owned closure before consumption");
-    pinned_store
-        .repair_orphaned_active_turn_inputs(
-            &pinned_request.session_id,
-            &lease.fence(),
-            &address.turn_id,
-            &crate::TurnCancelIntentSnapshot::Absent,
-            Some(&settlement),
-        )
-        .await
-        .expect("consume process-owned closure authorization")
-        .into_applied()
-        .expect("no cancellation intent appeared during retirement race");
+    turn_cancel::commit_teardown(
+        pinned_store.as_ref(),
+        &lease,
+        &address.turn_id,
+        &crate::TurnCancelIntentSnapshot::Absent,
+        &settlement,
+    )
+    .await
+    .expect("consume process-owned closure authorization");
     let report = registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
@@ -1325,7 +1257,7 @@ async fn session_store_factory_rejects_writes_after_delete(
     );
     assert_deleted_write(
         stale
-            .seal_claim_epoch_for_test(
+            .seal_drive_epoch_for_test(
                 &request.session_id,
                 &crate::LeaseOwnerIdentity::opaque("deleted-owner", "deleted-incarnation"),
                 "session-store-factory-rejects-writes-after-delete-executor",
@@ -2149,7 +2081,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         1
     );
     let initial_lease = created
-        .seal_claim_epoch_for_test(
+        .seal_drive_epoch_for_test(
             &request.session_id,
             &crate::LeaseOwnerIdentity::opaque("delete-session-owner", "before-delete"),
             "session-store-factory-delete-removes-store-and-is-idempotent-executor",
@@ -2160,7 +2092,8 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .acquired()
         .expect("session execution lease before delete must be acquired");
     assert_eq!(
-        initial_lease.fencing_token, 1,
+        initial_lease.epoch(),
+        1,
         "newly created session should start with the first execution lease fence"
     );
     assert!(

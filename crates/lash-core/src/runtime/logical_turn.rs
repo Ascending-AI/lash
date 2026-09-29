@@ -1,28 +1,26 @@
-use super::turn_loop::{
-    LogicalTurnErrorContext, SessionExecutionLeaseReleasePolicy, TurnLeaseScope,
-    TurnPrepareContext, TurnSinks, TurnStopwatch,
-};
+use super::turn_loop::{LogicalTurnErrorContext, TurnPrepareContext, TurnSinks, TurnStopwatch};
 use super::*;
 use crate::TurnId;
 
 pub const MAX_AGENT_FRAME_SWITCHES: usize = 16;
 
 /// How many follow-on physical turns one logical run may start from work
-/// claimed at a terminal checkpoint (FIG-3157), so a wake storm cannot run a
+/// admitted at a terminal checkpoint (FIG-3157), so a wake storm cannot run a
 /// logical turn forever.
 pub const MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS: usize = 16;
 
-/// Work claimed at a terminal checkpoint and withheld from that checkpoint's
-/// delivery.
+/// Work admitted at a terminal checkpoint and withheld from that
+/// checkpoint's delivery.
 ///
 /// FIG-3157: a terminal finish ends the turn. The committed finish is the
-/// turn's answer, so a delivery claimed at `BeforeCompletion` never extends it
-/// — it starts a follow-on physical turn inside the same logical run, carrying
-/// the claimed work as that turn's input.
-#[derive(Default)]
+/// turn's answer, so a delivery admitted at `BeforeCompletion` never extends
+/// it — it starts a follow-on physical turn inside the same logical run,
+/// carrying the admitted work as that turn's input. The rows stay bound to
+/// the root throughout (FIG-3927).
+#[derive(Clone, Default)]
 pub(in crate::runtime) struct WithheldTerminalWork {
-    pub(in crate::runtime) queued: Vec<crate::QueuedWorkClaim>,
-    pub(in crate::runtime) turn_inputs: Vec<crate::TurnInputClaim>,
+    pub(in crate::runtime) queued: Vec<crate::AdmittedQueuedWork>,
+    pub(in crate::runtime) turn_inputs: Vec<crate::AdmittedTurnInputs>,
 }
 
 impl WithheldTerminalWork {
@@ -33,45 +31,61 @@ impl WithheldTerminalWork {
     pub(in crate::runtime) fn take_if_any(&mut self) -> Option<Self> {
         (!self.is_empty()).then(|| std::mem::take(self))
     }
+
+    /// Put `earlier` ahead of this work: what an earlier physical turn of
+    /// the logical run withheld, which this turn carries on to the run's
+    /// follow-on together with its own (FIG-4044).
+    pub(in crate::runtime) fn carry_earlier(&mut self, earlier: Option<Self>) {
+        let Some(mut earlier) = earlier else {
+            return;
+        };
+        earlier.queued.append(&mut self.queued);
+        earlier.turn_inputs.append(&mut self.turn_inputs);
+        *self = earlier;
+    }
 }
 
 pub(super) struct PhysicalTurnExecution {
     pub(super) turn: AssembledTurn,
     pub(super) post_commit_delivery_failed: bool,
-    /// Claimed at this turn's terminal checkpoint and withheld from it, for
+    /// Admitted at this turn's terminal checkpoint and withheld from it, for
     /// the logical run to start a follow-on turn with.
     pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
 }
 
-pub(super) struct LogicalTurnClaims {
-    pub(super) queued: Vec<crate::QueuedWorkClaim>,
-    /// The turn-input rows this turn drives, each under the generation-fenced
-    /// claim it will settle.
-    pub(super) turn_inputs: Vec<crate::TurnInputClaim>,
-    /// Work this turn claimed at its terminal checkpoint and withheld from the
-    /// delivery. It is never settled as this turn's completed work: it is the
-    /// follow-on turn's input, and holding it keeps the session execution
-    /// lease live across the commit that ends this turn. A cancelled turn
-    /// starts no follow-on: its commit hands all of it to the cancellation
-    /// instead — input to the undelivered disposition (FIG-3531), wakes to be
-    /// deferred (FIG-3543, ADR 0101 §10).
+/// The rows one physical turn drives, each admitted to the turn's root
+/// (FIG-3927): the root's own admission, and what its checkpoints admitted.
+pub(super) struct LogicalTurnAdmissions {
+    pub(super) queued: Vec<crate::AdmittedQueuedWork>,
+    pub(super) turn_inputs: Vec<crate::AdmittedTurnInputs>,
+    /// Work this turn admitted at its terminal checkpoint and withheld from
+    /// the delivery. It is never settled as this turn's completed work: it is
+    /// the follow-on turn's input. A cancelled turn starts no follow-on: its
+    /// commit hands all of it to the cancellation instead — input to the
+    /// undelivered disposition (FIG-3531), wakes to be released (FIG-3543,
+    /// ADR 0101 §10).
     pub(super) withheld_terminal_work: Option<WithheldTerminalWork>,
     /// Withheld work a turn that aborted on a cancel hands straight to the
     /// cancellation, whatever outcome the commit assembles (FIG-3531,
     /// FIG-3543).
     pub(super) undelivered: WithheldTerminalWork,
+    /// Whether the logical run may start another follow-on turn after this
+    /// one ([`MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS`]). A turn whose run spent
+    /// the bound hands its withheld work back open in its own commit.
+    follow_on_allowed: bool,
 }
 
-impl LogicalTurnClaims {
+impl LogicalTurnAdmissions {
     pub(super) fn new(
-        queued: Vec<crate::QueuedWorkClaim>,
-        turn_inputs: Vec<crate::TurnInputClaim>,
+        queued: Vec<crate::AdmittedQueuedWork>,
+        turn_inputs: Vec<crate::AdmittedTurnInputs>,
     ) -> Self {
         Self {
             queued,
             turn_inputs,
             withheld_terminal_work: None,
             undelivered: WithheldTerminalWork::default(),
+            follow_on_allowed: true,
         }
     }
 
@@ -88,11 +102,22 @@ impl LogicalTurnClaims {
         self
     }
 
+    pub(super) fn with_follow_on_allowed(mut self, allowed: bool) -> Self {
+        self.follow_on_allowed = allowed;
+        self
+    }
+
+    pub(super) fn follow_on_allowed(&self) -> bool {
+        self.follow_on_allowed
+    }
+
     /// Whether this turn leaves withheld work for a follow-on turn, given
     /// whether it committed as cancelled. A cancelled turn carries nothing:
-    /// its commit hands the withheld work to the cancellation instead.
+    /// its commit hands the withheld work to the cancellation instead, and a
+    /// run past its follow-on bound hands it back open.
     pub(super) fn carries_follow_on_work(&self, cancelled: bool) -> bool {
         !cancelled
+            && self.follow_on_allowed
             && self
                 .withheld_terminal_work
                 .as_ref()
@@ -102,73 +127,50 @@ impl LogicalTurnClaims {
     /// The withheld work the logical run drives in a follow-on turn once this
     /// turn has committed. See [`Self::carries_follow_on_work`].
     pub(super) fn take_follow_on_work(&mut self, cancelled: bool) -> Option<WithheldTerminalWork> {
+        let carries = self.carries_follow_on_work(cancelled);
         let withheld = self.withheld_terminal_work.take()?;
-        if cancelled {
-            return None;
-        }
-        Some(withheld).filter(|withheld| !withheld.is_empty())
+        carries.then_some(withheld)
     }
 
-    /// `journaled_drive_claims` names the claims of the journaled initial
-    /// drive set: a superseded one cedes the turn whatever generation it was
-    /// taken under (ADR 0069 §6). Every other claim cedes when it is
-    /// superseded after being restored from an earlier execution (FIG-3552).
+    /// What this turn's commit settles: every row it drove completes, and
+    /// withheld work no follow-on turn drives is handed back.
     pub(super) fn commit_effects(
         &self,
         outcome: &TurnOutcome,
-        journaled_drive_claims: &std::collections::BTreeSet<String>,
         pending_follow_on: Option<crate::store::PendingFollowOn>,
     ) -> LogicalTurnCommitEffects {
-        let completed_queue_claims = self
-            .queued
-            .iter()
-            .map(crate::QueuedWorkClaim::completion)
-            .collect();
-        let completed_turn_input_claims = self
-            .turn_inputs
-            .iter()
-            .map(crate::TurnInputClaim::completion)
-            .collect();
-        let queue_claim_generations = self
-            .queued
-            .iter()
-            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
-            .collect();
-        let turn_input_claim_generations = self
-            .turn_inputs
-            .iter()
-            .map(|claim| (claim.claim_id.clone(), claim.session_lease_generation))
-            .collect();
-        // A cancelled turn never delivers the work it withheld from its
-        // terminal checkpoint: it starts no follow-on for it, and hands it to
-        // the cancellation instead (FIG-3531, FIG-3543).
         let cancelled = matches!(outcome, TurnOutcome::Stopped(TurnStop::Cancelled { .. }));
         let mut undelivered = WithheldTerminalWork {
             queued: self.undelivered.queued.clone(),
             turn_inputs: self.undelivered.turn_inputs.clone(),
         };
-        if cancelled && let Some(withheld) = &self.withheld_terminal_work {
+        if !self.carries_follow_on_work(cancelled)
+            && let Some(withheld) = &self.withheld_terminal_work
+        {
             undelivered.queued.extend(withheld.queued.iter().cloned());
             undelivered
                 .turn_inputs
                 .extend(withheld.turn_inputs.iter().cloned());
         }
         LogicalTurnCommitEffects {
-            claim_settlement: TurnClaimSettlement::new(
-                completed_queue_claims,
-                completed_turn_input_claims,
-                queue_claim_generations,
-                turn_input_claim_generations,
+            ingress_settlement: TurnIngressSettlement::new(
+                self.queued
+                    .iter()
+                    .map(crate::AdmittedQueuedWork::completion)
+                    .collect(),
+                self.turn_inputs
+                    .iter()
+                    .map(crate::AdmittedTurnInputs::completion)
+                    .collect(),
             )
-            .with_undelivered(undelivered)
-            .with_journaled_drive_claims(journaled_drive_claims.clone()),
+            .with_undelivered(undelivered),
             pending_follow_on,
         }
     }
 }
 
 pub(super) struct LogicalTurnCommitEffects {
-    pub(super) claim_settlement: TurnClaimSettlement,
+    pub(super) ingress_settlement: TurnIngressSettlement,
     /// The follow-on the head owes once this turn commits (ADR 0101 §3).
     pub(super) pending_follow_on: Option<crate::store::PendingFollowOn>,
 }
@@ -261,7 +263,7 @@ impl LashRuntime {
         observer: &TurnObserver,
         scoped_effect_controller: &ScopedEffectController<'_>,
         turn_id: &TurnId,
-        claims: &LogicalTurnClaims,
+        admissions: &LogicalTurnAdmissions,
         announce_queued_work: bool,
     ) {
         let mut cursor =
@@ -269,28 +271,20 @@ impl LashRuntime {
         super::turn_loop::emit_turn_started(observer, &mut cursor, turn_id);
         if !announce_queued_work {
             // Work withheld from a terminal checkpoint already announced its
-            // start at the boundary that claimed it (FIG-3157).
+            // start at the boundary that admitted it (FIG-3157).
             return;
         }
-        for claim in &claims.queued {
-            let work = claim.materialize_queued_checkpoint_work();
+        for queued in &admissions.queued {
+            let work = queued.materialize_queued_checkpoint_work();
             super::turn_loop::emit_queued_work_started(
                 observer,
                 &mut cursor,
                 turn_id,
-                crate::QueuedWorkClaimBoundary::Idle,
-                claim,
+                crate::AdmissionBoundary::Idle,
+                queued,
                 work.turn_causes,
             );
         }
-    }
-
-    /// Whether the root this turn runs under is retried on `err`: a live
-    /// fault aborts the attempt an engine runs the root in, and the engine
-    /// retries it under the same root (FIG-3897), except a superseded commit,
-    /// which ends the root (FIG-4010).
-    fn drive_retries(&self, err: &RuntimeError) -> bool {
-        self.engine_retries_root && super::drive::engine_retries(err)
     }
 
     #[expect(
@@ -309,10 +303,52 @@ impl LashRuntime {
             ));
     }
 
-    /// Hand back work claimed at a terminal checkpoint that this logical run
-    /// will not drive after all. The rows return to the queue exactly as they
-    /// were, for the next drain to claim.
-    async fn abandon_withheld_terminal_work(&self, withheld: WithheldTerminalWork) {
+    /// End the root at the commit of its physical turn `committed_turn`,
+    /// handing back `withheld`: the rows that turn withheld from its
+    /// terminal checkpoint for a follow-on turn this run will not drive
+    /// after all (FIG-3157, FIG-3927).
+    ///
+    /// The commit that withheld them owed their follow-on, so it wrote no
+    /// terminal, and the rows stay bound to the root. Once the follow-on
+    /// fails before its commit, or the commit before it fails its delivery,
+    /// nothing else ends the root or redrives it: its run returns, and no row
+    /// owes a drive. So the root ends here, at the turn whose answer it
+    /// committed, in one commit under the root's drive fence that releases
+    /// the withheld rows open at their own positions, each owing its session a
+    /// drive again, and writes the terminal a redrive of the root reads. A
+    /// root that still owes a frame's follow-on is left to the drive that
+    /// recovers it, and a commit that fails leaves the root as it was, to the
+    /// next drive that resumes it.
+    async fn end_root_without_follow_on(
+        &mut self,
+        committed_turn: &TurnId,
+        outcome: &TurnOutcome,
+        withheld: WithheldTerminalWork,
+    ) {
+        let Some(drive_commit) = self
+            .drive_root
+            .as_ref()
+            .and_then(|root| root.commit_facts(committed_turn, outcome, false))
+        else {
+            return;
+        };
+        let refused = |runtime: &mut Self, error: &dyn std::fmt::Display| {
+            runtime.invalidate_resident_session_state();
+            tracing::warn!(
+                error = %error,
+                root = %drive_commit.root,
+                "failed to end a root whose withheld follow-on work will not run"
+            );
+        };
+        // The failed turn may have dirtied the resident state; the root ends
+        // over the head its last commit wrote.
+        if let Err(error) = self.refresh_resident_head().await {
+            refused(self, &error);
+            return;
+        }
+        if self.state.pending_follow_on.is_some() {
+            return;
+        }
         let Some(store) = self
             .session
             .as_ref()
@@ -320,24 +356,48 @@ impl LashRuntime {
         else {
             return;
         };
-        if !withheld.queued.is_empty()
-            && let Err(err) = store.abandon_queued_work_claims(&withheld.queued).await
-        {
-            tracing::warn!(
-                error = %err,
-                claim_count = withheld.queued.len(),
-                "failed to abandon queued work withheld from a terminal checkpoint"
-            );
+        let operation = crate::OperationId::new(
+            crate::ExecutionScope::turn(self.state.session_id.as_str(), committed_turn.clone()),
+            "root-end",
+        );
+        let fleet_format = self.fleet_format();
+        let (mut commit, persisted_node_ids) =
+            match crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
+                &mut self.state,
+                &[],
+                operation,
+                self.host.core.durability.commit_budget,
+                fleet_format,
+            ) {
+                Ok(commit) => commit,
+                Err(error) => {
+                    refused(self, &error);
+                    return;
+                }
+            };
+        let settlement =
+            super::turn_settlement::TurnIngressSettlement::default().with_undelivered(withheld);
+        if !settlement.is_empty() {
+            commit.ingress = Some(settlement.into_ingress(
+                drive_commit.root.clone(),
+                crate::TurnCancelDisposition::Defer,
+            ));
         }
-        let turn_input_claims = &withheld.turn_inputs;
-        if !turn_input_claims.is_empty()
-            && let Err(err) = store.abandon_turn_input_claims(turn_input_claims).await
-        {
-            tracing::warn!(
-                error = %err,
-                claim_count = turn_input_claims.len(),
-                "failed to abandon turn input claimed at a terminal checkpoint"
-            );
+        commit.drive_fence = Some(Box::new(drive_commit.fence.clone()));
+        commit.root_terminal = drive_commit.terminal.clone().map(Box::new);
+        match crate::store::commit_runtime_state_verified(store.as_ref(), commit).await {
+            Ok(receipt) => {
+                if receipt.receipt_replayed {
+                    self.invalidate_resident_session_state();
+                } else {
+                    self.state.apply_persisted_commit_result(receipt);
+                    self.state.mark_node_ids_persisted(persisted_node_ids);
+                }
+                if let Some(root) = self.drive_root.as_mut() {
+                    root.mark_terminal_written();
+                }
+            }
+            Err(error) => refused(self, &error),
         }
     }
 
@@ -357,8 +417,8 @@ impl LashRuntime {
         turn_events: &dyn TurnActivitySink,
         scoped_effect_controller: ScopedEffectController<'_>,
         local_stop: LocalTurnStop,
-        claims: LogicalTurnClaims,
-        session_execution_lease: &mut Option<DriveClaimGuard>,
+        admissions: LogicalTurnAdmissions,
+        drive_fence: Option<&DriveFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         let (observer, mut observations) = TurnObserver::open(events, turn_events);
@@ -367,8 +427,8 @@ impl LashRuntime {
             &observer,
             scoped_effect_controller,
             local_stop,
-            claims,
-            session_execution_lease,
+            admissions,
+            drive_fence,
             stopwatch,
         ));
         drive_with_observations(drive, &mut observations, |observation| {
@@ -384,8 +444,8 @@ impl LashRuntime {
         observer: &TurnObserver,
         scoped_effect_controller: ScopedEffectController<'_>,
         local_stop: LocalTurnStop,
-        mut claims: LogicalTurnClaims,
-        session_execution_lease: &mut Option<DriveClaimGuard>,
+        mut admissions: LogicalTurnAdmissions,
+        drive_fence: Option<&DriveFence>,
         stopwatch: TurnStopwatch,
     ) -> Result<AgentFrameRun, RuntimeError> {
         // FIG-3353: the shared funnel for every logical turn — an open that
@@ -416,13 +476,13 @@ impl LashRuntime {
         } else {
             supplied_trace_turn_id
         };
-        // A claim never mixes run specs, so the head input's spec is the
+        // An admission never mixes run specs, so the head input's spec is the
         // root's; a root of wakes runs the default spec, and a follow-on the
         // shape its parent root recorded on the pending fact (FIG-3877).
-        let root_spec = claims
+        let root_spec = admissions
             .turn_inputs
             .first()
-            .and_then(|claim| claim.inputs.first())
+            .and_then(|admitted| admitted.inputs.first())
             .and_then(|input| input.run_spec.clone());
         let inherited = self
             .state
@@ -438,10 +498,14 @@ impl LashRuntime {
         )
         .await?;
         let mut turns: Vec<AssembledTurn> = Vec::new();
-        // FIG-3157: work claimed at a terminal checkpoint, withheld from the
+        // FIG-3157: work admitted at a terminal checkpoint, withheld from the
         // delivery so the committed finish stayed the turn's answer, waiting
         // for the follow-on turn that drives it.
         let mut carried_withheld: Option<WithheldTerminalWork> = None;
+        // The last committed physical turn, and the withheld rows the
+        // follow-on turn now running drives (FIG-3157).
+        let mut committed_turn: Option<TurnId> = None;
+        let mut follow_on_rows: Option<WithheldTerminalWork> = None;
         let mut announce_queued_work = true;
         let mut follow_on_turns = 0usize;
 
@@ -450,7 +514,6 @@ impl LashRuntime {
             // not create new effect authority. Every frame in this admitted
             // run therefore keeps the controller's exact execution scope.
             let turn_effect_controller = scoped_effect_controller.clone();
-            let teardown_effect_controller = turn_effect_controller.clone();
             let frame_stopwatch = if turns.is_empty() {
                 stopwatch
             } else {
@@ -460,7 +523,7 @@ impl LashRuntime {
                 observer,
                 &scoped_effect_controller,
                 &turn_trace_turn_id,
-                &claims,
+                &admissions,
                 announce_queued_work,
             );
             announce_queued_work = true;
@@ -498,6 +561,8 @@ impl LashRuntime {
                     }),
             };
             if let Some((code, message, task)) = terminal {
+                // A terminal record starts no follow-on: work an earlier turn
+                // withheld for one is handed back open by its commit.
                 let terminal = Box::pin(self.finish_logical_turn_error(LogicalTurnErrorContext {
                     code,
                     message,
@@ -505,13 +570,10 @@ impl LashRuntime {
                     delivered_task: Some(task),
                     sinks: TurnSinks { observer },
                     scoped_effect_controller: turn_effect_controller,
-                    claims,
-                    session_execution_lease: session_execution_lease.as_ref(),
+                    admissions: admissions.with_follow_on_allowed(false),
+                    drive_fence,
                 }))
                 .await;
-                if let Some(withheld) = carried_withheld.take() {
-                    self.abandon_withheld_terminal_work(withheld).await;
-                }
                 let mut terminal = match terminal {
                     Ok(terminal) => terminal,
                     Err(error) if turns.is_empty() => {
@@ -543,14 +605,12 @@ impl LashRuntime {
                             sinks: TurnSinks { observer },
                             scoped_effect_controller: turn_effect_controller,
                             local_stop: local_stop.clone(),
-                            queued_claims: claims.queued,
-                            turn_input_claims: claims.turn_inputs,
-                            materialize_initial_claims: true,
-                            lease: TurnLeaseScope {
-                                guard: session_execution_lease.as_ref(),
-                                release_policy:
-                                    SessionExecutionLeaseReleasePolicy::KeepOnAgentFrameSwitch,
-                            },
+                            admissions: std::mem::replace(
+                                &mut admissions,
+                                LogicalTurnAdmissions::new(Vec::new(), Vec::new()),
+                            ),
+                            materialize_initial_admissions: true,
+                            drive_fence,
                         },
                     ))
                     .await
@@ -566,11 +626,11 @@ impl LashRuntime {
             };
             let execution = match execution_result {
                 Ok(execution) => execution,
-                // FIG-1573: this frame ended without reaching a commit, so the
-                // commit-time re-defer never ran. Inputs routed into it while it
-                // was live are pinned to a turn id no later turn will ever carry
-                // again, so the teardown owes them the same repair. Both ids are
-                // dead by construction here, which keeps the live-turn hazard out.
+                // This frame ended without reaching a commit. The rows its
+                // root admitted stay bound to the root, and input routed to the
+                // frame while it was live stays open: the root's terminal write
+                // releases the one and re-defers the other (FIG-3927 §2.6), and
+                // a redrive of the root drives its journal again (ADR 0101 A3).
                 //
                 // The rejected turn may have mutated the live execution before
                 // it failed (an after-turn hook refusing finalization runs after
@@ -579,54 +639,27 @@ impl LashRuntime {
                 // next use reloads from the accepted snapshot instead of running
                 // the executor this turn dirtied.
                 //
-                // A parked turn is exempt, and so is a drive root's live fault,
-                // whose attempt its engine retries under the same root
-                // (FIG-3897): a parked turn's journal diverged at the refusal,
-                // and a retry that commits would meet the repair's journaled
-                // effects where it publishes its terminal. Either way it issues
-                // no further journaled effect (the repair's cancel gate peek is
-                // one), and its turn id is the one its redrive carries, so the
-                // inputs routed to it are not orphaned. A failed follow-on
-                // frame is recorded instead, so only a park exempts it.
-                //
                 // A follow-on that fails before its commit stays owed on the
                 // head (ADR 0101 §3): the next drive recovers it.
                 Err(err) if turns.is_empty() => {
-                    if !parks(&err)
-                        && !self.drive_retries(&err)
-                        && !self.owes_follow_on(&turn_trace_turn_id)
-                    {
-                        self.defer_orphaned_turn_inputs_after_teardown(
-                            &turn_trace_turn_id,
-                            session_execution_lease
-                                .as_ref()
-                                .map(|lease| lease.fence())
-                                .as_ref(),
-                            &teardown_effect_controller,
-                        )
-                        .await;
-                    }
                     self.invalidate_resident_session_state();
-                    if let Some(withheld) = carried_withheld.take() {
-                        self.abandon_withheld_terminal_work(withheld).await;
-                    }
                     return Err(err);
                 }
+                // A FIG-3157 follow-on that failed ends its root at the turn
+                // that withheld its rows, unless the failure parked the root:
+                // a park holds the root's rows until it is resolved.
                 Err(err) => {
-                    if !parks(&err) && !self.owes_follow_on(&turn_trace_turn_id) {
-                        self.defer_orphaned_turn_inputs_after_teardown(
-                            &turn_trace_turn_id,
-                            session_execution_lease
-                                .as_ref()
-                                .map(|lease| lease.fence())
-                                .as_ref(),
-                            &teardown_effect_controller,
-                        )
-                        .await;
-                    }
+                    let parked = err.turn_failure_cause() == crate::TurnFailureCause::Parked;
                     self.record_follow_on_failure(&mut turns, err);
-                    if let Some(withheld) = carried_withheld.take() {
-                        self.abandon_withheld_terminal_work(withheld).await;
+                    if let (false, Some(withheld), Some(committed), Some(last)) = (
+                        parked,
+                        follow_on_rows.take(),
+                        committed_turn.as_ref(),
+                        turns.last(),
+                    ) {
+                        let outcome = last.outcome.clone();
+                        Box::pin(self.end_root_without_follow_on(committed, &outcome, withheld))
+                            .await;
                     }
                     return Ok(AgentFrameRun {
                         turns,
@@ -634,6 +667,8 @@ impl LashRuntime {
                     });
                 }
             };
+            committed_turn = Some(turn_trace_turn_id.clone());
+            follow_on_rows = None;
             let PhysicalTurnExecution {
                 mut turn,
                 post_commit_delivery_failed,
@@ -647,8 +682,16 @@ impl LashRuntime {
             frame_stopwatch.stamp(&mut turn, self.host.core.clock.as_ref());
             turns.push(turn);
             if post_commit_delivery_failed {
-                if let Some(withheld) = carried_withheld.take() {
-                    self.abandon_withheld_terminal_work(withheld).await;
+                // The run stops before the follow-on its withheld rows owe,
+                // so the root ends at this commit instead.
+                if let (Some(withheld), Some(last)) = (carried_withheld.take(), turns.last()) {
+                    let outcome = last.outcome.clone();
+                    Box::pin(self.end_root_without_follow_on(
+                        &turn_trace_turn_id,
+                        &outcome,
+                        withheld,
+                    ))
+                    .await;
                 }
                 return Ok(AgentFrameRun {
                     turns,
@@ -660,32 +703,6 @@ impl LashRuntime {
             // one path for every session: durable or store-less, the fact is
             // on the resident head.
             if let Some(owed) = self.state.pending_follow_on.as_deref().cloned() {
-                // A lane that lapsed is never silently reacquired for the
-                // follow-on: it stays owed on the head, and the next drive
-                // recovers it (ADR 0101 §3).
-                if session_execution_lease
-                    .as_ref()
-                    .is_some_and(DriveClaimGuard::is_lost)
-                {
-                    self.record_follow_on_failure(
-                        &mut turns,
-                        RuntimeError::new(
-                            RuntimeErrorCode::SessionExecutionLeaseLost,
-                            format!(
-                                "follow-on turn `{}` awaits a live execution lane; the next \
-                                 drive recovers it",
-                                owed.follow_on_turn_id
-                            ),
-                        ),
-                    );
-                    if let Some(withheld) = carried_withheld.take() {
-                        self.abandon_withheld_terminal_work(withheld).await;
-                    }
-                    return Ok(AgentFrameRun {
-                        turns,
-                        acceptance: None,
-                    });
-                }
                 turn_trace_turn_id = owed.follow_on_turn_id.clone();
                 // A late crash may replay this root after its follow-on has
                 // committed. In that case the first frame's recorded commit
@@ -713,47 +730,34 @@ impl LashRuntime {
                 }
                 let (input, options) = follow_on_input(&owed, follow_turn_context.clone());
                 start = LogicalTurnStart::Input(input, options);
-                claims = LogicalTurnClaims::new(Vec::new(), Vec::new());
+                // Work an earlier turn withheld at its terminal checkpoint
+                // still waits for its FIG-3157 follow-on, which runs after
+                // the frame's. The frame's turn carries it: its commit owes
+                // that follow-on too, so it neither settles the rows nor
+                // ends the root that holds them (FIG-4044).
+                admissions = LogicalTurnAdmissions::new(Vec::new(), Vec::new())
+                    .with_withheld_terminal_work(carried_withheld.take());
                 continue;
             }
             // FIG-3157: the turn ended on its committed answer. Work it
-            // claimed at the terminal checkpoint starts the next turn now
-            // — no idle gap, no wait for the user, the same session
-            // execution lease and generation throughout.
+            // admitted at the terminal checkpoint starts the next turn now
+            // — no idle gap, no wait for the user, the same drive fence and
+            // generation throughout. A run past its follow-on bound carried
+            // nothing: its commit handed the withheld rows back open.
             let Some(withheld) = carried_withheld.take() else {
                 return Ok(AgentFrameRun {
                     turns,
                     acceptance: None,
                 });
             };
-            // The claim is only generation-valid while the lease that
-            // fenced it is live (ADR 0029). A run whose lane lapsed hands
-            // the rows back instead, for a successor to reclaim.
-            let lane_live = session_execution_lease
-                .as_ref()
-                .is_some_and(|guard| !guard.is_lost());
-            if !lane_live {
-                self.abandon_withheld_terminal_work(withheld).await;
-                return Ok(AgentFrameRun {
-                    turns,
-                    acceptance: None,
-                });
-            }
-            if follow_on_turns >= MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS {
-                // Bounded like an agent-frame chain: hand the rows back so
-                // a later drain takes them instead of running forever.
-                self.abandon_withheld_terminal_work(withheld).await;
-                return Ok(AgentFrameRun {
-                    turns,
-                    acceptance: None,
-                });
-            }
             follow_on_turns += 1;
             turn_trace_turn_id = next_physical_turn_id(&turn_trace_turn_id)
                 .map_err(super::runtime_error_from_store_commit)?;
             let mut input = TurnInput::items(Vec::new());
             input.turn_context = follow_turn_context.clone();
-            claims = LogicalTurnClaims::new(withheld.queued, withheld.turn_inputs);
+            follow_on_rows = Some(withheld.clone());
+            admissions = LogicalTurnAdmissions::new(withheld.queued, withheld.turn_inputs)
+                .with_follow_on_allowed(follow_on_turns < MAX_TERMINAL_CHECKPOINT_FOLLOW_ONS);
             announce_queued_work = false;
             start = LogicalTurnStart::Input(input, follow_protocol_turn_options.clone());
         }
@@ -777,21 +781,4 @@ pub(super) fn next_physical_turn_id(current: &TurnId) -> Result<TurnId, crate::S
     let (root, index) = crate::store::PhysicalTurn::split_turn_id(current);
     let next = crate::StoreError::checked_monotonic_increment("physical_turn_index", index)?;
     Ok(crate::store::PhysicalTurn::derive_turn_id(&root, next))
-}
-
-impl LashRuntime {
-    /// Whether the head owes `turn_id` as its pending follow-on: such a turn
-    /// that ends without committing stays owed, with the input pinned to it,
-    /// for the next drive to recover (ADR 0101 §3).
-    fn owes_follow_on(&self, turn_id: &TurnId) -> bool {
-        self.state
-            .pending_follow_on
-            .as_ref()
-            .is_some_and(|owed| owed.is_turn(turn_id))
-    }
-}
-
-/// Whether `err` parked its turn on a replay refusal (FIG-3586).
-fn parks(err: &crate::RuntimeError) -> bool {
-    err.turn_failure_cause() == crate::TurnFailureCause::Parked
 }

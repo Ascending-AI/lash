@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 142.
+-- lash-postgres-store schema, DDL revision 141; compatibility stamp 1/1.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -16,7 +16,10 @@
 
 CREATE TABLE IF NOT EXISTS lash_schema_versions (
     component TEXT PRIMARY KEY,
-    version INTEGER NOT NULL
+    version INTEGER NOT NULL,
+    min_reader INTEGER NOT NULL,
+    CONSTRAINT ck_lash_schema_versions_stamp
+        CHECK (version >= 1 AND min_reader >= 1 AND min_reader <= version)
 );
 
 -- The migration ledger (FIG-3816): `lash migrate` records each applied step
@@ -244,6 +247,7 @@ CREATE TABLE IF NOT EXISTS lash_runtime_turn_commits (
     turn_id TEXT NOT NULL,
     turn_commit_hash TEXT NOT NULL,
     result_json TEXT NOT NULL,
+    outcome_code TEXT CONSTRAINT ck_runtime_turn_commits_outcome CHECK (outcome_code IN ('completed', 'frame_switch', 'cancelled', 'failed_incomplete', 'failed_invalid_input', 'failed_max_turns', 'failed_tool_failure', 'failed_provider_error', 'failed_context_overflow', 'failed_plugin_abort', 'failed_runtime_error', 'failed_submitted_error', 'failed_tool_error')),
     committed_at_ms BIGINT NOT NULL,
     request_identity_hash TEXT,
     requested_node_count BIGINT,
@@ -404,11 +408,8 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     authority_json TEXT NOT NULL,
     merge_key TEXT,
     enqueued_at_ms BIGINT NOT NULL,
-    claim_id TEXT, -- With claim_token, names a live claim for a nonzero generation.
-    claim_token TEXT, -- At generation zero, the pair is an abandon-restored predecessor.
-    claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-    claim_session_lease_generation BIGINT NOT NULL DEFAULT 0, -- Zero disambiguates the predecessor record from a live claim.
-    claim_owner_incarnation_id TEXT,
+    admitted_root TEXT, -- The root whose fenced admission holds the batch; NULL while open.
+    admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     obligation_id TEXT,
     obligation_state TEXT,
     obligation_attempts INTEGER NOT NULL DEFAULT 0,
@@ -420,8 +421,7 @@ CREATE TABLE IF NOT EXISTS lash_queued_work_batches (
     CONSTRAINT ck_queued_work_batches_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_queued_work_batches_work_kind CHECK (work_kind IN ('turn', 'control')),
     CONSTRAINT ck_queued_work_batches_delivery_policy CHECK (delivery_policy IN ('earliest_safe_boundary', 'after_current_turn_commit')),
-    CONSTRAINT ck_queued_work_batches_claim_id_token_all_or_none CHECK ((claim_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_token IS NOT NULL)),
-    CONSTRAINT ck_queued_work_batches_live_claim_owner CHECK (claim_token IS NULL OR claim_session_lease_generation = 0 OR claim_owner_incarnation_id IS NOT NULL),
+    CONSTRAINT ck_queued_work_batches_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -435,8 +435,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_stalled
     ON lash_queued_work_batches(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_lash_queued_work_claim
-    ON lash_queued_work_batches(session_id, claim_id, enqueue_seq);
+CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
+    ON lash_queued_work_batches(session_id, admitted_root, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
     ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
@@ -466,12 +466,8 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     submitted_ingress_json TEXT NOT NULL,
     submission_digest TEXT NOT NULL,
     enqueued_at_ms BIGINT NOT NULL,
-    claim_id TEXT,
-    claim_owner_id TEXT,
-    claim_owner_incarnation_id TEXT,
-    claim_token TEXT,
-    claim_fencing_token BIGINT NOT NULL DEFAULT 0,
-    claim_session_lease_generation BIGINT NOT NULL DEFAULT 0,
+    admitted_root TEXT, -- The root whose fenced admission holds the input; NULL while open.
+    admitted_by TEXT, -- The recorded step that bound it: `admit` or a checkpoint's replay key.
     run_spec_hash TEXT,
     obligation_id TEXT,
     obligation_state TEXT,
@@ -484,7 +480,8 @@ CREATE TABLE IF NOT EXISTS lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_pending_turn_inputs_state CHECK (state IN ('pending_active', 'deferred_next_turn', 'accepted', 'cancelled', 'completed')),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK (((ingress_json::jsonb ->> 'scope') = 'active_turn' AND state IN ('pending_active', 'accepted', 'cancelled', 'completed')) OR ((ingress_json::jsonb ->> 'scope') = 'next_turn' AND state IN ('deferred_next_turn', 'cancelled', 'completed'))),
-    CONSTRAINT ck_pending_turn_inputs_claim_identity_all_or_none CHECK ((claim_id IS NULL AND claim_owner_id IS NULL AND claim_owner_incarnation_id IS NULL AND claim_token IS NULL) OR (claim_id IS NOT NULL AND claim_owner_id IS NOT NULL AND claim_owner_incarnation_id IS NOT NULL AND claim_token IS NOT NULL)),
+    CONSTRAINT ck_pending_turn_inputs_admission_all_or_none CHECK ((admitted_root IS NULL) = (admitted_by IS NULL)),
+    CONSTRAINT ck_pending_turn_inputs_settled_unadmitted CHECK (admitted_root IS NULL OR state NOT IN ('cancelled', 'completed')),
     UNIQUE (session_id, source_key),
     PRIMARY KEY (session_id, enqueue_seq)
 );
@@ -498,12 +495,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_stalled
     ON lash_pending_turn_inputs(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
-    ON lash_pending_turn_inputs(session_id, state, enqueue_seq);
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
-    ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_claim
-    ON lash_pending_turn_inputs(session_id, claim_id, claim_token);
+-- All undelivered inputs, including ones a root already holds. Settled rows
+-- cannot lengthen an open-input scan, and the key retains enqueue order.
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open_state
+    ON lash_pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('pending_active', 'deferred_next_turn');
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_bound_root
+    ON lash_pending_turn_inputs(session_id, admitted_root)
+    WHERE admitted_root IS NOT NULL;
 
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and
@@ -701,6 +700,10 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     obligation_stall_reason TEXT,
     obligation_last_error TEXT,
     obligation_settled_at_ms BIGINT,
+    consumer_hold_key TEXT,
+    consumer_hold_scope_kind TEXT,
+    consumer_hold_scope_id TEXT COLLATE "C",
+    CONSTRAINT ck_processes_consumer_hold CHECK ((consumer_hold_key IS NULL) = (consumer_hold_scope_kind IS NULL) AND (consumer_hold_key IS NULL) = (consumer_hold_scope_id IS NULL)),
     CONSTRAINT ck_processes_start_obligation CHECK ((start_obligation_state IS NULL AND start_obligation_id IS NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'due' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'claimed' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NOT NULL AND start_obligation_claim_token IS NOT NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NULL) OR (start_obligation_state = 'delivered' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IS NULL AND start_obligation_settled_at_ms IS NOT NULL) OR (start_obligation_state = 'stalled' AND start_obligation_id IS NOT NULL AND start_obligation_due_at_ms IS NULL AND start_obligation_claim_token IS NULL AND start_obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND start_obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_obligation CHECK ((obligation_state IS NULL AND obligation_id IS NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'due' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'delivered' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NOT NULL) OR (obligation_state = 'stalled' AND obligation_id IS NOT NULL AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL)),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
@@ -708,6 +711,11 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'queue_drain', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
+
+-- A held row names the scope whose close releases it (ADR 0116 §3.6).
+CREATE INDEX IF NOT EXISTS idx_lash_processes_consumer_hold_owner
+    ON lash_processes(consumer_hold_scope_kind, consumer_hold_scope_id)
+    WHERE consumer_hold_key IS NOT NULL;
 
 -- The obligation columns' indexes (ADR 0109 §1.1): the id, the due read
 -- and the stalled listing.
@@ -936,7 +944,7 @@ CREATE TABLE IF NOT EXISTS lash_tool_intent_submissions (
     kind TEXT NOT NULL,
     payload_hash TEXT NOT NULL,
     submission_json TEXT NOT NULL,
-    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger'))
+    CONSTRAINT ck_tool_intent_submissions_kind CHECK (kind IN ('start_process', 'signal_process', 'cancel_process', 'emit_process_event', 'emit_trigger', 'register_process_definition', 'register_trigger'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_tool_intent_submissions_scope
     ON lash_tool_intent_submissions(session_id, execution_scope_id, intent_index);
@@ -1081,8 +1089,8 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- Seed rows. Every opened catalog requires them: the component version stamp, the
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
-INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 142)
+INSERT INTO lash_schema_versions (component, version, min_reader)
+VALUES ('lash-postgres-store', 1, 1)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

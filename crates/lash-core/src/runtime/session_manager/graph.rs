@@ -95,13 +95,9 @@ impl CurrentSessionCapability {
         commit.turn_commit = append_stamp;
         commit.debug_assert_append_envelope_scope();
         let commit_result = super::super::state::commit_in_lane_context(
-            self.held_session_execution_lease.as_ref(),
+            self.held_drive_fence.as_ref(),
             Arc::clone(store),
             commit,
-            &self.runtime_lease_owner,
-            &self.runtime_lease_executor_id,
-            self.host.core.control.lease_timings,
-            Arc::clone(&self.host.core.clock),
             &self.resident_graph_head_stale,
         )
         .await;

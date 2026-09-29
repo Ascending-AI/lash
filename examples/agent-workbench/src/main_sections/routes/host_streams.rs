@@ -1,6 +1,41 @@
 //! Host-owned HTTP observation streams.
 
 use super::*;
+use axum::http::HeaderMap;
+use lash_remote_protocol::{Negotiated, Negotiation, REMOTE_PROTOCOL, answer};
+
+const REMOTE_HELLO_HEADER: &str = "x-lash-protocol-hello";
+
+fn negotiate_remote(headers: &HeaderMap) -> Result<(Negotiated, String), AppError> {
+    let hello = headers
+        .get(REMOTE_HELLO_HEADER)
+        .ok_or_else(|| AppError::bad_request("missing remote protocol Hello"))?
+        .to_str()
+        .map_err(|_| AppError::bad_request("invalid remote protocol Hello header"))?;
+    let hello: Negotiation = serde_json::from_str(hello)
+        .map_err(|_| AppError::bad_request("invalid remote protocol Hello"))?;
+    let accept = answer(REMOTE_PROTOCOL, &hello);
+    let negotiated = Negotiated::from_accept(REMOTE_PROTOCOL, &accept)
+        .map_err(|error| AppError::bad_request(error.to_string()))?;
+    let accept_json = serde_json::to_string(&accept)
+        .map_err(|error| AppError::internal(format!("encode protocol Accept: {error}")))?;
+    Ok((negotiated, accept_json))
+}
+
+#[cfg(test)]
+fn test_remote_headers() -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        REMOTE_HELLO_HEADER,
+        serde_json::to_string(&Negotiation::Hello {
+            supported: REMOTE_PROTOCOL,
+        })
+        .expect("encode test Hello")
+        .parse()
+        .expect("valid test Hello header"),
+    );
+    headers
+}
 
 #[cfg(test)]
 pub(crate) async fn session_events(
@@ -81,14 +116,17 @@ pub(crate) async fn session_observations(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
 ) -> Result<Response, AppError> {
-    session_observations_with_shutdown(State(state), Query(query), None).await
+    session_observations_with_shutdown(State(state), Query(query), test_remote_headers(), None)
+        .await
 }
 
 pub(crate) async fn session_observations_with_shutdown(
     State(state): State<AppState>,
     Query(query): Query<EventsQuery>,
+    headers: HeaderMap,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 ) -> Result<Response, AppError> {
+    let (negotiated, accept_json) = negotiate_remote(&headers)?;
     let session_id = state
         .admit_session(
             &SessionQuery {
@@ -116,9 +154,17 @@ pub(crate) async fn session_observations_with_shutdown(
     };
     let (tx, rx) = mpsc::channel::<ObservationStreamItem>(64);
     tokio::spawn(async move {
-        forward_session_observations_until_shutdown(session, cursor, tx, shutdown).await;
+        forward_session_observations_until_shutdown(session, cursor, tx, shutdown, negotiated)
+            .await;
     });
-    Ok(ndjson_response(ReceiverStream::new(rx)))
+    let mut response = ndjson_response(ReceiverStream::new(rx));
+    response.headers_mut().insert(
+        "x-lash-protocol-accept",
+        accept_json
+            .parse()
+            .map_err(|error| AppError::internal(format!("protocol Accept header: {error}")))?,
+    );
+    Ok(response)
 }
 
 #[cfg(test)]
@@ -127,7 +173,8 @@ pub(crate) async fn forward_session_observations(
     cursor: SessionCursor,
     tx: mpsc::Sender<ObservationStreamItem>,
 ) {
-    forward_session_observations_until_shutdown(session, cursor, tx, None).await;
+    let negotiated = negotiate_remote(&test_remote_headers()).unwrap().0;
+    forward_session_observations_until_shutdown(session, cursor, tx, None, negotiated).await;
 }
 
 async fn host_shutdown_requested(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
@@ -158,6 +205,7 @@ async fn forward_session_observations_until_shutdown(
     cursor: SessionCursor,
     tx: mpsc::Sender<ObservationStreamItem>,
     mut shutdown: Option<tokio::sync::watch::Receiver<bool>>,
+    negotiated: Negotiated,
 ) {
     use lash::recoverable_chat::RecoverableChatUpdate;
 
@@ -199,7 +247,7 @@ async fn forward_session_observations_until_shutdown(
                 if !send_until_shutdown(
                     &tx,
                     ObservationStreamItem::Observation {
-                        event: Box::new(Envelope::new(event)),
+                        event: Box::new(Envelope::at(&negotiated, event)),
                     },
                     &mut shutdown,
                 )
@@ -223,7 +271,7 @@ async fn forward_session_observations_until_shutdown(
                     &tx,
                     ObservationStreamItem::TerminalReplacement {
                         cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
+                        event: Box::new(Envelope::at(&negotiated, event)),
                     },
                     &mut shutdown,
                 )
@@ -247,7 +295,7 @@ async fn forward_session_observations_until_shutdown(
                     &tx,
                     ObservationStreamItem::ResidentReplacement {
                         cursor: snapshot.cursor.to_string(),
-                        event: Box::new(Envelope::new(event)),
+                        event: Box::new(Envelope::at(&negotiated, event)),
                     },
                     &mut shutdown,
                 )
@@ -266,8 +314,8 @@ async fn forward_session_observations_until_shutdown(
                 if !send_until_shutdown(
                     &tx,
                     ObservationStreamItem::ReplayGap {
-                        observation: Box::new(Envelope::new(observation)),
-                        gap: Box::new(Envelope::new(gap)),
+                        observation: Box::new(Envelope::at(&negotiated, observation)),
+                        gap: Box::new(Envelope::at(&negotiated, gap)),
                     },
                     &mut shutdown,
                 )

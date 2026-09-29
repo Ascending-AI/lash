@@ -1,10 +1,10 @@
 //! The pending follow-on on the session head (ADR 0101 §3, FIG-3542), as
 //! store laws: a frame switch's commit writes it, only its own terminal commit
-//! clears it, every other claim and turn commit meets it, and its frame is the
+//! clears it, every other admission and turn commit meets it, and its frame is the
 //! head's current frame on every head write.
 
 use super::*;
-use lash_core::testing::RuntimePersistenceTestClaimExt as _;
+use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use pretty_assertions::assert_eq;
 
 const SESSION: &str = "follow-on";
@@ -128,7 +128,9 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_follow_on_blocks_every_claim_but_its_own(store: Arc<dyn RuntimePersistence>) {
+pub async fn pending_follow_on_blocks_every_admission_but_its_own(
+    store: Arc<dyn RuntimePersistence>,
+) {
     let (_, owed) = commit_switch(&store).await;
     // The wake is accepted before the host input: a checkpoint never takes
     // queued work past an earlier next-turn input (ADR 0101 §5).
@@ -145,74 +147,76 @@ pub async fn pending_follow_on_blocks_every_claim_but_its_own(store: Arc<dyn Run
         .await
         .expect("enqueue host input");
     store
-        .enqueue_queued_work(checkpoint_claims::queued_session_command_draft(
+        .enqueue_queued_work(checkpoint_admissions::queued_session_command_draft(
             &session(),
             "command behind the follow-on",
         ))
         .await
         .expect("enqueue a session command");
-    let lease = seal_claim_authority_for_test(&store, &session(), "follow-on-owner").await;
-    let owner = lease_owner("follow-on-owner");
+    let fence = seal_drive_fence_for_test(&store, &session(), "follow-on-owner").await;
+    let input = store
+        .list_pending_turn_inputs(&session())
+        .await
+        .expect("list the host input")
+        .remove(0)
+        .input;
 
+    for (root, head) in [
+        (
+            "blocked-input-root",
+            lash_core::store::AdmittedHead::Input(input.input_id.clone()),
+        ),
+        (
+            "blocked-wake-root",
+            lash_core::store::AdmittedHead::Batch(wake.batch_id.clone()),
+        ),
+    ] {
+        assert!(
+            admit_root_for_test(&store, &fence, &TurnId::from(root), head)
+                .await
+                .expect("an idle admission behind the follow-on")
+                .is_none(),
+            "an idle admission is blocked, not an error"
+        );
+    }
     assert!(
         store
-            .claim_next_turn_inputs(&session(), &lease.fence(), &owner, 8)
+            .open_session_command_run(&fence)
             .await
-            .expect("idle input claim")
-            .is_none(),
-        "an idle input claim is blocked, not an error"
-    );
-    assert!(matches!(
-        store
-            .claim_ready_queued_work(
-                &session(),
-                &lease.fence(),
-                &owner,
-                QueuedWorkClaimBoundary::Idle,
-                crate::testing::queued_work_claim_policy(8),
-            )
-            .await
-            .expect("idle queued claim"),
-        crate::QueuedWorkClaimOutcome::Refused(crate::QueuedWorkClaimRefusal::FollowOnPending)
-    ));
-    assert!(
-        store
-            .claim_leading_ready_session_command(&session(), &lease.fence(), &owner)
-            .await
-            .expect("command claim")
-            .is_none(),
+            .expect("command run")
+            .is_empty(),
         "a session command waits behind the follow-on"
     );
-    let other_turn = store
-        .claim_checkpoint_work(
-            &session(),
-            &lease.fence(),
-            &owner,
-            &TurnId::from("another-turn"),
-            crate::CheckpointKind::AfterWork,
-            8,
-            crate::testing::queued_work_claim_policy(8),
-        )
-        .await
-        .expect("another turn's checkpoint claim");
-    assert!(other_turn.0.is_none() && other_turn.1.is_none());
+    let other_turn = admit_at_checkpoint_for_test(
+        &store,
+        &fence,
+        &TurnId::from("another-turn"),
+        &TurnId::from("another-turn"),
+        crate::CheckpointKind::AfterWork,
+        "another-turn:step",
+        8,
+        crate::testing::queued_work_admission_policy(8),
+    )
+    .await
+    .expect("another turn's checkpoint admission");
+    assert!(other_turn.is_empty());
 
-    // The follow-on's own checkpoint claims.
-    let own = store
-        .claim_checkpoint_work(
-            &session(),
-            &lease.fence(),
-            &owner,
-            &owed.follow_on_turn_id,
-            crate::CheckpointKind::AfterWork,
-            8,
-            crate::testing::queued_work_claim_policy(8),
-        )
-        .await
-        .expect("the follow-on's checkpoint claim");
+    // The follow-on's own checkpoint admits.
+    let own = admit_at_checkpoint_for_test(
+        &store,
+        &fence,
+        &owed.follow_on_turn_id,
+        &owed.follow_on_turn_id,
+        crate::CheckpointKind::AfterWork,
+        "follow-on:step",
+        8,
+        crate::testing::queued_work_admission_policy(8),
+    )
+    .await
+    .expect("the follow-on's checkpoint admission");
     assert_eq!(
-        own.1
-            .expect("the follow-on claims the wake at its checkpoint")
+        own.queued
+            .expect("the follow-on admits the wake at its checkpoint")
             .batches[0]
             .batch_id,
         wake.batch_id
@@ -298,10 +302,10 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
 ) {
     let (state, owed) = commit_switch(&store).await;
     let revision = state.head_revision;
-    let lease = seal_claim_authority_for_test(&store, &session(), "recovering").await;
+    let lease = seal_drive_fence_for_test(&store, &session(), "recovering").await;
     for expected in 1..=2 {
         let raised = store
-            .raise_pending_follow_on_attempts(&lease.authority(), &owed.follow_on_turn_id)
+            .raise_pending_follow_on_attempts(&lease, &owed.follow_on_turn_id)
             .await
             .expect("a recovering drive raises the count");
         assert_eq!(raised.attempts, expected);
@@ -315,17 +319,17 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
     }
     assert!(matches!(
         store
-            .raise_pending_follow_on_attempts(&lease.authority(), &TurnId::from("not-owed"))
+            .raise_pending_follow_on_attempts(&lease, &TurnId::from("not-owed"))
             .await,
         Err(StoreError::FollowOnNotPending { .. })
     ));
     store
-        .supersede_claim_epoch_for_test(&lease.authority())
+        .supersede_drive_epoch_for_test(&lease)
         .await
         .expect("release the recovering lane");
     assert!(
         store
-            .raise_pending_follow_on_attempts(&lease.authority(), &owed.follow_on_turn_id)
+            .raise_pending_follow_on_attempts(&lease, &owed.follow_on_turn_id)
             .await
             .is_err(),
         "a raise outside the live lane is refused"
@@ -352,10 +356,10 @@ pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
         .commit_runtime_state(terminal_commit(&stale, FOLLOW_ON_TURN, None))
         .await
         .expect("the follow-on's terminal clears its fact");
-    let successor = seal_claim_authority_for_test(&store, &session(), "after").await;
+    let successor = seal_drive_fence_for_test(&store, &session(), "after").await;
     assert!(matches!(
         store
-            .raise_pending_follow_on_attempts(&successor.authority(), &owed.follow_on_turn_id)
+            .raise_pending_follow_on_attempts(&successor, &owed.follow_on_turn_id)
             .await,
         Err(StoreError::FollowOnNotPending { .. })
     ));

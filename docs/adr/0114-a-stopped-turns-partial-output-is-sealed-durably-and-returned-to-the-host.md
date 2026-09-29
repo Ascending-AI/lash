@@ -1430,6 +1430,15 @@ FIG-433 does not use it. The gate watch keeps today's attachment
   cleanup executor never see them, and a quoted artifact reference keeps no
   bytes alive.
 
+## Amendment (FIG-3562, 2026-09-29): the progress sink lives on `AttemptContext`
+
+§2.2 places `progress()` on `ToolContext`. Under [ADR 0116](0116-tools-are-opaque.md), `AttemptContext` is the
+only context a tool body sees, and `ToolContext` is crate-private runtime
+state. `AttemptContext::progress(&self) -> ToolProgressSink` is the accessor,
+with §2.2's semantics unchanged. `ToolContext` keeps the runtime's
+`progress_reporter` so the attempt context can hand it on. §8's lane R owns
+this region of `tool_provider.rs`, and [ADR 0116](0116-tools-are-opaque.md) §10.4 names the seam.
+
 ## Lane G amendment
 
 Added 2026-09-29, after lanes R, P, S and H settled. It closes six gaps

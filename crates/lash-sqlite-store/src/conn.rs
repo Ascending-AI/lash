@@ -19,7 +19,7 @@
 //!   rusqlite's `Connection::transaction` opens `BEGIN DEFERRED`, which only
 //!   takes the write lock on the first write statement. Every read-then-write
 //!   path the crate promises to serialise cross-process (head-revision CAS,
-//!   lease fencing, the queued-work claim) must therefore use
+//!   lease fencing, a root's admission) must therefore use
 //!   [`SqliteConnection::write`], which opens `BEGIN IMMEDIATE` so the write
 //!   lock is acquired up front and a contending writer waits on the busy
 //!   timeout instead of reading a stale snapshot. In-process writers never
@@ -38,8 +38,14 @@
 
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex, Weak};
+use std::path::PathBuf;
+#[cfg(feature = "perf-witness")]
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, RwLock, Weak};
 use std::time::Duration;
+#[cfg(feature = "perf-witness")]
+use std::time::Instant;
 use tokio_rusqlite::Connection as AsyncConnection;
 
 use crate::location::DatabaseTarget;
@@ -67,8 +73,8 @@ macro_rules! sim_fault {
 /// Outcome a write flow returns to decide commit vs rollback while still
 /// handing a value back to the caller. Used for paths that compute a result
 /// *and* may discover mid-transaction that the work must not be persisted
-/// (e.g. a contended queued-work claim, where partially claimed rows must be
-/// rolled back and the caller told nothing was claimed).
+/// (e.g. a contended root admission, where partially bound rows must be
+/// rolled back and the caller told nothing was admitted).
 pub(crate) enum TxOutcome<T> {
     Commit(T),
     Rollback(T),
@@ -90,6 +96,144 @@ const PREPARED_STATEMENT_CACHE_CAPACITY: usize = 256;
 /// a closed backend's gate is forgotten; the connections keep it alive.
 static WRITE_GATES: LazyLock<Mutex<HashMap<String, Weak<Mutex<()>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static READ_GATES: LazyLock<Mutex<HashMap<String, Weak<RwLock<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// One checkpoint worker per file database, shared by all of its connections.
+/// The worker holds only a weak reference while asleep, so closing the last
+/// store connection also ends the worker.
+static CHECKPOINTS: LazyLock<Mutex<HashMap<String, Weak<CheckpointState>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+struct CheckpointState {
+    path: PathBuf,
+    write_gate: Arc<Mutex<()>>,
+    read_gate: Arc<RwLock<()>>,
+    threshold_pages: AtomicU64,
+    commits: AtomicU64,
+}
+
+fn checkpoint_state(
+    target: &DatabaseTarget,
+    write_gate: &Arc<Mutex<()>>,
+    read_gate: &Arc<RwLock<()>>,
+    threshold_pages: u32,
+) -> Option<Arc<CheckpointState>> {
+    let path = target.file_path()?;
+    if threshold_pages == 0 {
+        return None;
+    }
+    let mut states = CHECKPOINTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = target.canonical_name();
+    if let Some(state) = states.get(&key).and_then(Weak::upgrade) {
+        state
+            .threshold_pages
+            .fetch_min(u64::from(threshold_pages), Ordering::Relaxed);
+        return Some(state);
+    }
+    let state = Arc::new(CheckpointState {
+        path: path.to_owned(),
+        write_gate: Arc::clone(write_gate),
+        read_gate: Arc::clone(read_gate),
+        threshold_pages: AtomicU64::new(u64::from(threshold_pages)),
+        commits: AtomicU64::new(0),
+    });
+    let weak = Arc::downgrade(&state);
+    match std::thread::Builder::new()
+        .name("lash-sqlite-checkpoint".to_string())
+        .spawn(move || checkpoint_loop(weak))
+    {
+        Ok(_) => {
+            states.insert(key, Arc::downgrade(&state));
+            Some(state)
+        }
+        Err(error) => {
+            tracing::error!(%error, "could not start SQLite checkpoint worker");
+            None
+        }
+    }
+}
+
+fn checkpoint_loop(state: Weak<CheckpointState>) {
+    let mut seen_commits = 0;
+    let mut retry = false;
+    loop {
+        std::thread::sleep(Duration::from_millis(100));
+        let Some(state) = state.upgrade() else {
+            return;
+        };
+        let commits = state.commits.load(Ordering::Acquire);
+        if commits == seen_commits && !retry {
+            continue;
+        }
+        seen_commits = commits;
+        retry = checkpoint_if_needed(&state).unwrap_or_else(|error| {
+            tracing::warn!(%error, path = %state.path.display(), "SQLite checkpoint retry");
+            true
+        });
+    }
+}
+
+/// Return whether a blocked checkpoint should be retried even without a new
+/// commit. TRUNCATE is attempted only while the in-process write gate is idle.
+fn checkpoint_if_needed(state: &CheckpointState) -> rusqlite::Result<bool> {
+    // Stop new in-process readers and let their current statements finish.
+    // Writers also take this shared lock before the existing write gate, so
+    // obtaining it exclusively makes the write gate idle without a lock cycle.
+    let _read_gate = state
+        .read_gate
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Ok(_write_gate) = state.write_gate.try_lock() else {
+        return Ok(true);
+    };
+    let connection = Connection::open_with_flags(
+        &state.path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    connection.busy_timeout(Duration::from_millis(20))?;
+    let pages: i64 =
+        connection.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(1))?;
+    if pages < state.threshold_pages.load(Ordering::Relaxed) as i64 {
+        return Ok(false);
+    }
+    let busy: i64 =
+        connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
+    Ok(busy != 0)
+}
+
+#[cfg(feature = "perf-witness")]
+static GATE_TIMING_ENABLED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(feature = "perf-witness")]
+/// Enable opt-in write-gate timing for the current process.
+pub fn enable_gate_timings() {
+    GATE_TIMING_ENABLED.store(true, Ordering::Relaxed);
+}
+#[cfg(feature = "perf-witness")]
+static GATE_TIMINGS: LazyLock<Mutex<Vec<(u64, u64)>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+
+#[cfg(feature = "perf-witness")]
+fn record_gate_timing(wait: Duration, hold: Duration) {
+    if GATE_TIMING_ENABLED.load(Ordering::Relaxed) {
+        GATE_TIMINGS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((wait.as_micros() as u64, hold.as_micros() as u64));
+    }
+}
+
+#[cfg(feature = "perf-witness")]
+/// Drain opt-in write-gate wait and hold measurements, in microseconds.
+pub fn take_gate_timings() -> Vec<(u64, u64)> {
+    std::mem::take(
+        &mut GATE_TIMINGS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    )
+}
 
 /// `target`'s shared write gate, created on first open.
 fn write_gate(target: &DatabaseTarget) -> Arc<Mutex<()>> {
@@ -101,6 +245,19 @@ fn write_gate(target: &DatabaseTarget) -> Arc<Mutex<()>> {
         return gate;
     }
     let gate = Arc::new(Mutex::new(()));
+    gates.insert(key, Arc::downgrade(&gate));
+    gate
+}
+
+fn read_gate(target: &DatabaseTarget) -> Arc<RwLock<()>> {
+    let key = target.canonical_name();
+    let mut gates = READ_GATES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(gate) = gates.get(&key).and_then(Weak::upgrade) {
+        return gate;
+    }
+    let gate = Arc::new(RwLock::new(()));
     gates.insert(key, Arc::downgrade(&gate));
     gate
 }
@@ -146,8 +303,9 @@ pub struct SqliteConnectionPolicy {
     pub synchronous: SqliteSynchronous,
     /// WAL pages written before SQLite attempts an automatic checkpoint. The
     /// default is SQLite's 1,000-page setting; `0` disables automatic
-    /// checkpointing. Lower it to bound WAL growth, or raise it when
-    /// checkpoint overhead matters more than reader lag.
+    /// checkpointing, including this store's background truncation worker.
+    /// Lower it to bound WAL growth, or raise it when checkpoint overhead
+    /// matters more than reader lag. `0` disables both mechanisms.
     pub wal_autocheckpoint_pages: u32,
     /// SQLite cache-size pragma value, preserving SQLite's sign overload. The
     /// default is SQLite's `-2000` value (approximately 2,000 KiB); negative
@@ -230,6 +388,8 @@ pub(crate) struct SqliteConnection {
     /// The gate every in-process writer to this database queues on (FIG-3975);
     /// shared by all connections opened on the same `canonical_name`.
     write_gate: Arc<Mutex<()>>,
+    read_gate: Arc<RwLock<()>>,
+    checkpoint: Option<Arc<CheckpointState>>,
     #[cfg(feature = "testing")]
     fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
@@ -287,6 +447,7 @@ impl SqliteConnection {
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         let gate = write_gate(target);
+        let reads = read_gate(target);
         let inner = AsyncConnection::open(target.open_name()).await?;
         let pragmas = crate::connection_sql::open_pragmas(policy);
         inner
@@ -305,7 +466,9 @@ impl SqliteConnection {
             .await?;
         Ok(Self {
             inner,
+            checkpoint: checkpoint_state(target, &gate, &reads, policy.wal_autocheckpoint_pages),
             write_gate: gate,
+            read_gate: reads,
             #[cfg(feature = "testing")]
             fault_injector,
         })
@@ -332,6 +495,8 @@ impl SqliteConnection {
         Ok(Self {
             inner,
             write_gate: write_gate(target),
+            read_gate: read_gate(target),
+            checkpoint: None,
             #[cfg(feature = "testing")]
             fault_injector: None,
         })
@@ -345,7 +510,17 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&mut Connection) -> rusqlite::Result<T> + Send + 'static,
     {
-        flatten(self.inner.call(move |c| Ok(f(c))).await)
+        let read_gate = Arc::clone(&self.read_gate);
+        flatten(
+            self.inner
+                .call(move |c| {
+                    let _read_gate = read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    Ok(f(c))
+                })
+                .await,
+        )
     }
 
     /// Run `f` inside a `BEGIN DEFERRED` read transaction, ending it with a
@@ -363,9 +538,13 @@ impl SqliteConnection {
         T: Send + 'static,
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
+        let read_gate = Arc::clone(&self.read_gate);
         flatten(
             self.inner
                 .call(move |c| {
+                    let _read_gate = read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let tx = c.transaction_with_behavior(TransactionBehavior::Deferred)?;
                     let value = f(&tx)?;
                     tx.rollback()?;
@@ -392,25 +571,49 @@ impl SqliteConnection {
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<T> + Send + 'static,
     {
         let write_gate = Arc::clone(&self.write_gate);
+        let read_gate = Arc::clone(&self.read_gate);
+        let checkpoint = self.checkpoint.clone();
         #[cfg(feature = "testing")]
         let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
+                    let _read_gate = read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    #[cfg(feature = "perf-witness")]
+                    let waiting_since = Instant::now();
                     let _write_gate = write_gate
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    #[cfg(feature = "testing")]
-                    let write_transaction_ordinal = fault_injector
-                        .as_ref()
-                        .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                    sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
-                    let value = f(&tx)?;
-                    sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
-                    sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
-                    tx.commit()?;
-                    Ok(Ok(value))
+                    #[cfg(feature = "perf-witness")]
+                    let wait = waiting_since.elapsed();
+                    #[cfg(feature = "perf-witness")]
+                    let holding_since = Instant::now();
+                    let result = (|| {
+                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                        #[cfg(feature = "testing")]
+                        let write_transaction_ordinal = fault_injector
+                            .as_ref()
+                            .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
+                        sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
+                        let value = f(&tx)?;
+                        sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
+                        sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
+                        tx.commit()?;
+                        Ok(Ok(value))
+                    })();
+                    #[cfg(feature = "perf-witness")]
+                    let hold = holding_since.elapsed();
+                    drop(_write_gate);
+                    #[cfg(feature = "perf-witness")]
+                    record_gate_timing(wait, hold);
+                    if result.is_ok()
+                        && let Some(checkpoint) = &checkpoint
+                    {
+                        checkpoint.commits.fetch_add(1, Ordering::Release);
+                    }
+                    result
                 })
                 .await,
         )
@@ -426,34 +629,58 @@ impl SqliteConnection {
         F: FnOnce(&Transaction<'_>) -> rusqlite::Result<TxOutcome<T>> + Send + 'static,
     {
         let write_gate = Arc::clone(&self.write_gate);
+        let read_gate = Arc::clone(&self.read_gate);
+        let checkpoint = self.checkpoint.clone();
         #[cfg(feature = "testing")]
         let fault_injector = self.fault_injector.clone();
         flatten(
             self.inner
                 .call(move |c| {
+                    let _read_gate = read_gate
+                        .read()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    #[cfg(feature = "perf-witness")]
+                    let waiting_since = Instant::now();
                     let _write_gate = write_gate
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-                    #[cfg(feature = "testing")]
-                    let write_transaction_ordinal = fault_injector
-                        .as_ref()
-                        .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
-                    sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
-                    let outcome = f(&tx)?;
-                    let value = match outcome {
-                        TxOutcome::Commit(value) => {
-                            sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
-                            sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
-                            tx.commit()?;
-                            value
-                        }
-                        TxOutcome::Rollback(value) => {
-                            tx.rollback()?;
-                            value
-                        }
-                    };
-                    Ok(Ok(value))
+                    #[cfg(feature = "perf-witness")]
+                    let wait = waiting_since.elapsed();
+                    #[cfg(feature = "perf-witness")]
+                    let holding_since = Instant::now();
+                    let result = (|| {
+                        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+                        #[cfg(feature = "testing")]
+                        let write_transaction_ordinal = fault_injector
+                            .as_ref()
+                            .map_or(0, crate::testing::SqliteFaultInjector::begin_write);
+                        sim_fault!(fault_injector, AfterBegin, write_transaction_ordinal);
+                        let outcome = f(&tx)?;
+                        let value = match outcome {
+                            TxOutcome::Commit(value) => {
+                                sim_fault!(fault_injector, BeforeCommit, write_transaction_ordinal);
+                                sim_fault!(fault_injector, CommitIo, write_transaction_ordinal);
+                                tx.commit()?;
+                                value
+                            }
+                            TxOutcome::Rollback(value) => {
+                                tx.rollback()?;
+                                value
+                            }
+                        };
+                        Ok(Ok(value))
+                    })();
+                    #[cfg(feature = "perf-witness")]
+                    let hold = holding_since.elapsed();
+                    drop(_write_gate);
+                    #[cfg(feature = "perf-witness")]
+                    record_gate_timing(wait, hold);
+                    if result.is_ok()
+                        && let Some(checkpoint) = &checkpoint
+                    {
+                        checkpoint.commits.fetch_add(1, Ordering::Release);
+                    }
+                    result
                 })
                 .await,
         )
@@ -488,7 +715,116 @@ fn flatten<T>(result: tokio_rusqlite::Result<rusqlite::Result<T>>) -> rusqlite::
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[expect(
+        clippy::disallowed_methods,
+        reason = "test inspects the physical WAL size"
+    )]
+    async fn checkpoint_truncates_after_a_reader_drains_without_another_write() {
+        let dir = tempfile::tempdir().expect("checkpoint test tempdir");
+        let path = dir.path().join("core.db");
+        let target = DatabaseTarget::File(path.clone());
+        let writer = SqliteConnection::open_with_policy(
+            &target,
+            SqliteConnectionPolicy {
+                wal_autocheckpoint_pages: 16,
+                ..SqliteConnectionPolicy::default()
+            },
+        )
+        .await
+        .expect("open WAL writer");
+        writer
+            .write(|tx| {
+                tx.execute_batch("CREATE TABLE payloads (body BLOB NOT NULL)")?;
+                Ok(())
+            })
+            .await
+            .expect("create payload table");
+
+        let reader = Connection::open(&path).expect("open WAL reader");
+        reader
+            .execute_batch("BEGIN")
+            .expect("begin read transaction");
+        reader
+            .query_row("SELECT COUNT(*) FROM payloads", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .expect("pin the reader snapshot");
+        for _ in 0..80 {
+            writer
+                .write(|tx| {
+                    tx.execute("INSERT INTO payloads VALUES (?1)", [vec![7_u8; 4096]])?;
+                    Ok(())
+                })
+                .await
+                .expect("commit burst write");
+        }
+        let mut wal_name = path.into_os_string();
+        wal_name.push("-wal");
+        let wal_path = std::path::PathBuf::from(wal_name);
+        let grown = std::fs::metadata(&wal_path).expect("WAL after burst").len();
+        assert!(
+            grown > 16 * 4096,
+            "WAL did not exceed the threshold: {grown}"
+        );
+
+        // Keep short store readers overlapping after the pinned reader leaves.
+        // The checkpoint must stop new readers long enough to truncate.
+        let keep_reading = Arc::new(AtomicBool::new(true));
+        let active_readers = Arc::new(AtomicUsize::new(0));
+        let mut reader_tasks = Vec::new();
+        for _ in 0..8 {
+            let connection = SqliteConnection::open(&target)
+                .await
+                .expect("open concurrent reader");
+            let keep_reading = Arc::clone(&keep_reading);
+            let active_readers = Arc::clone(&active_readers);
+            reader_tasks.push(tokio::spawn(async move {
+                while keep_reading.load(Ordering::Relaxed) {
+                    let active_readers = Arc::clone(&active_readers);
+                    connection
+                        .read(move |tx| {
+                            tx.query_row("SELECT COUNT(*) FROM payloads", [], |row| {
+                                row.get::<_, i64>(0)
+                            })?;
+                            active_readers.fetch_add(1, Ordering::Relaxed);
+                            std::thread::sleep(Duration::from_millis(10));
+                            active_readers.fetch_sub(1, Ordering::Relaxed);
+                            Ok(())
+                        })
+                        .await
+                        .expect("concurrent read");
+                }
+            }));
+        }
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while active_readers.load(Ordering::Relaxed) < 4 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("concurrent readers started");
+
+        reader
+            .execute_batch("ROLLBACK")
+            .expect("release reader snapshot");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                if std::fs::metadata(&wal_path).is_ok_and(|metadata| metadata.len() == 0) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("idle WAL should truncate without another write");
+        keep_reading.store(false, Ordering::Relaxed);
+        for task in reader_tasks {
+            task.await.expect("reader task");
+        }
+    }
 
     /// The counting busy handler the gate proofs read: every `SQLITE_BUSY`
     /// waits here instead of inside an untracked `busy_timeout`, so a run

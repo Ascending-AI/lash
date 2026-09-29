@@ -1,10 +1,11 @@
-//! The queued-work claim fencing backstop's two obligations, asserted together.
+//! The queued-work admission fencing backstop's two obligations, asserted
+//! together.
 //!
 //! When a conditional write loses after its shared verdict said yes, the store
 //! must do exactly two things:
 //!
-//! 1. **Fail closed with the site's own domain refusal.** A lost claim
-//!    reports no claim to its caller.
+//! 1. **Fail closed with the site's own domain refusal.** A lost admission
+//!    bind refuses the admission, and nothing it composed is bound.
 //! 2. **Record the disagreement as evidence** — an error-level event naming the
 //!    decision, the backend, the row and the rows affected — because the locked
 //!    read and the statement's predicate disagreeing about one locked row is a
@@ -21,11 +22,12 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use lash_core_execution::store::{AdmittedHead, DriveFence, RootAdmission, RootStore as _};
 use lash_core_execution::store_backend_support::{
     FENCED_WRITE_DISAGREEMENT_EVENT, FENCING_TRACE_TARGET,
 };
-use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt;
-use lash_core_execution::{LeaseOwnerIdentity, QueuedWorkStore};
+use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt;
+use lash_core_execution::{IngressStore, LeaseOwnerIdentity, StoreError, TurnId};
 use lash_sansio::SessionId;
 use lash_sqlite_store::Store;
 use tracing_subscriber::layer::{Context, SubscriberExt};
@@ -127,37 +129,37 @@ fn capture() -> EventCapture {
 }
 
 // ---------------------------------------------------------------------------
-// Queued-work claim fenced-write backstop.
+// Queued-work admission fenced-write backstop.
 // ---------------------------------------------------------------------------
 
 #[expect(
     clippy::expect_used,
     reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
 )]
-fn suppress_queued_work_claim(path: &Path, batch_id: &str) {
+fn suppress_queued_work_bind(path: &Path, batch_id: &str) {
     let batch_id = batch_id.replace('\'', "''");
     rusqlite::Connection::open(path)
-        .expect("open the claim-suppression connection")
+        .expect("open the bind-suppression connection")
         .execute_batch(&format!(
-            "CREATE TRIGGER lash_test_queued_claim_backstop
-             BEFORE UPDATE OF claim_token ON queued_work_batches
+            "CREATE TRIGGER lash_test_queued_bind_backstop
+             BEFORE UPDATE OF admitted_root ON queued_work_batches
              WHEN OLD.batch_id = '{batch_id}'
              BEGIN
                  SELECT RAISE(IGNORE);
              END;"
         ))
-        .expect("arm the claim-suppression trigger");
+        .expect("arm the bind-suppression trigger");
 }
 
 #[expect(
     clippy::expect_used,
     reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
 )]
-fn restore_queued_work_claim(path: &Path) {
+fn restore_queued_work_bind(path: &Path) {
     rusqlite::Connection::open(path)
-        .expect("open the claim-restore connection")
-        .execute_batch("DROP TRIGGER lash_test_queued_claim_backstop;")
-        .expect("disarm the claim-suppression trigger");
+        .expect("open the bind-restore connection")
+        .execute_batch("DROP TRIGGER lash_test_queued_bind_backstop;")
+        .expect("disarm the bind-suppression trigger");
 }
 
 fn backstop_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDelivery {
@@ -205,59 +207,63 @@ async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_executi
     clippy::expect_used,
     reason = "test fixture wiring: a failed drive epoch setup must fail the test"
 )]
-async fn sealed_claim_epoch(
+async fn sealed_drive_fence(
     store: &Store,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
-) -> lash_core_execution::ClaimAuthority {
+) -> DriveFence {
     store
-        .seal_claim_epoch_for_test(session_id, owner, executor_id, 0)
+        .seal_drive_epoch_for_test(session_id, owner, executor_id, 0)
         .await
         .expect("seal drive epoch")
         .acquired()
         .expect("drive epoch sealed")
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
-    // The queued-work claim's half of the same contract (D5). The verdict
-    // authorized this row over the locked read, so a write that changes no row
-    // is a disagreement between the locked read and the statement's own
-    // predicate: it is recorded as evidence, and the claim still reports
-    // nothing claimed, which is what a lost claim race has always reported.
-    let capture = capture();
-    let dir = tempfile::tempdir().expect("queued claim backstop tempdir");
-    let path = dir.path().join("queued-claim-backstop.db");
-    let store = Store::open(&path)
-        .await
-        .expect("open queued claim backstop store");
-    let session_id = SessionId::from("queued-claim-backstop-lost-write");
-    let owner = LeaseOwnerIdentity::opaque("queued-owner", "queued-incarnation");
-    let batch_id = enqueue_one(&store, &session_id).await;
-    let lease = sealed_claim_epoch(&store, &session_id, &owner, "queued-executor").await;
-
-    suppress_queued_work_claim(&path, batch_id.as_str());
-    let outcome = store
-        .claim_ready_queued_work(
-            &session_id,
-            &lease.fence(),
-            &owner,
-            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(10),
+/// Admit `root` headed by the batch `head` under `fence`.
+async fn admit(
+    store: &Store,
+    fence: &DriveFence,
+    root: &str,
+    head: &lash_core_execution::BatchId,
+) -> Result<Option<RootAdmission>, StoreError> {
+    store
+        .admit_root(
+            &lash_core_execution::testing::store_fixtures::admit_root_request_for_test(
+                fence,
+                &TurnId::from(root),
+                AdmittedHead::Batch(head.clone()),
+            ),
         )
         .await
-        .expect("the claim call itself succeeds");
-    restore_queued_work_claim(&path);
+}
 
-    // Obligation one: the caller receives exactly what it always received —
-    // a lost race, not an error.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
+    // The composition read this row open in the admission's own write
+    // transaction, so a bind that changes no row is a disagreement between
+    // that read and the statement's own predicate: it is recorded as
+    // evidence, and the admission is refused whole.
+    let capture = capture();
+    let dir = tempfile::tempdir().expect("admission backstop tempdir");
+    let path = dir.path().join("admission-backstop.db");
+    let store = Store::open(&path)
+        .await
+        .expect("open admission backstop store");
+    let session_id = SessionId::from("admission-backstop-lost-write");
+    let owner = LeaseOwnerIdentity::opaque("queued-owner", "queued-incarnation");
+    let batch_id = enqueue_one(&store, &session_id).await;
+    let fence = sealed_drive_fence(&store, &session_id, &owner, "queued-executor").await;
+
+    suppress_queued_work_bind(&path, batch_id.as_str());
+    let outcome = admit(&store, &fence, "backstop-root", &batch_id).await;
+    restore_queued_work_bind(&path);
+
+    // Obligation one: the admission fails closed.
     assert!(
-        matches!(
-            outcome,
-            lash_core_execution::QueuedWorkClaimOutcome::Refused(_)
-        ),
-        "a lost fenced claim must report no claim, got {outcome:?}"
+        matches!(outcome, Err(StoreError::Contended)),
+        "a lost admission bind must refuse the admission, got {outcome:?}"
     );
 
     // Obligation two: the disagreement is recorded against the row.
@@ -270,86 +276,52 @@ async fn a_lost_queued_work_claim_fails_closed_and_records_the_disagreement() {
     let event = &recorded[0];
     assert_eq!(event.level, "ERROR", "a store defect is not a warning");
     assert_eq!(event.target, FENCING_TRACE_TARGET);
-    assert_eq!(event.field("fenced_write"), "queued_work_claim.acquire");
+    assert_eq!(event.field("fenced_write"), "ingress.admit");
     assert_eq!(event.field("backend"), "sqlite");
     assert_eq!(event.field("row_identity"), batch_id.as_str());
     assert_eq!(event.field("rows_affected"), "0");
     assert_eq!(event.field("outcome"), "fenced_write_lost");
 
-    // Failing closed means nothing was published: the row is still claimable.
-    let claimed = store
-        .claim_ready_queued_work(
-            &session_id,
-            &lease.fence(),
-            &owner,
-            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(10),
-        )
+    // Failing closed means nothing was published: the row is still admissible.
+    let admitted = admit(&store, &fence, "backstop-root", &batch_id)
         .await
-        .expect("the retried claim succeeds")
-        .claim()
-        .expect("the rolled-back row is still claimable");
-    assert_eq!(claimed.data.batches.len(), 1);
+        .expect("the retried admission succeeds")
+        .expect("the rolled-back row is still admissible");
+    assert_eq!(admitted.batch_ids(), vec![batch_id]);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_queued_work_claim_the_verdict_refuses_never_reaches_the_write() {
-    // The companion law: a generation that already holds a row may not claim
-    // it again (ADR 0029), and refusing that is not a disagreement.
-    //
-    // Unlike the lease renewal above, the verdict and the statement's own
-    // predicate ask exactly the same question here — the generation predicate
-    // is also the candidate scan's `ORDER BY … LIMIT` filter, so it cannot
-    // move into shared code — and a red-side mutation that deletes the verdict
-    // call leaves this passing. What it does pin is that the refusal comes
-    // from the scan and the verdict agreeing *before* the write, so an empty
-    // capture is the evidence that no conditional write was attempted at all.
+async fn an_admission_the_unfinished_root_refuses_never_reaches_the_write() {
+    // The companion law: while one root is unfinished the session admits no
+    // other (FIG-3927), and refusing that is not a disagreement. The refusal
+    // comes before any bind, so an empty capture is the evidence that no
+    // conditional write was attempted at all.
     let capture = capture();
-    let dir = tempfile::tempdir().expect("queued verdict-first tempdir");
-    let path = dir.path().join("queued-verdict-first.db");
+    let dir = tempfile::tempdir().expect("admission refusal tempdir");
+    let path = dir.path().join("admission-refused-first.db");
     let store = Store::open(&path)
         .await
-        .expect("open queued verdict-first store");
-    let session_id = SessionId::from("queued-claim-backstop-verdict-first");
+        .expect("open admission refusal store");
+    let session_id = SessionId::from("admission-backstop-refused-first");
     let owner = LeaseOwnerIdentity::opaque("queued-verdict-owner", "queued-verdict-incarnation");
     let batch_id = enqueue_one(&store, &session_id).await;
-    let lease = sealed_claim_epoch(&store, &session_id, &owner, "queued-verdict-executor").await;
+    let fence = sealed_drive_fence(&store, &session_id, &owner, "queued-verdict-executor").await;
 
     assert!(
-        store
-            .claim_ready_queued_work(
-                &session_id,
-                &lease.fence(),
-                &owner,
-                lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-                lash_core_execution::testing::queued_work_claim_policy(10),
-            )
+        admit(&store, &fence, "first-root", &batch_id)
             .await
-            .expect("the first claim succeeds")
-            .claim()
+            .expect("the first admission succeeds")
             .is_some(),
-        "the first claim of this generation takes the row",
+        "the first root takes the row",
     );
-    let second = store
-        .claim_ready_queued_work(
-            &session_id,
-            &lease.fence(),
-            &owner,
-            lash_core_execution::runtime::QueuedWorkClaimBoundary::Idle,
-            lash_core_execution::testing::queued_work_claim_policy(10),
-        )
-        .await
-        .expect("the second claim call itself succeeds");
+    let second = admit(&store, &fence, "second-root", &batch_id).await;
 
     assert!(
-        matches!(
-            second,
-            lash_core_execution::QueuedWorkClaimOutcome::Refused(_)
-        ),
-        "a generation must not claim a row it already holds, got {second:?}"
+        matches!(second, Err(StoreError::UnfinishedRootConflict { .. })),
+        "a second root must not take a row the first holds, got {second:?}"
     );
     assert!(
         capture.disagreements_for(batch_id.as_str()).is_empty(),
-        "a verdict-refused claim must never reach the write, so nothing disagrees",
+        "a refused admission must never reach the write, so nothing disagrees",
     );
 }

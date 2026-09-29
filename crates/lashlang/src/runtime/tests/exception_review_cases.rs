@@ -85,10 +85,9 @@ async fn mutating_the_catch_binding_is_visible_at_the_thrown_slot() {
                     "e",
                     Expr::Assign {
                         target: crate::AssignTarget::variable("e".into()),
-                        expr: Box::new(Expr::Binary {
-                            left: Box::new(Expr::Variable("e".into())),
-                            op: crate::ast::BinaryOp::Add,
-                            right: Box::new(Expr::List(vec![Expr::Number(99.0)])),
+                        expr: Box::new(Expr::BuiltinCall {
+                            name: "push".into(),
+                            args: vec![Expr::Variable("e".into()), Expr::Number(99.0)],
                         }),
                     },
                 )),

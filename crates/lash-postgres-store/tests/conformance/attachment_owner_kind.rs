@@ -10,12 +10,12 @@ fn postgres_attachment_owner_kind_sql_derives_from_the_enum() {
             include_str!("../../src/postgres/runtime_persistence/mod.rs"),
         ),
         (
-            "runtime_persistence/claim_support.rs",
-            include_str!("../../src/postgres/runtime_persistence/claim_support.rs"),
+            "runtime_persistence/admission.rs",
+            include_str!("../../src/postgres/runtime_persistence/admission.rs"),
         ),
         (
-            "runtime_persistence/commit_claims.rs",
-            include_str!("../../src/postgres/runtime_persistence/commit_claims.rs"),
+            "runtime_persistence/ingress_settlement.rs",
+            include_str!("../../src/postgres/runtime_persistence/ingress_settlement.rs"),
         ),
         (
             "runtime_persistence/maintenance.rs",

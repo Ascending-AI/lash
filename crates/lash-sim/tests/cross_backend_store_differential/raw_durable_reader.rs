@@ -1,7 +1,7 @@
 use super::*;
 use sqlx::Row as _;
 
-type PendingTurnInputClaimRow = (String, i64, String, Option<String>, i64, Option<i64>);
+type PendingTurnInputRow = (String, String, Option<String>, Option<String>);
 
 /// One `session_roots` row's terminal and obligation columns, as each
 /// backend's durable read hands them to [`scope_close_obligations`].
@@ -320,12 +320,8 @@ impl RawDurableReader {
                     .await
                     .expect("read PostgreSQL session metadata")
                     .map(session_meta_observation);
-                let pending_rows: Vec<PendingTurnInputClaimRow> = sqlx::query_as(
-                    "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
-                            CASE WHEN claim_token IS NULL
-                                 THEN NULL
-                                 ELSE claim_session_lease_generation
-                            END
+                let pending_rows: Vec<PendingTurnInputRow> = sqlx::query_as(
+                    "SELECT input_id, state, admitted_root, admitted_by
                      FROM lash_pending_turn_inputs
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
@@ -336,35 +332,19 @@ impl RawDurableReader {
                 .expect("read Postgres pending turn inputs");
                 let pending_turn_inputs = pending_rows
                     .into_iter()
-                    .map(
-                        |(
+                    .map(|(input_id, state, admitted_root, admitted_by)| {
+                        PendingTurnInputObservation {
                             input_id,
-                            enqueue_seq,
-                            state,
-                            claim_id,
-                            fencing_token,
-                            claim_session_lease_generation,
-                        )| {
-                            assert_claim_id_spelling(
-                                claim_id.as_deref(),
-                                "tic",
-                                enqueue_seq as u64,
-                                fencing_token as u64,
-                            );
-                            PendingTurnInputObservation {
-                                input_id,
-                                state: TurnInputStateKind::from_wire_str(&state)
-                                    .expect("decode Postgres pending-input state"),
-                                claim_session_lease_generation: claim_session_lease_generation
-                                    .map(|generation| generation as u64),
-                            }
-                        },
-                    )
+                            state: TurnInputStateKind::from_wire_str(&state)
+                                .expect("decode Postgres pending-input state"),
+                            admitted_root,
+                            admitted_by,
+                        }
+                    })
                     .collect();
                 let queued_work_batches: Vec<QueuedWorkBatchRow> = sqlx::query_as(
                     "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                            authority_json, merge_key, claim_id, claim_token,
-                            claim_fencing_token, claim_session_lease_generation
+                            authority_json, merge_key, admitted_root, admitted_by
                      FROM lash_queued_work_batches
                      WHERE session_id = $1
                      ORDER BY enqueue_seq ASC",
@@ -635,11 +615,7 @@ pub(super) async fn read_sqlite_durable_state(
     let pending_turn_inputs = {
         let mut statement = connection
             .prepare(
-                "SELECT input_id, enqueue_seq, state, claim_id, claim_fencing_token,
-                        CASE WHEN claim_token IS NULL
-                             THEN NULL
-                             ELSE claim_session_lease_generation
-                        END
+                "SELECT input_id, state, admitted_root, admitted_by
                  FROM pending_turn_inputs
                  WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
@@ -649,11 +625,9 @@ pub(super) async fn read_sqlite_durable_state(
             .query_map([session_id.as_str()], |row| {
                 Ok((
                     row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, Option<i64>>(5)?,
                 ))
             })
             .expect("read SQLite pending turn inputs")
@@ -661,27 +635,12 @@ pub(super) async fn read_sqlite_durable_state(
             .expect("decode SQLite pending turn inputs")
             .into_iter()
             .map(
-                |(
+                |(input_id, state, admitted_root, admitted_by)| PendingTurnInputObservation {
                     input_id,
-                    enqueue_seq,
-                    state,
-                    claim_id,
-                    fencing_token,
-                    claim_session_lease_generation,
-                )| {
-                    assert_claim_id_spelling(
-                        claim_id.as_deref(),
-                        "tic",
-                        enqueue_seq as u64,
-                        fencing_token as u64,
-                    );
-                    PendingTurnInputObservation {
-                        input_id,
-                        state: TurnInputStateKind::from_wire_str(&state)
-                            .expect("decode SQLite pending-input state"),
-                        claim_session_lease_generation: claim_session_lease_generation
-                            .map(|generation| generation as u64),
-                    }
+                    state: TurnInputStateKind::from_wire_str(&state)
+                        .expect("decode SQLite pending-input state"),
+                    admitted_root,
+                    admitted_by,
                 },
             )
             .collect()
@@ -690,8 +649,7 @@ pub(super) async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT enqueue_seq, batch_id, source_key, delivery_policy, work_kind,
-                        authority_json, merge_key, claim_id, claim_token,
-                        claim_fencing_token, claim_session_lease_generation
+                        authority_json, merge_key, admitted_root, admitted_by
                  FROM queued_work_batches
                  WHERE session_id = ?1
                  ORDER BY enqueue_seq ASC",
@@ -709,8 +667,6 @@ pub(super) async fn read_sqlite_durable_state(
                     row.get(6)?,
                     row.get(7)?,
                     row.get(8)?,
-                    row.get(9)?,
-                    row.get(10)?,
                 ))
             })
             .expect("read SQLite queued-work batches")

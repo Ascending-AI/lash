@@ -27,6 +27,7 @@ pub struct LoadedPersistedSession {
     pub state: crate::RuntimeSessionState,
     pub config: crate::PersistedSessionConfig,
     pub turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
+    pub turn_commits: Vec<super::TurnCommitRecord>,
 }
 
 async fn load_persisted_session_with_relation(
@@ -50,6 +51,7 @@ async fn load_persisted_session_with_relation(
             state: persisted_session_state_from_read(&read, store.fleet_format())?,
             config,
             turn_failure_settlements: read.turn_failure_settlements,
+            turn_commits: read.turn_commits,
         },
         meta.relation,
     )))
@@ -74,6 +76,7 @@ pub async fn load_persisted_session_read_view(
         &loaded.state,
         relation,
         loaded.turn_failure_settlements,
+        loaded.turn_commits,
     )
     .map(Some)
     .map_err(|error| StoreError::StoredDataCorrupt {

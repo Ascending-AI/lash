@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use lash_sansio::sync::MutexExt;
 
 use crate::store::{
-    ClaimAuthority, PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
+    PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
     RuntimePersistenceDecorator, StoreError,
 };
 use crate::{SessionId, SessionStoreCreateRequest, SessionStoreFactory};
@@ -38,19 +38,18 @@ pub struct RecordingStore {
     load_session_head_meta_count: AtomicUsize,
     list_queued_work_count: AtomicUsize,
     fail_next_runtime_commit: Mutex<Option<StoreError>>,
+    fail_next_end_refused_root: Mutex<Option<StoreError>>,
     inject_turn_cancel_before_next_runtime_commit: Mutex<Option<crate::TurnCancelRequest>>,
     fail_next_load_session_head_meta: AtomicBool,
     fail_load_session_on_call: Mutex<Option<usize>>,
     session_admission_count: AtomicUsize,
-    abandoned_queued_work_claim_count: AtomicUsize,
-    abandoned_turn_input_claim_count: AtomicUsize,
-    claim_hook: Mutex<Option<ClaimHook>>,
+    admission_hook: Mutex<Option<AdmissionHook>>,
     forged_head: Mutex<Option<crate::SessionHeadMeta>>,
     attachment_intents: Mutex<Vec<crate::store::AttachmentIntent>>,
 }
 
-/// A hook a test runs as the next claim reaches the store.
-pub type ClaimHook = Arc<dyn Fn() + Send + Sync>;
+/// A hook a test runs as the next admission reaches the store.
+pub type AdmissionHook = Arc<dyn Fn() + Send + Sync>;
 
 impl RecordingStore {
     /// Record over `inner`, a store the test's backend opened.
@@ -64,13 +63,12 @@ impl RecordingStore {
             load_session_head_meta_count: AtomicUsize::new(0),
             list_queued_work_count: AtomicUsize::new(0),
             fail_next_runtime_commit: Mutex::new(None),
+            fail_next_end_refused_root: Mutex::new(None),
             inject_turn_cancel_before_next_runtime_commit: Mutex::new(None),
             fail_next_load_session_head_meta: AtomicBool::new(false),
             fail_load_session_on_call: Mutex::new(None),
             session_admission_count: AtomicUsize::new(0),
-            abandoned_queued_work_claim_count: AtomicUsize::new(0),
-            abandoned_turn_input_claim_count: AtomicUsize::new(0),
-            claim_hook: Mutex::new(None),
+            admission_hook: Mutex::new(None),
             forged_head: Mutex::new(None),
             attachment_intents: Mutex::new(Vec::new()),
         }
@@ -106,23 +104,14 @@ impl RecordingStore {
         self.session_admission_count.load(Ordering::SeqCst)
     }
 
-    /// Queued-work and turn-input claims abandoned through this store.
-    pub fn abandoned_claim_counts(&self) -> (usize, usize) {
-        (
-            self.abandoned_queued_work_claim_count
-                .load(Ordering::SeqCst),
-            self.abandoned_turn_input_claim_count.load(Ordering::SeqCst),
-        )
+    /// Run `hook` as the next root or checkpoint admission reaches the
+    /// store, before the wrapped store admits.
+    pub fn set_admission_hook(&self, hook: AdmissionHook) {
+        *self.admission_hook.lock_recover() = Some(hook);
     }
 
-    /// Run `hook` as the next queued-work or turn-input claim reaches the
-    /// store, before the wrapped store claims.
-    pub fn set_claim_after_lease_validation_hook(&self, hook: ClaimHook) {
-        *self.claim_hook.lock_recover() = Some(hook);
-    }
-
-    fn run_claim_hook(&self) {
-        let hook = self.claim_hook.lock_recover().take();
+    fn run_admission_hook(&self) {
+        let hook = self.admission_hook.lock_recover().take();
         if let Some(hook) = hook {
             hook();
         }
@@ -156,6 +145,13 @@ impl RecordingStore {
         *self.fail_next_runtime_commit.lock_recover() = Some(error);
     }
 
+    /// Refuse the next root-end write of a refused run with `error`, before
+    /// the wrapped store sees it: the refused run fails between meeting its
+    /// refusal and writing its end.
+    pub fn fail_next_end_refused_root(&self, error: StoreError) {
+        *self.fail_next_end_refused_root.lock_recover() = Some(error);
+    }
+
     /// Record `request` on the wrapped store immediately before the next
     /// runtime commit reaches it: a cancel that races the commit and lands
     /// first.
@@ -182,9 +178,18 @@ impl RuntimePersistenceDecorator for RecordingStore {
         &self,
         request: &crate::store::AdmitRootRequest,
     ) -> Result<Option<crate::store::RootAdmission>, StoreError> {
-        self.run_claim_hook();
+        self.run_admission_hook();
         self.inner.admit_root(request).await
     }
+
+    async fn admit_at_checkpoint(
+        &self,
+        request: &crate::store::CheckpointAdmissionRequest,
+    ) -> Result<crate::store::CheckpointAdmission, StoreError> {
+        self.run_admission_hook();
+        self.inner.admit_at_checkpoint(request).await
+    }
+
     fn inner(&self) -> &(dyn RuntimePersistence + '_) {
         self.inner.as_ref()
     }
@@ -266,6 +271,22 @@ impl RuntimePersistenceDecorator for RecordingStore {
         Ok(receipt)
     }
 
+    async fn end_refused_root(
+        &self,
+        session_id: &SessionId,
+        root: &crate::TurnId,
+        refusal: &crate::RuntimeError,
+        at_ms: u64,
+    ) -> Result<Option<crate::store::RootTerminal>, StoreError> {
+        let injected_failure = self.fail_next_end_refused_root.lock_recover().take();
+        if let Some(error) = injected_failure {
+            return Err(error);
+        }
+        self.inner
+            .end_refused_root(session_id, root, refusal, at_ms)
+            .await
+    }
+
     async fn begin_attachment_write(
         &self,
         intent: crate::store::AttachmentIntent,
@@ -280,121 +301,6 @@ impl RuntimePersistenceDecorator for RecordingStore {
     ) -> Result<crate::store::SessionAdmission, StoreError> {
         self.session_admission_count.fetch_add(1, Ordering::SeqCst);
         self.inner.admit_and_bind_session(binding).await
-    }
-
-    async fn claim_ready_queued_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        boundary: crate::QueuedWorkClaimBoundary,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<crate::QueuedWorkClaimOutcome, StoreError> {
-        self.run_claim_hook();
-        self.inner
-            .claim_ready_queued_work(session_id, session_execution_lease, owner, boundary, policy)
-            .await
-    }
-
-    async fn claim_checkpoint_work(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: crate::CheckpointKind,
-        max_inputs: usize,
-        policy: crate::QueuedWorkClaimPolicy,
-    ) -> Result<
-        (
-            Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>,
-            Option<crate::WorkClaim<crate::runtime::QueuedWorkClaimData>>,
-        ),
-        StoreError,
-    > {
-        self.run_claim_hook();
-        self.inner
-            .claim_checkpoint_work(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-                policy,
-            )
-            .await
-    }
-
-    async fn claim_active_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        turn_id: &crate::TurnId,
-        checkpoint: crate::CheckpointKind,
-        max_inputs: usize,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
-        self.run_claim_hook();
-        self.inner
-            .claim_active_turn_inputs(
-                session_id,
-                session_execution_lease,
-                owner,
-                turn_id,
-                checkpoint,
-                max_inputs,
-            )
-            .await
-    }
-
-    async fn claim_next_turn_inputs(
-        &self,
-        session_id: &SessionId,
-        session_execution_lease: &ClaimAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<crate::WorkClaim<crate::runtime::TurnInputClaimData>>, StoreError> {
-        self.run_claim_hook();
-        self.inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await
-    }
-
-    async fn abandon_queued_work_claim(
-        &self,
-        claim: &crate::WorkClaim<crate::runtime::QueuedWorkClaimData>,
-    ) -> Result<(), StoreError> {
-        self.abandoned_queued_work_claim_count
-            .fetch_add(1, Ordering::SeqCst);
-        self.inner.abandon_queued_work_claim(claim).await
-    }
-
-    async fn abandon_queued_work_claims(
-        &self,
-        claims: &[crate::WorkClaim<crate::runtime::QueuedWorkClaimData>],
-    ) -> Result<(), StoreError> {
-        self.abandoned_queued_work_claim_count
-            .fetch_add(claims.len(), Ordering::SeqCst);
-        self.inner.abandon_queued_work_claims(claims).await
-    }
-
-    async fn abandon_turn_input_claim(
-        &self,
-        claim: &crate::WorkClaim<crate::runtime::TurnInputClaimData>,
-    ) -> Result<(), StoreError> {
-        self.abandoned_turn_input_claim_count
-            .fetch_add(1, Ordering::SeqCst);
-        self.inner.abandon_turn_input_claim(claim).await
-    }
-
-    async fn abandon_turn_input_claims(
-        &self,
-        claims: &[crate::WorkClaim<crate::runtime::TurnInputClaimData>],
-    ) -> Result<(), StoreError> {
-        self.abandoned_turn_input_claim_count
-            .fetch_add(claims.len(), Ordering::SeqCst);
-        self.inner.abandon_turn_input_claims(claims).await
     }
 
     async fn list_queued_work(

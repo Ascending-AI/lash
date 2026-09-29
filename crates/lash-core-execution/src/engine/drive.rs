@@ -156,6 +156,37 @@ impl RootOutcome {
     }
 }
 
+/// How an engine's per-root handler run of one admitted root ended
+/// ([`SessionDriver::run_root`](crate::runtime::work::SessionDriver::run_root)):
+/// the run's outcome, and the scope close its terminal commit left owed
+/// (FIG-4035).
+///
+/// The run never closes the root's scope itself: a close the handler awaited
+/// would hold the session's drive, and so the next root's admission, behind
+/// it. The engine runs the owed close through
+/// [`SessionDriver::close_root`](crate::runtime::work::SessionDriver::close_root)
+/// in a journal of its own once it has the outcome.
+#[derive(Debug)]
+pub struct RootRunEnd {
+    /// The root's outcome, or how the attempt ended without one.
+    pub result: Result<RootOutcome, DriveAbort>,
+    /// The logical root whose terminal evidence the run made durable: its
+    /// scope close is owed. A durable fact, so every execution of the root
+    /// answers it alike, and set however `result` ended. `None` for a run
+    /// that ended no root, or on a host that owns no scopes.
+    pub owed_close: Option<TurnId>,
+}
+
+impl RootRunEnd {
+    /// A run that owes no scope close.
+    pub fn owing_nothing(result: Result<RootOutcome, DriveAbort>) -> Self {
+        Self {
+            result,
+            owed_close: None,
+        }
+    }
+}
+
 /// Why a drive stopped admitting.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "stop", rename_all = "snake_case")]

@@ -39,6 +39,9 @@ pub(super) fn register_native_plugin(
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
+    reg.tools().provider(Arc::new(
+        lash_lashlang_runtime::register_trigger_tool_provider(dialect.artifact_store()),
+    ))?;
     reg.tool_catalog().contribute(Arc::new(move |ctx| {
         crate::tool_catalog::validate_discovery(
             &ctx.tools,

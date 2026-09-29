@@ -179,7 +179,7 @@ impl Roll {
         let workflow_key = crate::RestateDurableWaitAddress::for_key(key).workflow_key;
         tokio::spawn(async move {
             ingress
-                .call_workflow_json::<_, Resolution>(
+                .call_lash_workflow::<_, Resolution>(
                     WAIT_WORKFLOW,
                     &workflow_key,
                     "await_resolution",
@@ -225,7 +225,7 @@ async fn l10_shared_wait_journals_suspended_on_n_resume_on_n_plus_1() {
     let attach_workflow = crate::process_attach::process_attach_workflow_key(&attach_key);
     let attached = roll.await_resolution(&attach_key);
     roll.ingress
-        .send_workflow_json(
+        .send_lash_workflow(
             "LashProcessAttach",
             &attach_workflow,
             "run",
@@ -264,7 +264,7 @@ async fn l10_shared_wait_journals_suspended_on_n_resume_on_n_plus_1() {
 
     let terminal = process_success(serde_json::json!({ "process": "ended" }));
     roll.ingress
-        .call_workflow_json::<_, ()>(
+        .call_lash_workflow::<_, ()>(
             "LashProcessWorkflow",
             process_id.as_str(),
             "complete_terminal",
@@ -474,6 +474,7 @@ impl HandOff {
                 session_driver: crate::RestateSessionDriverSlot::new(),
                 build_generation: generation,
                 namespace: crate::RestateNamespace::default(),
+                fleet: crate::object_state::FleetView::default(),
             },
         )
         .build();
@@ -500,7 +501,7 @@ impl HandOff {
             .expect("register the signal-waiting process")
             .id;
         self.ingress
-            .send_workflow_json(
+            .send_lash_workflow(
                 "LashProcessWorkflow",
                 &crate::process::process_segment_workflow_key(&process_id, 0),
                 "run",
@@ -600,7 +601,7 @@ impl HandOff {
     async fn terminal(&self, process_id: &ProcessId) -> ProcessAwaitOutput {
         tokio::time::timeout(
             Duration::from_secs(60),
-            self.ingress.call_workflow_json::<_, ProcessAwaitOutput>(
+            self.ingress.call_lash_workflow::<_, ProcessAwaitOutput>(
                 "LashProcessWorkflow",
                 process_id.as_str(),
                 "await_terminal",
@@ -915,7 +916,9 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
                 .expect("the wait's outcome")
                 .expect("the wait succeeded");
             assert_eq!(
-                serde_json::from_slice::<Resolution>(&returned).expect("a resolution"),
+                serde_json::from_slice::<crate::Reply<Resolution>>(&returned)
+                    .expect("a resolution")
+                    .body,
                 resolution,
                 "{case}: every waiter on the key returns the signal, never Cancelled"
             );

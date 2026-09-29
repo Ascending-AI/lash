@@ -45,10 +45,6 @@ fn isolation_preserves_cycles_with_fresh_ids() {
         heap.get(copy),
         Ok(&HeapObject::List(vec![Value::Ref(copy)]))
     );
-    assert!(
-        heap.structural_eq(&Value::Ref(original), &Value::Ref(copy))
-            .expect("compare cycles")
-    );
 }
 
 #[test]
@@ -122,39 +118,6 @@ fn allocation_across_a_sweep_is_byte_identical_to_allocation_without_one() {
     );
     assert_eq!(swept.live_logical_bytes(), clean.live_logical_bytes());
     assert_eq!(swept, clean);
-}
-
-#[test]
-fn indexed_add_charges_before_record_growth_and_updates_incrementally() {
-    let key = Value::String("a-long-new-key".into());
-    let added_bytes = RECORD_FIELD_BYTES
-        + "a-long-new-key".len() as u64
-        + value_logical_bytes(&Value::Number(1.0));
-    let base_bytes = HeapObject::Record(Box::default()).logical_bytes();
-
-    let mut exact = Heap::with_limit(base_bytes + added_bytes);
-    let target = exact
-        .allocate(HeapObject::Record(Box::default()))
-        .expect("allocate exact-limit record");
-    exact
-        .add_assign_index_number(&target, &key, 1.0)
-        .expect("exact limit must succeed");
-    assert_eq!(exact.live_logical_bytes(), base_bytes + added_bytes);
-
-    let mut over = Heap::with_limit(base_bytes + added_bytes - 1);
-    let target = over
-        .allocate(HeapObject::Record(Box::default()))
-        .expect("allocate one-byte-over record");
-    assert!(matches!(
-        over.add_assign_index_number(&target, &key, 1.0),
-        Err(RuntimeError::MemoryLimitExceeded { .. })
-    ));
-    assert_eq!(over.live_logical_bytes(), base_bytes);
-    assert_eq!(
-        over.export(&target)
-            .expect("post-error record remains valid"),
-        Value::Record(std::sync::Arc::new(Record::new()))
-    );
 }
 
 #[test]

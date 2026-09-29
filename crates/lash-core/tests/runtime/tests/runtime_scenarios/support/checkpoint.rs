@@ -12,14 +12,15 @@ impl RuntimeScenarioContext {
             .appended_nodes()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
-        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[])
-            .completing_queue_claims(self.command_claim.iter().map(QueuedWorkClaim::completion));
+        let mut commit = RuntimeCommit::persisted_state_for_test(&self.state, &[]);
+        commit.drive_fence = Some(Box::new(self.owner_and_lease().1.clone()));
+        commit.applied_commands = self.command_completion();
         if let Some(turn_id) = phase.defer_interrupted_turn_id {
             commit = commit.deferring_interrupted_turn_inputs(TurnId::from(turn_id), None);
             commit = lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 self.store(),
                 &self.turn_control,
-                &self.owner_and_lease().1.fence(),
+                self.owner_and_lease().1,
                 commit,
             )
             .await
@@ -32,7 +33,7 @@ impl RuntimeScenarioContext {
             .expect("commit runtime scenario checkpoint");
         self.state.apply_persisted_commit_result(result);
         self.state.mark_node_ids_persisted(persisted_node_ids);
-        self.command_claim = None;
+        self.commands.clear();
 
         if !phase.pending_turn_inputs_after_deferral.is_empty() {
             assert_pending_turn_inputs(
@@ -48,17 +49,9 @@ impl RuntimeScenarioContext {
             self.cancel_turn_input(alias, "deferred").await;
         }
         if phase.no_next_turn_input_claim_after_cancellations {
-            let (owner, lease) = self.owner_and_lease();
             assert!(
-                self.store()
-                    .claim_next_turn_inputs(&self.session_id, &lease.fence(), owner, 10)
-                    .await
-                    .unwrap_or_else(|err| panic!(
-                        "{} failed to claim next-turn inputs after cancellation: {err}",
-                        self.name
-                    ))
-                    .is_none(),
-                "{} should not claim cancelled next-turn inputs",
+                self.next_turn_input_head().await.is_none(),
+                "{} should not admit cancelled next-turn inputs",
                 self.name
             );
         }

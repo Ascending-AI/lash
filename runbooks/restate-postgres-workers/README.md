@@ -11,8 +11,9 @@ Budget for a cold build the first time: the harness builds its own binaries with
 plain Cargo, not through kiln, so it does not share the Bazel cache and a release
 profile build is paid in full.
 
-That starts Postgres, S3 (Garage), Restate, a mock OpenAI-compatible provider, two
-workers, the h2c proxy, and the runner. Alongside the process, durable-wait,
+That starts Postgres (with the separate witness database described below), S3
+(Garage), Restate, a mock OpenAI-compatible provider, two workers, the h2c
+proxy, and the runner. Alongside the process, durable-wait,
 frame-switch, and storage gates, the runner verifies first-party turn control:
 
 - cancellation from the runner process with no Lash session handle;
@@ -58,6 +59,97 @@ progress for each workflow. If no workflow progress is reported for 240
 seconds, it prints unfinished Restate invocations and recent worker events,
 then exits so the shell harness can append per-service logs and process state.
 Override that bound with `LASH_E2E_STALL_TIMEOUT_SECS` while debugging.
+
+## Recovery laws with independent evidence (FIG-608)
+
+The runner also checks four recovery laws, and it checks them only against the
+witness ledgers: a second database, `lash_witness`, under its own account in the
+same Postgres server. `witness.sql` creates it in plain SQL, and the script
+applies it before any service starts. No Lash transaction, store adapter,
+serializer or schema lifecycle touches these ledgers. The writer account can
+only `INSERT` the columns it supplies and `SELECT`, so every ledger is
+append-only for its writers. The database stamps every `recorded_at_us` from its
+own clock and computes every digest over the bytes it received. The `lash_e2e_*`
+tables in the `lash` database remain harness control and diagnostics only; the
+laws never read them.
+
+| Ledger | Written by | Records |
+|---|---|---|
+| `witness_submissions`, `witness_acknowledgements` | runner | the request before it is sent; the ingress acknowledgement after it returns |
+| `witness_client_terminals` | runner | the exact bytes of `GET /restate/workflow/E2eTurnWorkflow/<id>/output`: `observed` when the workflow finishes, `reattached` after the restart |
+| `witness_provider_receipts` | mock provider | every completion it serves; a failed receipt write fails the request |
+| `witness_effect_attempts`, `witness_effect_commits`, `witness_effect_replies` | `batch_side_effect` | every physical attempt with its request digest, the idempotent receiver's one accepted commit per logical key, and the answer each attempt received |
+| `witness_nemesis` | script, `crash_once`, `batch_side_effect` | `restart-begin`/`restart-complete`, `worker-exit`, `loss-after-commit` |
+
+A failed witness write fails the tool call, the provider request or the runner
+step. It is never logged and dropped.
+
+The faults cover the commit/ack window:
+
+- **Cluster restart (segment 2).** At the engine-restart handshake the script
+  SIGKILLs both workers from outside, stops Restate, and starts all three again.
+  The provider and the proxy stay up. The runner then reads every terminal it
+  had already observed from the identical workflow address.
+- **Loss after commit.** In `e2e-tool-batch-failover`, the `slow` call exits its
+  worker once, after the receiver commits and before the reply is recorded or
+  the tool returns. Restate must re-enter the closure, and the retry must find
+  the first commit.
+- **Replay over completed effects.** The same workflow's `crash_once` now runs
+  after `Promise.all` settles, so the replay runs over effects that already
+  completed. The existing one-side-effect-per-key and one-provider-call counts
+  still hold.
+
+`process_assertions.rs` holds the checkers as pure functions of the rows in one
+read-only repeatable-read snapshot. Each law is a list of named rules:
+
+1. **Durable-result stability and recovery progress.** One restart is
+   witnessed. Every terminal observed before it is reattached after it with
+   identical bytes. Each invocation that was acknowledged but unfinished at the
+   restart reaches a client-observed terminal within 180 s of
+   `restart-complete`.
+2. **Logical-effect identity.** Each logical key keeps one parent and call id
+   across retries, and the retries send identical request bytes. The receiver
+   holds at most one commit per key, and every reply carries that commit's
+   response. The commit names its accepted attempt. Every expected effect of a
+   finished workflow has a receipt. The attempt lost after its commit was
+   retried.
+3. **Causal identity.** Every acknowledgement, terminal, provider receipt,
+   attempt and commit names a submitted workflow. None is recorded before that
+   submission, and no workflow was submitted as two different requests.
+4. **Replay equivalence.** The worker exit came after the workflow's effects
+   committed. No attempt, commit or reply for those effects appears after the
+   exit. The client-visible terminal carries each committed response.
+
+A rule reports either a violation or missing evidence. Missing evidence makes a
+law **inconclusive**, and an inconclusive law fails the run exactly as a
+violation does: an empty or partial snapshot never passes. Segment 2, and a
+full run, claims all four laws. Segment 1 on its own, and
+`LASH_E2E_TURN_CONTROL_ONLY` and `LASH_E2E_WAKE_RCA_ONLY`, claim law 3 alone,
+because the restart and the witnessed batch belong to segment 2. A passing run
+prints `recovery-law witness passed:` with the laws and the row counts. Law 5
+(fencing and cancellation cut) is deferred: no incident supplies an
+externally checkable authority token, and the checker must not read Lash's
+store to decide an epoch.
+
+`tests.rs` backs the checkers with fixtures:
+
+- a generated legal history;
+- one fixture per rule, each rejected by its law and accepted once that rule
+  alone is removed (`check_law_except`), which proves every assertion is the
+  one making its rejection test fail;
+- one named rejecting fixture per law;
+- incomplete-evidence cases that must return inconclusive;
+- bounded property tests over 256 seeded shapes. Legal histories pass in any
+  row order, every single fault is rejected by its law, and removing any
+  required row never passes.
+
+Run them without the distributed services:
+
+```sh
+kiln test //runbooks/restate-postgres-workers:test_batch
+# or, with plain Cargo after sourcing env.sh:
+cargo test -p lash-restate-postgres-workers-e2e --bin lash-e2e-runner
+```
 
 The package-level build/unit check is lighter and does not start the distributed
 services:

@@ -63,6 +63,7 @@ impl RuntimeSessionServices {
             clock: Arc::clone(&self.current.host.core.clock),
             process_lineage: None,
             turn_capture: None,
+            process_originator: None,
         })
     }
 }

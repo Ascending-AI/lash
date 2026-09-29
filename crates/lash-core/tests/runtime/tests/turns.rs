@@ -548,6 +548,7 @@ impl lash_core::Clock for CancelWatchTestClock {
     }
 }
 
+mod active_input_settlement;
 mod cancel_watch;
 mod checkpoint_progress;
 mod config_patches;
@@ -556,6 +557,7 @@ mod drop_cancel_owner_failure;
 mod effects_and_queue;
 mod lease_and_claims;
 mod turn_lifecycle;
+mod withheld_frame_switch;
 
 use effects_and_queue::*;
 use turn_lifecycle::*;

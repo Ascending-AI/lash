@@ -11,17 +11,22 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
     let object_key = session_id.as_str();
     let stamped = |body: serde_json::Value| {
         serde_json::to_vec(&StampedValue {
-            format: crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+            format: u32::from(crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION),
             body,
         })
         .expect("encode a stamped registry row")
     };
     let metadata = serde_json::to_value(RestateDurableWaitIndexMetadata::default())
         .expect("encode registry metadata");
-    let mut state = BTreeMap::from([(
-        crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
-        stamped(metadata),
-    )]);
+    let mut state = BTreeMap::from([
+        super::process_await_redrive::fresh_compat_record(
+            crate::durable_wait::DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+        ),
+        (
+            crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+            stamped(metadata),
+        ),
+    ]);
     let mut measurements = Vec::new();
 
     for ordinal in 1..=1000 {
@@ -76,9 +81,12 @@ pub(super) async fn closed_roots_leave_flat_wait_index_state_through_a_thousand_
     eprintln!("FIG-3977 wait-index state at turns 1/500/1000: {measurements:?}");
     assert_eq!(measurements, vec![measurements[0]; 3]);
     assert_eq!(
-        state.len(),
-        1,
-        "only the index metadata survives root close"
+        state.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            crate::compat::COMPAT_KEY,
+            crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY
+        ],
+        "only the compat record and the index metadata survive root close"
     );
 
     let closed_root = TurnId::from("closed-root");

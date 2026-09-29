@@ -11,14 +11,15 @@
 
 use lash_core::engine::UpgradePolicy;
 
+use crate::compat::RESTATE_WIRE_VERSION;
 use crate::controller::{EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION};
 use crate::durable_wait::{DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION};
 use crate::effect_group::{
     EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
-    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_WIRE_VERSION,
+    EFFECT_GROUP_STATE_FORMAT_VERSION,
 };
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
-use crate::session_driver::LASH_SESSION_DRIVE_VERSION;
+use crate::session_driver::{LASH_SESSION_DRIVE_VERSION, LASH_TURN_OUTCOME_FORMAT_VERSION};
 
 // The rows are comparable counters whose bytes live in the engine's
 // deployment, so no bounded walk of lash's own store enumerates them.
@@ -92,10 +93,10 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
-        id: "restate.effect_group_wire",
-        name: "Restate effect-group wire",
-        version: EFFECT_GROUP_WIRE_VERSION,
-        constant: "EFFECT_GROUP_WIRE_VERSION",
+        id: "restate.wire",
+        name: "Restate handler wire",
+        version: RESTATE_WIRE_VERSION,
+        constant: "RESTATE_WIRE_VERSION",
         upgrade_policy: UpgradePolicy::Coexist,
         unwalkable_reason: UNWALKABLE_REASON,
     },
@@ -129,6 +130,14 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         version: EFFECT_JOURNAL_VERSION,
         constant: "EFFECT_JOURNAL_VERSION",
         upgrade_policy: UpgradePolicy::Drain,
+        unwalkable_reason: UNWALKABLE_REASON,
+    },
+    EngineDurableFormat {
+        id: "restate.turn_outcome_format",
+        name: "Restate LashTurn outcome format",
+        version: LASH_TURN_OUTCOME_FORMAT_VERSION,
+        constant: "LASH_TURN_OUTCOME_FORMAT_VERSION",
+        upgrade_policy: UpgradePolicy::Migrate,
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {

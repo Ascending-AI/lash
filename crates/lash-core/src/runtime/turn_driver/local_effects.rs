@@ -125,6 +125,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         runner.messages.clone(),
                         runner.protocol_iteration,
                         checkpoint,
+                        envelope.invocation.replay_key(),
                         &runner.event_tx,
                     )
                     .await;
@@ -144,10 +145,10 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 Ok(outcome)
             }
             RuntimeEffectCommand::SyncExecutionEnvironment => {
-                // A live fault rebuilding the environment (a store or lease
-                // fault) is not the sync's outcome: the claim is released
-                // unsealed and the turn aborts, so a redrive rebuilds it
-                // rather than replaying the fault as a failed turn.
+                // A live fault rebuilding the environment (a store fault) is
+                // not the sync's outcome: the step stays unrecorded and the
+                // turn aborts, so a redrive rebuilds it rather than replaying
+                // the fault as a failed turn.
                 let (result, tool_surface) = match runner
                     .driver
                     .refresh_execution_environment(
@@ -227,15 +228,15 @@ pub(super) fn turn_effect_executor(
         protocol_turn_options: driver.protocol_turn_options.clone(),
         turn_context: driver.turn_context.clone(),
         turn_causes: driver.turn_causes.clone(),
-        pending_queue_claims: driver.pending_queue_claims.clone(),
-        pending_turn_input_claims: driver.pending_turn_input_claims.clone(),
-        pending_checkpoint_turn_input_claim: driver.pending_checkpoint_turn_input_claim.clone(),
+        pending_queued: driver.pending_queued.clone(),
+        pending_turn_inputs: driver.pending_turn_inputs.clone(),
+        pending_checkpoint_turn_inputs: driver.pending_checkpoint_turn_inputs.clone(),
         // Work this executor withholds from a terminal checkpoint travels
-        // back on the journalled claim set, not on the driver copy.
+        // back on the journalled admitted set, not on the driver copy.
         withheld_terminal_work: Default::default(),
         checkpoint_messages: driver.checkpoint_messages.clone(),
-        session_execution_lease: driver.session_execution_lease.clone(),
-        runtime_lease_owner: driver.runtime_lease_owner.clone(),
+        drive_fence: driver.drive_fence.clone(),
+        drive_root: driver.drive_root.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
         protocol_reply: Default::default(),

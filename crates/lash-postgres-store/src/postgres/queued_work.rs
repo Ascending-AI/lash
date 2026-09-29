@@ -16,39 +16,11 @@ pub(crate) struct QueuedBatchRow {
     pub(crate) authority: QueuedWorkAuthority,
     pub(crate) merge_key: Option<String>,
     enqueued_at_ms: u64,
-    pub(crate) claim_fencing_token: u64,
-    pub(crate) claim_id: Option<String>,
-    pub(crate) claim_token: Option<String>,
-    pub(crate) claim_session_lease_generation: u64,
-    pub(crate) claim_owner_incarnation_id: Option<String>,
 }
 
-impl QueuedBatchRow {
-    /// The claim columns the shared claimability verdict consults.
-    ///
-    /// Exposed as one value rather than two fields so a call site cannot pass
-    /// a generation that belongs to a different row's token.
-    pub(crate) fn claim_facts(
-        &self,
-    ) -> lash_core_execution::store_backend_support::WorkRowClaimFacts<'_> {
-        lash_core_execution::store_backend_support::WorkRowClaimFacts {
-            claim_token: self.claim_token.as_deref(),
-            claim_session_lease_generation: self.claim_session_lease_generation,
-            claim_owner_incarnation_id: self.claim_owner_incarnation_id.as_deref(),
-        }
-    }
-}
-
-pub(crate) fn claim_candidate_from_row(
-    row: &QueuedBatchRow,
-    batch: &QueuedWorkBatch,
-) -> ClaimCandidate {
-    ClaimCandidate::from_batch(
-        batch,
-        row.claim_fencing_token,
-        row.claim_id.clone(),
-        row.claim_token.clone(),
-    )
+/// The turn-lane candidate `batch` offers an admission.
+pub(crate) fn turn_lane_candidate(batch: &QueuedWorkBatch) -> TurnLaneCandidate {
+    TurnLaneCandidate::from_batch(batch)
 }
 
 pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError> {
@@ -74,19 +46,6 @@ pub(crate) fn queued_batch_row(row: PgRow) -> Result<QueuedBatchRow, StoreError>
             "enqueued_at_ms",
             row.get("enqueued_at_ms"),
         )?,
-        claim_fencing_token: u64_from_sql(
-            "QueuedWorkBatch",
-            "claim_fencing_token",
-            row.get("claim_fencing_token"),
-        )?,
-        claim_id: row.get("claim_id"),
-        claim_token: row.get("claim_token"),
-        claim_session_lease_generation: u64_from_sql(
-            "QueuedWorkBatch",
-            "claim_session_lease_generation",
-            row.get("claim_session_lease_generation"),
-        )?,
-        claim_owner_incarnation_id: row.get("claim_owner_incarnation_id"),
     })
 }
 
@@ -149,97 +108,131 @@ pub(crate) async fn queued_work_batch_from_row(
     Ok(batch)
 }
 
-/// Observe every covered row under `FOR UPDATE` and return the shared
-/// settlement plan for this completion (FIG-1065).
+/// Settle batch `batch_id` of session `session_id`, which root `root` must
+/// hold, in the commit that completed it (FIG-3927).
 ///
-/// The plan's ordered writes execute later, in
-/// [`complete_queued_work_claims_tx`](crate::runtime_persistence::complete_queued_work_claims_tx):
-/// each consumed wake's source-key advisory lock and fence write still land
-/// immediately before the queue row leaves, exactly where the hand-written
-/// body put them.
-pub(crate) async fn plan_queued_work_settlement_tx(
+/// The verdict is taken over the row under `FOR UPDATE`; then the consumed
+/// wake's redelivery fence lands, under the wake source's advisory lock that
+/// serializes queue insertion against consumption, before the row leaves. A
+/// crash between the two would replay a wake the session already consumed,
+/// so the fence must land first.
+pub(crate) async fn complete_admitted_batch_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    completed: &QueuedWorkCompletion,
-) -> Result<lash_core_execution::store::claim_plan::QueuedWorkSettlementPlan, StoreError> {
+    session_id: &SessionId,
+    root: &lash_core_execution::TurnId,
+    batch_id: &lash_core_execution::BatchId,
+) -> Result<(), StoreError> {
     let sql = crate::turn_ingress::turn_ingress_sql();
-    let mut rows = Vec::with_capacity(completed.batch_ids.len());
-    for batch_id in &completed.batch_ids {
-        // Lock and read: the row is held `FOR UPDATE` for the rest of the
-        // commit, so it cannot move before the settlement below.
-        let observed: Option<(Option<String>, Option<String>, i64)> =
-            sqlx::query_as(sql.queued_batches_postgres.settlement_facts.sql())
-                .bind(completed.session_id.as_str())
-                .bind(batch_id.as_str())
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        let claim = observed
-            .map(|(claim_id, claim_token, generation)| {
-                Ok(
-                    lash_core_execution::store::claim_plan::QueuedWorkSettlementRowClaim {
-                        claim_id,
-                        claim_token,
-                        claim_session_lease_generation: u64_from_sql(
-                            "QueuedWorkBatch",
-                            "claim_session_lease_generation",
-                            generation,
-                        )?,
-                    },
-                )
-            })
-            .transpose()?;
-        // The wake identity a settled batch contributes to its redelivery
-        // fence: the source key (advisory-lock identity) and the head
-        // payload, both claim-keyed reads over the locked row. The advisory
-        // lock itself stays at the write site.
-        let terminal_wake = match claim.as_ref() {
-            Some(_) => {
-                let source_key: Option<String> =
-                    sqlx::query_scalar(sql.family_postgres.select_claimed_batch_source_key.sql())
-                        .bind(completed.session_id.as_str())
-                        .bind(batch_id.as_str())
-                        .bind(&completed.claim_id)
-                        .bind(&completed.lease_token)
-                        .fetch_optional(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?
-                        .flatten();
-                let payload_json: Option<String> =
-                    sqlx::query_scalar(sql.queued_batches.select_claimed_batch_head_payload.sql())
-                        .bind(completed.session_id.as_str())
-                        .bind(batch_id.as_str())
-                        .bind(&completed.claim_id)
-                        .bind(&completed.lease_token)
-                        .fetch_optional(&mut **tx)
-                        .await
-                        .map_err(store_sqlx_error)?;
-                payload_json
-                    .as_deref()
-                    .map(|json| {
-                        store_decode_json::<lash_core_execution::runtime::QueuedWorkPayload>(
-                            json,
-                            "queued work payload",
-                        )
-                    })
-                    .transpose()?
-                    .and_then(|payload| {
-                        lash_core_execution::store::claim_plan::TerminalProcessWake::of_payload(
-                            source_key, &payload,
-                        )
-                    })
-            }
-            None => None,
-        };
-        rows.push(
-            lash_core_execution::store::claim_plan::QueuedWorkSettlementRow {
-                batch_id: batch_id.clone(),
-                claim,
-                terminal_wake,
-            },
-        );
+    let row = lash_core_execution::store::IngressRowId::Batch(batch_id.clone());
+    let observed: Option<Option<String>> =
+        sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
+            .bind(session_id.as_str())
+            .bind(batch_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    lash_core_execution::store_backend_support::require_admitted_to_root(
+        session_id,
+        root,
+        &row,
+        observed.as_ref().map(Option::as_deref),
+    )?;
+    // The wake identity a settled batch contributes to its redelivery fence:
+    // the source key (advisory-lock identity) and the head payload, both
+    // root-keyed reads over the locked row.
+    let source_key: Option<String> =
+        sqlx::query_scalar(sql.family_postgres.select_admitted_batch_source_key.sql())
+            .bind(session_id.as_str())
+            .bind(batch_id.as_str())
+            .bind(root.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .flatten();
+    let payload_json: Option<String> =
+        sqlx::query_scalar(sql.queued_batches.select_admitted_batch_head_payload.sql())
+            .bind(session_id.as_str())
+            .bind(batch_id.as_str())
+            .bind(root.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    let terminal_wake = payload_json
+        .as_deref()
+        .map(|json| {
+            store_decode_json::<lash_core_execution::runtime::QueuedWorkPayload>(
+                json,
+                "queued work payload",
+            )
+        })
+        .transpose()?
+        .and_then(|payload| {
+            lash_core_execution::store::TerminalProcessWake::of_payload(source_key, &payload)
+        });
+    if let Some(wake) = terminal_wake.as_ref() {
+        crate::runtime_persistence::raise_wake_redelivery_fence_tx(tx, session_id, wake).await?;
     }
-    // The shared planner takes the verdict: a settlement is authorized only
-    // while every covered row still carries this claim's id and lease token.
-    lash_core_execution::store::claim_plan::plan_queued_work_settlement(completed, rows)
-        .into_result()
+    let settled = sqlx::query(sql.queued_batches.settle_admitted.sql())
+        .bind(session_id.as_str())
+        .bind(batch_id.as_str())
+        .bind(root.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+    // Backstop: the verdict above was taken under the row lock, so the root
+    // predicate cannot legitimately miss.
+    lash_core_execution::store_backend_support::require_fenced_write_applied(
+        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+        crate::POSTGRES_BACKEND,
+        batch_id.as_str(),
+        settled,
+        || StoreError::IngressRowNotAdmitted {
+            session_id: session_id.clone(),
+            root: root.clone(),
+            row: Box::new(row.clone()),
+            admitted_root: None,
+        },
+    )
+}
+
+/// Settle open session command `batch_id` of session `session_id`, in the
+/// commit that applied it (FIG-3927): the command lane takes no admission,
+/// so the predicate is the row's presence and openness. A command withdrawn
+/// since the drive read it refuses the whole commit.
+pub(crate) async fn settle_open_command_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    batch_id: &lash_core_execution::BatchId,
+) -> Result<(), StoreError> {
+    let sql = crate::turn_ingress::turn_ingress_sql();
+    let observed: Option<Option<String>> =
+        sqlx::query_scalar(sql.queued_batches_postgres.settlement_facts.sql())
+            .bind(session_id.as_str())
+            .bind(batch_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    lash_core_execution::store_backend_support::require_open_command(
+        session_id,
+        batch_id,
+        observed.as_ref().map(Option::as_deref),
+    )?;
+    let settled = sqlx::query(sql.queued_batches.settle_command.sql())
+        .bind(session_id.as_str())
+        .bind(batch_id.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+    lash_core_execution::store_backend_support::require_fenced_write_applied(
+        lash_core_execution::store_backend_support::FencedWrite::IngressSettlement,
+        crate::POSTGRES_BACKEND,
+        batch_id.as_str(),
+        settled,
+        || StoreError::SessionCommandWithdrawn {
+            session_id: session_id.clone(),
+            batch_id: batch_id.clone(),
+        },
+    )
 }

@@ -52,16 +52,16 @@ pub use effect::await_event_identity;
 pub use effect::{
     AdmittedScope, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason, CanonicalRuntimeEffectEnvelope,
-    CaptureWatermark, CausalRef, CheckpointClaimSet, CommandJournalGuard, CompletionKeyPreparation,
-    EffectAddress, EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, GroupChildBinding, GroupChildCancelWatch,
-    GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, IndependentEffectWork,
-    LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand, ProcessDriveStep,
-    ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RefusedWriteRange,
-    Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome, RuntimeAttribution,
-    RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
+    CaptureWatermark, CausalRef, CheckpointAdmittedSet, CommandJournalGuard,
+    CompletionKeyPreparation, EffectAddress, EffectGroupDrainBudget, EffectGroupHandle,
+    EffectGroupMembership, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
+    EffectOpener, EffectRetirementGate, ExecutionScope, ExternalCompletionError, GroupChildBinding,
+    GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy,
+    IndependentEffectWork, LlmRequestSpec, LlmStreamRecord, LoserPolicy, ProcessCommand,
+    ProcessDriveStep, ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver,
+    ProcessTurnCancellation, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAssistantResponseHooksOutcome,
+    RuntimeAttribution, RuntimeAwaitEventOptions, RuntimeDirectLlmOutcome, RuntimeEffectCommand,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
     RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
     RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
@@ -152,6 +152,7 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
     refused_process_registrations,
 };
+pub use process::{ConsumerHold, SessionTurnResult};
 pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;
@@ -174,13 +175,13 @@ pub use turn_control::{
 pub use turn_queue::SessionCommandSettlement;
 pub use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
-    DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
-    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
-    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    AdmissionBoundary, AdmittedQueuedWork, DeliveryPolicy, PROCESS_WAKE_MERGE_KEY,
+    ProcessWakeSource, QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch,
+    QueuedWorkBatchDraft, QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkCompletion,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
-    SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
-    process_wake_batch_draft_with_delivery_policy, process_wake_source_key,
+    SessionCommandPayload, SessionCommandReceipt, TurnLaneAdmissionPolicy, TurnWorkPayload,
+    process_wake_batch_draft, process_wake_batch_draft_with_delivery_policy,
+    process_wake_source_key,
 };
 pub use usage::{
     LedgerUsageDisposition, ReconciledUsageAttempt, SessionUsageReport, TokenLedgerEntry,
