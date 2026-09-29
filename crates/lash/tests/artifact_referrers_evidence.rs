@@ -728,10 +728,7 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         "the delete runs in the call: {deletion:?}"
     );
 
-    let after = wait_edges(&double, |edges| {
-        !edges.iter().any(|edge| edge.artifact_ref == module_ref)
-    })
-    .await;
+    let after = wait_edges(&double, |edges| edges.is_empty()).await;
     assert!(after.is_empty(), "no edge survives the session: {after:?}");
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while modules
