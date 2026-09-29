@@ -1,5 +1,10 @@
 # Turn cancellation is a first-party work-driver primitive on the keyed-promise seam
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Amended 2026-09-23 (FIG-3540), **not yet implemented**: [ADR 0101](0101-one-session-ingress-carries-every-admitted-item.md) §10 applies the
 `undelivered` disposition by author. Its scope is the host-authored items
 addressed to the cancelled turn that it did not deliver. `Defer` no longer

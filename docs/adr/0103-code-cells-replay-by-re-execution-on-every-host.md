@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Accepted 2026-09-23 (FIG-3549). Implemented. Amended 2026-09-23 (FIG-3586):
 a nested effect's identity is its issue ordinal, not its call site; see
 [Issue-ordinal identity](#amendment-fig-3586-issue-ordinal-identity).
@@ -589,3 +594,10 @@ settled in preparation still redrives by serving its presentation. The
 removed. `agents.spawn` is now an ordinary tool whose declared start journals
 `process:start:{key}` and `process:attach-terminal:{id}:{key}` under its
 command ([ADR 0116](0116-tools-are-opaque.md) §3), rows the frontier read already attributes to the tool call.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 13: Retired under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+Its code-cell replay rationale remains historical background for the
+Restate-only effect engine.

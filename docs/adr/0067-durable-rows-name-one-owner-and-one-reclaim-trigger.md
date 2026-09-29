@@ -2,6 +2,13 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+[ADR 0023](0023-retention-stays-a-parameterized-host-lever.md) governs retained
+receipts.
+
 Accepted. Ratified on FIG-1494; the six sections of the decision are the six
 rulings recorded there. The trigger-store ownership map was ratified on
 FIG-1507 on 2026-08-21.
@@ -240,8 +247,9 @@ There are no dedup or time-window carve-outs:
 reclamation runs only through host-invoked levers.**
 
 Owner-delete cascade and terminal-state vacuum run in the owner's transaction,
-bounded strictly to the owner's rows: deleting a session reclaims that session's
-rows and nothing else, deterministically. A reclaim error inside that scope
+bounded strictly to the owner's rows: deleting a session reclaims eligible
+session rows but retains receipts under [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md).
+A reclaim error inside that scope
 **fails the delete honestly** rather than leaking silently — if the cascade
 cannot complete, the delete does not claim to have happened.
 
@@ -267,8 +275,8 @@ terminal frontier, so its name fence remains durable.
 | Host or platform process-definition registry tombstone | Host or platform namespace | Never. Like a host subscription tombstone, the slot is the permanent take-over fence for its name. |
 | Session subscription | Registering session | The ADR 0049 deleted-session frontier. Delivery-retention reconciliation deletes the row in its trigger-store transaction only after witnessing zero remaining deliveries for the subscription. This applies to enabled and tombstoned rows; a tombstone remains the `Revive` CAS fence while its session could still speak. |
 | Host or platform subscription tombstone | Host or platform namespace | Never. It is the permanent `Revive` name fence, and there is no purge lever. |
-| Session mutation receipt | Registering session's replay eligibility | The same ADR 0049 frontier and trigger-store reconciliation transaction. Receipts survive while any delivery owned by that session remains. Once the frontier is crossed and the delivery set is witnessed empty, post-deletion replay is impossible and the journal is reclaimed. |
-| Host or platform mutation receipt | Host or platform replay eligibility | The existing host-invoked `prune_mutation_receipts` cutoff. This policy is unchanged. |
+| Session mutation receipt | Registering session's replay eligibility | Retained after session deletion under [ADR 0023](0023-retention-stays-a-parameterized-host-lever.md). Only the host's retention decision permits pruning through the internal trigger-store primitive. |
+| Host or platform mutation receipt | Host or platform replay eligibility | Retained until the host invokes an appropriate retention policy. `TriggerStore::prune_mutation_receipts` is an internal primitive, not a public facade lever. |
 | Fired trigger occurrence | Committed delivery fan-out | Delivery-retention reconciliation deletes the occurrence only after witnessing zero remaining delivery rows. A zero-match fired occurrence has a committed empty fan-out at ingest, so the same predicate reclaims it. A matched fired occurrence waits for its last delivery. |
 | Non-fired trigger occurrence | Factory-owned durable audit history | Never through delivery-fan-out retention. Its typed outcome is the history being retained, including after a scoped session crosses the deleted frontier. The host-invoked `prune_non_fired_occurrences` cutoff (2026-09-14 amendment) is the sole reclaim path, and selects only non-fired rows recorded before an explicit epoch. |
 | Trigger delivery | Deterministic process run | ADR 0021 process retention. This policy is unchanged. |

@@ -1,5 +1,10 @@
 # Retention stays a parameterized host lever
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Hosts need differentiated retention — ephemeral debris (subagent turns, fan-out helpers) pruned
 aggressively, long-lived processes kept until the host's own projection has durably consumed
 them. We considered a producer-declared retention class on `ProcessRegistration` (shaped like
