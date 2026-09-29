@@ -447,9 +447,9 @@ pub mod persistence {
         ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
         RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
         SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
-        TurnCommitFailureCause, TurnCommitOutcome, TurnCommitRecord, TurnPark, TurnParkQuery,
-        TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
-        commit_runtime_state_verified, validate_turn_commit_outcome_code,
+        TurnCommitFailureCause, TurnCommitOutcome, TurnPark, TurnParkQuery, TurnParkTarget,
+        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
+        validate_turn_commit_outcome_code,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the

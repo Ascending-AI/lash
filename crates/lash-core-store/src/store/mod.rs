@@ -342,15 +342,6 @@ impl From<String> for BlobRef {
     }
 }
 
-/// One committed physical turn and its durable terminal classification
-/// (FIG-4037), as a store reads it from `runtime_turn_commits`.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TurnCommitRecord {
-    /// The canonical operation key stored in `runtime_turn_commits.turn_id`.
-    pub operation_key: String,
-    pub outcome: TurnCommitOutcome,
-}
-
 /// JSON-owned fields persisted in a session head's `head_json` column.
 ///
 /// Revision and graph/checkpoint references live in dedicated columns and are
