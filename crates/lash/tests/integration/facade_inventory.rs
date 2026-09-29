@@ -232,14 +232,14 @@ mod rlm_testing_inventory {
 mod sqlite_inventory {
     use lash::sqlite::SqliteDatabase as _;
     use lash::sqlite::SqliteLocation as _;
-    use lash::sqlite::SqliteSessionStoreFactory as _;
+    use lash::sqlite::SqliteStore as _;
     use lash::sqlite::SqliteStoreSet as _;
 }
 
 #[cfg(feature = "postgres")]
 mod postgres_inventory {
-    use lash::postgres::PostgresSessionStoreFactory as _;
     use lash::postgres::PostgresStorage as _;
+    use lash::postgres::PostgresStore as _;
     use lash::postgres::PostgresStoreSet as _;
 }
 

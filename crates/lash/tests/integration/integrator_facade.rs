@@ -13,7 +13,7 @@ use lash::durability::{
     RuntimeAwaitEventOptions, RuntimeEffectReplayTrace, RuntimeReplay, RuntimeReplayAttribution,
     RuntimeSleepOptions, RuntimeSubject, SegmentProgress, ToolAttemptLaunch, TriggerLocalExecution,
 };
-use lash::messages::{PartAttachment, SessionMessageTreeNode, SharedJsonValue};
+use lash::messages::{PartAttachment, SharedJsonValue};
 use lash::persistence::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     LiveReplayOutcome, LiveReplaySubscription, ProcessWakeSource, QueuedCheckpointTurnInput,

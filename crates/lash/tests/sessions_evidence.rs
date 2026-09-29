@@ -1495,24 +1495,6 @@ fn drain_area_witnesses() {
     });
     // W0467: lash::tools::ToolInvocationReply::success [function]
     let _ = lash::tools::ToolInvocationReply::success;
-    // W0468: lash::messages::SessionMessageTreeNode [struct]
-    type_witness::<lash::messages::SessionMessageTreeNode>();
-    // W0469: lash::messages::SessionMessageTreeNode::active [field]
-    field_witness(|value: &lash::messages::SessionMessageTreeNode| {
-        let _ = &value.active;
-    });
-    // W0470: lash::messages::SessionMessageTreeNode::node_id [field]
-    field_witness(|value: &lash::messages::SessionMessageTreeNode| {
-        let _ = &value.node_id;
-    });
-    // W0471: lash::messages::SessionMessageTreeNode::parent_message_node_id [field]
-    field_witness(|value: &lash::messages::SessionMessageTreeNode| {
-        let _ = &value.parent_message_node_id;
-    });
-    // W0472: lash::messages::SessionMessageTreeNode::timestamp [field]
-    field_witness(|value: &lash::messages::SessionMessageTreeNode| {
-        let _ = &value.timestamp;
-    });
     // W0473: lash::messages::SharedJsonValue [struct]
     type_witness::<lash::messages::SharedJsonValue>();
     // W0474: lash::messages::SharedJsonValue::0 [field]
