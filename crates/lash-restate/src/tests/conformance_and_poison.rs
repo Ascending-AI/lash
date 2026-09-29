@@ -311,7 +311,8 @@ lash_conformance::migrated_tools_redrive_tests!(
         // run's workflows and groups, so each run names its own.
         let prefix: &'static str =
             Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
-        let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+        let plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
+            Arc::new(lash_protocol_standard::StandardProtocolPluginFactory::new()),
             Arc::new(
                 lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
                     lash_core::lifetime::session_or_starter,
@@ -327,14 +328,7 @@ lash_conformance::migrated_tools_redrive_tests!(
                 lash_core::lifetime::starter,
             )),
         ];
-        (
-            harness,
-            prefix,
-            effect_host,
-            stores,
-            turn_runner,
-            orchestration,
-        )
+        (harness, prefix, effect_host, stores, turn_runner, plugins)
     }
 );
 
@@ -873,11 +867,6 @@ mod on_the_server_double {
             |_law: &'static str| async {},
         )
     });
-
-    // `migrated_tools_redrive_tests` stays off the double for now: in about
-    // half of streaming runs the batch tool child stops after its first nested
-    // attempt's run completes (FIG-3671, #2140). It runs on the live server,
-    // above.
 
     lash_conformance::effect_host_await_event_witness_tests!({
         let harness = Arc::new(LiveConformanceHarness::start_on(HarnessServer::in_process()).await);

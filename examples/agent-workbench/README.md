@@ -223,7 +223,7 @@ preserved three-layer acceptance gates.
 
 The resident `ops.apply_change` demo tool shows the approval pattern without
 adding an approval concept to Lash. The provider calls
-`ToolContext::completion_key()`, writes the key, tool arguments, requesting
+`AttemptContext::completion_key()`, writes the key, tool arguments, requesting
 session, and request time to the host-owned `<data-dir>/approvals.db`, and
 returns `ToolOutcome::Pending`. The right-rail approval ledger and
 `GET /api/approvals` list those waits; approve and deny actions resolve the

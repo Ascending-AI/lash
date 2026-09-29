@@ -46,9 +46,8 @@ use crate::{
 use lash_http_transport::HttpRequest;
 
 /// The endpoint's process runner for the tool-child laws: a tool child's
-/// orchestrating body records its durable starts through the Restate process
-/// surface, so the service must exist for the submission to be a legal
-/// command. What runs the segment is not under test — the same role
+/// declared starts record through the Restate process surface, so the
+/// service must exist for the submission to be a legal command. What runs the segment is not under test — the same role
 /// `ConformanceExecutors` plays for group children — so the runner settles
 /// every submitted process successfully and lets the workflow write the
 /// terminal into the law's registry.
@@ -550,9 +549,9 @@ impl LiveConformanceHarness {
     /// The tool-child laws' endpoint: nothing is registered, so the runtime's
     /// `install_tool_child_host` installs its `ToolChildHost` on this host and
     /// the endpoint routes `ToolInvocation` children through it — the one
-    /// resolver a deployment has. An orchestrating child's durable start
-    /// submits `LashProcessWorkflow/run` through the handler's context, which
-    /// the endpoint serves with the law's installed process worker.
+    /// resolver a deployment has. A child's declared start submits
+    /// `LashProcessWorkflow/run` through the handler's context, which the
+    /// endpoint serves with the law's installed process worker.
     pub(super) async fn start_for_tool_children_on(target: HarnessServer) -> Self {
         Self::start_with(target, Arc::new(ConformanceExecutors::default()), |_| {}).await
     }
@@ -746,7 +745,7 @@ impl LiveConformanceHarness {
             // Deliberately one registry for every scenario, despite
             // `ToolChildLawFixture::make_processes` promising a fresh one: the
             // endpoint's LashProcessWorkflow writes the segment terminal into
-            // the registry the orchestrating child's start recorded, so the
+            // the registry a child's declared start recorded, so the
             // dispatched context and the workflow must share this one. Rows
             // do not collide because scenario prefixes keep process ids
             // distinct. Every other port is the same store set's.
@@ -757,6 +756,7 @@ impl LiveConformanceHarness {
                     Box::pin(async move { stores })
                 }
             }),
+            turn_runner: self.turn_runner(),
         }
     }
 

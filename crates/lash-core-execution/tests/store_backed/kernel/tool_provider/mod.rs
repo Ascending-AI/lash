@@ -1,5 +1,3 @@
-mod process;
-
 mod tests {
     use std::sync::Arc;
 
@@ -7,7 +5,7 @@ mod tests {
     async fn process_events_target_supplies_enclosing_process_when_host_did_not() {
         let registry: Arc<dyn crate::ProcessRegistry> =
             crate::support::memory_store_set().await.process_registry();
-        let context = crate::testing::mock_tool_context().with_process_events_for_testing(
+        let context = crate::testing::ToolCallFixture::mock().inside_process(
             crate::ProcessId::fixture("process-2"),
             registry,
             crate::ProcessExecutionWriteAuthority::invocation(
@@ -26,12 +24,9 @@ mod tests {
     async fn process_events_target_must_match_enclosing_process() {
         let registry: Arc<dyn crate::ProcessRegistry> =
             crate::support::memory_store_set().await.process_registry();
-        let _ = crate::testing::mock_tool_context()
-            .with_enclosing_process(
-                crate::ProcessId::fixture("process-a"),
-                tokio_util::sync::CancellationToken::new(),
-            )
-            .with_process_events_for_testing(
+        let _ = crate::testing::ToolCallFixture::mock()
+            .enclosing_process_id(Some(crate::ProcessId::fixture("process-a")))
+            .inside_process(
                 crate::ProcessId::fixture("process-b"),
                 registry,
                 crate::ProcessExecutionWriteAuthority::invocation(

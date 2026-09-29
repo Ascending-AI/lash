@@ -82,11 +82,6 @@ impl PluginExtensions {
 pub struct PluginSpec {
     pub extension_contributions: Vec<PluginExtensionContribution>,
     pub tool_providers: Vec<Arc<dyn ToolProvider>>,
-    /// Explicit internal owner-bound process tool definitions. Internal tools
-    /// are a distinct execution class: they are not leaf [`ToolProvider`]s and
-    /// run without a recorded `ToolAttempt` frame.
-    pub internal_tools: Vec<crate::InternalProcessToolDef>,
-    pub orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub triggers: Vec<crate::TriggerEvent>,
     pub prompt_contributors: Vec<PromptContributor>,
     pub tool_catalog_contributors: Vec<ToolCatalogContributor>,
@@ -122,27 +117,6 @@ impl PluginSpec {
 
     pub fn with_tool_provider(mut self, provider: Arc<dyn ToolProvider>) -> Self {
         self.tool_providers.push(provider);
-        self
-    }
-
-    /// This is an **integrator class 3: protocol and process-engine
-    /// implementor** seam. Internal definitions execute through
-    /// [`crate::InternalProcessToolImplementation`], not the leaf
-    /// [`ToolProvider`] seam.
-    pub fn with_internal_tool(mut self, definition: crate::InternalProcessToolDef) -> Self {
-        self.internal_tools.push(definition);
-        self
-    }
-
-    /// This is an **integrator class 3: protocol and process-engine
-    /// implementor** seam. Use a first-party definition such as
-    /// `lash_protocol_standard::standard_batch_orchestrating_tool`; external
-    /// code cannot construct arbitrary orchestrating definitions.
-    pub fn with_orchestrating_tool(
-        mut self,
-        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
-    ) -> Self {
-        self.orchestrating_tools.push(definition);
         self
     }
 
@@ -710,12 +684,6 @@ impl SessionPlugin for SpecPlugin {
     fn register(&self, reg: &mut PluginRegistrar) -> Result<(), PluginError> {
         for provider in &self.spec.tool_providers {
             reg.tools().provider(Arc::clone(provider))?;
-        }
-        for definition in &self.spec.internal_tools {
-            reg.tools().internal(definition.clone())?;
-        }
-        for definition in &self.spec.orchestrating_tools {
-            reg.tools().orchestrating(definition.clone())?;
         }
         for event in &self.spec.triggers {
             reg.triggers().declare(event.clone())?;

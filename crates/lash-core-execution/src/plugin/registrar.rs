@@ -87,8 +87,6 @@ pub(crate) struct PluginContributions {
     /// Plugins that kept their state store past registration (FIG-3712).
     pub(crate) state_retaining_plugins: Vec<String>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
-    pub(crate) internal_tools: Vec<crate::InternalProcessToolDef>,
-    pub(crate) orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     pub(crate) triggers: Vec<crate::TriggerEvent>,
     pub(crate) prompt_contributors: Vec<RegisteredHook<PromptContributor>>,
     pub(crate) tool_catalog_contributors: Vec<RegisteredHook<ToolCatalogContributor>>,
@@ -130,19 +128,6 @@ pub struct ToolRegistrations<'a> {
 impl ToolRegistrations<'_> {
     pub fn provider(self, provider: Arc<dyn ToolProvider>) -> Result<(), PluginError> {
         self.reg.add_tool_provider(provider)
-    }
-
-    /// Internal tools execute through [`crate::InternalProcessToolImplementation`] outside the
-    /// leaf `ToolAttempt` frame.
-    pub fn internal(self, definition: crate::InternalProcessToolDef) -> Result<(), PluginError> {
-        self.reg.add_internal_tool(definition)
-    }
-
-    pub fn orchestrating(
-        self,
-        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
-    ) -> Result<(), PluginError> {
-        self.reg.add_orchestrating_tool(definition)
     }
 }
 
@@ -592,22 +577,6 @@ impl PluginRegistrar {
             &self.registering_plugin_id,
             provider,
         );
-        Ok(())
-    }
-
-    fn add_internal_tool(
-        &mut self,
-        definition: crate::InternalProcessToolDef,
-    ) -> Result<(), PluginError> {
-        self.contributions.internal_tools.push(definition);
-        Ok(())
-    }
-
-    fn add_orchestrating_tool(
-        &mut self,
-        definition: crate::tool_provider::orchestration::OrchestratingToolDef,
-    ) -> Result<(), PluginError> {
-        self.contributions.orchestrating_tools.push(definition);
         Ok(())
     }
 

@@ -10,10 +10,9 @@
 //! answers an outcome naming the run that produced it, so a served record is
 //! told from a fresh run.
 //!
-//! Four effect kinds, each crashed two ways:
+//! Three effect kinds, each crashed two ways:
 //!
 //! - a scalar tool call;
-//! - a tool batch of two calls, partially recorded when the crash lands;
 //! - a trigger registration;
 //! - a child process start.
 //!
@@ -63,23 +62,16 @@ const CHILD_SETTLE_TIMEOUT: Duration = Duration::from_secs(60);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum EffectKind {
     ToolCall,
-    ToolBatch,
     Trigger,
     ChildStart,
 }
 
 impl EffectKind {
-    const ALL: [Self; 4] = [
-        Self::ToolCall,
-        Self::ToolBatch,
-        Self::Trigger,
-        Self::ChildStart,
-    ];
+    const ALL: [Self; 3] = [Self::ToolCall, Self::Trigger, Self::ChildStart];
 
     fn label(self) -> &'static str {
         match self {
             Self::ToolCall => "tool-call",
-            Self::ToolBatch => "tool-batch",
             Self::Trigger => "trigger",
             Self::ChildStart => "child-start",
         }
@@ -89,7 +81,6 @@ impl EffectKind {
     fn effects(self) -> &'static [&'static str] {
         match self {
             Self::ToolCall => &[TOOL],
-            Self::ToolBatch => &[BATCH_FIRST, BATCH_SECOND],
             Self::Trigger => &[TRIGGER],
             Self::ChildStart => &[CHILD],
         }
@@ -97,8 +88,6 @@ impl EffectKind {
 }
 
 const TOOL: &str = "tool";
-const BATCH_FIRST: &str = "batch-0";
-const BATCH_SECOND: &str = "batch-1";
 const TRIGGER: &str = "trigger";
 const CHILD: &str = "child";
 
@@ -583,57 +572,6 @@ async fn segment_body(
                 outcome.as_ref().map(trigger_run).map_err(|e| e.to_string()),
             );
         }
-        EffectKind::ToolBatch => {
-            // The batch's two calls are independent work: the engine drives
-            // them the way it drives any batch, and the crash lands after the
-            // first call's result is recorded — before the second call is
-            // issued (recorded), or after it ran (unrecorded).
-            let first = {
-                let scenario = scenario.clone();
-                let scoped = &scoped;
-                Box::pin(async move {
-                    let outcome = scoped
-                        .execute_effect(
-                            scenario.tool_envelope(BATCH_FIRST),
-                            scenario.tool_executor(BATCH_FIRST, None),
-                        )
-                        .await;
-                    scenario.probe.observe(
-                        phase,
-                        BATCH_FIRST,
-                        outcome.as_ref().map(tool_run).map_err(|e| e.to_string()),
-                    );
-                }) as crate::IndependentEffectWork<'_>
-            };
-            let second = {
-                let scenario = scenario.clone();
-                let scoped = &scoped;
-                let crash = crash.clone();
-                Box::pin(async move {
-                    if scenario.case == CrashCase::Recorded
-                        && let Some(crash) = &crash
-                    {
-                        die(crash).await;
-                    }
-                    let unrecorded_crash = crash.filter(|_| scenario.case == CrashCase::Unrecorded);
-                    let outcome = scoped
-                        .execute_effect(
-                            scenario.tool_envelope(BATCH_SECOND),
-                            scenario.tool_executor(BATCH_SECOND, unrecorded_crash),
-                        )
-                        .await;
-                    scenario.probe.observe(
-                        phase,
-                        BATCH_SECOND,
-                        outcome.as_ref().map(tool_run).map_err(|e| e.to_string()),
-                    );
-                }) as crate::IndependentEffectWork<'_>
-            };
-            scoped
-                .controller()
-                .drive_independent_effect_work(vec![first, second])
-                .await;
-        }
         EffectKind::ChildStart => {
             // The start registers the child and schedules it on the engine.
             // Unrecorded: the execution dies at the storage write that
@@ -704,19 +642,10 @@ fn body(
 fn assert_crash_precondition(scenario: &Scenario) -> BTreeMap<&'static str, usize> {
     let probe = &scenario.probe;
     let name = format!("{:?}/{:?}", scenario.kind, scenario.case);
-    let (recorded, unrecorded, unissued): (&[&str], &[&str], &[&str]) =
-        match (scenario.kind, scenario.case) {
-            (EffectKind::ToolCall, CrashCase::Recorded) => (&[TOOL], &[], &[]),
-            (EffectKind::ToolCall, CrashCase::Unrecorded) => (&[], &[TOOL], &[]),
-            (EffectKind::Trigger, CrashCase::Recorded) => (&[TRIGGER], &[], &[]),
-            (EffectKind::Trigger, CrashCase::Unrecorded) => (&[], &[TRIGGER], &[]),
-            (EffectKind::ToolBatch, CrashCase::Recorded) => (&[BATCH_FIRST], &[], &[BATCH_SECOND]),
-            (EffectKind::ToolBatch, CrashCase::Unrecorded) => {
-                (&[BATCH_FIRST], &[BATCH_SECOND], &[])
-            }
-            (EffectKind::ChildStart, CrashCase::Recorded) => (&[CHILD], &[], &[]),
-            (EffectKind::ChildStart, CrashCase::Unrecorded) => (&[], &[CHILD], &[]),
-        };
+    let (recorded, unrecorded): (&[&str], &[&str]) = match scenario.case {
+        CrashCase::Recorded => (scenario.kind.effects(), &[]),
+        CrashCase::Unrecorded => (&[], scenario.kind.effects()),
+    };
     for effect in recorded {
         assert_eq!(
             probe.runs(effect).len(),
@@ -741,12 +670,6 @@ fn assert_crash_precondition(scenario: &Scenario) -> BTreeMap<&'static str, usiz
             probe.observed(Phase::Crashing, effect)
         );
     }
-    for effect in unissued {
-        assert!(
-            probe.runs(effect).is_empty(),
-            "{name}: `{effect}` was not issued before the crash"
-        );
-    }
     scenario
         .kind
         .effects()
@@ -762,12 +685,8 @@ fn expected_after_replay(scenario: &Scenario, effect: &'static str, at_crash: us
         // The start is keyed by its start key: a re-drive of either case
         // starts no second run of the child.
         (EffectKind::ChildStart, _, _) => at_crash,
-        // The first call of the batch was recorded in both cases.
-        (EffectKind::ToolBatch, _, BATCH_FIRST) => at_crash,
-        (_, CrashCase::Recorded, _) => {
-            // The unissued second call runs for the first time.
-            if at_crash == 0 { 1 } else { at_crash }
-        }
+        // The recorded effect is served, never run again.
+        (_, CrashCase::Recorded, _) => at_crash,
         // The unrecorded effect never answered, so the re-drive runs it once
         // more.
         (_, CrashCase::Unrecorded, _) => at_crash + 1,

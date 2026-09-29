@@ -19,7 +19,6 @@ use lash_sansio::llm::types::LlmResponse;
 pub fn test_standard_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
     vec![Arc::new(TestProtocolFactory {
         id: "test_protocol",
-        include_batch: true,
         decode_code_create_options: false,
         session_override: None,
         code_executor: None,
@@ -33,7 +32,6 @@ pub fn test_standard_protocol_factory_with_runtime_state(
 ) -> Arc<dyn PluginFactory> {
     Arc::new(TestProtocolFactory {
         id: "test_protocol",
-        include_batch: true,
         decode_code_create_options: false,
         session_override: Some(session),
         code_executor,
@@ -55,7 +53,6 @@ pub fn test_plugin_host(factories: Vec<Arc<dyn PluginFactory>>) -> crate::Plugin
 pub fn test_code_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
     vec![Arc::new(TestProtocolFactory {
         id: "protocol_code",
-        include_batch: false,
         decode_code_create_options: true,
         session_override: None,
         code_executor: None,
@@ -64,7 +61,6 @@ pub fn test_code_protocol_factories() -> Vec<Arc<dyn PluginFactory>> {
 
 struct TestProtocolFactory {
     id: &'static str,
-    include_batch: bool,
     decode_code_create_options: bool,
     session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
     code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
@@ -78,7 +74,6 @@ impl PluginFactory for TestProtocolFactory {
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
         Ok(Arc::new(TestProtocolPlugin {
             id: self.id,
-            include_batch: self.include_batch,
             decode_code_create_options: self.decode_code_create_options,
             session_override: self.session_override.clone(),
             code_executor: self.code_executor.clone(),
@@ -88,7 +83,6 @@ impl PluginFactory for TestProtocolFactory {
 
 struct TestProtocolPlugin {
     id: &'static str,
-    include_batch: bool,
     decode_code_create_options: bool,
     session_override: Option<Arc<dyn ProtocolSessionPlugin>>,
     code_executor: Option<Arc<dyn crate::plugin::CodeExecutorPlugin>>,
@@ -108,9 +102,6 @@ impl SessionPlugin for TestProtocolPlugin {
             }))?;
         if let Some(code_executor) = self.code_executor.as_ref() {
             reg.execution().code_executor(code_executor.clone())?;
-        }
-        if self.include_batch {
-            reg.tools().orchestrating(test_batch_orchestrating_tool())?;
         }
         reg.protocol()
             .protocol_driver(Arc::new(TestProtocolDriver))?;
@@ -175,177 +166,6 @@ fn default_test_code_termination() -> serde_json::Value {
         "kind": "finish_required",
         "schema": null,
     })
-}
-
-/// The test `batch` tool registers in the runtime-owned orchestration lane,
-/// exactly like `lash-protocol-standard`'s: nesting tool dispatch is not
-/// something a recorded leaf attempt can do.
-#[expect(
-    unsafe_code,
-    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
-)]
-fn test_batch_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef {
-    let implementation: Arc<
-        dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
-    > = Arc::new(TestProtocolBatchTool);
-    // SAFETY: lash-core owns this test-only batch contract and its body.
-    unsafe {
-        crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(implementation)
-    }
-}
-
-struct TestProtocolBatchTool;
-
-#[async_trait]
-impl crate::tool_provider::orchestration::OrchestratingToolImplementation
-    for TestProtocolBatchTool
-{
-    fn manifest(&self) -> crate::ToolManifest {
-        test_batch_tool_definition().manifest()
-    }
-
-    fn contract(&self) -> Arc<crate::ToolContract> {
-        Arc::new(test_batch_tool_definition().contract())
-    }
-
-    async fn execute(
-        &self,
-        args: &serde_json::Value,
-        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolOutcome {
-        execute_test_batch(context, args).await
-    }
-}
-
-/// Minimal `batch` tool definition used by lash's own tests. Mirrors the
-/// standard protocol plugin's batch schema, but lives here so lash's tests
-/// don't need a dev-dep on that plugin crate.
-fn test_batch_tool_definition() -> crate::ToolDefinition {
-    crate::ToolDefinition::raw(
-        "tool:batch",
-        "batch",
-        "Execute up to 25 independent tool calls concurrently.",
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "tool_calls": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 25,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "tool": { "type": "string" },
-                            "parameters": { "type": "object", "additionalProperties": true }
-                        },
-                        "required": ["tool", "parameters"],
-                        "additionalProperties": false
-                    }
-                }
-            },
-            "required": ["tool_calls"],
-            "additionalProperties": false,
-        }),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    )
-}
-
-/// Minimal batch executor used by lash's own tests (mirrors the
-/// behavior of `lash-protocol-standard`'s `execute_batch_tool_call`).
-async fn execute_test_batch(
-    context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    args: &serde_json::Value,
-) -> crate::ToolOutcome {
-    const MAX: usize = 25;
-    let Some(raw_calls) = args.get("tool_calls").and_then(|v| v.as_array()) else {
-        return crate::ToolOutcome::err_fmt("Missing required parameter: tool_calls");
-    };
-    if raw_calls.is_empty() {
-        return crate::ToolOutcome::err_fmt("Invalid tool_calls: expected at least one call");
-    }
-
-    let mut results: Vec<lash_sansio::BatchResultRow> = Vec::new();
-    let mut parallel_specs = Vec::new();
-    for (index, item) in raw_calls.iter().enumerate().take(MAX) {
-        let Some(obj) = item.as_object() else {
-            return crate::ToolOutcome::err_fmt(format_args!(
-                "Invalid tool_calls[{index}]: expected object with tool and parameters"
-            ));
-        };
-        let Some(tool) = obj
-            .get("tool")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-        else {
-            return crate::ToolOutcome::err_fmt(format_args!(
-                "Invalid tool_calls[{index}].tool: expected non-empty string"
-            ));
-        };
-        if tool == "batch" {
-            results.push(lash_sansio::BatchResultRow::failure(
-                index,
-                tool,
-                serde_json::json!("Tool 'batch' is not allowed inside batch"),
-            ));
-            continue;
-        }
-        let parameters = obj
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        let Some(manifest) = context.callable_tool_manifest(tool) else {
-            results.push(lash_sansio::BatchResultRow::failure(
-                index,
-                tool,
-                serde_json::json!(format!("Tool '{tool}' is unavailable in this session")),
-            ));
-            continue;
-        };
-        parallel_specs.push((
-            index,
-            crate::ToolInvocation::new(format!("test-batch:{index}"), manifest.id, parameters),
-        ));
-    }
-
-    let outcomes = context
-        .call_tool_batch(
-            parallel_specs
-                .iter()
-                .map(|(_, invocation)| invocation.clone())
-                .collect(),
-        )
-        .await;
-    for ((index, invocation), outcome) in parallel_specs.into_iter().zip(outcomes) {
-        let tool_label = invocation.tool_id.to_string();
-        let tool_record = outcome.record.unwrap_or(crate::ToolCallRecord {
-            call_id: Some(invocation.id),
-            tool: tool_label,
-            args: invocation.args,
-            output: outcome.output,
-        });
-        let value = tool_record.output.value_for_projection();
-        results.push(if tool_record.output.is_success() {
-            lash_sansio::BatchResultRow::success(index, tool_record.tool, value)
-        } else {
-            lash_sansio::BatchResultRow::failure(index, tool_record.tool, value)
-        });
-    }
-
-    for overflow_index in MAX..raw_calls.len() {
-        results.push(lash_sansio::BatchResultRow::failure(
-            overflow_index,
-            raw_calls
-                .get(overflow_index)
-                .and_then(|item| item.get("tool"))
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown"),
-            serde_json::json!("Maximum of 25 tool calls allowed in batch"),
-        ));
-    }
-
-    results.sort_by_key(|row| row.index);
-    crate::ToolOutcome::ok(serde_json::json!({ "results": results }))
 }
 
 struct TestProtocolDriver;

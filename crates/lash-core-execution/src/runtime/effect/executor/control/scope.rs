@@ -78,8 +78,8 @@ pub struct ScopedEffectController<'run> {
 ///   the recorded run did not dispatch it there and nothing may be dispatched
 ///   live inside a recorded run. A write outside the namespace — the call's
 ///   presentation, keyed by its call id — passes: the recorded run may have
-///   made it with nothing under the namespace (an orchestrating body that
-///   issued no nested effect, a call settled in preparation), and the host
+///   made it with nothing under the namespace (a call settled in
+///   preparation), and the host
 ///   judges it against its own record (FIG-3680).
 ///
 /// A command the journal holds while it still holds entries beyond it is

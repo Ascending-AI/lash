@@ -173,8 +173,8 @@ pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 6;
 #[serde(deny_unknown_fields)]
 pub struct ToolUsageDelta {
     /// Which attempt of the invocation made the spend. Attempts are numbered
-    /// from 1; `0` names a spend made outside any attempt frame (the
-    /// orchestrating lane, which is coordination and has no `ToolAttempt`).
+    /// from 1; `0` names a spend the child aggregate recorded itself rather
+    /// than through an attempt's sink.
     pub attempt: u32,
     /// The nested call this spend belongs to.
     pub llm_call_id: LlmCallId,
@@ -429,9 +429,7 @@ pub(crate) fn settlement_possession(
 ///
 /// * A **child aggregate** (`new`) accepts already-stamped deltas through
 ///   [`extend`](ToolUsageLedger::extend) as each journaled attempt outcome is
-///   consumed, and also records spends made outside any attempt frame — the
-///   orchestrating lane has no `ToolAttempt`, so its `record` stamps attempt
-///   `0`.
+///   consumed; a spend it records itself stamps attempt `0`.
 /// * An **attempt sink** (`for_attempt`) is installed on the dispatch context's
 ///   direct-completion client for one `ToolAttempt` and stamps every spend it
 ///   sees with that attempt's ordinal, so the journaled capture attributes the
@@ -450,8 +448,7 @@ pub(crate) fn settlement_possession(
 pub struct ToolUsageLedger {
     facts: Arc<Mutex<Vec<ToolUsageDelta>>>,
     /// The attempt ordinal every recorded spend is stamped with. `0` for an
-    /// aggregate or a spend made outside any attempt frame; attempts are
-    /// numbered from 1.
+    /// aggregate; attempts are numbered from 1.
     attempt: u32,
 }
 

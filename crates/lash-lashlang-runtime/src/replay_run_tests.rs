@@ -365,8 +365,8 @@ fn a_key_fence_leaves_keys_outside_the_namespace_to_the_host() {
 
 /// FIG-3680: a command the journal holds nothing for while it holds entries
 /// beyond it refuses a write under the run's namespace, and one that names no
-/// key, but leaves a write outside the namespace — the presentation of an
-/// orchestrating call whose body issued no nested effect — to the host.
+/// key, but leaves a write outside the namespace — the presentation of a call
+/// settled in preparation — to the host.
 #[test]
 fn a_refusing_guard_judges_only_the_run_namespace() {
     let run = run_over(vec![key(1, "attempt:1")], Vec::new());

@@ -3,7 +3,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
 
-/// The full-lane group: seven children, one per driver lane.
+/// The full-lane group: six children, one per driver lane.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -55,30 +55,6 @@ fn lane_group(
             cancellation.clone(),
         ),
     );
-    // Rank 7 is the same-ID-orchestrator probe: a Granted admission on the
-    // id the tool registry holds as orchestrating. The lane gate must see
-    // the admission arm, not the registration — the call runs as a leaf
-    // under its grant or it runs an orchestrating body the grant never
-    // described, and the assertions downstream name which happened.
-    let granted_over_orchestrator = child_envelope(
-        scope,
-        group_key,
-        7,
-        leaf_request(
-            scope,
-            session_id,
-            &format!("{group_key}-call-7"),
-            LEAF_ORCHESTRATING,
-            LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-            crate::runtime::effect::ToolChildAdmission::Granted {
-                grant: Box::new(orchestrator_id_grant()),
-            },
-            ToolChildCompletionRouting::Inline,
-            env_ref,
-            parent,
-            cancellation.clone(),
-        ),
-    );
     let children = vec![
         leaf(0, LEAF_PLAIN, ToolChildCompletionRouting::Inline),
         leaf(1, LEAF_RETRY, ToolChildCompletionRouting::Inline),
@@ -86,8 +62,6 @@ fn lane_group(
         granted,
         leaf(4, LEAF_INTENTS, ToolChildCompletionRouting::Inline),
         leaf(5, LEAF_USAGE, ToolChildCompletionRouting::Inline),
-        leaf(6, LEAF_ORCHESTRATING, ToolChildCompletionRouting::Inline),
-        granted_over_orchestrator,
     ];
     crate::RuntimeEffectGroup::try_new(
         crate::RuntimeEffectInvocation::new(
@@ -171,7 +145,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
     });
 
     let mut settlements: Vec<crate::GroupSettlement> = Vec::new();
-    for rank in 0..8 {
+    for rank in 0..6 {
         settlements.push(next_settlement(&scoped, &mut handle, rank).await);
     }
     resolve.await.expect("the resolver task joins");
@@ -187,7 +161,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
             .iter()
             .map(|settlement| settlement.position)
             .collect::<Vec<_>>(),
-        (0..8).collect::<Vec<_>>(),
+        (0..6).collect::<Vec<_>>(),
         "every child settles exactly once, at every rank"
     );
 
@@ -229,16 +203,11 @@ pub async fn tool_children_run_through_the_invocation_driver(
         ),
         "the plain leaf succeeds"
     );
-    // The orchestrating child at rank 6 also calls this leaf nested; every
-    // invocation ran its body exactly once (each run is attempt 1). The total
-    // count is asserted after the orchestrating assertions below.
-    assert!(
-        scenario
-            .observation
-            .executions_of("law_plain")
-            .iter()
-            .all(|run| run.attempt == 1),
-        "no invocation of the plain leaf re-executed its body"
+    let plain_runs = scenario.observation.executions_of("law_plain");
+    assert_eq!(
+        plain_runs.iter().map(|run| run.attempt).collect::<Vec<_>>(),
+        vec![1],
+        "the plain leaf ran its body exactly once"
     );
 
     // The retry leaf: the first attempt's journaled failure is visible as a
@@ -325,75 +294,6 @@ pub async fn tool_children_run_through_the_invocation_driver(
         "the captured delta is the attempt's own spend"
     );
 
-    // The orchestrating leaf: the orchestration lane ran the body directly —
-    // the leaf provider never saw *it* — while the body's nested call ran as
-    // a journaled attempt under the child's own rebound dispatch, and the
-    // durable start it realized is the settlement's possession.
-    //
-    // The one provider execution under this name is the rank-7 child's: a
-    // Granted admission, so the lane gate left it to the leaf provider, which
-    // recorded the grant's execution binding. Had the gate consulted the
-    // registration instead of the admission arm, that call would have run an
-    // orchestrating body and this execution would not exist.
-    let orchestrating_runs = scenario.observation.executions_of("law_orchestrating");
-    assert_eq!(
-        orchestrating_runs.len(),
-        1,
-        "only the same-ID grant reached the leaf provider: {orchestrating_runs:?}"
-    );
-    assert_eq!(
-        orchestrating_runs[0].execution_binding,
-        serde_json::json!({ "route": "granted-over-orchestrator" }),
-        "the same-ID call executed under its recorded grant, not the orchestrating registration"
-    );
-    let orchestrating = &outcomes[6];
-    if !orchestrating.0.record.output.is_success() {
-        panic!("the orchestrating leaf settles: {:?}", orchestrating.0)
-    }
-    let value = orchestrating.0.record.output.value_for_projection();
-    assert_eq!(
-        value["nested_ok"],
-        serde_json::json!(true),
-        "the body's nested call executed through the child's rebound dispatch"
-    );
-    let started_id = value["started"]
-        .as_str()
-        .and_then(|started| crate::ProcessId::parse(started).ok())
-        .unwrap_or_else(|| {
-            panic!("the body's durable start is part of its settled output: {value}")
-        });
-    assert_eq!(
-        orchestrating.1.possession,
-        vec![started_id],
-        "an orchestrating body's realized start rides the settlement's possession"
-    );
-    assert_eq!(
-        scenario.observation.executions_of("law_plain").len(),
-        2,
-        "the plain leaf ran once as its own child and once nested under the \
-         orchestrating body"
-    );
-
-    // The same-ID-orchestrator child: the recorded grant decided the lane, so
-    // the call settled as a leaf — the leaf-shaped output, no started process
-    // in its possession, and none of the orchestrating body's side effects.
-    let granted_over_orchestrator = &outcomes[7];
-    let granted_value = granted_over_orchestrator
-        .0
-        .record
-        .output
-        .value_for_projection();
-    assert_eq!(
-        granted_value["leaf"],
-        serde_json::json!("orchestrating-as-leaf"),
-        "the granted call ran the leaf body, not the orchestrating one: {granted_value}"
-    );
-    assert!(
-        granted_over_orchestrator.1.possession.is_empty(),
-        "a granted leaf starts nothing: possession stays empty where an \
-         orchestrating body would have recorded its start"
-    );
-
     // Replay: a second open of the same group serves the journaled
     // settlements — the receipts and the possession are the recorded ones,
     // not re-executions.
@@ -402,11 +302,11 @@ pub async fn tool_children_run_through_the_invocation_driver(
         .open_effect_group(group)
         .await
         .expect("a recorded group reopens to serve its journaled settlements");
-    let mut replayed_orchestrating = None;
-    for rank in 0..8 {
+    let mut replayed_intents = None;
+    for rank in 0..6 {
         let settlement = next_settlement(&scoped, &mut replay_handle, rank).await;
-        if settlement.position == 6 {
-            replayed_orchestrating = Some(settlement.outcome);
+        if settlement.position == 4 {
+            replayed_intents = Some(settlement.outcome);
         }
     }
     scoped
@@ -417,16 +317,16 @@ pub async fn tool_children_run_through_the_invocation_driver(
     let Ok(crate::RuntimeEffectOutcome::ToolInvocation {
         settlement: replayed,
         ..
-    }) = replayed_orchestrating.expect("rank 6 re-serves on replay")
+    }) = replayed_intents.expect("rank 4 re-serves on replay")
     else {
-        panic!("rank 6 replayed to something that is not a tool invocation")
+        panic!("rank 4 replayed to something that is not a tool invocation")
     };
     assert_eq!(
-        replayed.possession, outcomes[6].1.possession,
+        replayed.possession, outcomes[4].1.possession,
         "the settlement's possession is the recorded one after replay"
     );
     assert_eq!(
-        replayed.model_return, outcomes[6].1.model_return,
+        replayed.model_return, outcomes[4].1.model_return,
         "the settlement's recorded return is unchanged on replay"
     );
 }

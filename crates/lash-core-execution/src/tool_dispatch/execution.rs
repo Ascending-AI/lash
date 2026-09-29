@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::plugin::ToolResultHookContext;
 use crate::{PreparedToolCall, ToolContext, ToolFailureClass, ToolManifest, ToolOutcome};
-use futures_util::FutureExt as _;
 
 use super::context::ToolDispatchOutcome;
 use super::context::{
@@ -116,8 +115,7 @@ async fn announce_pending_park(
         return Ok(pending);
     };
     match context
-        .process_events()
-        .emit_request(announcement.into_append_request())
+        .append_process_event(announcement.into_append_request())
         .await
     {
         Ok(_) => Ok(pending),
@@ -127,156 +125,6 @@ async fn announce_pending_park(
             format!("declared park announcement could not be appended: {err}"),
         )),
     }
-}
-
-/// Runs an authored process-replay tool body without creating a ToolAttempt
-/// frame. Any durable operations the body issues are consequently direct
-/// children of the enclosing process replay and must be awaited by the body.
-pub async fn execute_orchestrating_tool<'run>(
-    context: &ToolDispatchContext<'run>,
-    prepared: PreparedToolCall,
-    tool_context: ToolContext<'run>,
-) -> ToolDispatchOutcome {
-    let started = context.clock.now();
-    let Some(tool_name) =
-        super::preparation::resolve_callable_manifest_by_id(context, &prepared.tool_id)
-            .map(|manifest| manifest.name)
-    else {
-        return unavailable_prepared_tool_outcome(context, prepared).await;
-    };
-    let args = prepared.args.clone();
-    let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
-    let orchestration_context =
-        crate::tool_provider::orchestration::OrchestrationContext::new(tool_context);
-    let result = std::panic::AssertUnwindSafe(async {
-        let Some(registry) = context.tool_registry.as_deref() else {
-            return ToolOutcome::err_fmt("orchestrating registration is missing its tool registry");
-        };
-        registry
-            .execute_orchestrating_by_id(&prepared.tool_id, &prepared.args, &orchestration_context)
-            .await
-    })
-    .catch_unwind()
-    .await
-    .unwrap_or_else(|payload| {
-        let message = crate::panic_containment::payload_message(payload.as_ref());
-        crate::panic_containment::enforce_loudness(payload);
-        ToolOutcome::failure(crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "tool_panicked",
-            message,
-        ))
-    });
-    let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
-    let result = finalize_tool_result_with_execution_context(
-        context,
-        &prepared.call_id,
-        &tool_name,
-        &args,
-        result,
-        duration_ms,
-    )
-    .await;
-    let result = match result {
-        result @ ToolOutcome::Done(_) => result,
-        ToolOutcome::Pending(_) => ToolOutcome::failure(crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "orchestrating_tool_returned_pending",
-            "orchestrating tools must immediately await journaled actions and return a completed result",
-        )),
-    };
-    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
-    outcome.record.call_id = Some(prepared.call_id);
-    outcome
-}
-
-/// Unlike authored orchestration, this is the owner-bound activity of the
-/// process itself and may perform host I/O. It is available only to
-/// `ToolActivation::Internal` process inputs, never to model-facing calls.
-pub async fn execute_internal_process_tool<'run>(
-    context: &ToolDispatchContext<'run>,
-    prepared: PreparedToolCall,
-    tool_context: ToolContext<'run>,
-) -> ToolDispatchOutcome {
-    let started = context.clock.now();
-    let Some(tool_name) =
-        super::preparation::resolve_internal_manifest_by_id(context, &prepared.tool_id)
-            .map(|manifest| manifest.name)
-    else {
-        return unavailable_prepared_tool_outcome(context, prepared).await;
-    };
-    let args = prepared.args.clone();
-    let tool_context = tool_context.with_prepared_payload(prepared.prepared_payload.clone());
-    let internal_context = crate::InternalProcessContext::new(tool_context);
-    let Some(manifest) = context.tools.resolve_manifest_by_id(&prepared.tool_id) else {
-        return unavailable_prepared_tool_outcome(context, prepared).await;
-    };
-    let Some(registry) = context.tool_registry.as_ref() else {
-        return unavailable_prepared_tool_outcome(context, prepared).await;
-    };
-    let result = match std::panic::AssertUnwindSafe(registry.execute_internal_process_tool(
-        crate::InternalProcessToolCall::new(&manifest, &prepared.args, &internal_context),
-    ))
-    .catch_unwind()
-    .await
-    {
-        Ok(Ok(result)) => ToolOutcome::from_output(result.into_output()),
-        Ok(Err(result)) => result,
-        Err(payload) => {
-            let message = crate::panic_containment::payload_message(payload.as_ref());
-            crate::panic_containment::enforce_loudness(payload);
-            ToolOutcome::failure(crate::ToolFailure::runtime(
-                ToolFailureClass::Internal,
-                "tool_panicked",
-                message,
-            ))
-        }
-    };
-    let duration_ms = context.clock.now().duration_since(started).as_millis() as u64;
-    let result = finalize_tool_result_with_execution_context(
-        context,
-        &prepared.call_id,
-        &tool_name,
-        &args,
-        result,
-        duration_ms,
-    )
-    .await;
-    let result = match result {
-        result @ ToolOutcome::Done(_) => result,
-        ToolOutcome::Pending(_) => ToolOutcome::failure(crate::ToolFailure::runtime(
-            ToolFailureClass::Internal,
-            "internal_process_tool_returned_pending",
-            "internal process-body tools must return a completed result",
-        )),
-    };
-    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
-    outcome.record.call_id = Some(prepared.call_id);
-    outcome
-}
-
-async fn unavailable_prepared_tool_outcome(
-    context: &ToolDispatchContext<'_>,
-    prepared: PreparedToolCall,
-) -> ToolDispatchOutcome {
-    let tool_name = context
-        .tools
-        .resolve_manifest_by_id(&prepared.tool_id)
-        .map(|manifest| manifest.name)
-        .unwrap_or(prepared.tool_name);
-    let mut unavailable = normalized_outcome(
-        context,
-        tool_name,
-        prepared.args,
-        runtime_failure(
-            ToolFailureClass::Unavailable,
-            "tool_unavailable",
-            "Tool is unavailable in this session",
-        ),
-    )
-    .await;
-    unavailable.record.call_id = Some(prepared.call_id);
-    unavailable
 }
 
 #[cfg(any(test, feature = "testing"))]

@@ -46,7 +46,9 @@ pub use crate::tool_dispatch::{
     CheckpointMessageBuffer, ToolCallLaunch, ToolTriggerOutcomeBuffer, execute_final_tool_intents,
     resolve_callable_manifest_by_id,
 };
-pub use crate::tool_dispatch::{
+/// The kernel's single-call entries under the dispatch state a [`crate::testing::ToolCallFixture`]
+/// configures: the entries themselves take crate-private state.
+pub use lash_core_execution::testing::kernel_internals::{
     coordinate_prepared_tool_call_launch_with_execution_context, execute_once,
 };
 

@@ -192,10 +192,10 @@ impl LashlangReplayNamespace {
 /// apart: the shape of the rows at its ordinal.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandShape {
-    /// A tool call: `{command}:attempt:{n}` and its sub-rows, or an
-    /// orchestrating tool's nested rows — a process it started
-    /// (`{command}:process:start:{id}`) and awaited
-    /// (`{command}:process:await:{id}`).
+    /// A tool call: `{command}:attempt:{n}` and its sub-rows, its deferred
+    /// `{command}:await`, and a declared start's rows — the start
+    /// (`{command}:process:start:{key}`) and its armed terminal
+    /// (`{command}:process:attach-terminal:{id}:{key}`).
     ToolCall,
     /// A journaled value at the command's own key: a runtime value
     /// (`Date.now()`, `Math.random()`) or a trigger operation.
@@ -316,13 +316,6 @@ impl RecordedRun {
                     }
                     (Some(row), None) => shape = Some(row),
                     (Some(row), Some(seen)) if row == seen => {}
-                    // An orchestrating tool call awaits the process it
-                    // started under its own ordinal: its await rows are the
-                    // call's, not a separate handle await.
-                    (Some(CommandShape::ToolCall), Some(CommandShape::AwaitHandle)) => {
-                        shape = Some(CommandShape::ToolCall);
-                    }
-                    (Some(CommandShape::AwaitHandle), Some(CommandShape::ToolCall)) => {}
                     (Some(row), Some(seen)) => {
                         unreadable = Some(format!(
                             "rows of a {} and a {} share it (`{key}`)",
@@ -580,9 +573,9 @@ impl LashlangReplayRun {
     ///   [`CommandAdmission::RefuseWrites`] — the command may run, but its
     ///   first journal write under the namespace is refused, because the
     ///   recorded run did not write here and nothing may be dispatched live
-    ///   inside it. A write outside the namespace is the host's to judge: an
-    ///   orchestrating call whose body issued no nested effect wrote only its
-    ///   presentation, and replays by serving it (FIG-3680).
+    ///   inside it. A write outside the namespace is the host's to judge: a
+    ///   call settled in preparation wrote only its presentation, and replays
+    ///   by serving it (FIG-3680).
     /// * The journal holds nothing at or beyond it, or checks itself by
     ///   position: [`CommandAdmission::Live`].
     pub fn enter(

@@ -472,8 +472,8 @@ impl TriggerRouter {
     ///
     /// This is deliberately not a journaled wrapper around [`Self::emit`]:
     /// delivery starts are themselves effects, and nesting them inside an outer
-    /// effect is what [`crate::ToolContext::triggers`] refuses inside an
-    /// atomic tool attempt.
+    /// effect is what an atomic tool attempt cannot do: its body declares the
+    /// trigger as an intent instead.
     pub async fn emit_recorded(
         &self,
         request: TriggerOccurrenceRequest,

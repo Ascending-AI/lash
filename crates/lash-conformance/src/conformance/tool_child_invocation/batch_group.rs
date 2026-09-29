@@ -29,9 +29,8 @@ async fn run_batch(
     calls: impl FnOnce(&crate::SessionId) -> Vec<crate::ToolInvocation>,
 ) -> (crate::SessionId, crate::session::ToolBatchReplies) {
     let session_id = crate::SessionId::from(format!("{prefix}-batch-group"));
-    // Call ids carry the session id: an orchestrating leaf derives the process
-    // it starts from its call id, so a durable registry shared across runs
-    // never sees two starts under one name.
+    // Call ids carry the session id, so a durable registry shared across
+    // runs never sees two calls under one name.
     let calls = calls(&session_id);
     let scenario = scenario(
         fixture,
@@ -48,23 +47,15 @@ async fn run_batch(
         .scoped_static(admitted)
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
-    let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
-        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>,
-        vec![law_orchestrating_tool()],
+    let tool_registry = crate::ToolRegistry::from_tool_provider(
+        Arc::clone(&scenario.provider) as Arc<dyn crate::ToolProvider>
     )
-    .expect("the law's leaf provider and orchestrating tool register disjoint ids");
+    .expect("the law's leaf provider registers");
     let mut definitions = leaf_definitions();
     definitions.push(crate::ToolDefinition::raw(
         LEAF_FAIL,
         LEAF_FAIL.trim_start_matches("tool:"),
         "conformance failing leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
         crate::ToolDefinition::default_input_schema(),
         serde_json::json!({ "type": "object", "additionalProperties": true }),
     ));
@@ -102,8 +93,8 @@ async fn run_batch(
 /// One batch of every admission shape yields one reply per input.
 ///
 /// The calls cover every admission shape a batch carries — a catalog leaf, a
-/// granted leaf, an orchestrating leaf, a leaf whose tool fails, and a leaf
-/// whose tool id resolves to nothing — so the law proves the group consumer
+/// granted leaf, a leaf whose tool fails, and a leaf whose tool id resolves
+/// to nothing — so the law proves the group consumer
 /// keeps preparation-prefix settlement (ADR 0099 §10 L5), per-leaf replies
 /// keyed by input index, and the settlement-order contract: a permutation of
 /// `0..n` whose preparation-settled positions lead.
@@ -131,11 +122,6 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
             )
             .with_execution_grant(leaf_grant()),
             crate::ToolInvocation::new(
-                format!("{session}-orchestrating"),
-                crate::ToolId::from(LEAF_ORCHESTRATING),
-                serde_json::json!({ "leaf": "orchestrating" }),
-            ),
-            crate::ToolInvocation::new(
                 format!("{session}-fail"),
                 crate::ToolId::from(LEAF_FAIL),
                 serde_json::json!({ "leaf": "fail" }),
@@ -150,8 +136,8 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
 
     let (session, grouped) = run_batch(fixture, &host, prefix, calls).await;
 
-    assert_eq!(grouped.replies.len(), 5, "the group answers every input");
-    for (index, (suffix, reply)) in ["plain", "granted", "orchestrating", "fail", "absent"]
+    assert_eq!(grouped.replies.len(), 4, "the group answers every input");
+    for (index, (suffix, reply)) in ["plain", "granted", "fail", "absent"]
         .into_iter()
         .zip(grouped.replies.iter())
         .enumerate()
@@ -177,17 +163,12 @@ pub async fn an_all_group_of_tool_children_yields_the_batch_replies(
         "the granted leaf answers its own output"
     );
     assert!(
-        grouped.replies[2].output.is_success(),
-        "the orchestrating leaf settles through its lane: {:?}",
-        grouped.replies[2].output
-    );
-    assert!(
-        !grouped.replies[3].output.is_success(),
+        !grouped.replies[2].output.is_success(),
         "the failing leaf's rejection is its reply, not an infrastructure failure"
     );
-    let absent = grouped.replies[4].output.value_for_projection();
+    let absent = grouped.replies[3].output.value_for_projection();
     assert!(
-        !grouped.replies[4].output.is_success() && absent.to_string().contains("unavailable"),
+        !grouped.replies[3].output.is_success() && absent.to_string().contains("unavailable"),
         "the unresolved leaf settles during preparation as unavailable: {absent}"
     );
 

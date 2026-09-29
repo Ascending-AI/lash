@@ -14,20 +14,16 @@ use self::facade_ops::ToolRegistryFacadeOps;
 use lash_core_store::tool_state::facade_ops::ToolStateFacadeOps;
 
 mod state;
-pub(crate) use state::{
-    LeafToolSourceExecutor, ToolSourceCapture, ToolSourceExecution, ToolSourceExecutor,
-};
+pub(crate) use state::{LeafToolSourceExecutor, ToolSourceCapture, ToolSourceExecutor};
 pub use state::{PLUGIN_TOOL_SOURCE_ID, ToolSourceHandle, ToolState, ToolStateEntry};
 mod sources;
-use sources::{
-    InternalProcessToolSource, OrchestratingToolSource, ToolBinding, ToolProviderSource,
-};
+use sources::{ToolBinding, ToolProviderSource};
 mod registry_types;
+pub(crate) use registry_types::ToolSourceKey;
 pub use registry_types::{
     ReconfigureError, SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy,
     ToolSurfaceOpenMode,
 };
-pub(crate) use registry_types::{ToolRegistrationKind, ToolSourceKey};
 use registry_types::{
     ToolRegistryEntry, ToolRegistryInner, ToolRegistryState, ToolSurface, ToolSurfaceInsertError,
 };
@@ -67,7 +63,6 @@ where
                 "name": manifest.name,
                 "description": manifest.description,
                 "bindings": manifest.bindings,
-                "activation": manifest.activation,
                 "inline": manifest.inline,
             });
             projected

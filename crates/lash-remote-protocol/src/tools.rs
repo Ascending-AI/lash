@@ -1,4 +1,4 @@
-//! Tool grants: schemas, call-path bindings, activation, and retry policies.
+//! Tool grants: schemas, call-path bindings, and retry policies.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -22,8 +22,6 @@ pub struct RemoteToolGrant {
     pub output_contract: RemoteToolOutputContract,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub examples: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub activation: Option<RemoteToolActivation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub argument_projection: Option<RemoteToolArgumentProjectionPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -181,14 +179,6 @@ fn validate_call_path_binding(
         });
     }
     Ok(())
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteToolActivation {
-    #[default]
-    Always,
-    Internal,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

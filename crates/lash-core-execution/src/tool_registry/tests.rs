@@ -32,12 +32,6 @@ struct CountingPrepareProvider {
     prepares: Arc<AtomicUsize>,
     defer_queries: Arc<AtomicUsize>,
 }
-struct LeafBatchTool;
-struct LazyLeafBatchTool;
-struct LazyOrchestratingBatchSource {
-    definition: crate::facade_support::OrchestratingToolDef,
-}
-struct TestBatchOrchestratingTool;
 struct BlockingLiveTool {
     entered: Arc<tokio::sync::Semaphore>,
     release: Arc<tokio::sync::Semaphore>,
@@ -139,34 +133,6 @@ async fn execute_leaf_by_id(
     )
 }
 
-#[tokio::test]
-async fn internal_execution_route_refuses_non_internal_activation() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("registry");
-    let tool = test_tool_context();
-    let context = crate::InternalProcessContext::__for_testing(&tool);
-
-    let manifest = registry
-        .resolve_manifest_by_id(&tool_id("mock_tool"))
-        .expect("mock tool manifest resolves");
-    let result = registry
-        .execute_internal_process_tool(crate::InternalProcessToolCall::new(
-            &manifest,
-            &serde_json::json!({}),
-            &context,
-        ))
-        .await;
-
-    let Err(result) = result else {
-        panic!("an Always-activated tool must not cross the internal route")
-    };
-    assert!(
-        result.as_output().value_for_projection()["message"]
-            .as_str()
-            .is_some_and(|message| message.contains("not activated for internal execution")),
-        "the class-boundary refusal must be explicit: {result:?}"
-    );
-}
-
 #[async_trait::async_trait]
 impl ToolProvider for MockTool {
     fn tool_manifests(&self) -> Vec<ToolManifest> {
@@ -182,137 +148,6 @@ impl ToolProvider for MockTool {
     }
 }
 
-#[async_trait::async_trait]
-impl ToolProvider for LeafBatchTool {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        manifests(vec![test_tool("batch", "leaf batch")])
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        contract_from(vec![test_tool("batch", "leaf batch")], name)
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        ToolOutcome::ok(serde_json::json!("unreachable")).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolProvider for LazyLeafBatchTool {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        Vec::new()
-    }
-
-    fn resolve_manifest(&self, name: &str) -> Option<ToolManifest> {
-        (name == "batch").then(|| test_tool("batch", "lazy leaf batch").manifest())
-    }
-
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        (id == &tool_id("batch")).then(|| test_tool("batch", "lazy leaf batch").manifest())
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        contract_from(vec![test_tool("batch", "lazy leaf batch")], name)
-    }
-
-    async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        ToolOutcome::ok(json!("leaf")).into()
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolSourceExecutor for LazyOrchestratingBatchSource {
-    fn id(&self) -> &str {
-        "lazy-orchestrating"
-    }
-
-    fn snapshot_execution_source(
-        &self,
-        _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(Self {
-            definition: self.definition.clone(),
-        }))
-    }
-
-    fn source_key(&self) -> ToolSourceKey {
-        ToolSourceKey::Orchestrating(tool_id("batch"))
-    }
-
-    fn registration_kind(&self) -> ToolRegistrationKind {
-        ToolRegistrationKind::Orchestrating
-    }
-
-    fn advertised_tools(&self) -> Vec<ToolManifest> {
-        Vec::new()
-    }
-
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        (id == &tool_id("batch")).then(|| test_tool("batch", "lazy orchestrating batch").manifest())
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        contract_from(vec![test_tool("batch", "lazy orchestrating batch")], name)
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
-    }
-
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Orchestrating(&self.definition)
-    }
-}
-
-#[async_trait::async_trait]
-impl crate::facade_support::OrchestratingToolImplementation for TestBatchOrchestratingTool {
-    fn manifest(&self) -> ToolManifest {
-        test_tool("batch", "orchestrating batch").manifest()
-    }
-
-    fn contract(&self) -> Arc<ToolContract> {
-        Arc::new(test_tool("batch", "orchestrating batch").contract())
-    }
-
-    async fn execute(
-        &self,
-        _args: &serde_json::Value,
-        context: &crate::facade_support::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::ok(json!({ "session_id": context.session_id() }))
-    }
-}
-
-fn test_batch_orchestrating_tool() -> crate::facade_support::OrchestratingToolDef {
-    crate::facade_support::OrchestratingToolDef::new(Arc::new(TestBatchOrchestratingTool))
-}
-
-#[test]
-fn leaf_and_orchestrating_tool_id_collision_is_typed() {
-    let error = match ToolRegistry::from_tool_registrations(
-        vec![(
-            "orchestrating:tool:batch".to_string(),
-            vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
-        )],
-        Vec::new(),
-        vec![test_batch_orchestrating_tool()],
-    ) {
-        Ok(_) => panic!("cross-lane tool ids must be rejected"),
-        Err(error) => error,
-    };
-    assert!(matches!(
-        error,
-        ReconfigureError::CrossLaneToolIdCollision {
-            ref tool_id,
-            ref leaf_source_id,
-        } if tool_id.as_str() == "tool:batch"
-            && leaf_source_id == "orchestrating:tool:batch"
-    ));
-}
-
 #[test]
 fn reconciled_combined_collision_reports_duplicate_name() {
     let manifest = test_tool("combined", "combined").manifest();
@@ -320,19 +155,14 @@ fn reconciled_combined_collision_reports_duplicate_name() {
     surface
         .insert(ToolRegistryEntry::new(
             manifest.clone(),
-            ToolSourceKey::Leaf("source".to_string()),
-            ToolRegistrationKind::Leaf,
+            ToolSourceKey::new("source"),
         ))
         .expect("initial tool");
 
     let error = insert_result_entry(
         &mut surface,
         manifest.id.clone(),
-        ToolRegistryEntry::new(
-            manifest,
-            ToolSourceKey::Leaf("source".to_string()),
-            ToolRegistrationKind::Leaf,
-        ),
+        ToolRegistryEntry::new(manifest, ToolSourceKey::new("source")),
     )
     .expect_err("combined id and name collision");
 
@@ -345,64 +175,12 @@ fn reconciled_combined_collision_reports_duplicate_name() {
 }
 
 #[test]
-fn registration_kind_alone_selects_orchestration_dispatch() {
-    let leaf = ToolRegistry::from_tool_provider_sources(vec![(
-        "subagents".to_string(),
-        vec![Arc::new(LeafBatchTool) as Arc<dyn ToolProvider>],
-    )])
-    .expect("leaf ids and plugin ids have no reserved-name semantics");
-    assert!(
-        !leaf.is_orchestrating_tool(&tool_id("batch")),
-        "an impostor plugin id cannot change a leaf registration's kind"
-    );
-
-    let orchestrating = ToolRegistry::from_tool_registrations(
-        Vec::new(),
-        Vec::new(),
-        vec![test_batch_orchestrating_tool()],
-    )
-    .expect("typed orchestrating registration");
-    assert!(orchestrating.is_orchestrating_tool(&tool_id("batch")));
-}
-
-#[test]
-fn pre_cutover_snapshot_without_registration_kind_is_refused() {
-    let source = ToolRegistry::from_tool_registrations(
-        Vec::new(),
-        Vec::new(),
-        vec![test_batch_orchestrating_tool()],
-    )
-    .expect("source registry");
-    let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
-    let legacy_entry = legacy_blob["tools"]["tool:batch"]
-        .as_object_mut()
-        .expect("serialized batch entry");
-    assert_eq!(
-        legacy_entry.remove("registration_kind"),
-        Some(json!("orchestrating")),
-        "the compatibility probe strips exactly the field the cutover requires"
-    );
-
-    let error =
-        serde_json::from_value::<ToolState>(legacy_blob).expect_err("deserialize must refuse");
-    assert!(
-        error.to_string().contains("registration_kind"),
-        "the refusal must name the missing field: {error}"
-    );
-}
-
-#[test]
 fn pre_cutover_snapshot_without_orphaned_is_refused() {
-    let source = ToolRegistry::from_tool_registrations(
-        Vec::new(),
-        Vec::new(),
-        vec![test_batch_orchestrating_tool()],
-    )
-    .expect("source registry");
+    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
     let mut legacy_blob = serde_json::to_value(source.export_state()).expect("serialize state");
-    let legacy_entry = legacy_blob["tools"]["tool:batch"]
+    let legacy_entry = legacy_blob["tools"]["tool:mock_tool"]
         .as_object_mut()
-        .expect("serialized batch entry");
+        .expect("serialized mock tool entry");
     assert_eq!(
         legacy_entry.remove("orphaned"),
         Some(json!(false)),
@@ -414,59 +192,6 @@ fn pre_cutover_snapshot_without_orphaned_is_refused() {
     assert!(
         error.to_string().contains("orphaned"),
         "the refusal must name the missing field: {error}"
-    );
-}
-
-#[tokio::test]
-async fn unadvertised_leaf_cannot_smuggle_an_orchestrating_registration() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(LazyLeafBatchTool))
-        .expect("unadvertised leaf source");
-    let generation = registry.generation();
-    assert!(
-        registry.resolve_manifest("batch").is_none(),
-        "dispatch lookup cannot admit an unadvertised leaf"
-    );
-    assert_eq!(registry.generation(), generation);
-    assert!(!registry.is_orchestrating_tool(&tool_id("batch")));
-
-    registry
-        .upsert_source(Arc::new(OrchestratingToolSource::new(
-            test_batch_orchestrating_tool(),
-        )))
-        .expect("the advertised typed registration establishes the live lane");
-    assert!(
-        registry.is_orchestrating_tool(&tool_id("batch")),
-        "only the live typed source can establish the orchestrating lane"
-    );
-
-    let leaf_route = execute_leaf_by_id(
-        &registry,
-        &tool_id("batch"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert!(
-        !leaf_route.is_success(),
-        "the unadvertised leaf body cannot execute after the typed source is admitted"
-    );
-    assert!(format!("{leaf_route:?}").contains("is an orchestrating tool"));
-
-    let context = crate::facade_support::OrchestrationContext::new(test_tool_context());
-    let orchestrating_route = registry
-        .execute_orchestrating_by_id(&tool_id("batch"), &json!({}), &context)
-        .await;
-    assert!(orchestrating_route.is_success());
-    assert_eq!(
-        orchestrating_route.value_for_projection(),
-        json!({ "session_id": "registry-test" })
-    );
-    assert_eq!(
-        registry
-            .resolve_manifest("batch")
-            .expect("the typed source remains bound")
-            .description,
-        "orchestrating batch"
     );
 }
 
@@ -604,8 +329,8 @@ impl ToolSourceExecutor for ExternalMockSource {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -664,8 +389,8 @@ impl ToolSourceExecutor for ExactResolvingSource {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -713,8 +438,8 @@ impl ToolSourceExecutor for NamedExactSource {
         Ok(PreparedToolCall::identity(call.tool_id, call.pending))
     }
 
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Leaf(self)
+    fn execution(&self) -> &dyn LeafToolSourceExecutor {
+        self
     }
 }
 
@@ -1182,39 +907,6 @@ async fn single_provider_source_refuses_unknown_id_without_calling_the_provider(
         1,
         "the zero-count assertion above is a real refusal, not a prepare route that refuses everything"
     );
-}
-
-#[test]
-fn snapshot_resolution_rejects_lazy_live_sources_from_both_lanes() {
-    let registry = ToolRegistry::empty();
-    registry
-        .upsert_source(Arc::new(ToolProviderSource::new(
-            "lazy-leaf",
-            vec![Arc::new(LazyLeafBatchTool)],
-        )))
-        .expect("lazy leaf source registered");
-    registry
-        .upsert_source(Arc::new(LazyOrchestratingBatchSource {
-            definition: test_batch_orchestrating_tool(),
-        }))
-        .expect("lazy orchestrating source registered");
-
-    let mut tools = BTreeMap::new();
-    tools.insert(
-        tool_id("batch"),
-        ToolStateEntry::new(test_tool("batch", "snapshot batch").manifest()),
-    );
-    let error = registry
-        .apply_state(ToolState::new(registry.generation(), tools))
-        .expect_err("two live registration lanes resolving one id must collide");
-
-    assert!(matches!(
-        error,
-        ReconfigureError::CrossLaneToolIdCollision {
-            ref tool_id,
-            ref leaf_source_id,
-        } if tool_id.as_str() == "tool:batch" && leaf_source_id == "lazy-leaf"
-    ));
 }
 
 #[test]

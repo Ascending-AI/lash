@@ -10,18 +10,6 @@ impl ToolRegistry {
         Ok(registry)
     }
 
-    /// The two registration lanes must have disjoint tool ids.
-    pub fn from_tool_provider_with_orchestrating_tools(
-        provider: Arc<dyn ToolProvider>,
-        orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
-    ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(
-            vec![(PLUGIN_TOOL_SOURCE_ID.to_string(), vec![provider])],
-            Vec::new(),
-            orchestrating_tools,
-        )
-    }
-
     #[cfg(test)]
     pub(crate) fn from_tool_providers(
         providers: Vec<Arc<dyn ToolProvider>>,
@@ -33,36 +21,17 @@ impl ToolRegistry {
     pub(crate) fn from_tool_provider_sources(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
     ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(sources, Vec::new(), Vec::new())
+        Self::from_tool_registrations(sources)
     }
 
     pub(crate) fn from_tool_registrations(
         sources: Vec<(String, Vec<Arc<dyn ToolProvider>>)>,
-        internal_tools: Vec<crate::InternalProcessToolDef>,
-        orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
     ) -> Result<Self, ReconfigureError> {
-        let internal_manifests = internal_tools
-            .iter()
-            .map(crate::InternalProcessToolDef::manifest)
-            .collect::<Vec<_>>();
-        validate_unique_manifests(&internal_manifests)?;
         let registry = Self::empty();
         for (source_id, providers) in sources {
             registry.upsert_source(Arc::new(ToolProviderSource::new(source_id, providers)))?;
         }
-        for definition in internal_tools {
-            registry.upsert_source(Arc::new(InternalProcessToolSource::new(definition)))?;
-        }
-        for definition in orchestrating_tools {
-            registry.upsert_source(Arc::new(OrchestratingToolSource::new(definition)))?;
-        }
         Ok(registry)
-    }
-
-    pub fn from_internal_tools(
-        definitions: Vec<crate::InternalProcessToolDef>,
-    ) -> Result<Self, ReconfigureError> {
-        Self::from_tool_registrations(Vec::new(), definitions, Vec::new())
     }
 
     pub(crate) fn empty() -> Self {
@@ -82,15 +51,6 @@ impl ToolRegistry {
 
     pub fn generation(&self) -> u64 {
         self.inner.read_recover().state.generation
-    }
-
-    pub(crate) fn is_orchestrating_tool(&self, tool_id: &ToolId) -> bool {
-        self.inner
-            .read_recover()
-            .state
-            .surface
-            .get(tool_id)
-            .is_some_and(|entry| entry.registration_kind() == ToolRegistrationKind::Orchestrating)
     }
 
     pub fn export_state(&self) -> ToolState {
@@ -267,7 +227,7 @@ impl ToolRegistry {
         reason = "the ids were collected from this very surface a few lines above, under the same write guard"
     )]
     pub(crate) fn remove_source_id(&self, source_id: &str) -> Result<u64, ReconfigureError> {
-        let source_key = ToolSourceKey::Leaf(source_id.to_string());
+        let source_key = ToolSourceKey::new(source_id);
         let mut authority = self.inner.write_recover();
         if !authority.sources.contains_key(&source_key) {
             return Err(ReconfigureError::UnknownSource(source_id.to_string()));
@@ -283,11 +243,7 @@ impl ToolRegistry {
             let previous = surface
                 .get(&id)
                 .expect("source-bound tool id was collected from this surface");
-            let orphan = ToolRegistryEntry::orphaned(
-                previous.manifest.clone(),
-                previous.registration_kind(),
-                previous.member,
-            );
+            let orphan = ToolRegistryEntry::orphaned(previous.manifest.clone(), previous.member);
             let entry = surface
                 .get_mut(&id)
                 .expect("source-bound tool id was collected from this surface");
@@ -350,7 +306,6 @@ impl ToolRegistry {
                     insert_advertised_entry(
                         next_surface,
                         &source_key,
-                        source.registration_kind(),
                         manifest,
                         Some(&source_key),
                     )?;
@@ -415,18 +370,6 @@ impl ToolRegistry {
                     ),
                 )
             };
-            if matches!(
-                source_key,
-                ToolSourceKey::Internal(_) | ToolSourceKey::Orchestrating(_)
-            ) && sources.contains_key(&source_key)
-            {
-                if self.inputs_changed(write_revision) {
-                    continue;
-                }
-                return Err(ReconfigureError::Validation(format!(
-                    "duplicate tool source `{source_key}`"
-                )));
-            }
             sources.insert(source_key.clone(), Arc::clone(&source));
             let reconciled = match reconcile_tool_state_entries(
                 snapshot.entries(),

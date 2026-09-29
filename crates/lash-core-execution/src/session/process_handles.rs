@@ -2,10 +2,6 @@ use serde_json::json;
 
 use super::execution_context::RuntimeExecutionContext;
 use super::tool_execution::ToolInvocationReply;
-#[cfg(feature = "testing")]
-use crate::tool_dispatch::ToolPreparationOutcome;
-#[cfg(feature = "testing")]
-use crate::{ProcessInput, ProcessRegistration};
 use crate::{ToolCallOutput, ToolCallRecord, ToolOutcome};
 
 enum HandleAuthority {
@@ -58,67 +54,6 @@ impl RuntimeExecutionContext<'_> {
             )
             .await?;
         Ok(HandleAuthority::SessionVisible)
-    }
-
-    #[cfg(feature = "testing")]
-    pub(crate) async fn start_tool_process(
-        &self,
-        call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-    ) -> ToolInvocationReply {
-        let handle_id = call_id.clone();
-        let pending_call = crate::sansio::PendingToolCall {
-            call_id: call_id.clone(),
-            tool_name: tool_name.clone(),
-            args: args.clone(),
-            replay: None,
-        };
-        let prepared_call = match self
-            .prepare_tool_call(pending_call, &format!("handle:{call_id}"))
-            .await
-        {
-            ToolPreparationOutcome::Prepared(prepared) => *prepared,
-            ToolPreparationOutcome::Completed(outcome) => {
-                let mut record = outcome.record;
-                record.call_id = Some(call_id);
-                return ToolInvocationReply::from_output(record.output.clone()).with_record(record);
-            }
-        };
-        let registration = ProcessRegistration::session_start_draft(ProcessInput::ToolCall {
-            call: prepared_call.clone(),
-        })
-        .with_start_key(Some(crate::StartKey::for_orchestration_call(
-            self.admitted_scope().scope(),
-            &handle_id,
-            0,
-        )));
-        let (registration, env_spec) = self.process_start_execution_env(registration);
-        let started = match self
-            .dispatch
-            .processes
-            .start(
-                &self.session_id,
-                registration,
-                crate::ProcessStartOptions::new()
-                    .with_initial_observer(self.session_id.clone())
-                    .with_env_spec(env_spec),
-                self.process_scope(self.parent_invocation.clone()),
-            )
-            .await
-        {
-            Ok(record) => record,
-            Err(err) => return ToolInvocationReply::error(json!(err.to_string())),
-        };
-
-        let handle_value = Self::process_handle_json(&started.id.clone());
-        let record = ToolCallRecord {
-            call_id: Some(call_id),
-            tool: prepared_call.tool_name,
-            args: prepared_call.args,
-            output: ToolCallOutput::success(handle_value.clone()),
-        };
-        ToolInvocationReply::success(handle_value).with_record(record)
     }
 
     fn recorded_process_reply(

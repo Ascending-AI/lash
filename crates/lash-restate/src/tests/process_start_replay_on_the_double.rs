@@ -98,10 +98,14 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
     let registry = backend.lash_backend().process_registry();
     let started: StartedIds = Arc::default();
     let registration = || {
-        external_registration().with_start_key(Some(lash_core::StartKey::for_orchestration_call(
-            &lash_core::ExecutionScope::turn("session", "turn"),
-            "spawn-child",
-            0,
+        external_registration().with_start_key(Some(lash_core::StartKey::for_tool_intent(
+            &lash_core::derive_tool_intent_identity(
+                &lash_core::SessionId::from("session"),
+                "turn",
+                Some("spawn-child"),
+                0,
+            )
+            .expect("the spawn's intent identity derives"),
         )))
     };
     let crashing: lash_restate_test::HandlerAttempt = {

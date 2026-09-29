@@ -411,32 +411,22 @@ mod tests {
         args: &Value,
         tool_call_id: &str,
     ) -> ToolOutcome {
-        let sessions: Arc<dyn SessionStateService> = manager.clone();
-        let session_lifecycle: Arc<dyn SessionLifecycleService> = manager.clone();
-        let session_graph: Arc<dyn SessionGraphService> = manager.clone();
-        let processes: Arc<dyn lash_core::ProcessService> = manager;
-        let context = lash_core::ToolContext::__for_testing(
-            SessionId::from("test-session"),
-            sessions,
-            session_lifecycle,
-            session_graph,
-            processes,
-            Arc::new(lash_core::facade_support::SessionAttachmentStore::unavailable()),
+        let processes: Arc<dyn lash_core::ProcessService> = manager.clone();
+        let context = lash_core::testing::ToolCallFixture::with_host_and_direct_completions(
+            manager,
             lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
                 Err(lash_core::PluginError::Session(
                     "direct completions are unavailable in continue_as tests".to_string(),
                 ))
             }),
-            Some(tool_call_id.to_string()),
-        );
-        let context = lash_core::ToolContext::with_agent_frame_id_for_testing(
-            context,
-            lash_core::facade_support::frame_node_id(
-                &SessionId::from("test-session"),
-                "test-lineage",
-            ),
-        );
-        let context = lash_core::testing::mock_attempt_context_from(&context);
+        )
+        .processes(processes)
+        .tool_call_id(Some(tool_call_id.to_string()))
+        .agent_frame_id(lash_core::facade_support::frame_node_id(
+            &SessionId::from("test-session"),
+            "test-lineage",
+        ))
+        .attempt("test-turn");
         let manifest = provider
             .resolve_manifest("continue_as")
             .expect("continue_as manifest");

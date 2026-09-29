@@ -144,15 +144,14 @@ impl ToolSurfaceDrift {
 }
 
 /// The part of a tool definition that decides how a call links and
-/// dispatches: its identity, binding, activation, argument projection, retry
-/// policy and schemas. The description and examples reach only the model's
+/// dispatches: its identity, binding, argument projection, retry policy and
+/// schemas. The description and examples reach only the model's
 /// prompt, which a redrive serves from the journaled environment sync.
 #[derive(serde::Serialize, PartialEq)]
 pub struct ToolDispatchSurface<'a> {
     id: &'a crate::ToolId,
     name: &'a str,
     bindings: &'a std::collections::BTreeMap<String, serde_json::Value>,
-    activation: &'a crate::ToolActivation,
     argument_projection: &'a crate::ToolArgumentProjectionPolicy,
     retry_policy: &'a crate::ToolRetryPolicy,
     input_schema: &'a crate::SchemaContract,
@@ -169,7 +168,6 @@ pub fn tool_dispatch_surface<'a>(
         id: &manifest.id,
         name: &manifest.name,
         bindings: &manifest.bindings,
-        activation: &manifest.activation,
         argument_projection: &manifest.argument_projection,
         retry_policy: &manifest.retry_policy,
         input_schema: &contract.input_schema,

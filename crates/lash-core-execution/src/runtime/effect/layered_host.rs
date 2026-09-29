@@ -651,16 +651,6 @@ impl RuntimeEffectController for LayeredController<'_> {
         self.layer.owns_commit_backpressure(self.inner.as_ref())
     }
 
-    async fn drive_independent_effect_work<'work>(
-        &self,
-        work: Vec<crate::IndependentEffectWork<'work>>,
-    ) {
-        self.inner
-            .as_ref()
-            .drive_independent_effect_work(work)
-            .await;
-    }
-
     fn wants_segment_boundary(&self, progress: &SegmentProgress) -> Option<BoundaryReason> {
         self.inner.as_ref().wants_segment_boundary(progress)
     }

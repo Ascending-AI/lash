@@ -382,10 +382,14 @@ mod tests {
         let first_ref = first_env.stable_ref().expect("first environment reference");
         let retry_ref = retry_env.stable_ref().expect("retry environment reference");
         assert_ne!(first_ref, retry_ref, "the retry submits different content");
-        let key = crate::StartKey::for_orchestration_call(
-            &crate::ExecutionScope::runtime_operation("runtime"),
-            "crashed-start",
-            0,
+        let key = crate::StartKey::for_tool_intent(
+            &crate::derive_tool_intent_identity(
+                &crate::SessionId::from("session"),
+                "runtime",
+                Some("crashed-start"),
+                0,
+            )
+            .expect("the crashed start's intent identity derives"),
         );
         let registration = |marker: &str| {
             let mut registration = tool_registration("crashed-start", marker);

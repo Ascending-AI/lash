@@ -483,7 +483,6 @@ mod tests {
             .map(|manifest| manifest.name)
             .collect::<std::collections::BTreeSet<_>>();
         assert!(tool_names.contains("mock_tool"));
-        assert!(tool_names.contains("batch"));
         let contributions = session
             .collect_prompt_contributions(PromptHookContext {
                 session_id: SessionId::from("root"),

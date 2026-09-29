@@ -91,47 +91,20 @@ impl RuntimeSessionServices {
             .cancellation(cancellation.clone())
             .build()?;
         let dispatch = run_context.dispatch();
-        let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
-            .prepared_call(&call)
-            .enclosing_process(Some(process_id.clone()))
-            .cancellation_token(Some(cancellation))
-            .process_events(
-                process_id.clone(),
-                execution_write_authority,
-                process_work,
-                self.current
-                    .store
-                    .as_ref()
-                    .map(|store| Arc::clone(store.store())),
-                Some(self.current.host.core.session_store_factory()),
-                Arc::clone(self.current.host.queued_work()),
-                self.current.host.core.control.process_wake_delivery_policy,
-                Arc::clone(&self.current.host.core.clock),
-            )
-            .build();
-        if crate::tool_dispatch::resolve_internal_manifest_by_id(dispatch.as_ref(), &call.tool_id)
-            .is_some()
-        {
-            // Boxed because the scoped controller this future carries now also
-            // carries the incarnation its process was admitted under (FIG-3394),
-            // which took the inline future past the `large_futures` budget.
-            let outcome = Box::pin(crate::tool_dispatch::execute_internal_process_tool(
-                dispatch.as_ref(),
-                call,
-                tool_context,
-            ))
-            .await;
-            return Ok(outcome.record.output);
-        }
-        if dispatch.is_orchestrating_tool(&call.tool_id) {
-            let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
-                dispatch.as_ref(),
-                call,
-                tool_context,
-            ))
-            .await;
-            return Ok(outcome.record.output);
-        }
+        let process = lash_core_execution::ProcessToolCallWiring::new(
+            process_id.clone(),
+            execution_write_authority,
+            process_work,
+            self.current
+                .store
+                .as_ref()
+                .map(|store| Arc::clone(store.store())),
+            Some(self.current.host.core.session_store_factory()),
+            Arc::clone(self.current.host.queued_work()),
+            self.current.host.core.control.process_wake_delivery_policy,
+            Arc::clone(&self.current.host.core.clock),
+        );
+        let attempt_call = call.clone();
         let call_id = call.call_id.clone();
         let retry_policy =
             crate::tool_dispatch::resolve_callable_manifest_by_id(dispatch.as_ref(), &call.tool_id)
@@ -150,15 +123,16 @@ impl RuntimeSessionServices {
             &turn_cancel_wait,
             None,
             |completion_key| {
-                crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
+                crate::RuntimeEffectLocalExecutor::process_tool_attempt(
                     Arc::clone(&dispatch),
-                    tool_context.clone(),
+                    &attempt_call,
+                    cancellation.clone(),
+                    process.clone(),
                     completion_key,
                 )
             },
         )
         .await;
-        drop(tool_context);
         let launch = coordinated.launch;
         let output = match launch {
             crate::tool_dispatch::ToolCallLaunch::Done(outcome) => outcome.record.output,

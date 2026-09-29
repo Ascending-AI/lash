@@ -560,48 +560,257 @@ pub fn mock_session_policy() -> SessionPolicy {
     }
 }
 
-/// A `ToolContext` backed by a default [`MockSessionManager`], suitable for
-/// unit-testing a `ToolProvider` in isolation. Use [`mock_tool_context_with_host`]
-/// when the tool under test interacts with session services and needs a
-/// configured `MockSessionManager`.
-pub fn mock_tool_context() -> crate::ToolContext<'static> {
-    mock_tool_context_with_host(Arc::new(MockSessionManager::default()))
+/// The runtime's per-call dispatch state for one tool call, built for a test.
+///
+/// That state is crate-private: a test configures it here, then projects the
+/// [`crate::AttemptContext`] a provider body receives ([`Self::attempt`]) or
+/// hands it to a dispatch entry point in [`kernel_internals`]. Nothing a
+/// fixture yields reaches dispatch, process administration or an effect
+/// controller from inside a body.
+#[derive(Clone)]
+pub struct ToolCallFixture<'run> {
+    pub(crate) context: crate::tool_provider::ToolContext<'run>,
 }
 
-/// Like [`mock_tool_context`], but with the grant execution binding populated.
-/// Use this for provider tests that need to assert grant-only routing behavior.
-pub fn mock_tool_context_with_execution_binding(
-    binding: serde_json::Value,
-) -> crate::ToolContext<'static> {
-    mock_tool_context().with_tool_execution_binding(binding)
+impl ToolCallFixture<'static> {
+    /// A call on a default [`MockSessionManager`], suitable for unit-testing a
+    /// `ToolProvider` in isolation.
+    pub fn mock() -> Self {
+        Self::with_host(Arc::new(MockSessionManager::default()))
+    }
+
+    /// Like [`Self::mock`], but lets the caller supply the host. Useful when a
+    /// tool reads from the host (snapshots, tool state, lifecycle hooks) and
+    /// the test wants to assert against captured interactions.
+    pub fn with_host<T>(host: Arc<T>) -> Self
+    where
+        T: crate::plugin::SessionStateService
+            + crate::plugin::SessionLifecycleService
+            + crate::plugin::SessionGraphService
+            + 'static,
+    {
+        Self::with_host_and_direct_completions(
+            host,
+            crate::DirectCompletionClient::unavailable(
+                "direct completions are unavailable in this test context",
+            ),
+        )
+    }
+
+    /// Like [`Self::with_host`], with the direct-completion client a tool's
+    /// own model call goes through.
+    pub fn with_host_and_direct_completions<T>(
+        host: Arc<T>,
+        direct_completions: crate::DirectCompletionClient<'static>,
+    ) -> Self
+    where
+        T: crate::plugin::SessionStateService
+            + crate::plugin::SessionLifecycleService
+            + crate::plugin::SessionGraphService
+            + 'static,
+    {
+        let sessions: Arc<dyn crate::plugin::SessionStateService> = host.clone();
+        let session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = host.clone();
+        let session_graph: Arc<dyn crate::plugin::SessionGraphService> = host;
+        Self {
+            context: crate::tool_provider::ToolContext::builder(
+                SessionId::from("test-session".to_string()),
+                sessions,
+                session_lifecycle,
+                session_graph,
+                Arc::new(crate::UnavailableProcessService),
+                crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
+                    UnavailableEffectController,
+                )),
+                Arc::new(crate::SessionAttachmentStore::unavailable()),
+                direct_completions,
+            )
+            .build(),
+        }
+    }
 }
 
-/// Tool bodies take [`crate::AttemptContext`], never [`crate::ToolContext`], so
-/// this is the context a unit test hands a provider's `execute`.
-pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
-    mock_attempt_context_from(&mock_tool_context())
-}
+impl<'run> ToolCallFixture<'run> {
+    /// The call a runtime dispatch context would run: its sessions, processes,
+    /// controller, catalog and parent invocation are the dispatch's.
+    pub fn from_dispatch(dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>) -> Self {
+        Self {
+            context: crate::tool_provider::ToolContext::from_dispatch(dispatch).build(),
+        }
+    }
 
-impl<'run> crate::AttemptContext<'run> {
-    pub fn __for_testing(
-        context: &crate::ToolContext<'run>,
-        execution_scope_id: impl Into<String>,
+    /// The session the call runs in.
+    pub fn session_id(&self) -> &str {
+        self.context.session_id()
+    }
+
+    /// The process the call runs inside, when it runs inside one.
+    pub fn enclosing_process(&self) -> Option<&ProcessId> {
+        self.context.enclosing_process()
+    }
+
+    /// Names the call; a declaring body derives its intent identity from it.
+    pub fn tool_call_id(mut self, tool_call_id: impl Into<Option<String>>) -> Self {
+        self.context.tool_call_id = tool_call_id.into();
+        self
+    }
+
+    /// Binds the call id and prepared payload of `call`.
+    pub fn prepared_call(mut self, call: &crate::PreparedToolCall) -> Self {
+        self.context.tool_call_id = Some(call.call_id.clone());
+        self.context.prepared_payload = call.prepared_payload.clone();
+        self
+    }
+
+    /// Sets the grant execution binding the call runs with.
+    pub fn execution_binding(mut self, binding: serde_json::Value) -> Self {
+        self.context.tool_execution_binding = binding;
+        self
+    }
+
+    pub fn cancellation_token(
+        mut self,
+        cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Self {
-        Self::from_tool_context(
-            context,
+        self.context.cancellation_token = cancellation_token;
+        self
+    }
+
+    /// Names the process the call runs inside.
+    pub fn enclosing_process_id(mut self, process_id: Option<ProcessId>) -> Self {
+        self.context.enclosing_process = process_id;
+        self
+    }
+
+    /// Overrides the frame lineage the call runs under.
+    pub fn agent_frame_id(mut self, agent_frame_id: crate::FrameNodeId) -> Self {
+        self.context.agent_frame_id = agent_frame_id;
+        self
+    }
+
+    /// Supplies the process service the call's process reads go through.
+    pub fn processes(mut self, processes: Arc<dyn crate::ProcessService>) -> Self {
+        self.context.processes = processes;
+        self
+    }
+
+    pub fn parent_invocation(mut self, invocation: Option<crate::RuntimeInvocation>) -> Self {
+        self.context.parent_invocation = invocation;
+        self
+    }
+
+    pub fn child_execution_trace_hook(
+        mut self,
+        hook: Option<crate::ToolChildExecutionTraceHook>,
+    ) -> Self {
+        self.context.child_execution_trace_hook = hook;
+        self
+    }
+
+    /// The mock call runs under a `RuntimeOperation` scope, which names no
+    /// opener; production attempts always run under a turn, drain or process
+    /// scope. A fixture that exercises an owner-derived answer (a declared
+    /// child's parent scope) binds the real scope here.
+    pub fn scoped_effect_controller(mut self, scoped: crate::ScopedEffectController<'run>) -> Self {
+        self.context.effect_controller =
+            crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
+        self
+    }
+
+    /// Makes the call run inside the durable process `process_id` of
+    /// `registry`, writing under `execution_write_authority`. The append
+    /// target and the enclosing process are one fact: a process the fixture
+    /// already names must be this one.
+    pub fn inside_process(
+        mut self,
+        process_id: impl Into<ProcessId>,
+        registry: Arc<dyn crate::ProcessRegistry>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
+    ) -> Self {
+        self.context = self.context.with_process_events_for_testing(
+            process_id,
+            registry,
+            execution_write_authority,
+        );
+        self
+    }
+
+    /// The attempt context a body executing this call under
+    /// `execution_scope_id` receives. No completion key is reserved: a test
+    /// harness is not the attempt coordinator.
+    pub fn attempt(&self, execution_scope_id: impl Into<String>) -> crate::AttemptContext<'run> {
+        crate::AttemptContext::from_tool_context(
+            &self.context,
             execution_scope_id.into(),
             None,
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
         )
     }
 
+    /// Like [`Self::attempt`], but with a completion key already reserved, as
+    /// the coordinator does for a tool that declared it defers. A body that
+    /// parks reads the key before returning `Pending`, so a test of a parking
+    /// tool that used the keyless projection would only ever observe the "did
+    /// not declare deferred completion" refusal.
+    pub fn attempt_with_completion_key(
+        &self,
+        key: crate::AwaitEventKey,
+    ) -> crate::AttemptContext<'run> {
+        crate::AttemptContext::from_tool_context(
+            &self.context,
+            "test-turn".to_string(),
+            Some(key),
+            crate::tool_provider::AttemptCompletionSupport::Available,
+        )
+    }
+}
+
+/// Project an in-crate test's dispatch state into the leaf-attempt context.
+#[cfg(test)]
+pub(crate) fn mock_attempt_context_from<'run>(
+    context: &crate::tool_provider::ToolContext<'run>,
+) -> crate::AttemptContext<'run> {
+    ToolCallFixture {
+        context: context.clone(),
+    }
+    .attempt("test-turn")
+}
+
+/// Tool bodies take [`crate::AttemptContext`], so this is the context a unit
+/// test hands a provider's `execute`.
+pub fn mock_attempt_context() -> crate::AttemptContext<'static> {
+    ToolCallFixture::mock().attempt("test-turn")
+}
+
+/// Like [`mock_attempt_context`], but with the grant execution binding
+/// populated, for provider tests that assert grant-only routing behavior.
+pub fn mock_attempt_context_with_execution_binding(
+    binding: serde_json::Value,
+) -> crate::AttemptContext<'static> {
+    ToolCallFixture::mock()
+        .execution_binding(binding)
+        .attempt("test-turn")
+}
+
+/// Like [`mock_attempt_context`], but lets the caller supply the host.
+pub fn mock_attempt_context_with_host<T>(host: Arc<T>) -> crate::AttemptContext<'static>
+where
+    T: crate::plugin::SessionStateService
+        + crate::plugin::SessionLifecycleService
+        + crate::plugin::SessionGraphService
+        + 'static,
+{
+    ToolCallFixture::with_host(host).attempt("test-turn")
+}
+
+impl<'run> crate::AttemptContext<'run> {
     /// Crate-internal fixture constructor for the granted route: the context
     /// a call admitted by `grant` executes under. Dispatch applies the
     /// grant's execution binding and source id together
     /// (`AttemptAuthority::apply_execution_binding`), so this hook does the
     /// same rather than leaving the pair to drift in a hand-built fixture.
-    /// Like [`__for_testing`](Self::__for_testing), no completion key is
-    /// reserved: a test harness is not the attempt coordinator.
+    /// Like [`ToolCallFixture::attempt`], no completion key is reserved: a
+    /// test harness is not the attempt coordinator.
     ///
     /// Deliberately crate-private and double-underscored: a granted context
     /// minted for one grant could otherwise be paired with a different
@@ -626,100 +835,6 @@ impl<'run> crate::AttemptContext<'run> {
             crate::tool_provider::AttemptCompletionSupport::NotDeclared,
         )
     }
-}
-
-/// Project an existing mock host context into the leaf-attempt context. Use
-/// this when the test also needs the host handles the [`mock_tool_context`]
-/// carries.
-pub fn mock_attempt_context_from<'run>(
-    context: &crate::ToolContext<'run>,
-) -> crate::AttemptContext<'run> {
-    crate::AttemptContext::from_tool_context(
-        context,
-        "test-turn".to_string(),
-        None,
-        crate::tool_provider::AttemptCompletionSupport::NotDeclared,
-    )
-}
-
-/// Like [`mock_attempt_context_from`], but with a completion key already
-/// reserved, as the coordinator does for a tool that declared it defers.
-///
-/// A body that parks reads the key before returning `Pending`, so a test of a
-/// parking tool that used the keyless projection would only ever observe the
-/// "did not declare deferred completion" refusal.
-pub fn mock_attempt_context_with_completion_key<'run>(
-    context: &crate::ToolContext<'run>,
-    key: crate::AwaitEventKey,
-) -> crate::AttemptContext<'run> {
-    crate::AttemptContext::from_tool_context(
-        context,
-        "test-turn".to_string(),
-        Some(key),
-        crate::tool_provider::AttemptCompletionSupport::Available,
-    )
-}
-
-/// Like [`mock_attempt_context`], but with the grant execution binding
-/// populated, for provider tests that assert grant-only routing behavior.
-pub fn mock_attempt_context_with_execution_binding(
-    binding: serde_json::Value,
-) -> crate::AttemptContext<'static> {
-    mock_attempt_context_from(&mock_tool_context_with_execution_binding(binding))
-}
-
-/// Like [`mock_attempt_context`], but lets the caller supply the host.
-pub fn mock_attempt_context_with_host<T>(host: Arc<T>) -> crate::AttemptContext<'static>
-where
-    T: crate::plugin::SessionStateService
-        + crate::plugin::SessionLifecycleService
-        + crate::plugin::SessionGraphService
-        + 'static,
-{
-    mock_attempt_context_from(&mock_tool_context_with_host(host))
-}
-
-/// Like [`mock_tool_context`], but lets the caller supply the host. Useful
-/// when a tool reads from the host (snapshots, tool state, lifecycle hooks)
-/// and the test wants to assert against captured interactions.
-pub fn mock_tool_context_with_host<T>(host: Arc<T>) -> crate::ToolContext<'static>
-where
-    T: crate::plugin::SessionStateService
-        + crate::plugin::SessionLifecycleService
-        + crate::plugin::SessionGraphService
-        + 'static,
-{
-    mock_tool_context_with_host_and_direct_completions(
-        host,
-        crate::DirectCompletionClient::unavailable(
-            "direct completions are unavailable in this test context",
-        ),
-    )
-}
-
-pub fn mock_tool_context_with_host_and_direct_completions<T>(
-    host: Arc<T>,
-    direct_completions: crate::DirectCompletionClient<'static>,
-) -> crate::ToolContext<'static>
-where
-    T: crate::plugin::SessionStateService
-        + crate::plugin::SessionLifecycleService
-        + crate::plugin::SessionGraphService
-        + 'static,
-{
-    let sessions: Arc<dyn crate::plugin::SessionStateService> = host.clone();
-    let session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService> = host.clone();
-    let session_graph: Arc<dyn crate::plugin::SessionGraphService> = host;
-    crate::tool_provider::ToolContext::__for_testing(
-        SessionId::from("test-session".to_string()),
-        sessions,
-        session_lifecycle,
-        session_graph,
-        Arc::new(crate::UnavailableProcessService),
-        Arc::new(crate::SessionAttachmentStore::unavailable()),
-        direct_completions,
-        None,
-    )
 }
 
 /// Run one effect through its local executor with no journal: the execution
@@ -1158,27 +1273,6 @@ pub fn exec_code_invocation(
         crate::RuntimeAttribution::for_turn(session_id, turn_id, turn_index, protocol_iteration),
         effect_id,
     )
-}
-
-/// Builds the production-shaped `ToolContext` installed while a controller-owned
-/// `ToolAttempt` local executor is open. Durable-adapter tests use this to prove
-/// that tool-facing clients refuse before entering a nested controller command.
-pub fn atomic_tool_context_with_services<'run>(
-    scoped_effect_controller: crate::ScopedEffectController<'run>,
-    session_lifecycle: Arc<dyn crate::plugin::SessionLifecycleService>,
-    processes: Arc<dyn crate::ProcessService>,
-    trigger_router: Option<crate::TriggerRouter>,
-    parent_invocation: crate::RuntimeInvocation,
-) -> crate::ToolContext<'run> {
-    crate::ToolContext::from_dispatch(build_atomic_tool_dispatch(
-        TestExecutionContextBuilder::over_controller(scoped_effect_controller)
-            .session_id("atomic-tool-test-session")
-            .session_lifecycle(session_lifecycle)
-            .processes(processes)
-            .trigger_router(trigger_router)
-            .dispatch_parent_invocation(parent_invocation),
-    ))
-    .build()
 }
 
 fn build_atomic_tool_dispatch<'run>(
@@ -1937,10 +2031,10 @@ pub fn effect_backed_process_service(
 }
 
 /// Convenience helper for the common tool-test shape: build a
-/// [`mock_tool_context`], wrap `name` + `args` in a `ToolCall`, and `await`
+/// [`mock_attempt_context`], wrap `name` + `args` in a `ToolCall`, and `await`
 /// the provider's `execute`. Use this for unit tests that don't need to
-/// inspect host interactions; call `mock_tool_context()` directly and
-/// construct `ToolCall` manually for more involved scenarios.
+/// inspect host interactions; build a [`ToolCallFixture`] and construct
+/// `ToolCall` manually for more involved scenarios.
 ///
 /// The full [`crate::ToolAttemptOutcome`] is returned so tests can assert on
 /// declared intents rather than losing them to a projection.
@@ -1952,8 +2046,7 @@ pub async fn run_tool<P>(
 where
     P: crate::ToolProvider + ?Sized,
 {
-    let host = mock_tool_context();
-    let context = mock_attempt_context_from(&host);
+    let context = ToolCallFixture::mock().attempt("test-turn");
     let Some(manifest) = tool.resolve_manifest(name) else {
         return crate::ToolOutcome::err_fmt(format!("unknown tool: {name}")).into();
     };
@@ -1978,8 +2071,11 @@ pub async fn run_tool_granted<P>(
 where
     P: crate::ToolProvider + ?Sized,
 {
-    let context =
-        crate::AttemptContext::__for_granted_source(&mock_tool_context(), "test-turn", grant);
+    let context = crate::AttemptContext::__for_granted_source(
+        &ToolCallFixture::mock().context,
+        "test-turn",
+        grant,
+    );
     tool.execute(crate::ToolCall::new(grant.manifest(), args, &context))
         .await
 }

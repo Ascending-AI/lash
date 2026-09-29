@@ -10,12 +10,6 @@ struct ToggleExactProvider {
     route: &'static str,
 }
 
-struct HiddenOrchestratingSource {
-    definition: crate::facade_support::OrchestratingToolDef,
-}
-
-struct HiddenOrchestratingTool;
-
 struct DefaultHiddenProvider {
     definition: ToolDefinition,
 }
@@ -117,78 +111,6 @@ impl ToolProvider for FilteringProvider {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::facade_support::OrchestratingToolImplementation for HiddenOrchestratingTool {
-    fn manifest(&self) -> ToolManifest {
-        test_tool("batch", "hidden orchestrating").manifest()
-    }
-
-    fn contract(&self) -> Arc<ToolContract> {
-        Arc::new(test_tool("batch", "hidden orchestrating").contract())
-    }
-
-    async fn execute(
-        &self,
-        _args: &serde_json::Value,
-        _context: &crate::facade_support::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        ToolOutcome::err_fmt("hidden orchestrating probe is never executed")
-    }
-}
-
-fn hidden_orchestrating_source() -> HiddenOrchestratingSource {
-    HiddenOrchestratingSource {
-        definition: crate::facade_support::OrchestratingToolDef::new(Arc::new(
-            HiddenOrchestratingTool,
-        )),
-    }
-}
-
-#[async_trait::async_trait]
-impl ToolSourceExecutor for HiddenOrchestratingSource {
-    fn id(&self) -> &str {
-        "hidden-orchestrating"
-    }
-
-    fn snapshot_execution_source(
-        &self,
-        _known_resident_ids: &BTreeSet<ToolId>,
-    ) -> Result<Arc<dyn ToolSourceExecutor>, ReconfigureError> {
-        Ok(Arc::new(hidden_orchestrating_source()))
-    }
-
-    fn source_key(&self) -> ToolSourceKey {
-        ToolSourceKey::Orchestrating(tool_id("batch"))
-    }
-
-    fn registration_kind(&self) -> ToolRegistrationKind {
-        ToolRegistrationKind::Orchestrating
-    }
-
-    fn advertised_tools(&self) -> Vec<ToolManifest> {
-        Vec::new()
-    }
-
-    fn resolve_manifest_by_id(&self, id: &ToolId) -> Option<ToolManifest> {
-        (id == &tool_id("batch")).then(|| test_tool("batch", "hidden orchestrating").manifest())
-    }
-
-    fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-        (name == "batch").then(|| Arc::new(test_tool("batch", "hidden orchestrating").contract()))
-    }
-
-    async fn prepare_tool_call(
-        &self,
-        call: ToolPrepareCall<'_>,
-    ) -> Result<PreparedToolCall, ToolOutcome> {
-        Ok(PreparedToolCall::identity(call.tool_id, call.pending))
-    }
-
-    fn execution(&self) -> ToolSourceExecution<'_> {
-        ToolSourceExecution::Orchestrating(&self.definition)
-    }
-}
-
 /// The projection asserts the outcome carries no declared intents before unwrapping the
 /// completed result.
 async fn execute_leaf_by_id(
@@ -216,22 +138,29 @@ async fn execute_leaf_by_id(
 }
 
 #[test]
-fn request_pin_detects_hidden_cross_lane_known_id_collision() {
-    let leaf_active = Arc::new(AtomicBool::new(false));
+fn request_pin_detects_hidden_known_id_collision() {
+    let second_active = Arc::new(AtomicBool::new(false));
     let registry = ToolRegistry::empty();
     registry
-        .upsert_source(Arc::new(hidden_orchestrating_source()))
-        .expect("hidden orchestrating source registered");
-    registry
         .upsert_source(Arc::new(ToolProviderSource::new(
-            "hidden-leaf",
+            "hidden-first",
             vec![Arc::new(ToggleExactProvider {
-                active: Arc::clone(&leaf_active),
-                definition: test_tool("batch", "hidden leaf batch"),
-                route: "leaf",
+                active: Arc::new(AtomicBool::new(true)),
+                definition: test_tool("batch", "hidden first batch"),
+                route: "first",
             })],
         )))
-        .expect("inactive hidden leaf source registered");
+        .expect("hidden first source registered");
+    registry
+        .upsert_source(Arc::new(ToolProviderSource::new(
+            "hidden-second",
+            vec![Arc::new(ToggleExactProvider {
+                active: Arc::clone(&second_active),
+                definition: test_tool("batch", "hidden second batch"),
+                route: "second",
+            })],
+        )))
+        .expect("inactive hidden second source registered");
     let mut entries = BTreeMap::new();
     entries.insert(
         tool_id("batch"),
@@ -239,21 +168,17 @@ fn request_pin_detects_hidden_cross_lane_known_id_collision() {
     );
     registry
         .restore_state(ToolState::new(registry.generation(), entries))
-        .expect("the hidden orchestrating route initially binds the resident");
+        .expect("the hidden first route initially binds the resident");
 
-    leaf_active.store(true, Ordering::SeqCst);
+    second_active.store(true, Ordering::SeqCst);
     let error = registry
         .compose_session_catalog(Vec::new())
         .err()
-        .expect("the new hidden leaf route collides during request pinning");
+        .expect("the new hidden route collides during request pinning");
     assert!(
-        matches!(
-            error,
-            ReconfigureError::CrossLaneToolIdCollision {
-                ref tool_id,
-                ref leaf_source_id,
-            } if tool_id.as_str() == "tool:batch" && leaf_source_id == "hidden-leaf"
-        ),
+        error
+            .to_string()
+            .contains("tool id `tool:batch` is resolved by multiple registered sources"),
         "unexpected collision error: {error:?}"
     );
 }

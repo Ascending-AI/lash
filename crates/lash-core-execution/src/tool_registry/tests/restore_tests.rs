@@ -106,56 +106,6 @@ async fn restore_orphans_unresolved_tools_instead_of_failing() {
 }
 
 #[tokio::test]
-async fn crafted_orchestrating_orphan_cannot_block_a_legitimate_leaf_registration() {
-    let source = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("source registry");
-    let mut crafted_blob =
-        serde_json::to_value(source.export_state()).expect("serialize leaf state");
-    crafted_blob["tools"]["tool:mock_tool"]["registration_kind"] = json!("orchestrating");
-    let crafted_snapshot: ToolState =
-        serde_json::from_value(crafted_blob).expect("deserialize crafted state");
-
-    let target = ToolRegistry::empty();
-    let report = target
-        .restore_state(crafted_snapshot)
-        .expect("an unresolved crafted entry remains an orphan");
-    assert_eq!(report.lost_members, vec![tool_id("mock_tool")]);
-    assert!(target.is_orchestrating_tool(&tool_id("mock_tool")));
-
-    let orphan_result = execute_leaf_by_id(
-        &target,
-        &tool_id("mock_tool"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert!(
-        !orphan_result.is_success(),
-        "a claimed lane never makes an orphan executable"
-    );
-    assert!(format!("{orphan_result:?}").contains("unavailable"));
-
-    target
-        .upsert_source(Arc::new(ToolProviderSource::new(
-            "legitimate-leaf",
-            vec![Arc::new(MockTool)],
-        )))
-        .expect("the live leaf lane supersedes the stored claim");
-    assert!(
-        !target.is_orchestrating_tool(&tool_id("mock_tool")),
-        "the rebound kind comes from the legitimate live source"
-    );
-    let rebound = execute_leaf_by_id(
-        &target,
-        &tool_id("mock_tool"),
-        &json!({}),
-        &test_attempt_context(),
-    )
-    .await;
-    assert!(rebound.is_success(), "the legitimate leaf executes");
-    assert_eq!(rebound.value_for_projection(), json!("ok"));
-}
-
-#[tokio::test]
 async fn orphan_rebinds_when_source_is_upserted_again() {
     let snapshot = snapshot_with_external_tool();
     let target = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
@@ -411,7 +361,6 @@ fn orphan_flag_serializes_on_every_entry_and_is_required() {
 
     let error = serde_json::from_value::<ToolStateEntry>(json!({
         "manifest": value["tools"]["tool:mock_tool"]["manifest"],
-        "registration_kind": "leaf"
     }))
     .expect_err("a pre-cutover entry without the flag must be refused");
     assert!(
@@ -435,7 +384,6 @@ fn member_false_decodes_as_host_curation_intent() {
         "manifest": manifest,
         "orphaned": false,
         "member": false,
-        "registration_kind": "leaf"
     }))
     .expect("non-member entry decodes");
 
@@ -592,133 +540,4 @@ fn project_tool_catalog_preserves_dynamic_output_contracts() {
         serde_json::json!("llm_query<T = str>({})")
     );
     assert_eq!(catalog[0]["contract"]["returns"], serde_json::json!("T"));
-}
-
-struct RestoreProbeInternal {
-    executed: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl crate::InternalProcessToolImplementation for RestoreProbeInternal {
-    async fn execute(&self, _call: crate::InternalProcessToolCall<'_>) -> crate::ToolOutcomeDone {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        crate::ToolOutcomeDone::ok(json!("internal-restored"))
-    }
-}
-
-fn stored_internal_probe_entry() -> ToolStateEntry {
-    ToolStateEntry::new(
-        test_tool("internal_probe", "stored internal probe")
-            .with_activation(crate::ToolActivation::Internal)
-            .manifest(),
-    )
-}
-
-/// A snapshot that recorded an internally activated tool rebinds to a matching
-/// explicit internal source on the same id and executes through the internal
-/// route.
-#[tokio::test]
-async fn restore_rebinds_stored_internal_entry_to_explicit_internal_source() {
-    let executed = Arc::new(AtomicUsize::new(0));
-    let registry = ToolRegistry::from_internal_tools(vec![crate::InternalProcessToolDef::new(
-        test_tool("internal_probe", "stored internal probe"),
-        Arc::new(RestoreProbeInternal {
-            executed: Arc::clone(&executed),
-        }),
-    )])
-    .expect("internal-only registry");
-    let mut entries = BTreeMap::new();
-    entries.insert(tool_id("internal_probe"), stored_internal_probe_entry());
-    registry
-        .restore_state(ToolState::new(registry.generation(), entries))
-        .expect("a matching internal source restores the stored internal entry");
-
-    let tool = test_tool_context();
-    let context = crate::InternalProcessContext::__for_testing(&tool);
-    let manifest = registry
-        .resolve_manifest_by_id(&tool_id("internal_probe"))
-        .expect("internal manifest resolves");
-    let result = registry
-        .execute_internal_process_tool(crate::InternalProcessToolCall::new(
-            &manifest,
-            &json!({}),
-            &context,
-        ))
-        .await
-        .expect("internal execution succeeds");
-    assert_eq!(
-        result.into_output().value_for_projection(),
-        json!("internal-restored")
-    );
-    assert_eq!(executed.load(Ordering::SeqCst), 1);
-}
-
-/// A stored internal entry with no matching internal source stays orphaned:
-/// unavailable rather than silently bound elsewhere.
-#[tokio::test]
-async fn restore_orphans_stored_internal_entry_without_a_matching_internal_source() {
-    let registry = ToolRegistry::from_tool_provider(Arc::new(MockTool)).expect("target");
-    let mut entries = BTreeMap::new();
-    entries.insert(tool_id("internal_probe"), stored_internal_probe_entry());
-    let report = registry
-        .restore_state(ToolState::new(registry.generation(), entries))
-        .expect("an absent internal source orphans the stored entry");
-    assert_eq!(report.lost_members, vec![tool_id("internal_probe")]);
-    let entry = registry
-        .export_state()
-        .get(&tool_id("internal_probe"))
-        .expect("orphan exported")
-        .clone();
-    assert!(entry.is_orphaned());
-    assert!(
-        !entry.is_member(),
-        "an orphaned internal entry is unavailable"
-    );
-    assert!(
-        !registry
-            .tool_manifests()
-            .into_iter()
-            .any(|manifest| manifest.name == "internal_probe"),
-        "the orphan is excluded from the catalog"
-    );
-}
-
-/// A stored internal entry must never silently rebind to a live leaf source on
-/// the same id; the restore errors before any execution.
-#[tokio::test]
-async fn restore_refuses_stored_internal_entry_claimed_by_a_live_leaf_source() {
-    struct SameIdLeaf;
-
-    #[async_trait::async_trait]
-    impl ToolProvider for SameIdLeaf {
-        fn tool_manifests(&self) -> Vec<ToolManifest> {
-            manifests(vec![test_tool(
-                "internal_probe",
-                "live leaf on the same id",
-            )])
-        }
-
-        fn resolve_contract(&self, name: &str) -> Option<Arc<ToolContract>> {
-            contract_from(
-                vec![test_tool("internal_probe", "live leaf on the same id")],
-                name,
-            )
-        }
-
-        async fn execute(&self, _call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
-            ToolOutcome::ok(json!("leaf-ran")).into()
-        }
-    }
-
-    let registry = ToolRegistry::from_tool_provider(Arc::new(SameIdLeaf)).expect("leaf registry");
-    let mut entries = BTreeMap::new();
-    entries.insert(tool_id("internal_probe"), stored_internal_probe_entry());
-    let error = registry
-        .restore_state(ToolState::new(registry.generation(), entries))
-        .expect_err("a live leaf source on the same id cannot adopt a stored internal entry");
-    let message = error.to_string();
-    assert!(
-        message.contains("tool:internal_probe") && message.contains("internal"),
-        "the refusal names the id and the class mismatch: {message}"
-    );
 }

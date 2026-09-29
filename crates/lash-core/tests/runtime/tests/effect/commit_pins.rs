@@ -17,6 +17,11 @@
 //! The two cancelled pins were re-pinned for ADR 0114 (FIG-433): a stopped
 //! turn's commit now names its sealed partial in `stopped_partial`. Removing
 //! that field from the masked commit reproduces each old digest.
+//!
+//! The two cancelled pins were re-pinned for ADR 0116 (FIG-4054): `batch` is
+//! protocol sugar, so the test protocol registers no `batch` tool and the
+//! committed tool state, which recorded that registration, is now empty. The
+//! code-cell pin, whose protocol never registered `batch`, is unchanged.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
@@ -119,7 +124,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["17d31b442f2132d26d1e2867af786af63c01cea64f152d9d8a672fef7771e0af"],
+        &["4251c43136ecf7c7c54fdb6271dd3add6c8b233f99b4d019b5315a1d63b2857f"],
     );
 }
 
@@ -143,6 +148,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["a7db93b5b3ca1a6185e858ee765bb188843aef62927d6addd0fcfc12d3db97c6"],
+        &["b6b61111a96a0e7e074e03998463a1819c54ef6f0e6dd57ee05a0e5939b2c8d4"],
     );
 }

@@ -36,11 +36,8 @@ fn opener_context(
         .scoped_static(admitted)
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
-    let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
-        Arc::clone(&provider),
-        vec![law_orchestrating_tool()],
-    )
-    .expect("the law's leaf provider and orchestrating tool register disjoint ids");
+    let tool_registry = crate::ToolRegistry::from_tool_provider(Arc::clone(&provider))
+        .expect("the law's leaf provider registers");
     crate::testing::TestExecutionContextBuilder::new(crate::testing::TestExecutionPorts::over_host(
         Arc::clone(host),
         process_env_store,

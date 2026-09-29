@@ -65,8 +65,8 @@ fn process_leaf_request(
 
 /// The foreign-opener law's group: two deferred leaves — one resolved inside the
 /// crashed world so its settlement orders the crash boundary, one left parked
-/// as the survivor the foreign opener must refuse — an orchestrating
-/// child under the recorded pin, and a plain leaf. The malformed probe cannot
+/// as the survivor the foreign opener must refuse — a leaf that reads its
+/// start context under the recorded pin, and a plain leaf. The malformed probe cannot
 /// ride inside the group: a process opener with no enclosing process is
 /// refused at envelope construction, which the law asserts directly instead.
 #[expect(
@@ -124,7 +124,7 @@ fn incarnation_group(
             ),
             child(
                 1,
-                LEAF_ORCHESTRATING,
+                LEAF_PARENT,
                 ToolChildCompletionRouting::Inline,
                 Some(recorded_ref.clone()),
             ),
@@ -147,8 +147,8 @@ fn incarnation_group(
 ///
 /// One group of four process-scoped children records `process(P)` as its
 /// opener: two deferred leaves (one resolved to order the crash boundary, one
-/// the durable survivor), an orchestrating child (whose durable-parent
-/// derivation must name the recorded process), and a plain leaf. The
+/// the durable survivor), a leaf whose start context's durable parent must
+/// name the recorded process, and a plain leaf. The
 /// malformed request — a process opener that records no enclosing process —
 /// is asserted directly: the boundary refuses it at envelope construction,
 /// so no journal can hold it, because the opener and its enclosing process
@@ -156,8 +156,8 @@ fn incarnation_group(
 ///
 /// On the durable tiers the group journals under `process(P)`, the worker
 /// dies, and a live opener of another process `Q` proves it cannot drain the
-/// survivor. On every tier the orchestrating settlement names `P` and the
-/// malformed request is refused with `ToolChildRequestOpener`.
+/// survivor. On every tier the start-context leaf's settlement names `P` and
+/// the malformed request is refused with `ToolChildRequestOpener`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -246,8 +246,8 @@ pub async fn another_process_is_not_the_recorded_opener(
         "no journal can hold a request whose opener and enclosing process disagree: {error}"
     );
 
-    /// Asserts the orchestrating settlement's recorded process — identical
-    /// on every tier.
+    /// Asserts the start-context leaf's recorded process — identical on
+    /// every tier.
     fn assert_process_settlements(
         settlements: &mut [crate::GroupSettlement],
         expected_parent: &str,
@@ -262,26 +262,20 @@ pub async fn another_process_is_not_the_recorded_opener(
             "the deferred leaf the law resolved settles: {:?}",
             resolved_leaf.outcome
         );
-        let orchestrating = settlements
+        let parent = settlements
             .iter()
             .find(|settlement| settlement.position == 1)
-            .expect("the orchestrating child settled");
-        let Ok(crate::RuntimeEffectOutcome::ToolInvocation { outcome, .. }) =
-            &orchestrating.outcome
+            .expect("the start-context leaf settled");
+        let Ok(crate::RuntimeEffectOutcome::ToolInvocation { outcome, .. }) = &parent.outcome
         else {
-            panic!("the orchestrating child is a tool invocation: {orchestrating:?}");
+            panic!("the start-context leaf is a tool invocation: {parent:?}");
         };
         let output = outcome.record.output.value_for_projection();
         assert_eq!(
             output["parent"],
             serde_json::json!(expected_parent),
-            "the body's durable parent names the recorded process, never \
+            "the attempt's durable parent names the recorded process, never \
              another live process: {output}"
-        );
-        assert_eq!(
-            output["nested_ok"],
-            serde_json::json!(true),
-            "the orchestrating body ran its nested call: {output}"
         );
         let plain = settlements
             .iter()

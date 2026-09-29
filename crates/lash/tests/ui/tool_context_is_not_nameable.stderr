@@ -1,0 +1,16 @@
+error[E0425]: cannot find type `ToolContext` in module `lash::tools`
+ --> tests/ui/tool_context_is_not_nameable.rs:4:32
+  |
+4 |     let _: Option<lash::tools::ToolContext<'static>> = None;
+  |                                ^^^^^^^^^^^
+  |
+ ::: $WORKSPACE/crates/lash-sansio/src/tool_contract.rs
+  |
+  | pub struct ToolContract {
+  | ----------------------- similarly named struct `ToolContract` defined here
+  |
+help: a struct with a similar name exists
+  |
+4 -     let _: Option<lash::tools::ToolContext<'static>> = None;
+4 +     let _: Option<lash::tools::ToolContract<'static>> = None;
+  |

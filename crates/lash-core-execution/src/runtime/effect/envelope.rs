@@ -403,9 +403,8 @@ pub enum RuntimeEffectCommand {
     /// Replay serves the recorded outcome and never re-runs a step.
     ///
     /// The command names only recorded facts. How long the call took is an
-    /// observation: a redrive serves a journaled attempt at once and re-runs an
-    /// orchestrating body against its recorded effects, so a duration here
-    /// would move the envelope of a healthy redrive. The steps still read the
+    /// observation: a redrive serves a journaled attempt at once, so a
+    /// duration here would move the envelope of a healthy redrive. The steps still read the
     /// live duration from the local executor, and the outcome they fold to is
     /// what replay serves.
     PresentToolResult {

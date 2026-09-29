@@ -209,7 +209,7 @@ mod testing_inventory {
     use lash::testing::TestProvider as _;
     use lash::testing::code_execution_context as _;
     use lash::testing::exec_code_invocation as _;
-    use lash::testing::mock_tool_context_with_execution_binding as _;
+    use lash::testing::mock_attempt_context_with_execution_binding as _;
     use lash::testing::store_fixtures::authorize_completion_deferral_for_test as _;
     use lash::testing::tool_registry_with_live_provider as _;
 }

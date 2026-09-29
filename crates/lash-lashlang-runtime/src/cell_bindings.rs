@@ -168,9 +168,6 @@ fn resolve_ambient_bindings(
 ) -> Result<serde_json::Value, serde_json::Error> {
     let mut bound = BTreeMap::new();
     for entry in &live.tools {
-        if entry.manifest.activation == lash_core::ToolActivation::Internal {
-            continue;
-        }
         let Some(path) = binding_path(&entry.manifest) else {
             continue;
         };

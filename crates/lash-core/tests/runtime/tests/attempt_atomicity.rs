@@ -375,10 +375,17 @@ fn attempt_invocation() -> lash_core::RuntimeEffectInvocation {
     )
 }
 
+/// A tool call under test: the dispatch it runs against and the per-call
+/// state its attempt context is projected from.
+struct ToolUnderTest<'run> {
+    dispatch: Arc<lash_core::tool_dispatch::ToolDispatchContext<'run>>,
+    call: lash_core::testing::ToolCallFixture<'run>,
+}
+
 fn tool_context<'run>(
     scoped: lash_core::ScopedEffectController<'run>,
     fixtures: &Fixtures,
-) -> lash_core::ToolContext<'run> {
+) -> ToolUnderTest<'run> {
     tool_context_with_provider(
         scoped,
         fixtures,
@@ -394,7 +401,7 @@ fn tool_context_with_provider<'run>(
     tools: Arc<dyn lash_core::ToolProvider>,
     catalog: Vec<lash_core::ToolDefinition>,
     bind_direct_client_to_attempt: bool,
-) -> lash_core::ToolContext<'run> {
+) -> ToolUnderTest<'run> {
     let plugins = lash_core::testing::test_plugin_host(Vec::new())
         .build_session(SESSION)
         .expect("build attempt-atomicity plugin session");
@@ -459,7 +466,7 @@ fn tool_context_with_provider<'run>(
         turn_capture: None,
         process_originator: None,
     });
-    lash_core::ToolContext::from_dispatch(dispatch)
+    let call = lash_core::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
         .tool_call_id(Some(CALL_ID.to_string()))
         .parent_invocation(Some(attempt_parent))
         .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
@@ -468,17 +475,12 @@ fn tool_context_with_provider<'run>(
                 child_process_starts.fetch_add(1, Ordering::SeqCst);
             },
         )))
-        .process_events(
+        .inside_process(
             fixtures.live.clone(),
+            Arc::clone(&fixtures.registry),
             fixtures.execution_authority.clone(),
-            lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
-            None,
-            None,
-            Arc::new(lash_core::NoSessionWork::new()),
-            lash_core::DeliveryPolicy::EarliestSafeBoundary,
-            Arc::new(lash_core::facade_support::SystemClock),
-        )
-        .build()
+        );
+    ToolUnderTest { dispatch, call }
 }
 
 /// A provider that implements only the pure `execute` body — the trait offers
@@ -520,7 +522,7 @@ impl lash_core::ToolProvider for PureLeafProbeProvider {
     async fn execute(&self, call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.execute_calls.fetch_add(1, Ordering::SeqCst);
         assert_eq!(call.name(), "attempt_atomicity");
-        // The sealed attempt projection, not the journal-capable `ToolContext`.
+        // The sealed attempt projection a body receives.
         assert_eq!(call.context.session_id(), SESSION);
         assert_eq!(call.context.tool_call_id(), Some(CALL_ID));
         assert_eq!(call.context.execution_scope_id(), TURN);
@@ -582,7 +584,7 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
                 },
             ),
             lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-                let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
+                let attempt = tool.call.attempt(TURN);
                 capability_inventory::exercise_attempt_capabilities(&attempt).await;
                 Ok(lash_core::RuntimeEffectOutcome::ToolAttempt {
                     launch: Box::new(lash_core::ToolAttemptLaunch::Done {
@@ -612,9 +614,9 @@ async fn sentinel_allows_no_undeclared_crossing_from_inside_an_attempt() {
 }
 
 /// A provider still runs its single `execute` body inside the recorded
-/// attempt, against `AttemptContext`. There is no
-/// per-tool opt-in and no legacy `ToolContext` route left to fall back to, so
-/// the attempt opens and closes with zero controller crossings.
+/// attempt, against `AttemptContext`. There is no per-tool opt-in and no
+/// other body context to fall back to, so the attempt opens and closes with
+/// zero controller crossings.
 #[tokio::test]
 async fn pure_execute_provider_routes_through_the_attempt_context_without_controller_crossing() {
     let fixtures = fixtures().await;
@@ -653,11 +655,7 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                 },
             ),
             lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
-                let dispatch = Arc::clone(
-                    tool.runtime_dispatch
-                        .as_ref()
-                        .expect("tool context carries runtime dispatch"),
-                );
+                let dispatch = Arc::clone(&tool.dispatch);
                 let prepared = prepared_tool_call();
                 assert!(
                     lash_core::tool_dispatch::resolve_callable_manifest_by_id(
@@ -667,10 +665,10 @@ async fn pure_execute_provider_routes_through_the_attempt_context_without_contro
                     .is_some(),
                     "the attempt is admitted through the production catalog authority"
                 );
-                let result = lash_core::tool_dispatch::execute_once(
+                let result = lash_core::testing::runtime_internals::execute_once(
                     dispatch.as_ref(),
                     &prepared,
-                    tool,
+                    tool.call,
                     None,
                 )
                 .await;
@@ -868,11 +866,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         )
         .expect("scoped intent sentinel controller");
         let tool = tool_context(scoped, &fixtures);
-        let mut dispatch = tool
-            .runtime_dispatch
-            .as_ref()
-            .map(|context| context.as_ref().clone())
-            .expect("runtime dispatch context");
+        let mut dispatch = tool.dispatch.as_ref().clone();
         dispatch.parent_invocation = Some(lash_core::RuntimeInvocation::effect(
             lash_core::EffectAddress::new(
                 lash_core::ExecutionScope::turn(SESSION, TURN),
@@ -970,11 +964,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
         )
         .expect("scoped overflow sentinel controller");
         let tool = tool_context(scoped, &fixtures);
-        let dispatch = tool
-            .runtime_dispatch
-            .as_ref()
-            .map(|context| context.as_ref().clone())
-            .expect("runtime dispatch context");
+        let dispatch = tool.dispatch.as_ref().clone();
         let intents = lash_core::ToolIntents::v3(
             (0..=lash_core::TOOL_INTENT_MAX_COUNT)
                 .map(|index| {
@@ -1153,11 +1143,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
         )
         .expect("layer the handler's scope");
         let tool = tool_context(scoped, &fixtures);
-        let dispatch = tool
-            .runtime_dispatch
-            .as_ref()
-            .map(|context| context.as_ref().clone())
-            .expect("runtime dispatch context");
+        let dispatch = tool.dispatch.as_ref().clone();
         let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
             lash_core::SignalProcessIntent {
                 session_id: SessionId::from(SESSION.to_string()),
@@ -1500,7 +1486,7 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
             attempt_effect_envelope(),
             lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
                 first_incarnation_bodies.fetch_add(1, Ordering::SeqCst);
-                let attempt = lash_core::AttemptContext::__for_testing(&tool, TURN);
+                let attempt = tool.call.attempt(TURN);
                 assert_eq!(
                     attempt
                         .direct_completions()
@@ -1553,7 +1539,7 @@ async fn direct_completion_inside_a_recorded_attempt_redrives_without_a_journal_
             attempt_effect_envelope(),
             lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
                 redriven_bodies.fetch_add(1, Ordering::SeqCst);
-                let _attempt = lash_core::AttemptContext::__for_testing(&redriven_tool, TURN);
+                let _attempt = redriven_tool.call.attempt(TURN);
                 Ok(attempt_done_outcome())
             }),
         )
@@ -1736,7 +1722,7 @@ fn raw_client_probe<'run>(
     sentinel: &'run AttemptAtomicitySentinel<'run>,
     fixtures: &Fixtures,
     provider: &Arc<RawClientDirectProvider>,
-) -> lash_core::ToolContext<'run> {
+) -> ToolUnderTest<'run> {
     let scoped = lash_core::ScopedEffectController::borrowed(
         sentinel,
         lash_core::AdmittedScope::turn(SESSION, TURN),
@@ -1763,12 +1749,7 @@ async fn assert_raw_client_probe_starts_unbound(fixtures: &Fixtures) {
         let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
         let provider = Arc::new(RawClientDirectProvider::default());
         let tool = raw_client_probe(&sentinel, fixtures, &provider);
-        let direct_completions = tool
-            .runtime_dispatch
-            .as_ref()
-            .expect("raw-client probe carries runtime dispatch")
-            .direct_completions
-            .clone();
+        let direct_completions = tool.dispatch.direct_completions.clone();
 
         lash_core::RuntimeEffectController::execute_effect(
             &sentinel,
@@ -1824,11 +1805,7 @@ async fn execution_context_attempt_dispatch_binds_the_direct_client() {
         let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
         let provider = Arc::new(RawClientDirectProvider::default());
         let tool = raw_client_probe(&sentinel, &fixtures, &provider);
-        let dispatch = Arc::clone(
-            tool.runtime_dispatch
-                .as_ref()
-                .expect("tool context carries runtime dispatch"),
-        );
+        let dispatch = Arc::clone(&tool.dispatch);
         let execution_context = lash_core::RuntimeExecutionContext::new(
             SessionId::from(SESSION.to_string()),
             dispatch,
@@ -1893,18 +1870,14 @@ async fn prepared_attempt_runner_dispatch_binds_the_direct_client() {
         let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
         let provider = Arc::new(RawClientDirectProvider::default());
         let tool = raw_client_probe(&sentinel, &fixtures, &provider);
-        let dispatch = Arc::clone(
-            tool.runtime_dispatch
-                .as_ref()
-                .expect("tool context carries runtime dispatch"),
-        );
+        let dispatch = Arc::clone(&tool.dispatch);
 
         let launch =
-            lash_core::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
+            lash_core::testing::runtime_internals::coordinate_prepared_tool_call_launch_with_execution_context(
                 dispatch.as_ref(),
                 prepared_tool_call(),
                 None,
-                tool,
+                tool.call,
             )
             .await;
 

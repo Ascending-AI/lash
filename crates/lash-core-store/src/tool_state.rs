@@ -23,11 +23,6 @@ pub struct ToolStateEntry {
         skip_serializing_if = "is_default_member"
     )]
     pub member: bool,
-    /// Persisted registration-lane hint. Required in every serialized entry:
-    /// a pre-cutover snapshot that omits it fails to decode rather than being
-    /// reconstructed as a leaf registration. On rebind the live source is
-    /// authoritative and re-derives the effective lane.
-    pub registration_kind: ToolRegistrationKind,
 }
 impl ToolStateEntry {
     pub fn new(manifest: ToolManifest) -> Self {
@@ -35,7 +30,6 @@ impl ToolStateEntry {
             manifest,
             orphaned: false,
             member: true,
-            registration_kind: ToolRegistrationKind::Leaf,
         }
     }
 
@@ -153,14 +147,6 @@ impl<'de> Deserialize<'de> for ToolState {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolRegistrationKind {
-    #[default]
-    Leaf,
-    Orchestrating,
-}
-
 fn is_member_default() -> bool {
     true
 }
@@ -230,13 +216,6 @@ pub mod facade_ops {
 pub enum ReconfigureError {
     #[error("validation error: {0}")]
     Validation(String),
-    #[error(
-        "tool id `{tool_id}` is registered in both the leaf and orchestrating lanes (leaf source `{leaf_source_id}`)"
-    )]
-    CrossLaneToolIdCollision {
-        tool_id: ToolId,
-        leaf_source_id: String,
-    },
     #[error("unknown tool source: {0}")]
     UnknownSource(String),
     #[error("generation mismatch: expected {expected}, actual {actual}")]

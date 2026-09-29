@@ -2,7 +2,7 @@
 //!
 //! The process kernel intentionally understands `ToolCall`, `SessionTurn`, and
 //! `External` because those inputs carry runtime mechanisms core must enforce:
-//! tool orchestration, child-session turns, and externally completed work. New
+//! recorded tool attempts, child-session turns, and externally completed work. New
 //! process runtimes should use `ProcessInput::Engine { kind, payload }` unless
 //! core must understand their semantics to enforce a kernel mechanism.
 //!
@@ -147,9 +147,6 @@ pub mod facade_support {
     }
     pub use crate::runtime::run_head_advancing_commit_attempt;
     pub use crate::runtime::turn_loop::{EmptyQueuedDrainReason, QueuedTurnDrain};
-    pub use crate::tool_provider::orchestration::{
-        OrchestratingToolDef, OrchestratingToolImplementation, OrchestrationContext,
-    };
     pub fn build_core_tool_registry(
         host: &crate::plugin::PluginHost,
     ) -> Result<std::sync::Arc<crate::ToolRegistry>, crate::PluginError> {
@@ -413,7 +410,6 @@ pub mod facade_support {
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
     pub use crate::tool_registry::SupersededToolIdentity;
@@ -564,13 +560,13 @@ pub use lash_sansio::{
     PromptTemplate, PromptTemplateEntry, PromptTemplateSection, PromptTitleBuiltin, SchemaContract,
     SchemaProjectionOverride, SchemaProjectionPolicy, SessionAppendNode,
     TYPESCRIPT_TOOL_BINDING_KEY, TextProjectionMetadata, TokenUsage, TokenUsageOverflow,
-    ToolActivation, ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry,
-    ToolContract, ToolControl, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery,
-    ToolFailure, ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome,
-    ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract,
-    ToolRetryPolicy, ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause,
-    TurnId, TurnOutputSource,
+    ToolArgumentProjectionPolicy, ToolBinding, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolCancellation, ToolCatalog, ToolCatalogBuildError, ToolCatalogEntry, ToolContract,
+    ToolControl, ToolDefinition, ToolDefinitionBindingExt, ToolDiscovery, ToolFailure,
+    ToolFailureClass, ToolFailureSource, ToolId, ToolIntentExecutionOutcome, ToolIntentIdentity,
+    ToolIntentKind, ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy,
+    ToolRetryStatus, ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId,
+    TurnOutputSource,
 };
 pub(crate) use lash_sansio::{
     BaseRenderCache, PromptBuildInput, build_turn, messages_are_prompt_resume_safe,
@@ -578,10 +574,7 @@ pub(crate) use lash_sansio::{
     visible_response_parts,
 };
 pub use protocol_build::ProtocolBuildInput;
-pub use tool_provider::{
-    ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
-    ToolSessionAdmin, ToolSessionModel,
-};
+pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
 pub use tool_registry::{
     SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
     ToolSurfaceOpenMode,
@@ -709,24 +702,23 @@ pub use runtime::{
     EffectOpenerError, EffectRetirementGate, ExecutableGeneration, ExecutableGenerationRefusal,
     ExecutionScope, ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding,
     GroupChildCancelWatch, GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId,
-    IndependentEffectWork, InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition,
-    Lifetime, LifetimeDecision, LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason,
-    LiveReplayOutcome, LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome,
-    LiveReplaySubscription, LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy,
-    MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork, NoSessionWork, NonTerminalProcessPage,
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
-    PendingTurnInputBatch, PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt,
-    PendingTurnInputCancelTarget, PendingTurnInputDraft, PendingTurnInputRead,
-    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
-    PreparedLiveReplayPublication, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
-    ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectSummary,
-    ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition, Lifetime, LifetimeDecision,
+    LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
+    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
+    LlmStreamRecord, LocalTurnStop, LoserPolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
+    NoSessionWork, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    ParentEndPlan, PendingTurnInput, PendingTurnInputBatch, PendingTurnInputCancelOutcome,
+    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputDraft,
+    PendingTurnInputRead, PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome,
+    PersistedSegmentHandover, PreparedLiveReplayPublication, ProcessAwaitOutput,
+    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions,
+    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
+    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
@@ -849,11 +841,9 @@ pub use tool_intent::{
 };
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
-    AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
-    InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, InternalProcessToolDef,
-    InternalProcessToolImplementation, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall,
-    ToolCall, ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext,
-    ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
+    AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
+    PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
+    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

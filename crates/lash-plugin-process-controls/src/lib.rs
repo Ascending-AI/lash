@@ -507,11 +507,8 @@ mod tests {
             include_cancel_process: true,
             lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
-        let tool_context = lash_core::testing::mock_tool_context();
-        let context = lash_core::AttemptContext::__for_testing(
-            &tool_context,
-            "process-controls-intent-scope",
-        );
+        let context =
+            lash_core::testing::ToolCallFixture::mock().attempt("process-controls-intent-scope");
         let result = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "cancel_process"),
@@ -545,11 +542,8 @@ mod tests {
             include_cancel_process: true,
             lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
-        let tool_context = lash_core::testing::mock_tool_context();
-        let context = lash_core::AttemptContext::__for_testing(
-            &tool_context,
-            "process-controls-intent-scope",
-        );
+        let context =
+            lash_core::testing::ToolCallFixture::mock().attempt("process-controls-intent-scope");
         let result = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "cancel_process"),
@@ -579,11 +573,8 @@ mod tests {
         );
     }
 
-    fn parked_attempt_context<'run>(
-        tool_context: &lash_core::ToolContext<'run>,
-    ) -> lash_core::AttemptContext<'run> {
-        lash_core::testing::mock_attempt_context_with_completion_key(
-            tool_context,
+    fn parked_attempt_context() -> lash_core::AttemptContext<'static> {
+        lash_core::testing::ToolCallFixture::mock().attempt_with_completion_key(
             lash_core::AwaitEventKey {
                 scope: lash_core::ExecutionScope::turn("test-session", "test-turn"),
                 wait: lash_core::AwaitEventWaitIdentity::ToolCompletion {
@@ -609,8 +600,7 @@ mod tests {
             include_cancel_process: true,
             lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
-        let tool_context = lash_core::testing::mock_tool_context();
-        let context = parked_attempt_context(&tool_context);
+        let context = parked_attempt_context();
         let outcome = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "await_process"),
@@ -641,8 +631,7 @@ mod tests {
             include_cancel_process: true,
             lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
-        let tool_context = lash_core::testing::mock_tool_context();
-        let context = parked_attempt_context(&tool_context);
+        let context = parked_attempt_context();
         for (label, args) in [
             ("missing handle", serde_json::json!({})),
             (

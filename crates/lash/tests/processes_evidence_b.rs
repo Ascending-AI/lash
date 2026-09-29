@@ -318,15 +318,6 @@ fn processes_area_witnesses_b() {
             lash::runtime::RuntimeErrorCode::MissingProcessExecutionId
         )
     });
-    // W0430: lash::tools::ToolContext::emit_child_process_started [function]
-    let _ = lash::tools::ToolContext::emit_child_process_started(
-        todo!(),
-        lash::ProcessId::fixture("x"),
-        todo!(),
-        todo!(),
-    );
-    // W0431: lash::tools::ToolContext::process_events [function]
-    let _ = lash::tools::ToolContext::process_events(todo!());
     // W0434: lash::durability::EffectJournalRetirement::Process [variant]
     variant_witness(|value: &lash::durability::EffectJournalRetirement| {
         matches!(

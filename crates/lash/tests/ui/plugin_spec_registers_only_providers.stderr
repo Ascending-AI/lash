@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/ui/plugin_spec_registers_only_providers.rs:12:65
+   |
+12 |     let _ = lash::plugins::PluginSpec::new().with_tool_provider(definition);
+   |                                              ------------------ ^^^^^^^^^^ expected `Arc<dyn ToolProvider>`, found `ToolDefinition`
+   |                                              |
+   |                                              arguments to this method are incorrect
+   |
+   = note: expected struct `Arc<(dyn ToolProvider + 'static)>`
+              found struct `ToolDefinition`
+note: method defined here
+  --> $WORKSPACE/crates/lash-core-execution/src/plugin/registry.rs
+   |
+   |     pub fn with_tool_provider(mut self, provider: Arc<dyn ToolProvider>) -> Self {
+   |            ^^^^^^^^^^^^^^^^^^

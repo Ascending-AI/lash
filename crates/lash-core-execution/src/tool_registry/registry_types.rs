@@ -1,39 +1,28 @@
 use super::*;
-pub use lash_core_store::tool_state::{ReconfigureError, ToolRegistrationKind};
+pub use lash_core_store::tool_state::ReconfigureError;
 
 #[derive(Clone, PartialEq)]
 pub(super) struct ToolRegistryEntry {
     pub(super) manifest: ToolManifest,
     pub(super) binding: ToolBinding,
-    pub(super) kind: ToolRegistrationKind,
     /// ToolId-keyed host curation intent. Authority policy is applied only to
     /// a pinned model-request surface and is never written back here.
     pub(super) member: bool,
 }
 
 impl ToolRegistryEntry {
-    pub(super) fn new(
-        manifest: ToolManifest,
-        source_key: ToolSourceKey,
-        kind: ToolRegistrationKind,
-    ) -> Self {
+    pub(super) fn new(manifest: ToolManifest, source_key: ToolSourceKey) -> Self {
         Self {
             manifest,
             binding: ToolBinding::Bound { source_key },
-            kind,
             member: true,
         }
     }
 
-    pub(super) fn orphaned(
-        manifest: ToolManifest,
-        kind: ToolRegistrationKind,
-        member: bool,
-    ) -> Self {
+    pub(super) fn orphaned(manifest: ToolManifest, member: bool) -> Self {
         Self {
             manifest,
             binding: ToolBinding::Orphaned,
-            kind,
             member,
         }
     }
@@ -44,10 +33,6 @@ impl ToolRegistryEntry {
 
     pub(super) fn is_member(&self) -> bool {
         self.member && !self.is_orphaned()
-    }
-
-    pub(super) fn registration_kind(&self) -> ToolRegistrationKind {
-        self.kind
     }
 
     /// The manifest as exposed to surfaces and catalogs. The view carries no
@@ -61,7 +46,6 @@ impl ToolRegistryEntry {
             manifest: self.manifest.clone(),
             orphaned: self.is_orphaned(),
             member: self.member,
-            registration_kind: self.kind,
         }
     }
 }
@@ -132,23 +116,20 @@ impl ToolSurface {
     }
 }
 
-/// Typed registry-source identity. Leaf source labels and orchestrating tool
-/// identities occupy disjoint namespaces even when their rendered text is
-/// identical.
+/// Typed registry-source identity: the label of the source that advertises
+/// a tool.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum ToolSourceKey {
-    Leaf(String),
-    Internal(ToolId),
-    Orchestrating(ToolId),
+pub(crate) struct ToolSourceKey(String);
+
+impl ToolSourceKey {
+    pub(crate) fn new(source_id: impl Into<String>) -> Self {
+        Self(source_id.into())
+    }
 }
 
 impl std::fmt::Display for ToolSourceKey {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Leaf(source_id) => formatter.write_str(source_id),
-            Self::Internal(tool_id) => write!(formatter, "internal:{tool_id}"),
-            Self::Orchestrating(tool_id) => write!(formatter, "orchestrating:{tool_id}"),
-        }
+        formatter.write_str(&self.0)
     }
 }
 

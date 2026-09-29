@@ -58,52 +58,6 @@ impl ToolTriggerOutcomeBuffer {
     }
 }
 
-/// What an orchestrating group child's body leaves for its driver outside any
-/// attempt frame: the processes it realized, captured at the start's journal
-/// boundary (ADR 0099 §6), and the refusal a nested call met.
-///
-/// An orchestrating child runs *outside* an attempt frame, so a process its
-/// body starts never appears in a `ToolIntentExecutionOutcome` — the channel
-/// [`ToolSettlement`](crate::runtime::ToolSettlement) possession reads from.
-/// The orchestrating `InternalProcessAdmin` enqueues each started id here at
-/// the moment the durable start succeeds, and the child's driver drains it
-/// into the settlement's possession, so replay serves the same possession set
-/// the live run produced.
-///
-/// A nested call the body issued whose attempt or deferred await a controller
-/// refused — a replay divergence against its record, a live journal fault —
-/// answers the body a failure, but the refusal is kept here too: the driver
-/// refuses the child with it instead of settling whatever the body made of
-/// that failure, so neither the divergence nor the fault reaches the model as
-/// the child's result (FIG-3679).
-#[derive(Clone, Default)]
-pub struct OrchestratingChildSinks {
-    queue: Arc<Mutex<Vec<crate::ProcessId>>>,
-    refusal: Arc<Mutex<Option<crate::RuntimeEffectControllerError>>>,
-}
-
-impl OrchestratingChildSinks {
-    pub(crate) fn enqueue(&self, process_id: crate::ProcessId) {
-        let mut queue = self.queue.lock_recover();
-        queue.push(process_id);
-    }
-
-    pub(crate) fn drain(&self) -> Vec<crate::ProcessId> {
-        let mut queue = self.queue.lock_recover();
-        queue.drain(..).collect()
-    }
-
-    /// Keeps the first refusal a nested call met.
-    pub(crate) fn refuse(&self, error: crate::RuntimeEffectControllerError) {
-        self.refusal.lock_recover().get_or_insert(error);
-    }
-
-    /// The refusal a nested call met, if any.
-    pub(crate) fn take_refusal(&self) -> Option<crate::RuntimeEffectControllerError> {
-        self.refusal.lock_recover().take()
-    }
-}
-
 #[derive(Clone)]
 pub struct ToolDispatchContext<'run> {
     pub plugins: Arc<PluginSession>,
@@ -141,7 +95,7 @@ pub struct ToolDispatchContext<'run> {
     /// The turn's observation sink (ADR 0105 §1): every host-facing event a
     /// dispatch emits is a synchronous [`ObservationSink::observe`] call,
     /// keyed by replay key and ordinal, and never awaited. A group child
-    /// borrows the opener's so its nested calls surface the same
+    /// borrows the opener's so its call surfaces the same
     /// `ToolCallStarted`/`ToolCallCompleted` activities a turn-dispatched call
     /// emits (ADR 0099 §3's live half of the split); a dispatch that serves no
     /// turn stream carries [`NullObservationSink`](crate::engine::NullObservationSink).
@@ -166,12 +120,6 @@ pub struct ToolDispatchContext<'run> {
 }
 
 impl ToolDispatchContext<'_> {
-    pub fn is_orchestrating_tool(&self, tool_id: &crate::ToolId) -> bool {
-        self.tool_registry
-            .as_deref()
-            .is_some_and(|registry| registry.is_orchestrating_tool(tool_id))
-    }
-
     pub(crate) fn attempt_may_defer(
         &self,
         tool_id: &crate::ToolId,
@@ -217,14 +165,12 @@ impl ToolDispatchContext<'_> {
     /// This dispatch with one call's observation key installed:
     /// `material` qualified under this dispatch's *resolved* key — its
     /// installed call key when it carries one, else its base — so sibling
-    /// calls that share a base mint distinct lanes, and a call nested inside
-    /// an orchestrating body's own keyed call nests under it rather than
-    /// colliding with a sibling of the outer call. Pass the call's own
+    /// calls that share a base mint distinct lanes. Pass the call's own
     /// effect-invocation replay key where it has one — a group child's
     /// `{group}:child:{position}` envelope, a command's key — else positional
     /// material the caller can prove unique: `{iteration}:{index}:{call_id}`
     /// on the turn-dispatched protocol path, `{batch_id}:{index}:{call_id}`
-    /// inside a batch, `{index}:{call_id}` inside a nested orchestration.
+    /// inside a batch.
     /// Buffers and services stay shared; only emissions re-key.
     pub fn observation_keyed(&self, call_material: impl Into<String>) -> Self {
         let mut keyed = self.clone();

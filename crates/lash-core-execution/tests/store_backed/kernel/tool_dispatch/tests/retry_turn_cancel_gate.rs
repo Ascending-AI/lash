@@ -126,9 +126,8 @@ async fn retry_sleep_shape(
         },
     );
     let dispatch = Arc::new(context.clone());
-    let tool_context = ToolContext::from_dispatch(Arc::clone(&dispatch))
-        .prepared_call(&call)
-        .build();
+    let tool_context =
+        crate::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch)).prepared_call(&call);
 
     let coordinated = coordinate_tool_invocation(
         &context,
@@ -140,7 +139,7 @@ async fn retry_sleep_shape(
         &turn_cancel_wait,
         None,
         |completion_key| {
-            crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(
+            crate::prepared_tool_attempt(
                 Arc::clone(&dispatch),
                 tool_context.clone(),
                 completion_key,

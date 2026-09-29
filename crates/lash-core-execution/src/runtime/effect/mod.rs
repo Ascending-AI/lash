@@ -20,7 +20,6 @@ pub use tool_child::{
     UnrecordedSessionSources,
 };
 mod tool_child_driver;
-pub(crate) use tool_child_driver::await_journaled_tool_completion;
 #[cfg(feature = "testing")]
 pub(crate) use tool_child_driver::validate_recorded_authorities;
 pub use tool_child_driver::{
@@ -60,15 +59,15 @@ pub use executor::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CommandJournalGuard, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
     EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
-    ExternalCompletionError, GroupChildCancelWatch, IndependentEffectWork, JournalReplay,
-    ProcessDriveStep, ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation,
-    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
-    RuntimeAwaitEventOptions, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectLocalExecutor, RuntimeSleepOptions, ScopeBoundController, ScopedEffectController,
-    SegmentProgress, ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation,
-    ToolIntentSubmissionGuard, TriggerLocalExecution, TurnCancelClosureOwnerBinding,
-    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding, TurnControlBindingId,
-    TurnControlBindingIdError, turn_control_binding_id_for_scope,
+    ExternalCompletionError, GroupChildCancelWatch, JournalReplay, ProcessDriveStep,
+    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, RecordedJournal,
+    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    turn_control_binding_id_for_scope,
 };
 pub use group::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 pub use group::{

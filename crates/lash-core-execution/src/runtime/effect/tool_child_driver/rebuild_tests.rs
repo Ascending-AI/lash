@@ -6,38 +6,13 @@
 //! wrong, so a path that let it decide shows up as its value surviving.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::tests::{IssueOrderRecorder, lent, manifest, request, spec};
+use super::tests::{lent, manifest, request, spec};
 use super::*;
-use crate::ToolManifest;
 use crate::runtime::effect::{ToolChildRebuildRefusal, UnrecordedSessionSources};
 
 /// The recursive-spawn tool a subagent at its maximum depth has hidden.
 const SPAWN: &str = "spawn_agent";
-
-/// Answers every call, counting the spawns it was asked for.
-struct SpawnAndEchoTools {
-    spawned: AtomicUsize,
-}
-
-#[async_trait::async_trait]
-impl crate::ToolProvider for SpawnAndEchoTools {
-    fn tool_manifests(&self) -> Vec<ToolManifest> {
-        vec![manifest(SPAWN), manifest("echo-leaf")]
-    }
-
-    fn resolve_contract(&self, _name: &str) -> Option<Arc<crate::ToolContract>> {
-        Some(Arc::new(crate::ToolContract::default()))
-    }
-
-    async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
-        if call.name() == SPAWN {
-            self.spawned.fetch_add(1, Ordering::SeqCst);
-        }
-        crate::ToolOutcome::ok(serde_json::json!("done")).into()
-    }
-}
 
 /// The two ways a child finds its context.
 #[derive(Clone, Copy, Debug)]
@@ -111,20 +86,16 @@ fn max_depth_subagent_request() -> ToolChildRequest {
     request
 }
 
-/// A subagent at its maximum depth cannot spawn through a nested batch on
-/// either path, even when the context serving it would admit `spawn_agent`:
-/// the child's nested calls are admitted against the recorded surface, never
-/// the serving context's catalog. Before FIG-3712 a built context, being a
-/// fresh ambient session, admitted the spawn and reset the depth to one.
-#[tokio::test]
-async fn a_max_depth_subagent_cannot_spawn_through_a_nested_batch_on_either_path() {
+/// A subagent at its maximum depth has no `spawn_agent` on either path, even
+/// when the context serving it would admit one: the child's catalog is the
+/// recorded surface, never the serving context's. Before FIG-3712 a built
+/// context, being a fresh ambient session, admitted the spawn and reset the
+/// depth to one.
+#[test]
+fn a_max_depth_subagent_has_no_spawn_on_either_path() {
     for path in [Path::Live, Path::Built] {
-        let tools = Arc::new(SpawnAndEchoTools {
-            spawned: AtomicUsize::new(0),
-        });
         let mut serving = lent();
         serving.observer = crate::engine::NullObservationSink::arc();
-        serving.tools = Arc::clone(&tools) as Arc<dyn crate::ToolProvider>;
         // Both paths serve the subagent's own plugins: the opener's, or ones
         // built from the request.
         serving.plugins = plugins_under(Some(max_depth_subagent()));
@@ -139,63 +110,27 @@ async fn a_max_depth_subagent_cannot_spawn_through_a_nested_batch_on_either_path
         ));
         let context = serving_context(path, &serving);
         let request = max_depth_subagent_request();
-        let controller = ScopedEffectController::shared(
-            Arc::new(IssueOrderRecorder::new(false)),
-            crate::AdmittedScope::turn("child-session", "turn"),
+        let dispatch = rebind_child_dispatch(
+            context.dispatch().as_ref(),
+            &request,
+            super::tests::child_controller(),
+            spec(3),
+            &ToolUsageLedger::new(),
         )
-        .expect("a valid child scope");
-        let dispatch = Arc::new(
-            rebind_child_dispatch(
-                context.dispatch().as_ref(),
-                &request,
-                controller,
-                spec(3),
-                &ToolUsageLedger::new(),
+        .expect("the lent client's test service binds to any recorded authority");
+
+        assert!(
+            crate::tool_dispatch::resolve_callable_manifest_by_id(&dispatch, &manifest(SPAWN).id)
+                .is_none(),
+            "{path:?}: the hidden spawn is not in the child's catalog"
+        );
+        assert!(
+            crate::tool_dispatch::resolve_callable_manifest_by_id(
+                &dispatch,
+                &manifest("echo-leaf").id
             )
-            .expect("the lent client's test service binds to any recorded authority"),
-        );
-        let wait = child_turn_cancel_wait(
-            &dispatch,
-            &request,
-            &tokio_util::sync::CancellationToken::new(),
-        );
-        let body = child_tool_context(
-            &dispatch,
-            &request,
-            wait,
-            crate::tool_dispatch::OrchestratingChildSinks::default(),
-        );
-
-        let replies = crate::OrchestrationContext::new(body)
-            .call_tool_batch(vec![
-                crate::ToolInvocation::new(
-                    "nested-spawn",
-                    manifest(SPAWN).id,
-                    serde_json::json!({}),
-                ),
-                crate::ToolInvocation::new(
-                    "nested-echo",
-                    manifest("echo-leaf").id,
-                    serde_json::json!({}),
-                ),
-            ])
-            .await;
-
-        assert_eq!(replies.len(), 2, "{path:?}");
-        assert!(
-            !replies[0].output.is_success(),
-            "{path:?}: the hidden spawn is refused: {:?}",
-            replies[0]
-        );
-        assert!(
-            replies[1].output.is_success(),
-            "{path:?}: a recorded tool still runs: {:?}",
-            replies[1]
-        );
-        assert_eq!(
-            tools.spawned.load(Ordering::SeqCst),
-            0,
-            "{path:?}: no spawn ran"
+            .is_some(),
+            "{path:?}: a recorded tool is"
         );
     }
 }
@@ -243,7 +178,7 @@ fn a_context_under_another_subagent_context_is_refused_on_either_path() {
 
 /// A built context has no link to its opener's cooperative cancellation, so
 /// the turn's cancel reaches it only through the durable gate: the wait its
-/// nested calls take observes the child's recorded authority on either path.
+/// attempts take observes the child's recorded authority on either path.
 #[test]
 fn a_built_childs_waits_observe_its_recorded_turn_gate() {
     for path in [Path::Live, Path::Built] {

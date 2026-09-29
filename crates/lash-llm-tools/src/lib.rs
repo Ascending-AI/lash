@@ -434,12 +434,8 @@ mod tests {
                 })
             }
         });
-        lash_core::testing::mock_attempt_context_from(
-            &lash_core::testing::mock_tool_context_with_host_and_direct_completions(
-                manager,
-                completions,
-            ),
-        )
+        lash_core::testing::ToolCallFixture::with_host_and_direct_completions(manager, completions)
+            .attempt("test-turn")
     }
 
     #[test]

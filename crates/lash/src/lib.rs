@@ -286,30 +286,24 @@ pub mod tools {
         CompactToolContract, EmitProcessEventIntent, EmitTriggerIntent, PendingAnnouncement,
         PendingCompletion, PendingResolver, PreparedToolCall, SignalProcessIntent,
         StartProcessIntent, TOOL_INTENT_MAX_CANONICAL_BYTES, TOOL_INTENT_MAX_COUNT,
-        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior, ToolActivation,
+        TOOL_INTENT_MAX_PER_KIND, TOOL_INTENT_PROTOCOL_V3, TimeoutBehavior,
         ToolArgumentProjectionPolicy, ToolAttachmentClient, ToolAttemptOutcome, ToolCall,
-        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContext,
-        ToolContract, ToolDefinition, ToolDirectCompletionClient, ToolDiscovery,
-        ToolDispatchClient, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolFailureSource,
-        ToolIntent, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-        ToolIntentRefusalReason, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone,
-        ToolOutputContract, ToolPrepareCall, ToolPrepareContext, ToolProcessEventClient,
-        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionAdmin, ToolSessionModel, ToolValue,
-        ToolView, ToolViewBlock, ToolViewMeta, derive_tool_intent_identity,
-        facade_support::OrchestrationContext, facade_support::ReconfigureError,
+        ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolCatalogEntry, ToolContract,
+        ToolDefinition, ToolDirectCompletionClient, ToolDiscovery, ToolExecutionGrant, ToolFailure,
+        ToolFailureClass, ToolFailureSource, ToolIntent, ToolIntentExecutionOutcome,
+        ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, ToolManifest,
+        ToolOutcome, ToolOutcomeDone, ToolOutputContract, ToolPrepareCall, ToolPrepareContext,
+        ToolProvider, ToolRegistry, ToolRetryStatus, ToolSessionModel, ToolValue, ToolView,
+        ToolViewBlock, ToolViewMeta, derive_tool_intent_identity, facade_support::ReconfigureError,
         facade_support::ToolSourceHandle, facade_support::ToolStateFacadeOps,
-        facade_support::ToolTriggerClient, turn_outcome_from_tool_control,
+        turn_outcome_from_tool_control,
     };
     pub use lash_core::{DeclaredStart, DeclaredStartRefused};
-    pub use lash_core::{
-        InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
-        InternalProcessToolDef, InternalProcessToolImplementation,
-    };
     /// Tool-execution request batches, replies, and child-process observation hooks.
     pub use lash_core::{
         PreparedToolBatch, PreparedToolBatchCall, ToolChildExecutionTraceHook,
-        ToolChildProcessStarted, facade_support::OrchestratingToolDef,
-        facade_support::ToolInvocation, facade_support::ToolInvocationReply,
+        ToolChildProcessStarted, facade_support::ToolInvocation,
+        facade_support::ToolInvocationReply,
     };
     /// The dialect-agnostic tool binding and its one setter. The manifest key
     /// is lash's internal projection — hosts never read or write it, and which
@@ -771,8 +765,8 @@ pub mod remote {
             RemoteToolRegistry, assert_remote_tool_registry_reopenable,
         };
         pub use lash_remote_protocol::tools::{
-            RemoteToolActivation, RemoteToolArgumentProjectionPolicy, RemoteToolGrant,
-            RemoteToolOutputContract, RemoteToolRetryPolicy,
+            RemoteToolArgumentProjectionPolicy, RemoteToolGrant, RemoteToolOutputContract,
+            RemoteToolRetryPolicy,
         };
     }
 

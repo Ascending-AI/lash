@@ -1,5 +1,5 @@
 use lash_core::plugin::{PluginError, ToolCatalogContext};
-use lash_core::{ToolActivation, ToolCatalog, facade_support::ToolCatalogContribution};
+use lash_core::{ToolCatalog, facade_support::ToolCatalogContribution};
 use lash_lashlang_runtime::required_tool_typescript_executable;
 
 use crate::dialect::TypescriptDialect;
@@ -33,7 +33,6 @@ pub(crate) fn rlm_prompt_tool_docs(
     let entries = tool_catalog
         .tools
         .iter()
-        .filter(|tool| tool.manifest.activation != ToolActivation::Internal)
         .filter(|tool| features.decomposition || tool.manifest.name != "continue_as")
         .map(|tool| {
             let contract = &tool.contract;
@@ -106,9 +105,6 @@ fn validate_rlm_language_bindings(
     language: &dyn crate::dialect::Dialect,
 ) -> Result<(), PluginError> {
     for tool in tools {
-        if tool.activation == ToolActivation::Internal {
-            continue;
-        }
         let typescript = required_tool_typescript_executable(tool)
             .map_err(|err| PluginError::Registration(err.to_string()))?;
         // Being a catalog member is being advertised, and the TypeScript
@@ -326,31 +322,6 @@ mod tests {
                 .contains("missing an explicit `typescript.tool` binding"),
             "{err}"
         );
-    }
-
-    #[test]
-    fn rlm_catalog_ignores_internal_members_without_tool_bindings() {
-        let internal = ToolDefinition::raw(
-            "tool:test/internal_runner",
-            "internal_runner",
-            "Runtime-owned process body",
-            ToolContract::default_input_schema(),
-            json!({ "type": "string" }),
-        )
-        .with_activation(ToolActivation::Internal);
-
-        rlm_tool_catalog(
-            ToolCatalogContext {
-                session_id: SessionId::from("session"),
-                tools: vec![internal.manifest()],
-                resolve_contract: None,
-                tool_access: lash_core::SessionToolAccess::default(),
-                subagent: None,
-                extensions: Default::default(),
-            },
-            &typescript_test_dialect(),
-        )
-        .expect("internal process bodies are not Lashlang-callable catalog members");
     }
 
     /// Membership is advertisement, so a binding whose call path a TypeScript
@@ -594,7 +565,6 @@ pub(crate) fn validate_discovery(
     if let Some(discovery) = discovery
         && !tools.iter().any(|tool| {
             tool.inline
-                && tool.activation != ToolActivation::Internal
                 && dialect.tool_call_path(tool).ok().as_deref()
                     == Some(discovery.operation.as_str())
         })

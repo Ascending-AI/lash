@@ -4,9 +4,9 @@
 //! # What "handler level" means, and why it is not a detail
 //!
 //! ADR 0099 §2: "A tool child is a replayable invocation driver. Retry,
-//! completion-key derivation, deferred await and the orchestrating lane are
-//! *coordination* and run at handler level on the child's own admitted
-//! controller. Only atomic attempts run inside recorded bodies." The structural
+//! completion-key derivation and deferred await are *coordination* and run
+//! at handler level on the child's own admitted controller. Only atomic
+//! attempts run inside recorded bodies." The structural
 //! reason is ADR 0042's — "A recorded body must not emit commands into an
 //! ordinal-addressed journal" — so a driver that lived inside a `ctx.run`
 //! closure could not journal its second attempt, its retry sleep or its
@@ -947,12 +947,11 @@ pub(crate) fn rebind_child_dispatch<'run>(
 /// manifest, whatever the recorded surface or the deployment now says.
 ///
 /// Every other id answers from the recorded surface too (FIG-3712), never
-/// from the context that happens to serve the child. A call the child's
-/// orchestrating body issues is admitted against what its opener could call
-/// at group open: the opener's session tool access and subagent depth are
-/// already folded into that surface (a subagent at its maximum depth has no
-/// `spawn_agent` in it), so a child run by a context the deployment built
-/// cannot reach a tool its opener could not — nor lose one it could.
+/// from the context that happens to serve the child: the opener's session
+/// tool access and subagent depth are already folded into that surface (a
+/// subagent at its maximum depth has no `spawn_agent` in it), so a child run
+/// by a context the deployment built cannot reach a tool its opener could
+/// not — nor lose one it could.
 ///
 /// The recorded manifest's contract is the recorded surface's entry for that
 /// id when there is one, and a default otherwise: a contract is read during
@@ -1106,14 +1105,10 @@ async fn run_tool_child<'run>(
         &usage_ledger,
     )?);
 
-    // The orchestrating-start sink the context carries: an orchestrating body
-    // runs outside an attempt frame, so its realized starts have no intent
-    // outcome to ride and are captured here instead (ADR 0099 §6).
-    let orchestrating_sinks = crate::tool_dispatch::OrchestratingChildSinks::default();
     // The cancellation trio is computed once, here, from the *recorded*
     // authority the validator just authenticated — and carried whole into the
-    // child's context so every retry sleep and deferred wait inside it,
-    // including a nested batch's, waits under exactly this shape (§3).
+    // child's context so every retry sleep and deferred wait inside it waits
+    // under exactly this shape (§3).
     let turn_cancel_wait = child_turn_cancel_wait(&dispatch, request, &cancel);
     // A built context has no running opener to fire its stop: its turn's
     // durable gate does (see `watch_turn_stop`).
@@ -1130,13 +1125,7 @@ async fn run_tool_child<'run>(
     let run_started = dispatch.clock.now();
     // Boxed for the same reason the runner's call is: `drive` holds the
     // coordinator and its attempt machinery live across every await.
-    let driven = Box::pin(drive(
-        &dispatch,
-        request,
-        child,
-        turn_cancel_wait,
-        orchestrating_sinks.clone(),
-    ));
+    let driven = Box::pin(drive(&dispatch, request, child, turn_cancel_wait));
     // On a built context, a session service call the child made abandons the
     // drive where it stands, as a crash would: nothing the refused call led
     // to is recorded (see `SessionServicesRefusal`).
@@ -1162,8 +1151,8 @@ async fn run_tool_child<'run>(
     }
     // The settlement is aggregated from the journaled outcome by the one
     // constructor every terminal owns (FIG-3411): per-attempt facts ride
-    // `outcome.captures` and its `triggers`; what the orchestrating lane wrote
-    // outside any attempt frame still drains from the child-local buffers.
+    // `outcome.captures` and its `triggers`; the child-local buffers drain
+    // beside them.
     let model_return = resolve_model_return(
         &dispatch,
         request,
@@ -1192,11 +1181,6 @@ async fn run_tool_child<'run>(
             stream.settle_against(&record);
         }
         settlement.stream = stream;
-    }
-    for process_id in orchestrating_sinks.drain() {
-        if !settlement.possession.contains(&process_id) {
-            settlement.possession.push(process_id);
-        }
     }
     // Realized intent evidence moved into the settlement, where the opener
     // incorporates it as evidence. The journaled terminal keeps the record and
@@ -1308,62 +1292,14 @@ pub(crate) async fn validate_recorded_authorities(
     Ok(())
 }
 
-/// Dispatches the child down the lane its admitted manifest names.
-///
-/// The orchestrating lane is a lane of coordination, not an attempt: ADR 0042
-/// says `batch` and `spawn_agent` "have no `ToolAttempt` frame of their own",
-/// so an orchestrating child runs its body directly and is classified by the
-/// commands it issued, never by an invented outer attempt (§4).
+/// Drives the child's attempts, retry sleeps and deferred await.
 async fn drive(
     dispatch: &Arc<ToolDispatchContext<'_>>,
     request: &ToolChildRequest,
     child: crate::EffectAddress,
     turn_cancel_wait: crate::runtime::TurnCancelWait,
-    orchestrating_sinks: crate::tool_dispatch::OrchestratingChildSinks,
 ) -> Result<ToolDispatchOutcome, RuntimeEffectControllerError> {
-    let tool_context = child_tool_context(
-        dispatch,
-        request,
-        turn_cancel_wait.clone(),
-        orchestrating_sinks.clone(),
-    );
-    // The orchestrating lane is a catalog lane: only a child the Tool Catalog
-    // itself admitted may run a handler-level body with no attempt frame. A
-    // granted call names its own authority, and running a grant's call under
-    // an orchestrating registration would let a registered orchestrator stand
-    // in for a call the grant never described — the admission arm and the
-    // lane are one fact, checked together.
-    if matches!(
-        request.admission,
-        super::tool_child::ToolChildAdmission::Catalog { .. }
-    ) && dispatch.is_orchestrating_tool(&request.call.tool_id)
-    {
-        // The body's one step boundary before it runs: a child whose group
-        // cancel is already decided never starts it (ADR 0105 §4, FIG-3904).
-        if dispatch
-            .effect_controller
-            .controller()
-            .observe_group_child_cancel()
-            .await?
-        {
-            return Err(crate::tool_dispatch::group_child_cancelled(
-                &request.call.call_id,
-            ));
-        }
-        let outcome = Box::pin(crate::tool_dispatch::execute_orchestrating_tool(
-            dispatch.as_ref(),
-            request.call.clone(),
-            tool_context,
-        ))
-        .await;
-        // A nested call the body issued was refused: the child is refused with
-        // it rather than settling what the body made of the failure.
-        return match orchestrating_sinks.take_refusal() {
-            Some(refusal) => Err(refusal),
-            None => Ok(outcome),
-        };
-    }
-
+    let tool_context = child_tool_context(dispatch, request, &turn_cancel_wait);
     let executor_context = tool_context.clone();
     let executor_dispatch = Arc::clone(dispatch);
     let group_child = crate::tool_dispatch::GroupChildCoordination {
@@ -1432,15 +1368,12 @@ async fn drive(
 fn child_tool_context<'run>(
     dispatch: &Arc<ToolDispatchContext<'run>>,
     request: &ToolChildRequest,
-    turn_cancel_wait: crate::runtime::TurnCancelWait,
-    orchestrating_sinks: crate::tool_dispatch::OrchestratingChildSinks,
+    turn_cancel_wait: &crate::runtime::TurnCancelWait,
 ) -> crate::ToolContext<'run> {
     let mut builder = crate::ToolContext::from_dispatch(Arc::clone(dispatch))
         .prepared_call(&request.call)
         .cancellation_token(Some(turn_cancel_wait.cancellation().clone()))
-        .parent_invocation(request.attempt_identity.parent_invocation().cloned())
-        .orchestrating_sinks(orchestrating_sinks)
-        .turn_cancel_wait(turn_cancel_wait);
+        .parent_invocation(request.attempt_identity.parent_invocation().cloned());
     if let Some(process_id) = request.enclosing_process.as_ref() {
         builder = builder.enclosing_process(Some(process_id.clone()));
     }
@@ -1509,18 +1442,15 @@ async fn await_child_completion(
 /// Arms the resolver a deferred tool call named, then parks on a journaled
 /// await derived from the lineage the caller supplies.
 ///
-/// Two callers park through this one body. The driver itself parks the child's
-/// own deferred call under the request's *recorded* parent invocation; an
-/// orchestrating body on the group-child path parks a nested deferred call
-/// under the parent it derived for that call. Both derivations name recorded
-/// lineage, so a redrive re-derives the same replay key rather than a fresh
-/// one — the same reconstruction property this module's documentation claims
-/// for the attempts themselves.
+/// The driver parks the child's deferred call under the request's *recorded*
+/// parent invocation, so a redrive re-derives the same replay key rather than
+/// a fresh one — the same reconstruction property this module's
+/// documentation claims for the attempts themselves.
 ///
 /// The arming runs before the park and on every redrive, for the reason the
 /// session path states: the recorded attempt body that named the resolver does
 /// not re-run, so nothing else would arm it.
-pub(crate) async fn await_journaled_tool_completion(
+async fn await_journaled_tool_completion(
     dispatch: &ToolDispatchContext<'_>,
     parent_invocation: Option<&crate::RuntimeInvocation>,
     call_id: &str,

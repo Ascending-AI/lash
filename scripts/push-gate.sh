@@ -377,11 +377,10 @@ run_s3_conformance() {
 # list from silently drifting away from the first two. A CI gate that appears
 # in none of the three places is an omission, not a decision.
 #
-#   scripts/lint_orchestrating_tools.py, actionlint
-#     Owned by the prek hooks in `.pre-commit-config.yaml`: file-scoped, run
-#     on every commit that touches their inputs, and not worth a second full
-#     pass here. The one that has a self-test still runs it above, because a
-#     hook that has stopped working is invisible from the hook itself.
+#   actionlint
+#     Owned by the prek hook in `.pre-commit-config.yaml`: file-scoped, run
+#     on every commit that touches its inputs, and not worth a second full
+#     pass here.
 #
 #   scripts/ci-stack-budget.sh, scripts/confidence-gate.sh fast shards,
 #   scripts/profile_runtime.py, scripts/profile_lashlang.py,

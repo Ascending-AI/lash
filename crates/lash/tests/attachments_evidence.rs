@@ -280,8 +280,8 @@ fn drain_area_witnesses() {
     let _ = lash::tools::ToolCallOutput::attachments;
     // W0072: lash::tools::ToolCallOutput::replace_attachment_source [function]
     let _ = lash::tools::ToolCallOutput::replace_attachment_source;
-    // W0073: lash::tools::ToolContext::attachments [function]
-    let _ = lash::tools::ToolContext::attachments;
+    // W0073: lash::tools::AttemptContext::attachments [function]
+    let _ = lash::tools::AttemptContext::attachments;
     // W0074: lash::tracing::TraceAttachment [struct]
     type_witness::<lash::tracing::TraceAttachment>();
     // W0075: lash::tracing::TraceAttachment::bytes_len [field]

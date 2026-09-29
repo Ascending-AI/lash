@@ -40,7 +40,7 @@ macro_rules! tool_child_turn_cancel_tests {
 
 /// Register the FIG-1293 migrated-tools crash-redrive law. The fixture hands
 /// back a guard, a prefix, the effect host, the store set under test, the tier's
-/// turn runner and the orchestration plugin factories (`spawn_agent`,
+/// turn runner and the plugin factories (the standard protocol, `spawn_agent`,
 /// `cancel_process`) from the crates above this one.
 #[macro_export]
 macro_rules! migrated_tools_redrive_tests {
@@ -52,9 +52,8 @@ macro_rules! migrated_tools_redrive_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, stores, runner, orchestration) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner, orchestration)
-                .await;
+            let (_guard, prefix, host, stores, runner, plugins) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, plugins).await;
         }
     };
 }
@@ -365,28 +364,6 @@ macro_rules! served_process_start_tests {
     };
 }
 
-/// Register the empty-orchestration redrive law (FIG-3680): an RLM cell
-/// that called an orchestrating tool whose body journals no nested effect,
-/// crashed before the cell sealed, redrives to the turn's end with nothing
-/// dispatched twice. The fixture is [`cell_binding_drift_tests!`]'s: its
-/// runner reads its journal's replay keys and cuts a turn at a
-/// [`JournalCut`](crate::JournalCut).
-#[macro_export]
-macro_rules! cell_orchestration_redrive_tests {
-    ($(#[$attr:meta])* $fixture:block) => {
-        $crate::cell_orchestration_redrive_tests!(@law [$(#[$attr])*] $fixture;
-            (an_empty_orchestrating_call_redrives_from_its_cell, "cell-empty-orchestration-redrive"));
-    };
-    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
-        $($attr)*
-        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn $law() {
-            let (_guard, prefix, host, stores, runner, rlm) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
-        }
-    };
-}
-
 /// Register one turn-runner law.
 #[macro_export]
 macro_rules! __turn_runner_register {
@@ -482,7 +459,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-commit-order-frozen-clock"
             ),
             (
-                a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink,
+                a_cancel_decided_before_a_sink_is_refused_at_the_sink,
                 "tool-child-admission-fence"
             ),
             (

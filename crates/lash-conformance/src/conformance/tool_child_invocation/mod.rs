@@ -6,8 +6,8 @@
 //! order, reopen fencing. This law proves the *child* contract: each member of
 //! a group is a `ToolInvocation` envelope carrying a `ToolChildRequest`, and the
 //! host routes it to the driver that runs retry, deferred-completion
-//! coordination, grant/catalog branching and orchestration at handler level
-//! while only the atomic `ToolAttempt` executes inside a recorded body.
+//! coordination and grant/catalog branching at handler level while only the
+//! atomic `ToolAttempt` executes inside a recorded body.
 //!
 //! What is asserted, all through the contract surface:
 //!
@@ -23,11 +23,7 @@
 //!   attempt commits — a process start lands in `possession`, a process event
 //!   lands in the registry, and both outcomes ride the settlement;
 //! * a **usage** leaf's managed-LLM spend inside the attempt is captured into
-//!   the journaled `ToolAttempt` outcome and aggregated onto the settlement;
-//! * an **orchestrating** leaf runs its body directly — no invented outer
-//!   `ToolAttempt` — and its work is real: a nested call runs through the
-//!   child's own rebound dispatch as a journaled attempt, and the durable
-//!   process start the body realizes rides the settlement's `possession`.
+//!   the journaled `ToolAttempt` outcome and aggregated onto the settlement.
 //!
 //! A second scenario covers the recovery routing rule: a reopened group whose
 //! child's opener is not live on this host is **not refused** and **not run** —
@@ -74,7 +70,9 @@ const LEAF_DEFERRED: &str = "tool:law_deferred";
 const LEAF_GRANTED: &str = "tool:law_granted";
 const LEAF_INTENTS: &str = "tool:law_intents";
 const LEAF_USAGE: &str = "tool:law_usage";
-const LEAF_ORCHESTRATING: &str = "tool:law_orchestrating";
+/// The leaf the incarnation law runs to read its start context: its output
+/// names the durable parent a start it declared would take.
+const LEAF_PARENT: &str = "tool:law_parent";
 /// The leaf the recovery scenario parks. Distinct from the deferred leaf so
 /// the two scenarios' completion keys and execution logs cannot collide.
 const LEAF_RECOVERY: &str = "tool:law_recovery";
@@ -101,8 +99,8 @@ const LEAF_SPEND_COMMIT: &str = "tool:law_spend_commit";
 /// body always returns an error, so the reply carries a failed output both
 /// paths must reproduce identically.
 const LEAF_FAIL: &str = "tool:law_fail";
-/// The leaf the admission-fence law's orchestrating child calls nested: like
-/// `law_commit` it gates on `held` and declares intent writes, plus a
+/// The leaf the admission-fence law's child runs: like `law_commit` it gates
+/// on `held` and declares intent writes, plus a
 /// process-definition registration — the journaled CAS write FIG-3470 routes
 /// through the bound controller like every other sink.
 const LEAF_FENCE: &str = "tool:law_fence";
@@ -150,9 +148,10 @@ pub type ToolChildProcessesFactory = Arc<
         + Sync,
 >;
 
-/// What a tier supplies: a world factory over one substrate and a process
-/// registry factory. Every host journals, so a deferrable child is always
-/// recorded under durable completion routing (ADR 0102, D1).
+/// What a tier supplies: a world factory over one substrate, a process
+/// registry factory and the runner its opener-side steps run in. Every host
+/// journals, so a deferrable child is always recorded under durable
+/// completion routing (ADR 0102, D1).
 #[derive(Clone)]
 pub struct ToolChildLawFixture {
     /// Two calls are two views of one substrate.
@@ -160,6 +159,11 @@ pub struct ToolChildLawFixture {
     /// A fresh process registry and process-exec-env store on the substrate
     /// the host factory serves.
     pub make_processes: ToolChildProcessesFactory,
+    /// Where a law runs an opener step that journals, over the world's host:
+    /// a Restate host executes journaled commands only inside a handler, so
+    /// a law that records an opener fact, crashes the opener and replays it
+    /// hands those steps to the tier's turn runner.
+    pub turn_runner: Arc<dyn crate::ConformanceTurnRunner>,
 }
 
 /// The lease window the lane law and the recovery law's live phases use:
@@ -290,6 +294,8 @@ impl LawObservation {
 }
 
 /// One definition per leaf lane, plus the retry policy the retry leaf needs.
+/// It is the catalog a law opener dispatches against, and so the surface it
+/// records for its children (FIG-3712).
 fn leaf_definitions() -> Vec<crate::ToolDefinition> {
     [
         LEAF_PLAIN,
@@ -298,6 +304,7 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_GRANTED,
         LEAF_INTENTS,
         LEAF_USAGE,
+        LEAF_PARENT,
         LEAF_RECOVERY,
         LEAF_SPEND_DEFERRED,
         LEAF_BILLED,
@@ -338,24 +345,7 @@ fn leaf_grant() -> crate::ToolExecutionGrant {
         .with_execution_binding(serde_json::json!({ "route": "granted-by-request" }))
 }
 
-/// The grant the same-ID-orchestrator child is admitted under: authority over
-/// the very id the live registry holds as orchestrating, so any lane decision
-/// that consulted the registration instead of the recorded admission would
-/// route the call into an orchestrating body the grant never described.
-fn orchestrator_id_grant() -> crate::ToolExecutionGrant {
-    let definition = crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    );
-    crate::ToolExecutionGrant::from_definition(definition)
-        .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
-        .with_execution_binding(serde_json::json!({ "route": "granted-over-orchestrator" }))
-}
-
-/// The leaf provider every child but the orchestrating one executes under.
+/// The leaf provider every child executes under.
 struct LawLeafProvider {
     definitions: Vec<crate::ToolDefinition>,
     observation: Arc<LawObservation>,
@@ -467,15 +457,21 @@ impl crate::ToolProvider for LawLeafProvider {
                     serde_json::json!({ "leaf": "granted" }),
                 ))
             }
-            // Reached only by the rank-7 child: a catalog-admitted call on
-            // this id is claimed by the orchestrating lane before the provider
-            // is asked, so a provider execution under this name is, by
-            // construction, a call that ran as a leaf under its own grant.
-            name if name == LEAF_ORCHESTRATING.trim_start_matches("tool:") => {
-                crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
-                    serde_json::json!({ "leaf": "orchestrating-as-leaf" }),
+            // The start context derives its starter through the admitted
+            // scope's minted `ProcessId` — the process the journal admitted,
+            // never a registry lookup. A lost pin errors rather than running.
+            name if name == LEAF_PARENT.trim_start_matches("tool:") => match context.start_cx() {
+                Ok(cx) => crate::ToolAttemptOutcome::done_without_intents(
+                    crate::ToolOutcomeDone::ok(serde_json::json!({
+                        "leaf": "parent",
+                        "parent": cx.starter().id().storage_id(),
+                    })),
+                ),
+                Err(error) => crate::ToolOutcome::err_fmt(format!(
+                    "the parent leaf could not name its durable parent: {error}"
                 ))
-            }
+                .into(),
+            },
             name if name == LEAF_INTENTS.trim_start_matches("tool:") => {
                 crate::ToolAttemptOutcome::done(
                     crate::ToolOutcomeDone::ok(serde_json::json!({ "leaf": "intents" })),
@@ -784,115 +780,6 @@ fn law_billed_completion() -> crate::DirectCompletion {
     }
 }
 
-/// The orchestrating child's body. It does the work §2 and §6 actually
-/// describe: a nested call coordinated through the child's own rebound
-/// dispatch — a journaled `ToolAttempt` under the child's admitted
-/// controller, not a `RuntimeExecutionContext` borrow — and a durable
-/// process start, which the settlement's `possession` must record because an
-/// orchestrating body has no attempt frame whose intents would carry it.
-struct LawOrchestratingTool {
-    definition: crate::ToolDefinition,
-}
-
-#[async_trait::async_trait]
-impl crate::tool_provider::orchestration::OrchestratingToolImplementation for LawOrchestratingTool {
-    fn manifest(&self) -> crate::ToolManifest {
-        self.definition.manifest()
-    }
-
-    fn contract(&self) -> Arc<crate::ToolContract> {
-        Arc::new(self.definition.contract())
-    }
-
-    async fn execute(
-        &self,
-        _args: &serde_json::Value,
-        context: &crate::tool_provider::orchestration::OrchestrationContext<'_>,
-    ) -> crate::ToolOutcome {
-        let replies = context
-            .call_tool_batch(vec![crate::ToolInvocation::new(
-                "nested-law-call",
-                crate::ToolId::from(LEAF_PLAIN),
-                serde_json::json!({}),
-            )])
-            .await;
-        let nested_ok = matches!(
-            replies.first().map(|reply| &reply.output.outcome),
-            Some(crate::ToolCallOutcome::Success(_))
-        );
-        // The start is keyed by the body's admitted scope, call id and start
-        // ordinal, so a redrive re-requests the same start rather than
-        // registering a second process (ADR 0107).
-        // The start context's starter derives through the admitted scope's minted
-        // `ProcessId` — the process the journal admitted, never a registry
-        // lookup. A lost pin answers `None` for `admitted_process`
-        // and this errors rather than running.
-        let parent_scope = match context.start_cx() {
-            Ok(cx) => cx.starter().id().clone(),
-            Err(error) => {
-                return crate::ToolOutcome::err_fmt(format!(
-                    "the orchestrating body could not name its durable parent: {error}"
-                ));
-            }
-        };
-        let start_key = match context.start_key(0) {
-            Ok(start_key) => start_key,
-            Err(error) => {
-                return crate::ToolOutcome::err_fmt(format!(
-                    "the orchestrating body could not key its start: {error}"
-                ));
-            }
-        };
-        match context
-            .start_process(
-                crate::ProcessStartRequest::external(
-                    crate::ProcessOriginator::host(),
-                    serde_json::json!({ "lane": "orchestrating" }),
-                    crate::Lifetime::Detached,
-                )
-                .with_start_key(Some(start_key)),
-            )
-            .await
-        {
-            Ok(view) => crate::ToolOutcome::ok(serde_json::json!({
-                "leaf": "orchestrating",
-                "replies": replies.len(),
-                "nested_ok": nested_ok,
-                "started": view.process_id.to_string(),
-                "parent": parent_scope.storage_id(),
-            })),
-            Err(error) => crate::ToolOutcome::err_fmt(format!(
-                "the orchestrating body's process start failed: {error}"
-            )),
-        }
-    }
-}
-
-/// The orchestrating definition, minted through the first-party capability
-/// boundary this crate is allowed to hold: conformance owns this law-local
-/// contract, and no leaf provider is being upgraded.
-#[expect(
-    unsafe_code,
-    reason = "OrchestratingToolDef::from_first_party is the unsafe capability boundary, and this crate owns the law-local tool contract it registers"
-)]
-fn law_orchestrating_tool() -> crate::tool_provider::orchestration::OrchestratingToolDef {
-    let definition = crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    );
-    let implementation: Arc<
-        dyn crate::tool_provider::orchestration::OrchestratingToolImplementation,
-    > = Arc::new(LawOrchestratingTool { definition });
-    // SAFETY: lash-internal-conformance owns this law-local tool contract and
-    // its body; no leaf provider is upgraded into the orchestrating lane.
-    unsafe {
-        crate::tool_provider::orchestration::OrchestratingToolDef::from_first_party(implementation)
-    }
-}
-
 /// Optional wiring an opener's lent dispatch can carry beyond the law's
 /// defaults: presentation-step plugin factories, a session attachment store
 /// the law built itself so it can observe and re-read what a step retains
@@ -932,12 +819,9 @@ fn build_opener_dispatch(
         .scoped_static(admitted.clone())
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
-    let tool_registry = crate::ToolRegistry::from_tool_provider_with_orchestrating_tools(
-        Arc::clone(&provider),
-        vec![law_orchestrating_tool()],
-    )
-    .expect("the law's leaf provider and orchestrating tool register disjoint ids");
-    let definitions = law_definitions();
+    let tool_registry = crate::ToolRegistry::from_tool_provider(Arc::clone(&provider))
+        .expect("the law's leaf provider registers");
+    let definitions = leaf_definitions();
     let processes = processes.unwrap_or_else(|| {
         crate::testing::effect_backed_process_service(
             registry.expect("a dispatch without a process service takes the registry"),
@@ -1585,32 +1469,17 @@ fn leaf_request(
     )
 }
 
-/// Every tool the law's openers can call: the leaves and the orchestrating
-/// leaf. It is the catalog a law opener dispatches against, and so the
-/// surface it records for its children (FIG-3712).
-fn law_definitions() -> Vec<crate::ToolDefinition> {
-    let mut definitions = leaf_definitions();
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
-    definitions
-}
-
 /// The session facts a law opener records at group open: its catalog as the
 /// surface, in an ordinary root session.
 fn law_session_facts() -> crate::runtime::effect::ToolChildSessionFacts {
     crate::runtime::effect::ToolChildSessionFacts {
-        tool_surface: law_definitions(),
+        tool_surface: leaf_definitions(),
         ..Default::default()
     }
 }
 
 fn catalog_admission(tool_id: &str) -> crate::runtime::effect::ToolChildAdmission {
-    let manifest = law_definitions()
+    let manifest = leaf_definitions()
         .into_iter()
         .find(|definition| definition.manifest().id == crate::ToolId::from(tool_id))
         .unwrap_or_else(|| unreachable!("every leaf has a definition"))

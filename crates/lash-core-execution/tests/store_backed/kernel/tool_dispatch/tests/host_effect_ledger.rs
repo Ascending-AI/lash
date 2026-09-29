@@ -342,9 +342,8 @@ async fn dispatch_ledger_call(
     call_id: &str,
     args: serde_json::Value,
 ) -> ToolDispatchOutcome {
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id(Some(call_id.to_string()))
-        .build();
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
+        .tool_call_id(Some(call_id.to_string()));
     Box::pin(dispatch_tool_call_with_execution_context(
         context,
         "effect".to_string(),

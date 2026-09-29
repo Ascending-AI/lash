@@ -1993,12 +1993,9 @@ fn masked_host_environment_is_the_environment_without_the_masked_members() {
         )
         .with_tool_binding(ToolBinding::new([module], operation).with_authority_type(authority))
     };
-    let mut internal = tool("internal_read", "fs", "internal", "Filesystem");
-    internal.manifest.activation = lash_core::ToolActivation::Internal;
     let unmasked_tools = vec![
         tool("fs_write", "fs", "write", "Filesystem"),
         tool("mirror_read", "mirror", "read", "Filesystem"),
-        internal,
     ];
     let masked_tools = [
         tool("fs_read", "fs", "read", "Filesystem"),
@@ -2112,7 +2109,6 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
         output_schema: lash_remote_protocol::RemoteSchemaContract::default(),
         output_contract: lash_remote_protocol::RemoteToolOutputContract::Static,
         examples: Vec::new(),
-        activation: None,
         argument_projection: None,
         retry_policy: None,
         bindings: Default::default(),

@@ -653,11 +653,6 @@ impl ProcessRegistration {
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn session_start_draft(input: ProcessInput) -> Self {
-        Self::new(input, ProcessProvenance::host(), Lifetime::Detached)
-    }
-
     /// The scopes whose close refuses this start (FIG-3607 R11, FIG-3948):
     /// its starter, the scope its lifetime names, and the session each of
     /// them lies inside, deduplicated in ledger-key order — the order a

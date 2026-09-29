@@ -16,23 +16,12 @@ use crate::{ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcome};
 mod attachments;
 mod completion_support;
 mod direct_completion;
-mod dispatch;
-pub mod orchestration;
-mod process;
 pub mod process_events;
 mod session;
-mod triggers;
 
 pub use attachments::ToolAttachmentClient;
 pub use direct_completion::ToolDirectCompletionClient;
-pub use dispatch::ToolDispatchClient;
-pub use process::{
-    ExternalLaunchAudit, InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall,
-    InternalProcessToolDef, InternalProcessToolImplementation,
-};
-pub use process_events::ToolProcessEventClient;
-pub use session::{ToolSessionAdmin, ToolSessionModel};
-pub use triggers::ToolTriggerClient;
+pub use session::ToolSessionModel;
 
 /// Integrator class 3 session reads available inside a recorded leaf attempt.
 #[derive(Clone)]
@@ -439,17 +428,19 @@ impl ToolCompletionState {
     }
 }
 
-/// Per-call environment for [`ToolProvider::execute`]. Fields are sealed so
-/// the runtime can add capabilities without breaking tool authors.
+/// The runtime's per-call dispatch state for one tool call. It is
+/// crate-private: a provider body receives only the [`AttemptContext`]
+/// projected from it, which reaches no dispatch, process administration or
+/// effect controller.
 #[derive(Clone)]
-pub struct ToolContext<'run> {
+pub(crate) struct ToolContext<'run> {
     pub(crate) session_id: SessionId,
     pub(crate) agent_frame_id: crate::FrameNodeId,
     pub(crate) sessions: Arc<dyn SessionStateService>,
     pub(crate) session_lifecycle: Arc<dyn SessionLifecycleService>,
     pub(crate) processes: Arc<dyn crate::ProcessService>,
     pub(crate) effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
-    pub runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
+    pub(crate) runtime_dispatch: Option<Arc<crate::tool_dispatch::ToolDispatchContext<'run>>>,
     pub(crate) runtime_execution_context: Option<crate::RuntimeExecutionContext<'run>>,
     pub(crate) cancellation_token: Option<tokio_util::sync::CancellationToken>,
     /// The process this call executes inside.
@@ -469,19 +460,6 @@ pub struct ToolContext<'run> {
     pub(crate) parent_invocation: Option<crate::RuntimeInvocation>,
     pub(crate) execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub(crate) child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    /// The realized-start sink a group child's driver installs so an
-    /// orchestrating body's process starts reach its settlement's possession.
-    /// `None` for every caller that is not a group child — its presence is
-    /// the mark that this context was admitted under a group child's rebound
-    /// dispatch; an ordinary orchestrating run's starts still ride its
-    /// `ToolIntent` records.
-    pub(crate) orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
-    /// The cancellation trio the child was validated to wait under, carried
-    /// whole from its driver. `None` for every caller that is not a group
-    /// child; a nested call must inherit exactly this wait — deriving one
-    /// from the scope alone is always observing, which would wire a child
-    /// admitted with no cooperative authority to a gate it must never see.
-    pub(crate) turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
     /// Where this call's progress chunks are persisted (ADR 0114 §2.2).
     /// `None` outside a turn's capture: the call's progress is then accepted
     /// and kept nowhere.
@@ -577,7 +555,7 @@ pub enum ProgressRefused {
 }
 
 #[derive(Clone)]
-/// Notification emitted when an orchestrating tool starts a child process.
+/// Notification emitted when a tool call's declared start realizes a child process.
 pub struct ToolChildProcessStarted {
     /// The minted id of the child process that started.
     pub process_id: ProcessId,
@@ -621,7 +599,52 @@ pub(crate) struct ToolProcessEventContext {
     clock: Arc<dyn crate::Clock>,
 }
 
-pub struct ToolContextBuilder<'run> {
+/// The durable process a tool call runs inside, and the wiring the runtime
+/// appends that call's declared park announcement and nudges its wake
+/// delivery through. A process host supplies it to
+/// [`crate::RuntimeEffectLocalExecutor::process_tool_attempt`]; the tool body
+/// never sees it.
+#[derive(Clone)]
+pub struct ProcessToolCallWiring {
+    process_id: ProcessId,
+    execution_write_authority: crate::ProcessExecutionWriteAuthority,
+    process_work: crate::ProcessWorkWiring,
+    store: Option<Arc<dyn crate::RuntimeStore>>,
+    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
+    process_wake_delivery_policy: crate::DeliveryPolicy,
+    clock: Arc<dyn crate::Clock>,
+}
+
+impl ProcessToolCallWiring {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each argument is one port of the process host the call's appends go through"
+    )]
+    pub fn new(
+        process_id: impl Into<ProcessId>,
+        execution_write_authority: crate::ProcessExecutionWriteAuthority,
+        process_work: crate::ProcessWorkWiring,
+        store: Option<Arc<dyn crate::RuntimeStore>>,
+        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
+        process_wake_delivery_policy: crate::DeliveryPolicy,
+        clock: Arc<dyn crate::Clock>,
+    ) -> Self {
+        Self {
+            process_id: process_id.into(),
+            execution_write_authority,
+            process_work,
+            store,
+            session_store_factory,
+            queued_work,
+            process_wake_delivery_policy,
+            clock,
+        }
+    }
+}
+
+pub(crate) struct ToolContextBuilder<'run> {
     session_id: SessionId,
     agent_frame_id: crate::FrameNodeId,
     sessions: Arc<dyn SessionStateService>,
@@ -644,8 +667,6 @@ pub struct ToolContextBuilder<'run> {
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     child_execution_trace_hook: Option<ToolChildExecutionTraceHook>,
-    orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
-    turn_cancel_wait: Option<crate::runtime::TurnCancelWait>,
     progress_reporter: Option<Arc<dyn ToolProgressReporter>>,
 }
 
@@ -676,31 +697,17 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: dispatch.parent_invocation.clone(),
             execution_env_spec: dispatch.execution_env_spec.clone(),
             child_execution_trace_hook: None,
-            orchestrating_sinks: None,
-            turn_cancel_wait: None,
             progress_reporter: None,
         }
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    pub fn tool_call_id(mut self, tool_call_id: impl Into<Option<String>>) -> Self {
-        self.tool_call_id = tool_call_id.into();
-        self
-    }
-
-    pub fn prepared_call(mut self, call: &PreparedToolCall) -> Self {
+    pub(crate) fn prepared_call(mut self, call: &PreparedToolCall) -> Self {
         self.tool_call_id = Some(call.call_id.clone());
         self.prepared_payload = call.prepared_payload.clone();
         self
     }
 
-    #[cfg(any(test, feature = "testing"))]
-    pub fn tool_execution_binding(mut self, binding: serde_json::Value) -> Self {
-        self.tool_execution_binding = binding;
-        self
-    }
-
-    pub fn cancellation_token(
+    pub(crate) fn cancellation_token(
         mut self,
         cancellation_token: Option<tokio_util::sync::CancellationToken>,
     ) -> Self {
@@ -719,27 +726,25 @@ impl<'run> ToolContextBuilder<'run> {
     /// Name the process this call executes inside. This is the one accessor
     /// hosts write; the process-event append target set via
     /// [`Self::process_events`] must agree with it.
-    pub fn enclosing_process(mut self, process_id: Option<ProcessId>) -> Self {
+    pub(crate) fn enclosing_process(mut self, process_id: Option<ProcessId>) -> Self {
         self.enclosing_process = process_id;
         self
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn process_events(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        execution_write_authority: crate::ProcessExecutionWriteAuthority,
-        process_work: crate::ProcessWorkWiring,
-        store: Option<Arc<dyn crate::RuntimeStore>>,
-        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
-        queued_work: Arc<dyn crate::SessionWorkEngine>,
-        process_wake_delivery_policy: crate::DeliveryPolicy,
-        clock: Arc<dyn crate::Clock>,
-    ) -> Self {
-        let process_id = process_id.into();
-        // The event append target and the enclosing process are the same fact.
-        // When the host already named one, they must agree; when it has not,
-        // the write authority's id is it.
+    /// Makes the call run inside the durable process `wiring` names. The
+    /// event append target and the enclosing process are the same fact: when
+    /// the host already named one, they must agree.
+    pub(crate) fn inside_process(mut self, wiring: ProcessToolCallWiring) -> Self {
+        let ProcessToolCallWiring {
+            process_id,
+            execution_write_authority,
+            process_work,
+            store,
+            session_store_factory,
+            queued_work,
+            process_wake_delivery_policy,
+            clock,
+        } = wiring;
         match &self.enclosing_process {
             Some(enclosing) => assert_eq!(
                 enclosing, &process_id,
@@ -761,46 +766,20 @@ impl<'run> ToolContextBuilder<'run> {
         self
     }
 
-    pub fn parent_invocation(mut self, metadata: Option<crate::RuntimeInvocation>) -> Self {
+    pub(crate) fn parent_invocation(mut self, metadata: Option<crate::RuntimeInvocation>) -> Self {
         self.parent_invocation = metadata;
         self
     }
 
-    pub fn child_execution_trace_hook(mut self, hook: Option<ToolChildExecutionTraceHook>) -> Self {
+    pub(crate) fn child_execution_trace_hook(
+        mut self,
+        hook: Option<ToolChildExecutionTraceHook>,
+    ) -> Self {
         self.child_execution_trace_hook = hook;
         self
     }
 
-    /// Installs the sinks an orchestrating group child's driver drains: the
-    /// realized starts its settlement possesses and the refusal a nested call
-    /// met. Internal: only the tool-child driver
-    /// sets one, which is also what marks the context as admitted under a
-    /// group child's rebound dispatch.
-    pub(crate) fn orchestrating_sinks(
-        mut self,
-        buffer: crate::tool_dispatch::OrchestratingChildSinks,
-    ) -> Self {
-        self.orchestrating_sinks = Some(buffer);
-        self
-    }
-
-    /// Installs the cancellation trio the child waits under, computed once by
-    /// its driver from the recorded cancellation authority. Internal: only
-    /// the tool-child driver sets one, and every nested retry sleep and
-    /// deferred wait inside the child inherits it exactly.
-    pub(crate) fn turn_cancel_wait(mut self, wait: crate::runtime::TurnCancelWait) -> Self {
-        self.turn_cancel_wait = Some(wait);
-        self
-    }
-
-    /// Installs the turn capture writer that persists this call's progress
-    /// (ADR 0114 §2.2). Only the runtime's tool step body sets one.
-    pub fn progress_reporter(mut self, reporter: Option<Arc<dyn ToolProgressReporter>>) -> Self {
-        self.progress_reporter = reporter;
-        self
-    }
-
-    pub fn build(self) -> ToolContext<'run> {
+    pub(crate) fn build(self) -> ToolContext<'run> {
         ToolContext {
             session_id: self.session_id,
             agent_frame_id: self.agent_frame_id,
@@ -826,8 +805,6 @@ impl<'run> ToolContextBuilder<'run> {
             parent_invocation: self.parent_invocation,
             execution_env_spec: self.execution_env_spec,
             child_execution_trace_hook: self.child_execution_trace_hook,
-            orchestrating_sinks: self.orchestrating_sinks,
-            turn_cancel_wait: self.turn_cancel_wait,
             progress_reporter: self.progress_reporter,
         }
     }
@@ -845,17 +822,6 @@ impl<'run> ToolContext<'run> {
                     .as_ref()
                     .and_then(|dispatch| dispatch.process_lineage.clone())
             })
-    }
-
-    /// The logical root this call runs under, read from the admitted scope
-    /// of its effect controller (FIG-3607 item 6): never a live read. `None`
-    /// outside a session turn (a process body, a runtime operation).
-    pub fn logical_root(&self) -> Option<crate::TurnId> {
-        self.effect_controller
-            .scoped()
-            .admitted_scope()
-            .scope()
-            .logical_root()
     }
 
     pub(crate) fn install_prederived_completion_key(&self, key: Option<crate::AwaitEventKey>) {
@@ -901,8 +867,6 @@ impl<'run> ToolContext<'run> {
             parent_invocation: self.parent_invocation.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             child_execution_trace_hook: self.child_execution_trace_hook.clone(),
-            orchestrating_sinks: self.orchestrating_sinks.clone(),
-            turn_cancel_wait: self.turn_cancel_wait.clone(),
             progress_reporter: self.progress_reporter.clone(),
         })
     }
@@ -953,8 +917,6 @@ impl<'run> ToolContext<'run> {
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
             ),
             child_execution_trace_hook: None,
-            orchestrating_sinks: None,
-            turn_cancel_wait: None,
             progress_reporter: None,
         }
     }
@@ -971,128 +933,25 @@ impl<'run> ToolContext<'run> {
         &self.session_id
     }
 
-    /// Exposes agent frame id to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn agent_frame_id(&self) -> &crate::FrameNodeId {
-        &self.agent_frame_id
-    }
-
-    /// Overrides the current frame lineage in an isolated tool-provider test.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn with_agent_frame_id_for_testing(mut self, agent_frame_id: crate::FrameNodeId) -> Self {
-        self.agent_frame_id = agent_frame_id;
-        self
-    }
-
-    /// Exposes sessions to protocol and process-engine implementors while preparing or executing an
-    /// authorized tool call.
-    ///
-    /// The returned admin reads session state; a tool that needs a related
-    /// session to run a turn starts a `ProcessInput::SessionTurn` process
-    /// instead, as `lash-subagents` does.
-    pub fn sessions(&self) -> ToolSessionAdmin {
-        ToolSessionAdmin {
-            session_id: self.session_id.clone(),
-            sessions: Arc::clone(&self.sessions),
-        }
-    }
-
-    /// Exposes dispatch to protocol and process-engine implementors while preparing or executing an
-    /// authorized tool call.
-    pub fn dispatch(&self) -> ToolDispatchClient<'run> {
-        ToolDispatchClient {
-            context: self.clone(),
-        }
-    }
-
-    /// Exposes triggers to protocol and process-engine implementors while preparing or executing an
-    /// authorized tool call.
-    pub fn triggers(&self) -> ToolTriggerClient<'run> {
-        ToolTriggerClient {
-            context: self.clone(),
-        }
-    }
-
-    pub(crate) fn process_admin(&self) -> InternalProcessAdmin<'run> {
-        InternalProcessAdmin {
-            session_id: self.session_id.clone(),
-            agent_frame_id: self.agent_frame_id.clone(),
-            processes: Arc::clone(&self.processes),
-            effect_controller: self.effect_controller.clone(),
-            parent_invocation: self.parent_invocation.clone(),
-            tool_call_id: self.tool_call_id.clone(),
-            execution_env_spec: self.execution_env_spec.clone(),
-            orchestrating_sinks: self.orchestrating_sinks.clone(),
-            process_lineage: self.process_lineage(),
-        }
-    }
-
-    /// Exposes emit child process started to protocol and process-engine implementors while
-    /// preparing or executing an authorized tool call.
-    pub fn emit_child_process_started(
+    /// Append `request` to the journal of the durable process this call runs
+    /// inside. Only the runtime appends on a call's behalf: a body declares
+    /// the event on its pending completion instead.
+    pub(crate) async fn append_process_event(
         &self,
-        process_id: ProcessId,
-        attempt: Option<u32>,
-        child_entry_name: Option<String>,
-    ) {
-        let Some(hook) = &self.child_execution_trace_hook else {
-            return;
+        request: crate::ProcessEventAppendRequest,
+    ) -> Result<crate::ProcessEvent, PluginError> {
+        let Some(process) = self.process_events.as_ref() else {
+            return Err(PluginError::Session(
+                "process event emission is unavailable outside a durable process".to_string(),
+            ));
         };
-        hook.child_process_started(ToolChildProcessStarted {
-            process_id,
-            attempt,
-            child_entry_name,
-        });
-    }
-
-    /// Exposes direct completions to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn direct_completions(&self) -> ToolDirectCompletionClient<'run> {
-        ToolDirectCompletionClient {
-            session_id: self.session_id.clone(),
-            tool_call_id: self.tool_call_id.clone(),
-            direct_completions: self.direct_completions.clone(),
-            parent_invocation: self.parent_invocation.clone(),
-        }
-    }
-
-    /// Provides session-scoped attachment operations to tool implementors so tool-produced blobs
-    /// participate in durable intent and retention tracking.
-    pub fn attachments(&self) -> ToolAttachmentClient {
-        ToolAttachmentClient {
-            store: Arc::clone(&self.attachment_store),
-        }
-    }
-
-    /// Exposes process events to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn process_events(&self) -> ToolProcessEventClient {
-        ToolProcessEventClient {
-            context: self.process_events.clone(),
-        }
+        process.append(request).await
     }
 
     /// Exposes cooperative cancellation to tool implementors, returning `None` when the execution
     /// boundary supplied no cancellation scope.
     pub fn cancellation_token(&self) -> Option<&tokio_util::sync::CancellationToken> {
         self.cancellation_token.as_ref()
-    }
-
-    /// The cancellation trio this context's nested waits inherit, installed
-    /// by the tool-child driver from the child's recorded authority.
-    /// `None` for every context that is not a group child's — the fallback
-    /// callers that reach this accessor only do so under a group-child
-    /// context, so a `None` here degrades to an unobserved wait rather than
-    /// a scope-derived observing one.
-    pub(crate) fn turn_cancel_wait(&self) -> Option<&crate::runtime::TurnCancelWait> {
-        self.turn_cancel_wait.as_ref()
-    }
-
-    pub fn named_phase(&self, phase: &'static str) -> crate::runtime::RuntimeNamedPhase {
-        match self.runtime_execution_context.as_ref() {
-            Some(context) => context.named_phase(phase),
-            None => crate::runtime::RuntimeNamedPhase::begin(None, phase),
-        }
     }
 
     /// Exposes the process this call executes inside to protocol and process-engine
@@ -1105,81 +964,6 @@ impl<'run> ToolContext<'run> {
     /// executing an authorized tool call.
     pub fn tool_call_id(&self) -> Option<&str> {
         self.tool_call_id.as_deref()
-    }
-
-    /// Exposes prepared payload to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn prepared_payload(&self) -> &serde_json::Value {
-        &self.prepared_payload
-    }
-
-    /// Exposes tool execution binding to protocol and process-engine implementors while preparing
-    /// or executing an authorized tool call.
-    pub fn tool_execution_binding(&self) -> &serde_json::Value {
-        &self.tool_execution_binding
-    }
-
-    pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        serde_json::from_value(self.prepared_payload.clone())
-    }
-
-    /// Current one-based attempt number for tool implementors handling this call.
-    pub fn attempt_number(&self) -> u32 {
-        self.attempt_number
-    }
-
-    /// Exposes max attempts to protocol and process-engine implementors while preparing or
-    /// executing an authorized tool call.
-    pub fn max_attempts(&self) -> u32 {
-        self.max_attempts
-    }
-
-    /// Exposes the durable replay key to tool implementors, returning `None` for calls that are not
-    /// replay-scoped.
-    pub fn replay_key(&self) -> Option<&str> {
-        self.replay_key.as_deref()
-    }
-
-    /// Obtain the durable completion key for this call, required before returning
-    /// [`ToolOutcome::Pending`](crate::ToolOutcome::Pending).
-    ///
-    /// A tool that defers its outcome (waiting on a webhook, human approval, or another
-    /// service) calls this, hands the returned [`AwaitEventKey`](crate::AwaitEventKey)
-    /// to whatever will complete the work out-of-band, and then returns
-    /// `ToolOutcome::Pending(..)`. The key names the durable wait the runtime parks the
-    /// call on; the external resolver delivers the result against it later.
-    ///
-    /// The key is stored on the context and consumed by the dispatcher when the tool returns
-    /// `Pending`.
-    /// Returning `Pending` without first calling this fails the call with
-    /// `pending_tool_missing_completion_key`.
-    pub async fn completion_key(&self) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        let tool_call_id = self.tool_call_id.clone().ok_or_else(|| {
-            crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyMissingCallId,
-                "completion keys require a prepared tool call id",
-            )
-        })?;
-        let scoped = self.effect_controller.scoped();
-        let preparation = scoped
-            .controller()
-            .prepare_completion_key(
-                scoped.execution_scope(),
-                crate::AwaitEventWaitIdentity::tool_completion(tool_call_id),
-                true,
-            )
-            .await?;
-        match preparation {
-            crate::CompletionKeyPreparation::Issued(key) => self.completion.store(key),
-            crate::CompletionKeyPreparation::Unsupported
-            | crate::CompletionKeyPreparation::NotNeeded => Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::AwaitEventUnsupported,
-                "completion keys require an effect controller that issues durable await-event keys",
-            )),
-        }
     }
 
     /// Lends the call the stop of the recorded step body it runs in (ADR 0105
@@ -1195,20 +979,10 @@ impl<'run> ToolContext<'run> {
         self.completion.take()
     }
 
-    /// Sets the process this call executes inside, along with the
-    /// cooperative cancellation token the host pairs with it.
-    pub fn with_enclosing_process(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        cancellation_token: tokio_util::sync::CancellationToken,
-    ) -> Self {
-        self.enclosing_process = Some(process_id.into());
-        self.cancellation_token = Some(cancellation_token);
-        self
-    }
-
+    /// Makes the call run inside the durable process `process_id` of
+    /// `registry` in a test; see `testing::ToolCallFixture::inside_process`.
     #[cfg(any(test, feature = "testing"))]
-    pub fn with_process_events_for_testing(
+    pub(crate) fn with_process_events_for_testing(
         mut self,
         process_id: impl Into<ProcessId>,
         registry: Arc<dyn crate::ProcessRegistry>,
@@ -1261,36 +1035,6 @@ impl<'run> ToolContext<'run> {
         self
     }
 
-    /// A body that declares tool intents derives its declaration identity from
-    /// the prepared call id, and a body that appends to the process it runs
-    /// inside needs that process's id. Neither is something a mock host has,
-    /// so a unit test of such a body sets them here rather than reaching past
-    /// the sealed context.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn __with_attempt_binding_for_testing(
-        mut self,
-        tool_call_id: Option<String>,
-        enclosing_process: Option<ProcessId>,
-    ) -> Self {
-        self.tool_call_id = tool_call_id;
-        self.enclosing_process = enclosing_process;
-        self
-    }
-
-    /// [`mock_tool_context`](crate::testing::mock_tool_context) runs under a
-    /// `RuntimeOperation` scope, which names no opener — production attempts
-    /// always run under a turn, drain or process scope. A fixture that
-    /// exercises an owner-derived answer (a declared child's parent scope)
-    /// binds the real scope here rather than leaning on the mock default.
-    #[cfg(any(test, feature = "testing"))]
-    pub fn __with_scoped_effect_controller_for_testing(
-        mut self,
-        scoped: crate::ScopedEffectController<'static>,
-    ) -> Self {
-        self.effect_controller = crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped);
-        self
-    }
-
     pub(crate) fn with_tool_execution_binding(mut self, binding: serde_json::Value) -> Self {
         self.tool_execution_binding = binding;
         self
@@ -1311,39 +1055,6 @@ impl<'run> ToolContext<'run> {
         self.runtime_dispatch = Some(dispatch);
         self.parent_invocation = Some(parent_invocation);
         self
-    }
-
-    /// Constructor reserved for `lash_core::testing` helpers. Do not call directly;
-    /// use [`lash_core::testing::mock_tool_context`] instead.
-    #[cfg(any(test, feature = "testing"))]
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "test-only constructor mirrors the sealed runtime tool context"
-    )]
-    pub fn __for_testing(
-        session_id: SessionId,
-        sessions: Arc<dyn SessionStateService>,
-        session_lifecycle: Arc<dyn SessionLifecycleService>,
-        session_graph: Arc<dyn SessionGraphService>,
-        processes: Arc<dyn crate::ProcessService>,
-        attachment_store: Arc<crate::SessionAttachmentStore>,
-        direct_completions: crate::DirectCompletionClient<'static>,
-        tool_call_id: Option<String>,
-    ) -> ToolContext<'static> {
-        ToolContext::builder(
-            session_id,
-            sessions,
-            session_lifecycle,
-            session_graph,
-            processes,
-            crate::runtime::RuntimeEffectControllerHandle::shared(Arc::new(
-                crate::testing::UnavailableEffectController,
-            )),
-            attachment_store,
-            direct_completions,
-        )
-        .tool_call_id(tool_call_id)
-        .build()
     }
 }
 
@@ -1721,8 +1432,8 @@ mod tests {
         assert_eq!(context.session_id(), "session-1");
         assert_eq!(context.tool_call_id(), Some("call-1"));
         assert_eq!(
-            context.prepared_payload(),
-            &serde_json::json!({ "prepared": true })
+            context.prepared_payload,
+            serde_json::json!({ "prepared": true })
         );
         assert_eq!(
             context.enclosing_process(),
@@ -1733,11 +1444,9 @@ mod tests {
 
     #[test]
     fn enclosing_process_travels_from_tool_context_to_attempt_context() {
-        let context = crate::testing::mock_tool_context().with_enclosing_process(
-            crate::ProcessId::fixture("process-1"),
-            tokio_util::sync::CancellationToken::new(),
-        );
-        let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
+        let attempt = crate::testing::ToolCallFixture::mock()
+            .enclosing_process_id(Some(crate::ProcessId::fixture("process-1")))
+            .attempt("attempt-scope");
         assert_eq!(
             attempt.enclosing_process(),
             Some(&crate::ProcessId::fixture("process-1"))
@@ -1780,22 +1489,9 @@ mod tests {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
             crate::process_id_for_test("worker"),
         ));
-        let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
+        let attempt = crate::testing::ToolCallFixture { context }.attempt("attempt-scope");
         assert!(
             attempt.start_cx().is_err(),
-            "a process opener without its lineage has no start context"
-        );
-    }
-
-    /// The orchestrating surface takes the same shared derivation.
-    #[tokio::test]
-    async fn an_orchestrating_context_without_its_lineage_is_refused() {
-        let context = tool_context_under_scope(crate::AdmittedScope::process(
-            crate::process_id_for_test("worker"),
-        ));
-        let orchestration = crate::OrchestrationContext::new(context);
-        assert!(
-            orchestration.start_cx().is_err(),
             "a process opener without its lineage has no start context"
         );
     }

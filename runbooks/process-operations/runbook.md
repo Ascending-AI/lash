@@ -66,8 +66,8 @@ not observe is a FAIL of that gate, never a skip. Do not credit the companion's 
    where the standard protocol is native; only one host can be the judged one, and it is the
    Workbench.) Each tool must succeed through its leaf-intent or
    process-replay shape on Restate exactly as it does on in-memory and PostgreSQL. Any
-   FIG-1127 ordinal-tier refusal from those public tools is a regression. The legacy
-   journal-capable `ToolContext` routes remain fenced until their aggregate removal.
+   FIG-1127 ordinal-tier refusal from those public tools is a regression. A tool body holds
+   only the sealed `AttemptContext`, which has no journal-capable route (ADR 0116).
 7. **Parent teardown is a registry ledger row, not terminal-state cleanup.** An ended parent
    scope leaves exactly one unsettled `parent_end_plans` row keyed by `(parent_kind, parent_id)`.
    The row carries no action list: the process worker's reconcile pass derives the work by
