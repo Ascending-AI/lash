@@ -659,7 +659,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             && let Some(key) = self
                 .parent_invocation
                 .as_ref()
-                .and_then(crate::RuntimeInvocation::replay_key)
+                .and_then(crate::RuntimeInvocation::effect_replay_key)
         {
             return crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
                 "{key}:{lane}"
@@ -677,7 +677,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let base = self
             .parent_invocation
             .as_ref()
-            .and_then(crate::RuntimeInvocation::replay_key)
+            .and_then(crate::RuntimeInvocation::effect_replay_key)
             .map(str::to_owned)
             .unwrap_or_else(|| self.dispatch.observation_base_key());
         format!("{base}:call:{material}")
@@ -1049,7 +1049,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         let Some(cell) = self
             .parent_invocation
             .as_ref()
-            .and_then(crate::RuntimeInvocation::replay_key)
+            .and_then(crate::RuntimeInvocation::effect_replay_key)
             .map(str::to_string)
         else {
             return Ok(false);

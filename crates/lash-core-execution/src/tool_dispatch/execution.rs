@@ -316,7 +316,7 @@ impl ToolAttemptTurnCapture {
         let invocation = context
             .parent_invocation
             .as_ref()
-            .and_then(crate::RuntimeInvocation::replay_key);
+            .and_then(crate::RuntimeInvocation::effect_replay_key);
         let (Some(capture), Some(invocation)) = (context.turn_capture.as_ref(), invocation) else {
             return Ok(Self(None));
         };

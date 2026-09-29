@@ -125,7 +125,7 @@ impl RuntimeTurnDriver<'_> {
             // while the admitted scope stays the root turn's, so a follow-on
             // frame's first tool call would otherwise name the root frame's
             // group and reopen its settlements.
-            let batch_id = group_invocation.replay_key().to_string();
+            let batch_id = group_invocation.effect_replay_key().to_string();
             let completions = prepare_context
                 .execute_prepared_tool_group(&batch_id, group_invocation, prepared_entries)
                 .await?;

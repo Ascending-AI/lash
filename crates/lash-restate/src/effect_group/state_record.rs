@@ -18,8 +18,8 @@ impl EffectGroupCleanupFacts {
 
     /// The replay key of a child position, as a terminal error when the
     /// retirement facts do not have one. Same pairing, same independent public
-    /// fields, and the same refusal as [`EffectGroupShape::replay_key`].
-    pub(crate) fn replay_key(&self, position: usize) -> Result<&str, TerminalError> {
+    /// fields, and the same refusal as [`EffectGroupShape::member_replay_key`].
+    pub(crate) fn member_replay_key(&self, position: usize) -> Result<&str, TerminalError> {
         self.replay_keys
             .get(position)
             .map(String::as_str)

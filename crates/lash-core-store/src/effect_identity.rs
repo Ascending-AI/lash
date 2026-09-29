@@ -328,7 +328,7 @@ impl RuntimeInvocation {
 
     /// Exposes replay key to store, effect-host, and protocol implementors while materializing,
     /// executing, or persisting a session turn. Returns `None` when no replay key is present.
-    pub fn replay_key(&self) -> Option<&str> {
+    pub fn effect_replay_key(&self) -> Option<&str> {
         self.effect_address()
             .map(|address| address.replay_key.as_str())
             .or_else(|| self.replay.as_ref().map(|replay| replay.key.as_str()))

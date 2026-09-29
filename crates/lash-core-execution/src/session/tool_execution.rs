@@ -1074,7 +1074,7 @@ impl RuntimeExecutionContext<'_> {
         // The await's journaled invocation is the settled call's observation
         // key: unique per (parent, call id) and re-derived identically on a
         // redrive (ADR 0105 §1).
-        let call_key = invocation.replay_key().to_owned();
+        let call_key = invocation.effect_replay_key().to_owned();
         // Arm before parking, never after: the resolver the call named is what
         // makes the wait finishable, and this runs on the redrive too, because
         // the recorded attempt body that named it does not re-run.
@@ -1315,7 +1315,7 @@ impl RuntimeExecutionContext<'_> {
         // The command's replay key is the call's own effect-invocation key:
         // every lane this call emits keys under it (ADR 0105 §1).
         let call_key = command
-            .replay_key()
+            .effect_replay_key()
             .map_or_else(|| call_id.to_string(), str::to_owned);
         let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let tool_id = authorization.tool_id();

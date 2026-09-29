@@ -52,7 +52,7 @@ impl RuntimeEffectController for RecordingEffectHostController {
             execution_scope: self.execution_scope.clone(),
             effect_id: envelope.invocation.effect_id().to_string(),
             effect_kind: envelope.command.kind(),
-            replay_key: Some(envelope.invocation.replay_key().to_owned()),
+            replay_key: Some(envelope.invocation.effect_replay_key().to_owned()),
             envelope_hash,
         });
         if matches!(
@@ -1904,7 +1904,7 @@ fn replay_conformance_tool_attempt_envelope(
         ),
         RuntimeEffectCommand::ToolAttempt {
             call: Box::new(crate::PreparedToolCall {
-                call_id: lash_core::ToolCallId::fixture(&call_id),
+                call_id: lash_core::ToolCallId::fixture(call_id),
                 provider_call_id: None,
                 tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
                 tool_name: tool_name.into(),
@@ -2083,7 +2083,7 @@ fn replay_conformance_tool_attempt_outcome(
     RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(crate::ToolAttemptLaunch::Done {
             record: Box::new(crate::ToolCallRecord {
-                call_id: lash_core::ToolCallId::fixture(&call_id.to_string()),
+                call_id: lash_core::ToolCallId::fixture(call_id),
                 provider_call_id: None,
                 tool: tool_name.to_string(),
                 args: serde_json::json!({ "call": call_id }),

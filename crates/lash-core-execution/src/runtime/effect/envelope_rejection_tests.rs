@@ -33,7 +33,7 @@ fn process_transfer_v1_identity_golden() {
 
 fn prepared_call(call_id: &str) -> crate::PreparedToolCall {
     crate::PreparedToolCall {
-        call_id: crate::ToolCallId::fixture(&call_id),
+        call_id: crate::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool_id: "tool:test".into(),
         tool_name: "test".into(),

@@ -529,16 +529,12 @@ impl StandardProtocolRun {
                         .push(format!("{:?}", request.messages));
                 }
                 Effect::ToolCalls { calls, .. } => {
-                    self.tool_calls.extend(calls.iter().map(|call| {
-                        ExpectedToolCall {
-                            call_id: call
-                                .provider_call_id
-                                .clone()
-                                .expect("a model-issued call carries its provider id"),
+                    self.tool_calls
+                        .extend(calls.iter().map(|call| ExpectedToolCall {
+                            call_id: call.provider_call_id.clone().unwrap_or_default(),
                             tool_name: call.tool_name.clone(),
                             args: call.args.clone(),
-                        }
-                    }));
+                        }));
                 }
                 Effect::Checkpoint { checkpoint, .. } => self.checkpoints.push(*checkpoint),
                 Effect::Emit(SessionStreamEvent::TextDelta { content, .. }) => {

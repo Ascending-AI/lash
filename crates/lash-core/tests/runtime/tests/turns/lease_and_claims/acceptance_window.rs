@@ -71,7 +71,7 @@ impl lash_core::testing::EffectLayer for AcceptanceWindowJournalController {
         if !self.journaling.load(Ordering::SeqCst) {
             return inner.execute_effect(envelope, local_executor).await;
         }
-        let replay_key = envelope.invocation.replay_key().to_string();
+        let replay_key = envelope.invocation.effect_replay_key().to_string();
         let reconstructed = envelope.canonical_form()?;
         let recorded = {
             let journal = self.journal.lock_recover();

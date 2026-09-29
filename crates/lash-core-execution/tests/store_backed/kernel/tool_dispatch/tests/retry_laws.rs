@@ -183,7 +183,7 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
             crate::ToolCallId::fixture("call-1")
         );
         assert_eq!(sleeps[0].effect_id(), Some(sleep_key.as_str()));
-        assert_eq!(sleeps[0].replay_key(), Some(sleep_key.as_str()));
+        assert_eq!(sleeps[0].effect_replay_key(), Some(sleep_key.as_str()));
     }
     drop(context);
     handler.close().await.expect("close the dispatch handler");

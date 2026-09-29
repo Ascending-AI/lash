@@ -223,7 +223,7 @@ pub(crate) fn restate_effect_execution(
     })
 }
 pub(crate) fn restate_effect_name(invocation: &RuntimeEffectInvocation) -> String {
-    format!("lash:{}", invocation.replay_key())
+    format!("lash:{}", invocation.effect_replay_key())
 }
 
 pub(crate) fn validate_recorded_effect_envelope(

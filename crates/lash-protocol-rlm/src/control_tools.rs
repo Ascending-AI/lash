@@ -418,7 +418,7 @@ mod tests {
             }),
         )
         .processes(processes)
-        .call_id(lash_core::ToolCallId::fixture(&tool_call_id))
+        .call_id(lash_core::ToolCallId::fixture(tool_call_id))
         .agent_frame_id(lash_core::facade_support::frame_node_id(
             &SessionId::from("test-session"),
             "test-lineage",

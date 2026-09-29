@@ -200,20 +200,20 @@ impl Scenario {
         ExecutionScope::process(&self.process_id)
     }
 
-    fn replay_key(&self, effect: &str) -> String {
+    fn effect_replay_key(&self, effect: &str) -> String {
         format!("segment-redrive:{}:{effect}", self.process_id)
     }
 
     fn call_id(&self, effect: &str) -> String {
-        self.tool_call_id(effect).to_string()
+        self.effect_call_id(effect).to_string()
     }
 
-    fn tool_call_id(&self, effect: &str) -> lash_core::ToolCallId {
+    fn effect_call_id(&self, effect: &str) -> lash_core::ToolCallId {
         lash_core::ToolCallId::fixture(&format!("{}-{effect}-call", self.process_id))
     }
 
     fn invocation(&self, effect: &str) -> RuntimeEffectInvocation {
-        let replay_key = self.replay_key(effect);
+        let replay_key = self.effect_replay_key(effect);
         RuntimeEffectInvocation::new(
             EffectAddress::new(self.scope(), replay_key.clone())
                 .unwrap_or_else(|error| panic!("address {replay_key}: {error}")),
@@ -223,7 +223,7 @@ impl Scenario {
     }
 
     fn tool_envelope(&self, effect: &str) -> RuntimeEffectEnvelope {
-        let call_id = self.tool_call_id(effect);
+        let call_id = self.effect_call_id(effect);
         RuntimeEffectEnvelope::new(
             self.invocation(effect),
             RuntimeEffectCommand::ToolAttempt {
@@ -333,7 +333,7 @@ impl Scenario {
             };
             let run = Run {
                 call_id: call.call_id.to_string(),
-                replay_key: envelope.invocation.replay_key().to_owned(),
+                replay_key: envelope.invocation.effect_replay_key().to_owned(),
             };
             let ordinal = probe.ran(effect, run.clone());
             if let Some(crash) = crash_after_running {
@@ -373,7 +373,7 @@ impl Scenario {
                 TRIGGER,
                 Run {
                     call_id,
-                    replay_key: envelope.invocation.replay_key().to_owned(),
+                    replay_key: envelope.invocation.effect_replay_key().to_owned(),
                 },
             );
             if let Some(crash) = crash_after_running {
@@ -808,7 +808,7 @@ async fn run_scenario(
                     assert_eq!(
                         runs.first()
                             .map(|run| (run.call_id.clone(), run.replay_key.clone())),
-                        Some((scenario.call_id(effect), scenario.replay_key(effect))),
+                        Some((scenario.call_id(effect), scenario.effect_replay_key(effect))),
                         "{name}: `{effect}` runs under the call id and replay key it was issued with"
                     );
                     assert_eq!(

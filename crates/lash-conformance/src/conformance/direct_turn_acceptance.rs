@@ -391,7 +391,7 @@ impl crate::testing::EffectLayer for JournalLayer {
     ) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         // Keyed by replay key, the address a durable engine journals under:
         // effect ids alone repeat across turns.
-        let effect_id = envelope.invocation.replay_key().to_string();
+        let effect_id = envelope.invocation.effect_replay_key().to_string();
         if let Some(outcome) = self.outcomes.lock().expect("journal lock").get(&effect_id) {
             return Ok(outcome.clone());
         }

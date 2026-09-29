@@ -45,7 +45,10 @@ pub(super) async fn served_run(
             Some(get) => Some(get.await?.into_body()),
             None => None,
         };
-        let child_replay_key = live.shape.replay_key(settlement.position)?.to_string();
+        let child_replay_key = live
+            .shape
+            .member_replay_key(settlement.position)?
+            .to_string();
         ranks.push(EffectGroupServedRank {
             settlement,
             child_replay_key,

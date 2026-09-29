@@ -35,7 +35,7 @@ fn turn_context<'run>(
 fn settled() -> crate::tool_dispatch::ToolDispatchOutcome {
     crate::tool_dispatch::ToolDispatchOutcome {
         record: crate::ToolCallRecord {
-            call_id: lash_core_execution::ToolCallId::fixture(&CALL_ID.to_string()),
+            call_id: lash_core_execution::ToolCallId::fixture(CALL_ID),
             provider_call_id: None,
             tool: "slow".to_string(),
             args: json!({}),

@@ -1311,7 +1311,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         parts: shared_parts(vec![Part::tool_call(
             format!("{message_id}.p0"),
             "{}".to_string(),
-            crate::ToolCallId::fixture(&call_id),
+            crate::ToolCallId::fixture(call_id),
             call_id.to_string(),
             "shot".to_string(),
             None,
@@ -1324,7 +1324,7 @@ async fn gates_advance_after_an_attachment_bearing_tool_result() {
         parts: shared_parts(vec![Part::tool_result(
             format!("{message_id}.p0"),
             content,
-            crate::ToolCallId::fixture(&call_id),
+            crate::ToolCallId::fixture(call_id),
             "shot".to_string(),
         )]),
         origin: None,

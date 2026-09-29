@@ -868,7 +868,7 @@ fn rlm_tool_call_record(
     output: lash_core::ToolCallOutput,
 ) -> lash_core::ToolCallRecord {
     lash_core::ToolCallRecord {
-        call_id: lash_core::ToolCallId::fixture(&call_id.to_string()),
+        call_id: lash_core::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool: tool.to_string(),
         args,

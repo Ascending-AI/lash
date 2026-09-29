@@ -183,7 +183,7 @@ pub fn child_effect_invocation(
     replay_suffix: impl AsRef<str>,
 ) -> RuntimeEffectInvocation {
     let replay_base = parent
-        .replay_key()
+        .effect_replay_key()
         .or_else(|| parent.effect_id())
         .unwrap_or("effect");
     RuntimeEffectInvocation {
@@ -212,7 +212,7 @@ pub fn child_effect_invocation_from_effect(
     RuntimeEffectInvocation {
         address: EffectAddress::new(
             execution_scope.clone(),
-            format!("{}:{}", parent.replay_key(), replay_suffix.as_ref()),
+            format!("{}:{}", parent.effect_replay_key(), replay_suffix.as_ref()),
         )
         .expect("child effect uses the already admitted controller scope"),
         attribution: parent.attribution.clone(),
@@ -342,7 +342,7 @@ pub fn process_effect_invocation(
     effect_id: &str,
 ) -> RuntimeEffectInvocation {
     if let Some(parent) = parent {
-        let replay_base = parent.replay_key().unwrap_or("process");
+        let replay_base = parent.effect_replay_key().unwrap_or("process");
         return RuntimeEffectInvocation {
             address: EffectAddress::new(
                 execution_scope.clone(),
@@ -687,7 +687,7 @@ mod tests {
         assert_eq!(effect.attribution.turn_index, Some(3));
         assert_eq!(effect.attribution.protocol_iteration, Some(5));
         assert_eq!(
-            effect.replay_key(),
+            effect.effect_replay_key(),
             "session:subagent:call:process:subagent:call:3:5:llm_call:7"
         );
 
@@ -703,7 +703,7 @@ mod tests {
         assert_eq!(acceptance.attribution.turn_index, None);
         assert_eq!(acceptance.attribution.protocol_iteration, None);
         assert_eq!(
-            acceptance.replay_key(),
+            acceptance.effect_replay_key(),
             "session:subagent:call:process:subagent:call:accept_turn_input"
         );
 
@@ -711,7 +711,7 @@ mod tests {
         assert_eq!(drive.execution_scope(), &process_scope);
         assert_eq!(drive.attribution, acceptance.attribution);
         assert_eq!(
-            drive.replay_key(),
+            drive.effect_replay_key(),
             "session:subagent:call:process:subagent:call:accept_turn_input:admit_root"
         );
         assert_eq!(drive.effect_id(), "process:subagent:call.accept.admit_root");
@@ -864,7 +864,7 @@ mod tests {
                 Some(&TurnId::from("t")),
                 None,
             )
-            .replay_key(),
+            .effect_replay_key(),
             "direct:v3:blake3:43bfa7f80a468e47f435784b0cf43f95ffef5a368e3fb26ee78929ffaf618c35"
         );
 
@@ -895,7 +895,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            first.replay_key(),
+            first.effect_replay_key(),
             "direct:v3:blake3:f8af7289056d371cc0b80d6d1f4ad3f8cccfd86bc863e9744a080354544dfa9e"
         );
         let second_discriminator = direct_request_discriminator(None, None, 1);
@@ -918,10 +918,10 @@ mod tests {
             None,
         );
         assert_eq!(
-            second.replay_key(),
+            second.effect_replay_key(),
             "direct:v3:blake3:89749b2923cda770d21363d4c9723d995d61023fe30a4d9d086f8ef240f60c0c"
         );
-        assert_ne!(first.replay_key(), second.replay_key());
+        assert_ne!(first.effect_replay_key(), second.effect_replay_key());
     }
 
     fn hex(bytes: &[u8]) -> String {

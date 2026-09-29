@@ -88,6 +88,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/tool_context_is_not_nameable.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_process_administration.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_controller.rs");
+    t.compile_fail("tests/ui/attempt_context_has_no_optional_call_ids.rs");
     t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/session_catalog_requires_lookup.rs");

@@ -145,7 +145,7 @@ impl ToolDispatchContext<'_> {
         if let Some(key) = self
             .parent_invocation
             .as_ref()
-            .and_then(crate::RuntimeInvocation::replay_key)
+            .and_then(crate::RuntimeInvocation::effect_replay_key)
         {
             return key.to_owned();
         }

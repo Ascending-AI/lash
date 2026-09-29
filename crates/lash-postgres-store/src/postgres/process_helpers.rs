@@ -444,7 +444,7 @@ async fn stage_process_event_append_tx(
                 .bind(process_id.as_str())
                 .bind(sequence as i64)
                 .bind(event.event_type.as_str())
-                .bind(event.invocation.replay_key())
+                .bind(event.invocation.effect_replay_key())
                 .bind(serde_json::to_string(&event).map_err(process_decode_error)?)
                 .execute(&mut **tx)
                 .await

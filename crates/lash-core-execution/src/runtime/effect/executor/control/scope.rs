@@ -462,7 +462,7 @@ impl<'run> ScopedEffectController<'run> {
     ) -> Result<RuntimeEffectLocalExecutor<'executor>, RuntimeEffectControllerError> {
         let mut local_executor = local_executor;
         if let Some(guard) = &self.journal_guard {
-            guard.admit(Some(envelope.invocation.replay_key()))?;
+            guard.admit(Some(envelope.invocation.effect_replay_key()))?;
             // A wait on an external completion dispatches nothing
             // (FIG-3587) — an await event, or the await of a process the
             // command started, or the arming of its terminal on a parked
@@ -484,7 +484,7 @@ impl<'run> ScopedEffectController<'run> {
                 ),
                 _ => true,
             };
-            let key = envelope.invocation.replay_key();
+            let key = envelope.invocation.effect_replay_key();
             if let Some(range) = guard
                 .served_only
                 .as_ref()

@@ -2258,7 +2258,7 @@ pub(super) fn restate_effect_name_uses_lash_replay_key() {
 
     assert_eq!(
         restate_effect_name(&invocation),
-        format!("lash:{}", invocation.replay_key())
+        format!("lash:{}", invocation.effect_replay_key())
     );
 }
 

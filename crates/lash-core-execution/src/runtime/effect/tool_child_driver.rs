@@ -1490,7 +1490,7 @@ async fn await_journaled_tool_completion(
     // The journaled await's replay key is the settled call's observation key:
     // unique per (parent, call id) and re-derived identically on a redrive
     // (ADR 0105 §1).
-    let settle_key = invocation.replay_key().to_owned();
+    let settle_key = invocation.effect_replay_key().to_owned();
     let deadline = pending
         .pending
         .deadline

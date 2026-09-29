@@ -400,7 +400,7 @@ mod tests {
             assert_eq!(membership.group_key, group.group_key());
             assert_eq!(child.invocation.execution_scope(), &admitted_scope);
             assert_eq!(
-                child.invocation.replay_key(),
+                child.invocation.effect_replay_key(),
                 child_replay_key(group.group_key(), position)
             );
         }

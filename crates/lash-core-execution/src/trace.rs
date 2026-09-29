@@ -327,7 +327,7 @@ pub fn trace_context_for_invocation(
         context,
         &invocation.attribution,
         invocation.effect_id(),
-        invocation.replay_key(),
+        invocation.effect_replay_key(),
         invocation.caused_by.as_ref(),
     )
 }
@@ -346,7 +346,7 @@ pub fn trace_context_for_effect_invocation(
         context,
         &invocation.attribution,
         Some(invocation.effect_id()),
-        Some(invocation.replay_key()),
+        Some(invocation.effect_replay_key()),
         invocation.caused_by.as_ref(),
     )
 }

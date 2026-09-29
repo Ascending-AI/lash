@@ -27,7 +27,7 @@ pub struct CaptureFrameKey {
     pub sequence: u64,
 }
 
-/// The invocation's replay key (`RuntimeEffectInvocation::replay_key`).
+/// The invocation's replay key (`RuntimeEffectInvocation::effect_replay_key`).
 /// Opaque to the store.
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,

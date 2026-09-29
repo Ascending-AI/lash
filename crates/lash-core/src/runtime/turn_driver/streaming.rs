@@ -311,11 +311,11 @@ impl RuntimeTurnDriver<'_> {
             block_raw_text: &mut block_raw_text,
         };
         debug_assert!(
-            invocation.replay_key().is_some(),
+            invocation.effect_replay_key().is_some(),
             "an llm call's stream observations require the call invocation's replay key"
         );
         let stream_base = invocation
-            .replay_key()
+            .effect_replay_key()
             .map(str::to_owned)
             .unwrap_or_else(|| {
                 let scope = self.scoped_effect_controller.execution_scope();

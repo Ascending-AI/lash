@@ -289,7 +289,7 @@ fn tool_attempt_envelope(
         ),
         crate::RuntimeEffectCommand::ToolAttempt {
             call: Box::new(crate::PreparedToolCall {
-                call_id: lash_core::ToolCallId::fixture(&call_id),
+                call_id: lash_core::ToolCallId::fixture(call_id),
                 provider_call_id: None,
                 tool_id: crate::ToolId::from(format!("tool:{call_id}")),
                 tool_name: call_id.into(),
@@ -311,7 +311,7 @@ fn tool_attempt_outcome(
     crate::RuntimeEffectOutcome::ToolAttempt {
         launch: Box::new(crate::ToolAttemptLaunch::Done {
             record: Box::new(crate::ToolCallRecord {
-                call_id: lash_core::ToolCallId::fixture(&call_id.to_string()),
+                call_id: lash_core::ToolCallId::fixture(call_id),
                 provider_call_id: None,
                 tool: call_id.to_string(),
                 args: serde_json::json!({}),

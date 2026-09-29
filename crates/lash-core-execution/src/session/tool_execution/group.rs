@@ -292,13 +292,7 @@ impl RuntimeExecutionContext<'_> {
 
         // Each child's request is bound to its identity before anything of
         // the group is journaled (ADR 0117 §7).
-        let mut retained_payloads = Vec::with_capacity(children.len());
-        for child in children {
-            retained_payloads.push(match child.tool() {
-                Some(leaf) => Some(self.bind_retained_request(leaf).await?),
-                None => None,
-            });
-        }
+        let retained_payloads = self.bind_retained_requests(&group_key, children).await?;
 
         // Live trace/activity is the opener's (ToolSettlement plan rule 3):
         // started events are emitted here, at formation, exactly as the batch
@@ -416,55 +410,83 @@ impl RuntimeExecutionContext<'_> {
             .inspect_err(|_| self.release_group_work(&group_key))
     }
 
-    /// Binds `leaf`'s request to its call's identity (ADR 0117 §7) and
-    /// returns the prepared payload the call runs with.
+    /// Binds every tool child's request to its call's identity (ADR 0117 §7)
+    /// and returns, by position, the prepared payload each call runs with.
     ///
-    /// The first formation journals, under `{call_id}:request`, the digest of
-    /// the call's canonical tool, arguments and authority together with the
-    /// payload its prepare phase sealed. Every later formation — a replay of
-    /// the opener, a redrive — runs the call from that retained payload,
-    /// whatever a fresh prepare sealed, so no effect runs with a payload other
-    /// than the one sealed at admission. A request whose tool, arguments or
-    /// authority differ under the same id is refused before any effect,
-    /// through the binding-drift refusal a drifted tool meets (ADR 0116
-    /// §2.2), so the turn parks; the id is never reminted to fit.
-    async fn bind_retained_request(
+    /// The first formation journals, in one record under `{group}:requests`,
+    /// each tool child's call id and the digest of its canonical tool,
+    /// arguments and authority, together with the payload its prepare phase
+    /// sealed. One record, not one per child, so a replay of the opener
+    /// resumes a bounded number of times whatever the group's width. Every
+    /// later formation — a replay of the opener, a redrive — runs each call
+    /// from its retained payload, whatever a fresh prepare sealed, so no
+    /// effect runs with a payload other than the one sealed at admission. A
+    /// request whose tool, arguments or authority differ under the same id is
+    /// refused before any effect, through the binding-drift refusal a drifted
+    /// tool meets (ADR 0116 §2.2), so the turn parks; the id is never reminted
+    /// to fit.
+    async fn bind_retained_requests(
         &self,
-        leaf: &PreparedToolChildLeaf,
-    ) -> Result<serde_json::Value, crate::RuntimeEffectControllerError> {
-        let call = &leaf.call.call;
-        let digest = retained_request_digest(call, &leaf.admission);
-        let live = serde_json::json!({
-            "digest": digest,
-            "prepared_payload": call.prepared_payload,
-        });
+        group_key: &str,
+        children: &[PreparedGroupChild],
+    ) -> Result<Vec<Option<serde_json::Value>>, crate::RuntimeEffectControllerError> {
+        let formed = children
+            .iter()
+            .map(|child| {
+                child.tool().map(|leaf| {
+                    let call = &leaf.call.call;
+                    (call, retained_request_digest(call, &leaf.admission))
+                })
+            })
+            .collect::<Vec<_>>();
+        if formed.iter().all(Option::is_none) {
+            return Ok(vec![None; children.len()]);
+        }
+        let live = serde_json::Value::Array(
+            formed
+                .iter()
+                .map(|formed| match formed {
+                    Some((call, digest)) => serde_json::json!({
+                        "call_id": call.call_id.as_str(),
+                        "digest": digest,
+                        "prepared_payload": call.prepared_payload,
+                    }),
+                    None => serde_json::Value::Null,
+                })
+                .collect(),
+        );
         let recorded = self
             .journaled_language_value_with(
-                format!("{}:request", call.call_id),
+                format!("{group_key}:requests"),
                 RETAINED_REQUEST_OPERATION.to_string(),
                 move || Ok(live),
             )
             .await?;
-        if recorded.get("digest").and_then(serde_json::Value::as_str) == Some(digest.as_str()) {
-            return Ok(recorded
-                .get("prepared_payload")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null));
-        }
-        let provider = call
-            .provider_call_id
-            .as_deref()
-            .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
-            .unwrap_or_default();
-        Err(crate::RuntimeEffectControllerError::new(
-            crate::RuntimeErrorCode::LashlangCellBindingDrift,
-            format!(
-                "tool call `{}` ({provider}tool `{}`) was recorded with a different tool, \
-                 arguments or authority than this redrive formed; its journal binds the call \
-                 to the recorded request, so nothing was dispatched",
-                call.call_id, call.tool_id,
-            ),
-        ))
+        let recorded = recorded.as_array().map(Vec::as_slice).unwrap_or_default();
+        formed
+            .iter()
+            .enumerate()
+            .map(|(position, formed)| {
+                let Some((call, digest)) = formed else {
+                    return Ok(None);
+                };
+                let binding = recorded.get(position).filter(|binding| {
+                    binding.get("call_id").and_then(serde_json::Value::as_str)
+                        == Some(call.call_id.as_str())
+                        && binding.get("digest").and_then(serde_json::Value::as_str)
+                            == Some(digest.as_str())
+                });
+                match binding {
+                    Some(binding) => Ok(Some(
+                        binding
+                            .get("prepared_payload")
+                            .cloned()
+                            .unwrap_or(serde_json::Value::Null),
+                    )),
+                    None => Err(retained_request_drift(call)),
+                }
+            })
+            .collect()
     }
 
     /// Records one leaf's completion routing from the same two admission facts
@@ -1141,6 +1163,59 @@ impl RuntimeExecutionContext<'_> {
     }
 }
 
+/// The operation a retained-request binding journals under (ADR 0117 §7).
+const RETAINED_REQUEST_OPERATION: &str = "tool-call-request";
+
+/// The refusal a formation meets when a call's recorded request differs
+/// from the one it formed under the same id (ADR 0117 §7).
+fn retained_request_drift(call: &crate::PreparedToolCall) -> crate::RuntimeEffectControllerError {
+    let provider = call
+        .provider_call_id
+        .as_deref()
+        .map(|provider_call_id| format!("provider call `{provider_call_id}`, "))
+        .unwrap_or_default();
+    crate::RuntimeEffectControllerError::new(
+        crate::RuntimeErrorCode::LashlangCellBindingDrift,
+        format!(
+            "tool call `{}` ({provider}tool `{}`) was recorded with a different tool, \
+             arguments or authority than this redrive formed; its journal binds the call \
+             to the recorded request, so nothing was dispatched",
+            call.call_id, call.tool_id,
+        ),
+    )
+}
+
+/// The digest a call's retained request is bound to: its identity, canonical
+/// tool, arguments and authority (ADR 0117 §7). The prepared payload is
+/// retained beside it and served, not compared.
+fn retained_request_digest(
+    call: &crate::PreparedToolCall,
+    admission: &ToolChildAdmission,
+) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.tool-call-request", 1);
+    identity.string(call.call_id.as_str());
+    identity.string(call.tool_id.as_str());
+    identity.string(&call.tool_name);
+    identity.bytes(&crate::identity_json::payload_leaf(&call.args));
+    match admission {
+        ToolChildAdmission::Catalog { manifest } => {
+            identity.tag(0);
+            identity.string(manifest.id.as_str());
+        }
+        ToolChildAdmission::Granted { grant } => {
+            identity.tag(1);
+            identity.string(grant.manifest.id.as_str());
+            identity.optional(grant.source_id.as_deref(), |identity, source_id| {
+                identity.string(source_id);
+            });
+            identity.bytes(&crate::identity_json::payload_leaf(
+                &grant.execution_binding,
+            ));
+        }
+    }
+    crate::stable_identity::rendered_hash("tool-call-request", 1, &identity.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1177,38 +1252,4 @@ mod tests {
         );
         assert_eq!(first.matches(second_id.as_str()).count(), 0);
     }
-}
-
-/// The operation a retained-request binding journals under (ADR 0117 §7).
-const RETAINED_REQUEST_OPERATION: &str = "tool-call-request";
-
-/// The digest a call's retained request is bound to: its identity, canonical
-/// tool, arguments and authority (ADR 0117 §7). The prepared payload is
-/// retained beside it and served, not compared.
-fn retained_request_digest(
-    call: &crate::PreparedToolCall,
-    admission: &ToolChildAdmission,
-) -> String {
-    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.tool-call-request", 1);
-    identity.string(call.call_id.as_str());
-    identity.string(call.tool_id.as_str());
-    identity.string(&call.tool_name);
-    identity.bytes(&crate::identity_json::payload_leaf(&call.args));
-    match admission {
-        ToolChildAdmission::Catalog { manifest } => {
-            identity.tag(0);
-            identity.string(manifest.id.as_str());
-        }
-        ToolChildAdmission::Granted { grant } => {
-            identity.tag(1);
-            identity.string(grant.manifest.id.as_str());
-            identity.optional(grant.source_id.as_deref(), |identity, source_id| {
-                identity.string(source_id);
-            });
-            identity.bytes(&crate::identity_json::payload_leaf(
-                &grant.execution_binding,
-            ));
-        }
-    }
-    crate::stable_identity::rendered_hash("tool-call-request", 1, &identity.finish())
 }

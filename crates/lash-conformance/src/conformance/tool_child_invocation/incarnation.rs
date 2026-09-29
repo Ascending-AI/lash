@@ -32,7 +32,7 @@ fn process_leaf_request(
 ) -> crate::runtime::effect::ToolChildRequest {
     let mut request = crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall {
-            call_id: super::leaf_call_id(&call_id),
+            call_id: super::leaf_call_id(call_id),
             provider_call_id: None,
             tool_id: crate::ToolId::from(tool_id),
             tool_name: tool_name.into(),

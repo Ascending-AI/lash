@@ -265,6 +265,15 @@ whose retained request differs under the same id is refused before
 execution, through the existing drift refusal (ADR 0116 §2.2). No identity
 is reminted to make it fit.
 
+As built (FIG-4080): a tool-child group's formation journals, in one record
+under `{group}:requests`, each child's call id and the digest of its tool,
+arguments and authority, with its prepared payload. One record per group
+keeps an opener's replay resumptions bounded in the group's width. A replay
+whose call id or digest differs is refused as `LashlangCellBindingDrift`
+before any effect. The prepared payload is retained rather than compared: a
+replay re-runs its prepare phase, and the recorded payload is what every
+later attempt executes with, so a re-prepared payload never reaches a tool.
+
 ### 8. The provider boundary
 
 The provider id is correlation. The boundary repairs it and never refuses it.

@@ -35,7 +35,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 machine,
                 event_tx.clone(),
                 task_controller,
-                envelope.invocation.replay_key(),
+                envelope.invocation.effect_replay_key(),
             );
             scoped_effect_controller
                 .execute_effect(envelope, local_executor)
@@ -52,7 +52,7 @@ impl<'run> RuntimeTurnDriver<'run> {
                 machine,
                 event_tx.clone(),
                 task_controller,
-                envelope.invocation.replay_key(),
+                envelope.invocation.effect_replay_key(),
             );
             crate::runtime::effect::drive_effect_controller_task(
                 scoped_effect_controller.controller(),

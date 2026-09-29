@@ -663,7 +663,7 @@ impl SqliteProcessRegistry {
                         process_id.as_str(),
                         sequence as i64,
                         event.event_type.as_str(),
-                        event.invocation.replay_key(),
+                        event.invocation.effect_replay_key(),
                         process_encode_json(&event)?,
                     ],
                 )

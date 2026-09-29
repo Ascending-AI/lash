@@ -220,7 +220,7 @@ async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
 
     assert_eq!(first.invocation.address(), second.invocation.address());
     assert_eq!(
-        first.invocation.replay_key(),
+        first.invocation.effect_replay_key(),
         format!(
             "tool:{}:attempt:1:sleep",
             lash_core_execution::ToolCallId::fixture("retry-call")

@@ -1305,7 +1305,7 @@ where
                         err.to_string(),
                     )
                 })?;
-                let replay_key = invocation.replay_key().to_string();
+                let replay_key = invocation.effect_replay_key().to_string();
                 // A process segment's signal wait also races the drain's
                 // hand-over (FIG-3799); every other wait keeps its shape.
                 if let (

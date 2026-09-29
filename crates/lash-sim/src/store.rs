@@ -987,7 +987,7 @@ impl ModelStore {
             "runtime_effect": {
                 "kind": "tool_attempt",
                 "effect_id": effect_id,
-                "replay_key": envelope.invocation.replay_key(),
+                "replay_key": envelope.invocation.effect_replay_key(),
                 "envelope_hash": envelope_hash,
                 "controller": "restate_runtime_effect_controller",
                 "local_executor_called": true,

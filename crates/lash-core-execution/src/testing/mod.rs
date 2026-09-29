@@ -872,7 +872,7 @@ pub async fn execute_effect_locally(
             ) {
                 let result = local_executor
                     .into_process_definitions()?
-                    .execute(envelope.invocation.replay_key(), *command)
+                    .execute(envelope.invocation.effect_replay_key(), *command)
                     .await?;
                 return Ok(crate::RuntimeEffectOutcome::Process { result });
             }
@@ -931,7 +931,7 @@ impl crate::RuntimeEffectController for UnavailableEffectController {
             crate::RuntimeErrorCode::Plugin,
             format!(
                 "this context has no effect host; `{}` was not executed",
-                envelope.invocation.replay_key()
+                envelope.invocation.effect_replay_key()
             ),
         ))
     }

@@ -885,7 +885,7 @@ pub fn prepare_process_event_append(
         !is_runtime_lifecycle_event_type(&event.event_type)
             || event
                 .invocation
-                .replay_key()
+                .effect_replay_key()
                 .is_none_or(|key| { !key.ends_with(FOLD_VALIDATION_REPLAY_KEY_SUFFIX) }),
         "fold-validation replay keys must be refused before a process-event insert is planned"
     );

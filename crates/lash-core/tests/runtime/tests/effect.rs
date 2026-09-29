@@ -1016,7 +1016,7 @@ async fn direct_completion_crosses_controller_and_records_usage_and_trace() {
             None,
             Some(caused_by),
         )
-        .replay_key()
+        .effect_replay_key()
         .to_string();
     assert!(recorder.records().iter().any(|record| {
         record.kind == RuntimeEffectKind::Direct && record.replay_key == expected_replay_key

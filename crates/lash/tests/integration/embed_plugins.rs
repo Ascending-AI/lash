@@ -124,7 +124,7 @@ impl ToolProvider for TestTools {
             call_id: call.pending.call_id,
             provider_call_id: call.pending.provider_call_id,
             tool_id: call.tool_id,
-            tool_name: call.pending.tool_name.into(),
+            tool_name: call.pending.tool_name,
             args: call.pending.args,
             replay: call.pending.replay,
             prepared_payload,

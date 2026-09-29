@@ -191,7 +191,7 @@ impl AnthropicProvider {
         req: &LlmRequest,
     ) -> Result<BuiltMessages, LlmTransportError> {
         let system_prompt = req.instructions.as_deref().map(str::to_owned);
-        let tool_ids = tool_call_id_map(req)?;
+        let tool_ids = provider_call_id_map(req)?;
         let mut out: Vec<Value> = Vec::new();
         let mut breakpoint = None;
         for (index, msg) in req.messages.iter().enumerate() {
@@ -696,7 +696,7 @@ fn mapped_tool_call_id<'a>(
     })
 }
 
-fn tool_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, LlmTransportError> {
+fn provider_call_id_map(req: &LlmRequest) -> Result<HashMap<String, String>, LlmTransportError> {
     let ids: BTreeSet<&str> = req
         .messages
         .iter()

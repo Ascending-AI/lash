@@ -46,7 +46,10 @@ impl EffectLayer for RecordingLayer {
         envelope: RuntimeEffectEnvelope,
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.record(format!("execute:{}", envelope.invocation.replay_key()));
+        self.record(format!(
+            "execute:{}",
+            envelope.invocation.effect_replay_key()
+        ));
         inner.execute_effect(envelope, local_executor).await
     }
 
@@ -79,7 +82,7 @@ impl GroupExecutors for EchoChildren {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let key = envelope.invocation.replay_key().to_string();
+        let key = envelope.invocation.effect_replay_key().to_string();
         Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
             Ok(RuntimeEffectOutcome::LanguageRuntimeValue {
                 value: serde_json::json!(key),

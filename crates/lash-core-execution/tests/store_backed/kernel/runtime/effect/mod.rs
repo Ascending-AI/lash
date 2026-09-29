@@ -101,8 +101,8 @@ mod tests {
         let decoded: RuntimeEffectEnvelope =
             serde_json::from_str(&encoded).expect("decode envelope");
         assert_eq!(
-            decoded.invocation.replay_key(),
-            envelope.invocation.replay_key()
+            decoded.invocation.effect_replay_key(),
+            envelope.invocation.effect_replay_key()
         );
         assert_eq!(decoded.command.kind(), RuntimeEffectKind::Direct);
     }

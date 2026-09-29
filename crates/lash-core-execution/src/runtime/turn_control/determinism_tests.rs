@@ -73,7 +73,7 @@ impl RuntimeEffectController for GateEngine<'_> {
         _local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
         let canonical = envelope.canonical_form()?;
-        let key = envelope.invocation.replay_key().to_string();
+        let key = envelope.invocation.effect_replay_key().to_string();
         let kind = envelope.command.kind().as_str().to_string();
         let RuntimeEffectCommand::PeekAwaitEvent { key: peeked } = envelope.command else {
             panic!("the gate engine serves gate peeks only");

@@ -1023,6 +1023,12 @@
             "null"
           ]
         },
+        "call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "content": {
           "description": "The part's text; absent on a tool result, whose content is `blocks`.",
           "type": [
@@ -1035,6 +1041,12 @@
         },
         "kind": {
           "$ref": "#/definitions/RemotePartKind"
+        },
+        "provider_call_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "reasoning_meta": {
           "anyOf": [
@@ -1054,12 +1066,6 @@
             {
               "type": "null"
             }
-          ]
-        },
-        "tool_call_id": {
-          "type": [
-            "string",
-            "null"
           ]
         },
         "tool_name": {
@@ -1727,20 +1733,6 @@
           "properties": {
             "reason": {
               "enum": [
-                "missing_tool_call_id"
-              ],
-              "type": "string"
-            }
-          },
-          "required": [
-            "reason"
-          ],
-          "type": "object"
-        },
-        {
-          "properties": {
-            "reason": {
-              "enum": [
                 "intent_index_overflow"
               ],
               "type": "string"
@@ -2260,13 +2252,11 @@
           "type": "object"
         },
         {
+          "description": "A tool call started. `call_id` is lash's identity for the call; `provider_call_id` is the model provider's correlation, when a model issued the call.",
           "properties": {
             "args": true,
             "call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             },
             "graph_key": {
               "type": [
@@ -2277,6 +2267,12 @@
             "name": {
               "type": "string"
             },
+            "provider_call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "tool_call_started"
@@ -2286,6 +2282,7 @@
           },
           "required": [
             "args",
+            "call_id",
             "name",
             "type"
           ],
@@ -2295,10 +2292,7 @@
           "properties": {
             "args": true,
             "call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "type": "string"
             },
             "duration_ms": {
               "format": "uint64",
@@ -2315,6 +2309,12 @@
               "type": "string"
             },
             "output": true,
+            "provider_call_id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "tool_call_completed"
@@ -2324,6 +2324,7 @@
           },
           "required": [
             "args",
+            "call_id",
             "duration_ms",
             "name",
             "output",

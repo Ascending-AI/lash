@@ -616,7 +616,7 @@ fn settled_outcome(
 ) -> ToolDispatchOutcome {
     ToolDispatchOutcome {
         record: ToolCallRecord {
-            call_id: lash_core::ToolCallId::fixture(&call_id),
+            call_id: lash_core::ToolCallId::fixture(call_id),
             provider_call_id: None,
             tool: "sim-tool".to_string(),
             args: serde_json::Value::Null,

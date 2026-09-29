@@ -406,7 +406,7 @@ pub fn derive_tool_intent_identity_under(
         execution_scope_id,
         tool_call_id,
         intent_index,
-        parent_invocation.and_then(crate::RuntimeInvocation::replay_key),
+        parent_invocation.and_then(crate::RuntimeInvocation::effect_replay_key),
     )
 }
 
@@ -486,7 +486,7 @@ pub fn legacy_tool_intent_v1_lookup_key(
         return None;
     }
     let legacy_identity = derive_legacy_tool_intent_v1_replay_key(identity);
-    let replay_key = invocation.replay_key();
+    let replay_key = invocation.effect_replay_key();
     let legacy_lookup = replay_key.replace(&identity.replay_key, &legacy_identity);
     (legacy_lookup != replay_key).then_some(legacy_lookup)
 }

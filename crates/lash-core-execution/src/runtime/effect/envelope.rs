@@ -125,7 +125,7 @@ impl RuntimeEffectInvocation {
         &self.effect_id
     }
 
-    pub fn replay_key(&self) -> &str {
+    pub fn effect_replay_key(&self) -> &str {
         &self.address.replay_key
     }
 
@@ -287,15 +287,14 @@ fn validate_effect_command(
         attempt,
         max_attempts,
     } = command
+        && (*attempt == 0 || *max_attempts == 0 || *attempt > *max_attempts)
     {
-        if *attempt == 0 || *max_attempts == 0 || *attempt > *max_attempts {
-            return Err(RuntimeEffectControllerError::new(
-                crate::RuntimeErrorCode::RuntimeEffectToolAttemptIndex,
-                format!(
-                    "runtime effect tool attempt must satisfy 1 <= attempt <= max_attempts, got {attempt}/{max_attempts}"
-                ),
-            ));
-        }
+        return Err(RuntimeEffectControllerError::new(
+            crate::RuntimeErrorCode::RuntimeEffectToolAttemptIndex,
+            format!(
+                "runtime effect tool attempt must satisfy 1 <= attempt <= max_attempts, got {attempt}/{max_attempts}"
+            ),
+        ));
     }
     if let RuntimeEffectCommand::ToolInvocation { request } = command {
         request.validate()?;

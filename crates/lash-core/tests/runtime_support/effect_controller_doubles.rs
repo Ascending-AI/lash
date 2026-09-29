@@ -410,7 +410,7 @@ impl RecordingEffectController {
         self.records.lock_recover().push(EffectControllerRecord {
             kind: envelope.command.kind(),
             turn_id: envelope.invocation.attribution.turn_id.clone(),
-            replay_key: envelope.invocation.replay_key().to_string(),
+            replay_key: envelope.invocation.effect_replay_key().to_string(),
         });
     }
 }
@@ -477,7 +477,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
         if let Some(outcome) = self.strict_replay.replay(&strict_replay)? {
             return Ok(outcome);
         }
-        let replay_key = envelope.invocation.replay_key().to_string();
+        let replay_key = envelope.invocation.effect_replay_key().to_string();
         if self.replay_by_key
             && let Some(outcome) = self
                 .replay_outcomes

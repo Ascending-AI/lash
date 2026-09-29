@@ -1374,6 +1374,22 @@ impl<'a> ToolCall<'a> {
 /// Lash contains an `execute` panic as a typed call failure. Containment does
 /// not establish that the host object's own interior-mutability state still
 /// satisfies its invariants; hosts own replacement or repair before reuse.
+///
+/// # Delivery
+///
+/// A call is delivered at least once. A crash between a tool's effect and
+/// the durable record of its outcome runs `execute` again, and a reported
+/// failure the retry policy allows is retried. Lash does not deduplicate a
+/// tool's effects for it.
+///
+/// Key idempotency on [`AttemptContext::call_id`]. It is the `ToolCallId`
+/// lash mints when it admits the call (ADR 0117): every run of one logical
+/// call — a crash replay, a retry after a reported failure, a redrive —
+/// sees the same id, and every other call sees another one, even when the
+/// model's provider repeats its own call id. The provider's id is never
+/// handed to a tool. [`AttemptContext::attempt_number`] counts the runs
+/// separately; a tool that wants a fresh key per attempt combines the two
+/// itself.
 #[async_trait::async_trait]
 pub trait ToolProvider: Send + Sync + 'static {
     fn tool_manifests(&self) -> Vec<ToolManifest>;

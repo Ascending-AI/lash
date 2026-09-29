@@ -66,7 +66,7 @@ fn child_request(command: RuntimeEffectCommand) -> EffectGroupChildRequest {
         shape: EffectGroupShape {
             wake: GroupWakePolicy::All,
             loser_disposition: LoserPolicy::Cancel,
-            replay_keys: vec![envelope.invocation.replay_key().to_string()],
+            replay_keys: vec![envelope.invocation.effect_replay_key().to_string()],
             wait_scope: scope(),
             opener: lash_core::AdmittedScope::runtime_operation("fig-3904"),
         },

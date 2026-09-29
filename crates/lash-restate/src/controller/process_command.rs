@@ -232,7 +232,7 @@ where
     if matches!(command, ProcessCommand::RegisterDefinition { .. }) {
         let outcome = local_executor
             .into_process_definitions()?
-            .execute(invocation.replay_key(), command)
+            .execute(invocation.effect_replay_key(), command)
             .await?;
         if let Some(observer) = outcome_observer {
             observer(&outcome, lash_core::StoreRealization::Realized);

@@ -1459,7 +1459,7 @@ fn leaf_request(
     let admitted = crate::AdmittedScope::new(scope.clone());
     crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall {
-            call_id: leaf_call_id(&call_id),
+            call_id: leaf_call_id(call_id),
             provider_call_id: None,
             tool_id: crate::ToolId::from(tool_id),
             tool_name: tool_name.into(),

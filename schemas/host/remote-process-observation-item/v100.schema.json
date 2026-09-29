@@ -1649,10 +1649,7 @@
     "TraceExecToolCall": {
       "properties": {
         "call_id": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "string"
         },
         "name": {
           "type": "string"
@@ -1662,6 +1659,7 @@
         }
       },
       "required": [
+        "call_id",
         "name",
         "status"
       ],
@@ -3863,10 +3861,8 @@
           "properties": {
             "args": true,
             "call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "Lash's identity for the call (ADR 0117).",
+              "type": "string"
             },
             "issuing_node_id": {
               "type": [
@@ -3877,6 +3873,13 @@
             "name": {
               "type": "string"
             },
+            "provider_call_id": {
+              "description": "The model provider's id for the call, when a model issued it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "tool_call_started"
@@ -3886,6 +3889,7 @@
           },
           "required": [
             "args",
+            "call_id",
             "name",
             "type"
           ],
@@ -3904,10 +3908,8 @@
               ]
             },
             "call_id": {
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "Lash's identity for the call (ADR 0117).",
+              "type": "string"
             },
             "duration_ms": {
               "format": "uint64",
@@ -3926,6 +3928,13 @@
             "output": {
               "$ref": "#/definitions/TraceToolCallOutput"
             },
+            "provider_call_id": {
+              "description": "The model provider's id for the call, when a model issued it.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "type": {
               "enum": [
                 "tool_call_completed"
@@ -3935,6 +3944,7 @@
           },
           "required": [
             "args",
+            "call_id",
             "duration_ms",
             "name",
             "output",

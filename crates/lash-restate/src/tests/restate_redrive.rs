@@ -228,7 +228,7 @@ pub(super) async fn fig1128_deadline_wait_redrive_reuses_the_first_payload() {
     let workflow_key = "fig1128-deadline-redrive";
     let input = Fig1128DeadlineRedriveInput;
     let expected_replay_key = runtime_invocation(RuntimeEffectKind::AwaitEvent, "fig1128-deadline")
-        .replay_key()
+        .effect_replay_key()
         .to_owned();
 
     let first = invoke_endpoint_with_named_call_responses(

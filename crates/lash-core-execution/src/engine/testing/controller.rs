@@ -44,7 +44,7 @@ impl RuntimeEffectController for LocalTestCx {
         local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let canonical = envelope.canonical_form()?;
-        let key = envelope.invocation.replay_key().to_string();
+        let key = envelope.invocation.effect_replay_key().to_string();
         let kind = envelope.command.kind().as_str().to_string();
         self.op_with_command_bytes(
             key,

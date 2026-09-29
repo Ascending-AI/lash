@@ -125,7 +125,7 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                         runner.messages.clone(),
                         runner.protocol_iteration,
                         checkpoint,
-                        envelope.invocation.replay_key(),
+                        envelope.invocation.effect_replay_key(),
                         &runner.event_tx,
                     )
                     .await;
@@ -309,7 +309,7 @@ mod tests {
             crate::sansio::EffectId(0),
             RuntimeEffectKind::Checkpoint,
         );
-        let mut body_cursor = body_observation_cursor(body_invocation.replay_key());
+        let mut body_cursor = body_observation_cursor(body_invocation.effect_replay_key());
 
         let sink = ObservationIds::default();
         let event = || {
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(ids.len(), 2);
         assert_eq!(
             ids[0],
-            format!("{}:body#0", body_invocation.replay_key()),
+            format!("{}:body#0", body_invocation.effect_replay_key()),
             "the body's lane is keyed by its own effect invocation"
         );
         assert_ne!(

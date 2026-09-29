@@ -222,7 +222,7 @@ impl GroupExecutors for ConformanceExecutors {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let replay_key = envelope.invocation.replay_key().to_owned();
+        let replay_key = envelope.invocation.effect_replay_key().to_owned();
         if self.mapping_current.load(Ordering::SeqCst) {
             return self
                 .current
@@ -318,7 +318,7 @@ impl WitnessExecutors {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(
-                child.invocation.replay_key().to_owned(),
+                child.invocation.effect_replay_key().to_owned(),
                 WitnessRoute { executions, label },
             );
     }
@@ -332,12 +332,12 @@ impl GroupExecutors for WitnessExecutors {
         self.resolved
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .push(envelope.invocation.replay_key().to_owned());
+            .push(envelope.invocation.effect_replay_key().to_owned());
         let route = self
             .staged
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(envelope.invocation.replay_key())
+            .get(envelope.invocation.effect_replay_key())
             .cloned()?;
         Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
             route.executions.fetch_add(1, Ordering::SeqCst);
@@ -1443,9 +1443,12 @@ impl LiveConformanceHarness {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         for child in &children {
-            let request =
-                cancel_wait_request(&shape.wait_scope, &group_key, child.invocation.replay_key())
-                    .expect("the child's cancel wait key derives");
+            let request = cancel_wait_request(
+                &shape.wait_scope,
+                &group_key,
+                child.invocation.effect_replay_key(),
+            )
+            .expect("the child's cancel wait key derives");
             assert_eq!(
                 await_group_wait(&ingress, request).await,
                 EffectGroupWaitResolution::Settled,
@@ -2054,7 +2057,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
                 &group_key,
                 "commit_child",
                 &EffectGroupCommitChildRequest {
-                    replay_key: child.invocation.replay_key().to_owned(),
+                    replay_key: child.invocation.effect_replay_key().to_owned(),
                 },
             )
             .await
@@ -2245,7 +2248,7 @@ pub(super) fn witness_shape(
         loser_disposition: LoserPolicy::RunToCompletion,
         replay_keys: children
             .iter()
-            .map(|child| child.invocation.replay_key().to_owned())
+            .map(|child| child.invocation.effect_replay_key().to_owned())
             .collect(),
         wait_scope: ExecutionScope::runtime_operation(group_key),
         // The opener is the admission the wait and timer children's

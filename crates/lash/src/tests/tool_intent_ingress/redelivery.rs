@@ -394,6 +394,67 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
     Ok(())
 }
 
+/// ADR 0117 §2: a host submission's call is rooted at the handle the host
+/// admitted it under. A redelivery that holds no key re-derives it from the
+/// handle alone and lands on the call the first delivery named; another handle
+/// is another call; the same handle under a turn root is another call; and a
+/// blank handle roots nothing.
+#[tokio::test]
+async fn a_host_submission_names_its_call_by_its_handle_across_redelivery() -> Result<()> {
+    let (core, _registry, _process) = ingress_core(memory_store_backend().await).await?;
+    let handle = "host-submission-root";
+    let first_key = ingress_of(&core)?
+        .key(handle, 0)
+        .expect("a host submission handle");
+    let first = ingress_of(&core)?
+        .submit(first_key.clone(), start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_admitted(&first, "the first submission");
+    let started = super::started_process_id(&first);
+
+    let redelivery = second_invocation_of(&core).await?;
+    let redelivered_key = ingress_of(&redelivery)?
+        .key(handle, 0)
+        .expect("the redelivery's handle");
+    assert_eq!(
+        redelivered_key.identity().tool_call_id,
+        first_key.identity().tool_call_id,
+        "the handle alone names the call"
+    );
+    let replayed = ingress_of(&redelivery)?
+        .submit(redelivered_key, start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_replayed(&replayed, true, "a redelivery under the same handle");
+    assert_eq!(super::started_process_id(&replayed), started);
+
+    let other_key = ingress_of(&core)?
+        .key("another-host-submission", 0)
+        .expect("another handle");
+    assert_ne!(
+        other_key.identity().tool_call_id,
+        first_key.identity().tool_call_id,
+        "another handle is another call"
+    );
+    let other = ingress_of(&core)?
+        .submit(other_key, start_intent(&SessionId::from(SESSION)))
+        .await;
+    assert_admitted(&other, "the other submission");
+    assert_ne!(super::started_process_id(&other), started);
+
+    assert_ne!(
+        lash_core::ToolCallAdmission::turn("", handle)
+            .expect("a turn handle")
+            .call_id(&[]),
+        first_key.identity().tool_call_id,
+        "a host submission is its own root"
+    );
+    assert!(matches!(
+        ingress_of(&core)?.key("  ", 0),
+        Err(lash_core::ToolCallRootError::BlankHandle)
+    ));
+    Ok(())
+}
+
 #[tokio::test]
 async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Result<()> {
     let (core, store, _subscription, _registry) = ingress_core_with_trigger_store(

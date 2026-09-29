@@ -555,7 +555,7 @@ impl RuntimeTurnDriver<'_> {
             }
         };
         let graph_key = Some(foreground_effect_graph_key(&invocation));
-        let cell_key = invocation.replay_key().to_string();
+        let cell_key = invocation.effect_replay_key().to_string();
         // The cell's own observation lane: every CodeBlock* event this driver
         // publishes for the cell sequences under the cell's replay key.
         let mut code_observations = crate::engine::ObservationCursor::new(

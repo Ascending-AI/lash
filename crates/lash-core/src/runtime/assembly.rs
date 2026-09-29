@@ -598,7 +598,7 @@ impl LlmStreamAccumulator {
             if response.parts.is_empty() {
                 response.parts = self.parts.clone();
             } else if !response_contains_accumulated_parts(response, &self.parts)
-                || !tool_call_ids_unique(&self.parts)
+                || !provider_call_ids_unique(&self.parts)
             {
                 response.parts = reconcile_accumulated_parts(&self.parts, &response.parts);
             }
@@ -612,7 +612,7 @@ impl LlmStreamAccumulator {
     }
 }
 
-fn tool_call_ids_unique(parts: &[LlmOutputPart]) -> bool {
+fn provider_call_ids_unique(parts: &[LlmOutputPart]) -> bool {
     let mut seen = HashSet::new();
     parts.iter().all(|part| match part {
         LlmOutputPart::ToolCall { call_id, .. } => seen.insert(call_id),

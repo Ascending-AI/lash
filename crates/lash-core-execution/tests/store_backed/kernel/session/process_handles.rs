@@ -279,7 +279,7 @@ mod tests {
                 call_id: call.pending.call_id.clone(),
                 provider_call_id: None,
                 tool_id: call.tool_id,
-                tool_name: call.pending.tool_name.into(),
+                tool_name: call.pending.tool_name,
                 args: call.pending.args,
                 replay: call.pending.replay,
                 prepared_payload: serde_json::json!({ "prepared": true }),

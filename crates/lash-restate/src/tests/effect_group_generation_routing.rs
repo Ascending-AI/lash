@@ -41,7 +41,7 @@ impl GroupExecutors for BuildExecutors {
             return None;
         };
         let operation = operation.clone();
-        let replay_key = envelope.invocation.replay_key().to_owned();
+        let replay_key = envelope.invocation.effect_replay_key().to_owned();
         let (build, log) = (self.build, Arc::clone(&self.log));
         Some(RuntimeEffectLocalExecutor::testing(move |_| async move {
             log.lock_recover().push((build, replay_key));

@@ -11,7 +11,7 @@ pub(super) async fn execute_await_event_forwards_the_invocation_replay_key() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let invocation = runtime_invocation(RuntimeEffectKind::AwaitEvent, "correlated-await");
-    let expected_replay_key = invocation.replay_key().to_owned();
+    let expected_replay_key = invocation.effect_replay_key().to_owned();
     let key = test_restate_await_event_key(
         &durable_turn_scope("session", "turn"),
         AwaitEventWaitIdentity::Custom {

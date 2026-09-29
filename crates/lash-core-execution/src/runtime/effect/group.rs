@@ -243,7 +243,7 @@ impl RuntimeEffectGroup {
             .collect::<Result<Vec<_>, _>>()?;
         let mut first_seen_at: BTreeMap<&str, usize> = BTreeMap::new();
         for (index, child) in children.iter().enumerate() {
-            let replay_key = child.invocation.replay_key();
+            let replay_key = child.invocation.effect_replay_key();
             if let Some(first) = first_seen_at.insert(replay_key, index) {
                 return Err(group_shape_error(format!(
                     "children {first} and {index} of durable effect group {group_key} share \

@@ -514,7 +514,11 @@ mod tests {
         );
 
         assert_eq!(invocation.attribution.session_id.as_deref(), Some("s"));
-        assert!(invocation.replay_key().starts_with("direct:v3:blake3:"));
+        assert!(
+            invocation
+                .effect_replay_key()
+                .starts_with("direct:v3:blake3:")
+        );
     }
 
     #[test]
@@ -535,6 +539,10 @@ mod tests {
             2,
         );
 
-        assert!(sleep.replay_key().ends_with(":probe:attempt:2:sleep"));
+        assert!(
+            sleep
+                .effect_replay_key()
+                .ends_with(":probe:attempt:2:sleep")
+        );
     }
 }

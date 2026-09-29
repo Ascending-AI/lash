@@ -44,7 +44,7 @@ impl EffectGroupShape {
         let replay_keys = group
             .children()
             .iter()
-            .map(|child| child.invocation.replay_key().to_owned())
+            .map(|child| child.invocation.effect_replay_key().to_owned())
             .collect();
         let wait_scope = ExecutionScope::runtime_operation(group.group_key());
         let membership = group
@@ -122,7 +122,7 @@ impl EffectGroupShape {
 
     /// The replay key of a child position, as a terminal error when the shape
     /// does not have one.
-    pub(crate) fn replay_key(&self, position: usize) -> Result<&str, TerminalError> {
+    pub(crate) fn member_replay_key(&self, position: usize) -> Result<&str, TerminalError> {
         self.replay_keys
             .get(position)
             .map(String::as_str)

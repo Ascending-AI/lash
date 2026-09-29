@@ -1045,7 +1045,7 @@ impl EffectGroupState for EffectGroupStateImpl {
         live.settlements.insert(rank, settlement);
         live.settled_positions.insert(request.position, rank);
         let wait_scope = live.shape.wait_scope.clone();
-        let replay_key = live.shape.replay_key(request.position)?.to_string();
+        let replay_key = live.shape.member_replay_key(request.position)?.to_string();
         store_index(&ctx, object.writer, record.clone());
         resolve_group_wait(
             &ctx,
@@ -1120,7 +1120,10 @@ impl EffectGroupState for EffectGroupStateImpl {
             ));
         }
         if let Some(settlement) = live.settlements.get(&request.rank).cloned() {
-            let child_replay_key = live.shape.replay_key(settlement.position)?.to_string();
+            let child_replay_key = live
+                .shape
+                .member_replay_key(settlement.position)?
+                .to_string();
             return Ok(Reply::at(
                 wire,
                 EffectGroupReadRankResponse::Settled {
@@ -1268,7 +1271,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                     &self.namespace,
                     &shape.wait_scope,
                     &group_key,
-                    EffectGroupWaitKind::Cancel(shape.replay_key(position)?),
+                    EffectGroupWaitKind::Cancel(shape.member_replay_key(position)?),
                     EffectGroupWaitResolution::Cancel,
                 )
                 .await?;
@@ -1513,7 +1516,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                 &self.namespace,
                 &facts.wait_scope,
                 &group_key,
-                EffectGroupWaitKind::Cancel(facts.replay_key(position)?),
+                EffectGroupWaitKind::Cancel(facts.member_replay_key(position)?),
                 EffectGroupWaitResolution::Cancel,
             )
             .await?;

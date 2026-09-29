@@ -269,6 +269,16 @@ pub mod triggers {
 }
 
 /// Tool definitions, providers, and execution types.
+///
+/// Tools are at-least-once: a crash between a tool's effect and the durable
+/// record of its outcome runs the call again, and a reported failure may be
+/// retried. A tool keys its idempotency on
+/// [`AttemptContext::call_id`](crate::tools::AttemptContext::call_id), the
+/// `ToolCallId` lash mints for the call: it is the same on every run of one
+/// logical call and different for every other call, whatever id the model's
+/// provider sent.
+/// [`AttemptContext::attempt_number`](crate::tools::AttemptContext::attempt_number)
+/// counts the runs apart from it.
 pub mod tools {
     pub use crate::tool_intent_ingress::{
         ToolIntentIngress, ToolIntentIngressKey, ToolIntentIngressOutcome, ToolIntentIngressRefusal,

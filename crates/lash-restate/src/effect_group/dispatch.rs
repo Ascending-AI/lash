@@ -340,7 +340,7 @@ impl EffectGroupDispatchImpl {
         // `group_key` column — never from a caller's assertion. A revoked
         // scope index refuses the record, and a child whose scope is gone
         // settles nowhere.
-        let child_replay_key = request.envelope.invocation.replay_key().to_string();
+        let child_replay_key = request.envelope.invocation.effect_replay_key().to_string();
         let membership_admitted = self
             .route
             .namespace()
@@ -363,7 +363,7 @@ impl EffectGroupDispatchImpl {
         let cancel_key = group_wait_key(
             &request.shape.wait_scope,
             &request.group_key,
-            EffectGroupWaitKind::Cancel(request.shape.replay_key(request.position)?),
+            EffectGroupWaitKind::Cancel(request.shape.member_replay_key(request.position)?),
         )?;
         // The child's durable cancel fact (ADR 0105 §4, FIG-3904). No child
         // races it at handler level: a wait child races it as a journaled
@@ -726,7 +726,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         // about 2i replays of a journal that grows with the width.
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
-            let replay_key = shape.replay_key(position)?.to_string();
+            let replay_key = shape.member_replay_key(position)?.to_string();
             // A child call goes to this dispatcher's own lane (FIG-3795):
             // the route the index recorded for the group's dispatch, which
             // this dispatch runs under, never a name recomputed from the
@@ -1147,7 +1147,7 @@ async fn record_child_settlement(
     let committed = namespace
         .effect_group_state(ctx, request.group_key.clone())
         .commit_child(EffectGroupCommitChildRequest {
-            replay_key: request.envelope.invocation.replay_key().to_string(),
+            replay_key: request.envelope.invocation.effect_replay_key().to_string(),
         })
         .call()
         .await?

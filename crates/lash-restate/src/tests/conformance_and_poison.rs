@@ -1960,7 +1960,7 @@ pub(super) fn prepared_tool_call_with(
     tool_name: &str,
 ) -> lash_core::PreparedToolCall {
     lash_core::PreparedToolCall {
-        call_id: lash_core::ToolCallId::fixture(&call_id),
+        call_id: lash_core::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool_id: format!("tool:{tool_name}").into(),
         tool_name: tool_name.into(),
@@ -1972,7 +1972,7 @@ pub(super) fn prepared_tool_call_with(
 
 pub(super) fn completed_tool_record(call_id: &str, tool_name: &str) -> lash_core::ToolCallRecord {
     lash_core::ToolCallRecord {
-        call_id: lash_core::ToolCallId::fixture(&call_id),
+        call_id: lash_core::ToolCallId::fixture(call_id),
         provider_call_id: None,
         tool: tool_name.to_string(),
         args: serde_json::json!({ "call": call_id }),

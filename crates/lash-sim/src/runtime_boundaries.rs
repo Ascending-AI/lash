@@ -321,7 +321,7 @@ impl RuntimeBoundaryHarness {
             "runtime_effect": {
                 "kind": RuntimeEffectKind::ToolAttempt.as_str(),
                 "effect_id": effect_id,
-                "replay_key": envelope.invocation.replay_key(),
+                "replay_key": envelope.invocation.effect_replay_key(),
                 "envelope_hash": envelope_hash,
                 "controller": RUNTIME_EFFECT_CONTROLLER,
                 "local_executor_called": first_calls > 0,

@@ -52,9 +52,12 @@ fn a_child_position_past_the_replay_keys_is_a_typed_terminal_error() {
     // the object key for every later handler until an operator intervened.
     let shape = shape(&["child-0"]);
 
-    assert_eq!(shape.replay_key(0).expect("the recorded child"), "child-0");
+    assert_eq!(
+        shape.member_replay_key(0).expect("the recorded child"),
+        "child-0"
+    );
     let error = shape
-        .replay_key(1)
+        .member_replay_key(1)
         .expect_err("a position past the replay keys must not panic");
     assert!(
         error.message().contains("no replay key for child 1"),

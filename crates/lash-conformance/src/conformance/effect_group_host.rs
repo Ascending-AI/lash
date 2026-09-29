@@ -2442,7 +2442,7 @@ impl StagedGroupExecutors {
         child: &RuntimeEffectEnvelope,
         executor: RuntimeEffectLocalExecutor<'static>,
     ) {
-        let replay_key = child.invocation.replay_key().to_string();
+        let replay_key = child.invocation.effect_replay_key().to_string();
         self.staged.lock_recover().insert(replay_key, executor);
     }
 }
@@ -2458,7 +2458,7 @@ impl GroupExecutors for StagedGroupExecutors {
         &self,
         envelope: &RuntimeEffectEnvelope,
     ) -> Option<RuntimeEffectLocalExecutor<'static>> {
-        let replay_key = envelope.invocation.replay_key();
+        let replay_key = envelope.invocation.effect_replay_key();
         self.staged.lock_recover().remove(replay_key)
     }
 }

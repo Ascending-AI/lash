@@ -595,6 +595,74 @@ mod tests {
         assert_eq!(standing.attempts, 1, "the failed attempt is counted");
     }
 
+    /// ADR 0117 §2: a trigger delivery's tool call is named by the process
+    /// its delivery start mints, which is the root the process runner admits
+    /// the call under. Every attempt at one delivery presents one start key,
+    /// so a redelivery lands on the same process and the call keeps its
+    /// `ToolCallId`; another occurrence mints another process, and so names
+    /// another call.
+    #[tokio::test]
+    async fn a_trigger_delivery_names_its_tool_call_by_the_process_it_starts() {
+        let delivery = |occurrence: &str| {
+            crate::StartKey::for_trigger_delivery(
+                crate::StartKeyDerivation::LASH_START_PATHS,
+                occurrence,
+                "subscription",
+                "incarnation",
+                1,
+            )
+        };
+        let registration = |occurrence: &str| {
+            tool_registration(occurrence, "delivery")
+                .with_start_key(Some(delivery(occurrence)))
+                .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
+                    "process-env:delivery",
+                )))
+        };
+        let call_id = |record: &crate::ProcessRecord| {
+            let crate::ProcessInput::ToolCall { call } = &*record.input else {
+                panic!("a tool-call delivery: {:?}", record.input)
+            };
+            call.admitted(&record.id).call_id
+        };
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let registry: Arc<dyn crate::ProcessRegistry> = double.lash_backend().process_registry();
+
+        let first = registry
+            .register_process(registration("occurrence-1"))
+            .await
+            .expect("the delivery starts its process");
+        let redelivered = registry
+            .register_process(registration("occurrence-1"))
+            .await
+            .expect("a redelivery lands on the delivered process");
+        let other = registry
+            .register_process(registration("occurrence-2"))
+            .await
+            .expect("another occurrence starts its own process");
+
+        assert_eq!(redelivered.id, first.id, "one delivery, one process");
+        assert_eq!(
+            call_id(&redelivered),
+            call_id(&first),
+            "a redelivered call keeps its id"
+        );
+        assert_eq!(
+            call_id(&first),
+            crate::EffectOpener::process(first.id.clone())
+                .tool_call_admission()
+                .call_id(&[]),
+            "the call is rooted at the delivered process"
+        );
+        assert_ne!(other.id, first.id);
+        assert_ne!(
+            call_id(&other),
+            call_id(&first),
+            "another occurrence is another call"
+        );
+    }
+
     /// ADR 0107: a lash-derived start key is trusted. A retry under a
     /// retained key whose content changed returns the retained process
     /// untouched, and start cleanup reclaims the environment it staged rather

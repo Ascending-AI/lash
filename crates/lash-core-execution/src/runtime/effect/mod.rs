@@ -174,7 +174,7 @@ mod tests {
 
     fn prepared_tool_call(call_id: &str, tool_name: &str) -> crate::PreparedToolCall {
         crate::PreparedToolCall {
-            call_id: crate::ToolCallId::fixture(&call_id),
+            call_id: crate::ToolCallId::fixture(call_id),
             provider_call_id: None,
             tool_id: crate::ToolId::from(format!("tool:{tool_name}")),
             tool_name: tool_name.to_string(),
