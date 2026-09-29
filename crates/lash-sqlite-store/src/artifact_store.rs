@@ -310,7 +310,14 @@ impl Store {
             let refs: Vec<String> = {
                 let mut stmt = tx.prepare_cached(artifact_sql().edges.select_referrer_edges_in_namespace.sql())?;
                 stmt.query_map(params![namespace, cleanup.referrer.kind().as_str(), cleanup.referrer.canonical_id()],
-                    |row| row.get(1))?.collect::<rusqlite::Result<_>>()?
+                    |row| {
+                        let artifact_ref = row.get(1)?;
+                        let kind: String = row.get(2)?;
+                        let id: String = row.get(3)?;
+                        ArtifactReferrer::decode(&kind, &id)
+                            .map_err(|error| sqlite_conversion_error(stored_data_corrupt("artifact referrer edge", error)))?;
+                        Ok(artifact_ref)
+                    })?.collect::<rusqlite::Result<_>>()?
             };
             if refs.is_empty() && artifact_fenced_tx(tx, &cleanup.referrer)? {
                 return Ok(());
@@ -360,6 +367,19 @@ impl Store {
                 let Some(blob_ref) = blob_ref else {
                     return Ok(None);
                 };
+                let mut edges =
+                    conn.prepare_cached(artifact_sql().edges.select_artifact_edges.sql())?;
+                let mut rows = edges.query(params![namespace, artifact_ref])?;
+                while let Some(row) = rows.next()? {
+                    let kind: String = row.get(0)?;
+                    let id: String = row.get(1)?;
+                    ArtifactReferrer::decode(&kind, &id).map_err(|error| {
+                        sqlite_conversion_error(stored_data_corrupt(
+                            "artifact referrer edge",
+                            error,
+                        ))
+                    })?;
+                }
                 Ok(Some(
                     Self::get_blob_conn(conn, &BlobRef(blob_ref))
                         .map_err(sqlite_conversion_error)?,
@@ -834,5 +854,47 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn artifact_read_refuses_a_malformed_stored_referrer() {
+        let (_dir, store) = store().await;
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(pin()).expect("host pin claim"),
+                "malformed-edge",
+                b"module",
+            )
+            .await
+            .expect("publish module");
+        store
+            .conn
+            .write(|tx| {
+                tx.execute(
+                    artifact_sql().edges.insert_edge.sql(),
+                    params![
+                        MODULE_ARTIFACT_NAMESPACE,
+                        "malformed-edge",
+                        "host_pin",
+                        "not-a-pin"
+                    ],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("insert malformed edge");
+        assert!(matches!(
+            store
+                .get_artifact_ref_blob(
+                    MODULE_ARTIFACT_NAMESPACE,
+                    "malformed-edge".into(),
+                    "test artifact".into(),
+                )
+                .await,
+            Err(StoreError::StoredDataCorrupt {
+                record_kind: "artifact referrer edge",
+                ..
+            })
+        ));
     }
 }
