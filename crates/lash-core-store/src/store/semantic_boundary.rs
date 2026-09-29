@@ -44,6 +44,7 @@ pub(super) fn validate_semantic_boundary_commit_is_pure(
         ("failure_evidence", !commit.failure_evidence.is_empty()),
         ("ingress", commit.ingress.is_some()),
         ("applied_commands", commit.applied_commands.is_some()),
+        ("outcome", commit.outcome.is_some()),
         (
             "interrupted_turn_input_turn_id",
             commit.interrupted_turn_input_turn_id.is_some(),
@@ -103,6 +104,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         checkpoint: _,              // rebuilt baseline, not the request
         usage_deltas,
         failure_evidence: _, // refused non-empty by validation
+        outcome: _,          // semantic boundaries do not commit a turn terminal
         turn_commit,
         ingress: _,                             // refused present by validation
         applied_commands: _,                    // refused present by validation

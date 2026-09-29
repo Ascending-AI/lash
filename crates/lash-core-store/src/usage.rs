@@ -718,6 +718,36 @@ impl SessionUsageTotals {
         Ok(())
     }
 
+    /// [`Self::fold_checked`] for a display report, which must not fail. An
+    /// entry the checked fold refuses (a counter overflow or a conflicting
+    /// hole attribution) has its counters clamped into its row, keeps the
+    /// holes already held, and marks the fold inexact. Returns whether it
+    /// was inexact.
+    pub fn fold_saturating(&mut self, entry: &TokenLedgerEntry) -> bool {
+        if self.fold_checked(entry).is_ok() {
+            return false;
+        }
+        let index = match self.rows.binary_search_by(|row| {
+            (row.source.as_str(), row.model.as_str())
+                .cmp(&(entry.source.as_str(), entry.model.as_str()))
+        }) {
+            Ok(index) => index,
+            Err(index) => {
+                self.rows.insert(
+                    index,
+                    UsageTotalRow {
+                        source: entry.source.clone(),
+                        model: entry.model.clone(),
+                        ..UsageTotalRow::default()
+                    },
+                );
+                index
+            }
+        };
+        saturating_add_usage(&mut self.rows[index].usage, &entry.usage);
+        true
+    }
+
     fn outstanding_index(&self, call_id: &str, attempt_ordinal: u32) -> Result<usize, usize> {
         self.outstanding.binary_search_by(|held| {
             (held.call_id.as_str(), held.attempt_ordinal).cmp(&(call_id, attempt_ordinal))

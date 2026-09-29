@@ -532,6 +532,33 @@ pub async fn session_is_live(
     ))
 }
 
+/// The view of `session_id` on `store` when the catalog holds it live, and
+/// `None` when it is absent or deleted (ADR 0112 §2: `lookup_session` plus
+/// `SessionStore::new`). A catalog that cannot answer is `Err`.
+pub async fn live_session_view(
+    store: &Arc<dyn crate::DeploymentStore>,
+    session_id: &SessionId,
+) -> Result<Option<crate::store::SessionStore>, crate::StoreError> {
+    match store.lookup_session(session_id).await? {
+        crate::store::SessionLookup::Live(_) => {
+            let runtime: Arc<dyn crate::store::RuntimeStore> = store.clone();
+            crate::store::SessionStore::new(runtime, session_id.clone()).map(Some)
+        }
+        crate::store::SessionLookup::Deleted | crate::store::SessionLookup::Absent => Ok(None),
+    }
+}
+
+/// Admit `request`'s session on the catalog and return its view (ADR 0112
+/// §2: `admit_session` plus `SessionStore::new`).
+pub async fn admit_session_view(
+    store: &Arc<dyn crate::DeploymentStore>,
+    request: &crate::SessionStoreCreateRequest,
+) -> Result<crate::store::SessionStore, crate::StoreError> {
+    store.admit_session(request).await?;
+    let runtime: Arc<dyn crate::store::RuntimeStore> = store.clone();
+    crate::store::SessionStore::new(runtime, request.session_id.clone())
+}
+
 /// The session-state generation gate for work that acts for a session from
 /// outside that session's execution lease (FIG-3619).
 ///

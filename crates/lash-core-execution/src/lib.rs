@@ -810,10 +810,10 @@ pub use runtime::{
     WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
-    admit_session_state_generation, apply_parent_end_plan, effect_groups_unsupported,
-    end_parent_scope, end_session_roots, lifetime, mint_process_id, parent_end_delivery_key,
-    parent_end_requester, park_turn_of_refused_group_child, park_turn_refused_by_generation,
-    session_is_live,
+    admit_session_state_generation, admit_session_view, apply_parent_end_plan,
+    effect_groups_unsupported, end_parent_scope, end_session_roots, lifetime, live_session_view,
+    mint_process_id, parent_end_delivery_key, parent_end_requester,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation, session_is_live,
 };
 #[allow(unused_imports)]
 pub(crate) use runtime::{

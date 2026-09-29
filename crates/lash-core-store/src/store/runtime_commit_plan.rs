@@ -462,6 +462,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
+            outcome: self.commit.outcome.clone(),
             pending_follow_on: self.commit.pending_follow_on.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),

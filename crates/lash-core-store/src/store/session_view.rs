@@ -56,6 +56,16 @@ impl SessionStore {
         self.store.fleet_format()
     }
 
+    /// [`commit_runtime_state_verified`] for this view's session: a commit
+    /// for another session is refused before anything reaches the store.
+    pub async fn commit_runtime_state_verified(
+        &self,
+        commit: RuntimeCommit,
+    ) -> Result<RuntimeCommitReceipt, StoreError> {
+        self.check_request(&commit)?;
+        commit_runtime_state_verified(self.store.as_ref(), commit).await
+    }
+
     fn check_request(&self, request: &(impl CarriesSession + ?Sized)) -> Result<(), StoreError> {
         request.check_session(&self.session_id)
     }
