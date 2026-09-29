@@ -93,7 +93,7 @@ pub(super) async fn prune_terminal_processes(
     watermark: lash_core_execution::ProjectionWatermark,
 ) -> Result<ProcessPruneReport, PluginError> {
     let cutoff = i64::try_from(cutoff_epoch_ms).unwrap_or(i64::MAX);
-    let pruned_at_ms = registry.clock.timestamp_ms() as i64;
+    let pruned_at_ms = crate::support::clamp_epoch_ms(registry.clock.timestamp_ms());
     let max_change_seq = watermark_change_seq(watermark);
     let mut tx = registry.pool.begin().await.map_err(plugin_sqlx_error)?;
     let prunable = select_prunable(

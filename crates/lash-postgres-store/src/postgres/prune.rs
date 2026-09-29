@@ -37,6 +37,9 @@ pub(super) async fn prune_process_rows_tx(
         )));
     }
 
+    let cleanup_due_at_ms = u64::try_from(pruned_at_ms)
+        .map_err(|_| PluginError::Session("process prune time cannot be negative".into()))?;
+
     for process_id in process_ids {
         let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
         crate::artifact_store::lock_referrer_tx(&mut **tx, &referrer)
@@ -57,7 +60,7 @@ pub(super) async fn prune_process_rows_tx(
         crate::obligation_ledger::arm_cleanup_tx(
             &mut **tx,
             &ArtifactCleanup::ended(referrer, Vec::new(), None),
-            u64::try_from(pruned_at_ms).unwrap_or(0),
+            cleanup_due_at_ms,
         )
         .await
         .map_err(|error| PluginError::Session(error.to_string()))?;
