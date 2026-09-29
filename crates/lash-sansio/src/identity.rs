@@ -374,9 +374,79 @@ string_identity!(
     "turn"
 );
 
+/// Who a runtime runs for: a session, or a process named by its minted id.
+///
+/// A session runtime and a process runtime cross the same interfaces — the
+/// plugin session, the tool catalog, the attachment facade, the authority a
+/// tool intent is declared under — and those interfaces take a
+/// `RuntimeOwner`. A process runtime is never handed a session id as a
+/// stand-in for its own identity.
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOwner {
+    Session(SessionId),
+    Process(ProcessId),
+}
+
+impl RuntimeOwner {
+    pub fn session_id(&self) -> Option<&SessionId> {
+        match self {
+            Self::Session(session_id) => Some(session_id),
+            Self::Process(_) => None,
+        }
+    }
+
+    pub fn process_id(&self) -> Option<&ProcessId> {
+        match self {
+            Self::Session(_) => None,
+            Self::Process(process_id) => Some(process_id),
+        }
+    }
+}
+
+/// `session:<session id>` or `process:<process id>`. A lashlang VM's owner
+/// stamp for a process is the same `process:<process id>` text, so the two
+/// must stay equal.
+impl std::fmt::Display for RuntimeOwner {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Session(session_id) => write!(formatter, "session:{session_id}"),
+            Self::Process(process_id) => write!(formatter, "process:{process_id}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_owner_displays_its_kind_and_id_and_round_trips_tagged() {
+        let session = RuntimeOwner::Session(SessionId::from("s-1"));
+        assert_eq!(session.to_string(), "session:s-1");
+        assert_eq!(
+            serde_json::to_value(&session).unwrap(),
+            serde_json::json!({"session": "s-1"})
+        );
+        let process = RuntimeOwner::Process(ProcessId::fixture("owner"));
+        assert_eq!(
+            process.to_string(),
+            format!("process:{}", ProcessId::fixture("owner"))
+        );
+        let encoded = serde_json::to_string(&process).unwrap();
+        assert_eq!(serde_json::from_str::<RuntimeOwner>(&encoded).unwrap(), process);
+    }
 
     /// Each identity is spelled out by hand rather than looped over the macro:
     /// a round trip through the generated impls would agree with itself even if
