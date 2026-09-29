@@ -1,6 +1,6 @@
 use lash_core::store::{AdmittedHead, DriveFence, RootAdmission};
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
-use lash_core::{LeaseOwnerIdentity, RuntimePersistence, StoreError, TurnId};
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
+use lash_core::{LeaseOwnerIdentity, RuntimeStore, StoreError, TurnId};
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -18,13 +18,15 @@ pub(super) const ENTRIES: [Entry; 2] = [Entry::Root, Entry::Checkpoint];
 const ROOT: &str = "atomicity-root";
 
 pub(super) struct Case {
-    pub(super) store: Arc<dyn RuntimePersistence>,
+    pub(super) store: Arc<dyn RuntimeStore>,
     pub(super) ids: Vec<lash_core::BatchId>,
     fence: DriveFence,
     entry: Entry,
 }
 
-pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) -> Case {
+/// Prepare a case on `store`, whose catalog has admitted the root session
+/// `root`.
+pub(super) async fn prepare(store: Arc<dyn RuntimeStore>, entry: Entry) -> Case {
     let mut ids = Vec::new();
     for (sequence, task) in [(1, "first"), (2, "second")] {
         // Both rows are wakes from one process, so they share the
@@ -141,7 +143,7 @@ impl Case {
 /// (FIG-3927). Both halves run on every backend so the two cannot answer
 /// differently.
 pub(super) async fn an_admission_holds_its_rows_across_a_displaced_fence(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     backend: &str,
 ) {
     let case = prepare(store, Entry::Root).await;
