@@ -458,7 +458,8 @@ lash_conformance::batch_sugar_tests!(
 
 // FIG-4079's tool-call identity laws on the live endpoint: each turn runs in
 // a probe handler, and a crash is a failed handler attempt Restate
-// redelivers.
+// redelivers. The process-admission law drives its worker in the test
+// process and stays on the double's tiers.
 lash_conformance::tool_call_identity_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
@@ -471,9 +472,6 @@ lash_conformance::tool_call_identity_tests!(
             stores: harness.law_stores(),
             runner: harness.turn_runner(),
             rlm: vec![drift_law_rlm_factory()],
-            process_rlm: super::tool_call_identity_on_the_double::process_rlm(
-                &harness.law_backend(),
-            ),
         };
         (harness, tier)
     }
