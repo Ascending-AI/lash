@@ -52,6 +52,38 @@ impl StoreTestSupport for PostgresStore {
                     .execute(&self.pool)
                     .await
             }
+            GraphRowCorruption::SetPayloadKindToPlugin => {
+                let original: String = sqlx::query_scalar(
+                    "SELECT node_json FROM lash_graph_nodes WHERE node_id = $1",
+                )
+                .bind(node_id.as_str())
+                .fetch_one(&self.pool)
+                .await
+                .map_err(store_sqlx_error)?;
+                let mut body: serde_json::Value = serde_json::from_str(&original)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                let object = body.as_object_mut().ok_or_else(|| {
+                    StoreError::Backend("test graph node body is not an object".to_string())
+                })?;
+                object.retain(|key, _| key == "schema_version" || key == "timestamp");
+                let payload = serde_json::to_value(GraphRowCorruption::plugin_payload())
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                object.extend(payload.as_object().ok_or_else(|| {
+                    StoreError::Backend("test plugin payload is not an object".to_string())
+                })?.clone());
+                let json = serde_json::to_string(&body)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                sqlx::query(
+                    "UPDATE lash_graph_nodes SET node_json = $2, body_bytes = $3 WHERE node_id = $1",
+                )
+                .bind(node_id.as_str())
+                .bind(&json)
+                .bind(i64::try_from(json.len()).map_err(|_| {
+                    StoreError::Backend("test body size exceeds BIGINT".to_string())
+                })?)
+                .execute(&self.pool)
+                .await
+            }
         }
         .map_err(store_sqlx_error)?;
         if result.rows_affected() != 1 {

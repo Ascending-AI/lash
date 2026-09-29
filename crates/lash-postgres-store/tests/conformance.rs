@@ -1903,6 +1903,13 @@ mod session_history {
         Some((lock, store, storage))
     }
 
+    lash_conformance::turn_commit_outcome_tests!({
+        let Some((lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        (lock, store)
+    });
+
     #[tokio::test]
     async fn window_is_frame_bounded() {
         let Some((_lock, store, _storage)) = catalog().await else {
