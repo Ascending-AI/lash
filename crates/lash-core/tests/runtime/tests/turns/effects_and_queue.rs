@@ -267,7 +267,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
     assert!(
         lash_core::store::SessionCommitStore::load_session_head_meta(
             store.as_ref(),
-            &lash_core::SessionId::from("root")
+            &lash_core::SessionId::from(SESSION_ID)
         )
         .await
         .expect("load the head")
@@ -549,10 +549,13 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
         0,
         "the admitted root and its follow-on must not hydrate an unchanged graph"
     );
+    // The admission's pending-follow-on probe answers from the head, the
+    // root checks its epoch against it, and the follow-on rechecks it.
     assert_eq!(
         store.load_session_head_meta_count(),
-        2,
-        "the admitted drive checks its epoch and rechecks head freshness for the follow-on"
+        3,
+        "the admitted drive probes its follow-on, checks its epoch and rechecks head freshness \
+         for the follow-on"
     );
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -588,8 +591,8 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
     );
     assert_eq!(
         store.load_session_head_meta_count(),
-        3,
-        "the next admitted drive checks the durable head once more"
+        5,
+        "the next admitted drive probes its follow-on and checks the durable head once more"
     );
 }
 
