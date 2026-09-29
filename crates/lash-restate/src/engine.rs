@@ -13,7 +13,7 @@ use lash_core::engine::BuildGeneration;
 use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
 use lash_core::{EffectHost as _, SessionWorkEngine, StoreSet};
 
-use crate::effect_host::RestateEffectHost;
+use crate::effect_host::{RestateEffectHost, RestateJournalAuthority};
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
 use crate::process::{RestateProcessDeployment, RestateProcessServing};
 use crate::services::{LashServiceParts, RestateNamespace, bind_lash_services};
@@ -134,6 +134,10 @@ impl RestateEngine {
             namespace.clone(),
         ));
         let admin = crate::RestateAdminClient::new(admin_connection);
+        effect_host.bind_journal_authority(RestateJournalAuthority::new(
+            admin.clone(),
+            Arc::clone(&stores),
+        ));
         let session_work = Arc::new(RestateSessionWork::new(
             RestateIngressClient::new(connection.clone()),
             crate::RestateSessionDriverSlot::new(),

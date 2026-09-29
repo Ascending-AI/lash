@@ -2,7 +2,9 @@ use crate::SessionId;
 use lash_trace::{TraceContext, TraceLevel, TraceSink};
 use std::sync::Arc;
 
-use super::process::{ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry};
+use super::process::{
+    ArtifactReferrerPorts, ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry,
+};
 use super::{
     EffectHost, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
     SessionWorkEngine, TerminationPolicy,
@@ -168,6 +170,7 @@ impl RuntimeHostConfig {
         let attachment_store = backend.attachment_store();
         let process_env_store = backend.process_env_store();
         let clock = backend.clock();
+        let artifact_ports = ArtifactReferrerPorts::of_backend(&backend);
         let tool_children =
             effect_host.install_tool_child_host(crate::runtime::effect::ToolChildHost::new(
                 &effect_host,
@@ -193,7 +196,7 @@ impl RuntimeHostConfig {
                 )),
                 process_env_store,
             },
-            process_engines: ProcessEngineRegistry::new(),
+            process_engines: ProcessEngineRegistry::new().with_artifact_ports(artifact_ports),
             providers: RuntimeProviderConfig {
                 provider_resolver: Arc::new(crate::EmptyProviderResolver),
                 run_definitions: crate::RunDefinitions::default(),
@@ -241,10 +244,14 @@ impl RuntimeHostConfig {
             crate::SessionAttachmentStore::ephemeral(backend.attachment_store())
                 .with_max_attachment_bytes(max_attachment_bytes),
         );
-        let config = self
+        let mut config = self
             .with_process_env_store(backend.process_env_store())
             .with_effect_host(backend.effect_host())
             .with_clock(backend.clock());
+        config.process_engines = config
+            .process_engines
+            .clone()
+            .with_artifact_ports(ArtifactReferrerPorts::of_backend(&backend));
         Self { backend, ..config }
     }
 
