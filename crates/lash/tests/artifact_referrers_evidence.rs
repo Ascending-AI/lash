@@ -264,8 +264,12 @@ async fn overwrite_retains_old_module_until_frame_end() {
     let core = rlm_core(
         &double,
         vec![
-            response("const holder = { saved: async () => 11 }; finish('first');"),
-            response("holder.saved = async () => 22; finish('second');"),
+            response(
+                "let holder = new Map(); { const old = async () => 11; holder.set('saved', old); } finish('first');",
+            ),
+            response(
+                "{ const newer = async () => 22; holder.set('saved', newer); } finish('second');",
+            ),
             response("await control.continue_as({ task: 'new frame' });"),
             response("finish('new frame');"),
         ],
