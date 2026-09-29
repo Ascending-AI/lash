@@ -96,6 +96,26 @@ impl SqliteProcessDefinitionRegistry {
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessDefinitionRegistry for SqliteProcessDefinitionRegistry {
+    async fn definition_state(
+        &self,
+        definition_id: &str,
+    ) -> Result<Option<ProcessDefinitionRecord>, PluginError> {
+        let definition_id = definition_id.to_owned();
+        self.conn
+            .call(move |conn| {
+                conn.query_row(
+                    "SELECT record_json FROM process_definitions WHERE definition_id = ?1",
+                    rusqlite::params![definition_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .map(|json| decode_record(&json))
+                .transpose()
+            })
+            .await
+            .map_err(sqlite_plugin_error)
+    }
+
     async fn register_definition(
         &self,
         operation_id: &str,

@@ -1,9 +1,9 @@
 //! The lashlang module-artifact store and the process-execution-env store.
 //!
 //! The SQLite owner of the artifact family: `artifact_refs` (this backend's
-//! pointer from a namespaced reference to its bytes), `artifact_owners` (the
-//! exact owner edges that keep an artifact alive) and
-//! `artifact_owner_retirements` (the permanent publication fence). The bytes
+//! pointer from a namespaced reference to its bytes), `artifact_referrer_edges` (the
+//! exact edges that keep an artifact alive) and
+//! `artifact_referrer_fences` (the permanent publication fence). The bytes
 //! themselves live in `blobs`, shared with checkpoint storage, which is why
 //! reclaiming one is conditional on every other rooting relation.
 //!
@@ -15,9 +15,12 @@
 use std::sync::LazyLock;
 
 use crate::schema_layout::Schema;
+use lash_core_execution::{
+    ArtifactReferrer, ArtifactStoreError, ArtifactStoreId, ReferrerClaim, ResolvedArtifactCleanup,
+};
 use lash_store_sql::artifact::blobs::BlobStatements;
-use lash_store_sql::artifact::owner_retirements::OwnerRetirementStatements;
-use lash_store_sql::artifact::owners::OwnerStatements;
+use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
+use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
 
 use super::*;
 use lash_sansio::sync::MutexExt;
@@ -40,12 +43,12 @@ lash_store_sql::statements! {
         select_blob_ref = "SELECT blob_ref FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2";
 
-        /// `NOT EXISTS` is the whole safety argument: an owner acquired
+        /// `NOT EXISTS` is the whole safety argument: a referrer acquired
         /// between the release and this delete keeps the row.
-        delete_unowned = "DELETE FROM artifact_refs
+        delete_unreferenced = "DELETE FROM artifact_refs
              WHERE namespace = ?1 AND artifact_ref = ?2
                AND NOT EXISTS (
-                   SELECT 1 FROM artifact_owners
+                   SELECT 1 FROM artifact_referrer_edges
                    WHERE namespace = ?1 AND artifact_ref = ?2
                )";
 
@@ -65,64 +68,26 @@ lash_store_sql::statements! {
     }
 }
 
-lash_store_sql::statements! {
-    /// `artifact_owners` statements only SQLite issues.
-    pub(crate) struct OwnerSqliteStatements @ "artifact_owner" {
-        /// `INSERT … SELECT` is the fork: it makes "the destination edge
-        /// appears only if the source edge was there" one statement under the
-        /// write lock. PostgreSQL reads the source edge first because it
-        /// takes a per-owner advisory lock anyway and wants to tell a missing
-        /// staging edge from an already-completed transfer.
-        transfer_edge = "INSERT INTO artifact_owners
-             (namespace, artifact_ref, owner_kind, owner_id)
-             SELECT namespace, artifact_ref, ?3, ?4
-             FROM artifact_owners
-             WHERE namespace = ?1 AND artifact_ref = ?2
-               AND owner_kind = ?5 AND owner_id = ?6
-             ON CONFLICT DO NOTHING";
-
-        /// Every artifact owner `?2`/`?3` holds in namespace `?1`.
-        ///
-        /// Unordered: SQLite reclaims each reference in turn under one write
-        /// lock, so no lock-acquisition order exists to respect. PostgreSQL
-        /// orders the same read because it takes a per-artifact advisory lock
-        /// for each row and must take them in a stable order.
-        select_owned_refs = "SELECT artifact_ref FROM artifact_owners
-             WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3";
-    }
-}
-
 /// Every artifact-family statement, rendered once.
 pub(crate) struct ArtifactSql {
-    /// `artifact_owners` statements both backends issue verbatim.
-    pub(crate) owners: OwnerStatements,
-    /// `artifact_owners` statements only SQLite issues.
-    pub(crate) owners_sqlite: OwnerSqliteStatements,
-    /// `artifact_owner_retirements` statements both backends issue verbatim.
-    pub(crate) retirements: OwnerRetirementStatements,
-    /// `artifact_refs` statements, all of which only SQLite issues.
+    pub(crate) edges: ReferrerEdgeStatements,
+    pub(crate) fences: ReferrerFenceStatements,
     pub(crate) refs: RefSqliteStatements,
-    /// `blobs` statements both backends issue verbatim.
     pub(crate) blobs: BlobStatements,
-    /// `blobs` statements only SQLite issues.
     pub(crate) blobs_sqlite: crate::blobs::BlobSqliteStatements,
 }
 
-/// The artifact family lives entirely in the session catalog's own database
-/// and is never reached through an `ATTACH`ed name, so one dialect renders it.
 static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
     let dialect = Schema::Main.dialect();
     ArtifactSql {
-        owners: OwnerStatements::render(dialect),
-        owners_sqlite: OwnerSqliteStatements::render(dialect),
-        retirements: OwnerRetirementStatements::render(dialect),
+        edges: ReferrerEdgeStatements::render(dialect),
+        fences: ReferrerFenceStatements::render(dialect),
         refs: RefSqliteStatements::render(dialect),
         blobs: BlobStatements::render(dialect),
         blobs_sqlite: crate::blobs::BlobSqliteStatements::render(dialect),
     }
 });
 
-/// The artifact-family statements, rendered once at first use.
 pub(crate) fn artifact_sql() -> &'static ArtifactSql {
     &ARTIFACT_SQL
 }
@@ -154,6 +119,54 @@ pub(crate) fn artifact_namespace_kind(
     }
 }
 
+/// Keep the typed refusals raised within a SQLite write transaction.
+fn artifact_sqlite_error(error: rusqlite::Error) -> ArtifactStoreError {
+    match error {
+        rusqlite::Error::ToSqlConversionFailure(error) => {
+            match error.downcast::<ArtifactStoreError>() {
+                Ok(error) => *error,
+                Err(error) => match error.downcast::<StoreError>() {
+                    Ok(error) => ArtifactStoreError::from(*error),
+                    Err(error) => ArtifactStoreError::Backend(error.to_string()),
+                },
+            }
+        }
+        error => ArtifactStoreError::from(sqlite_error(error)),
+    }
+}
+
+fn artifact_failure(error: ArtifactStoreError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+}
+
+pub(crate) fn artifact_fenced_tx(
+    tx: &rusqlite::Connection,
+    referrer: &ArtifactReferrer,
+) -> rusqlite::Result<bool> {
+    tx.query_row(
+        artifact_sql().fences.select_is_fenced.sql(),
+        params![referrer.kind().as_str(), referrer.canonical_id()],
+        |row| row.get(0),
+    )
+}
+
+pub(crate) fn fence_artifact_referrer_tx(
+    tx: &rusqlite::Connection,
+    referrer: &ArtifactReferrer,
+    now_ms: u64,
+) -> rusqlite::Result<()> {
+    crate::conn::cached_execute(
+        tx,
+        artifact_sql().fences.insert_fence.sql(),
+        params![
+            referrer.kind().as_str(),
+            referrer.canonical_id(),
+            crate::clamp_epoch_ms(now_ms)
+        ],
+    )?;
+    Ok(())
+}
+
 impl Store {
     async fn publish_artifact_ref_blob(
         &self,
@@ -161,23 +174,21 @@ impl Store {
         artifact_ref: String,
         descriptor: BlobArtifactDescriptor,
         bytes: Vec<u8>,
-        owner: lash_core_execution::ArtifactOwner,
-    ) -> Result<(), StoreError> {
+        claim: ReferrerClaim,
+    ) -> Result<(), ArtifactStoreError> {
         let blob_profile = self.options.blob_profile;
+        let now_ms = self.clock.timestamp_ms();
         self.conn
             .write(move |tx| {
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let retired = tx.query_row(
-                    artifact_sql().retirements.select_is_retired.sql(),
-                    params![owner_kind, owner_id],
-                    |row| row.get::<_, bool>(0),
-                )?;
-                if retired {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::ArtifactOwnerRetired,
-                    )));
+                let referrer = claim.referrer();
+                if artifact_fenced_tx(tx, referrer)? {
+                    return Err(artifact_failure(ArtifactStoreError::ReferrerEnded {
+                        referrer: referrer.clone(),
+                    }));
+                }
+                if let Some(cleanup) = claim.guard_cleanup() {
+                    crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
+                        .map_err(sqlite_conversion_error)?;
                 }
                 let blob_ref =
                     Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
@@ -192,86 +203,64 @@ impl Store {
                     |row| row.get(0),
                 )?;
                 if stored_blob_ref != blob_ref.as_str() {
-                    return Err(rusqlite::Error::InvalidParameterName(format!(
-                        "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
-                    )));
+                    return Err(artifact_failure(ArtifactStoreError::Immutable {
+                        artifact_ref,
+                    }));
                 }
                 crate::conn::cached_execute(
                     tx,
-                    artifact_sql().owners.insert_edge.sql(),
-                    params![namespace, artifact_ref, owner_kind, owner_id],
+                    artifact_sql().edges.insert_edge.sql(),
+                    params![
+                        namespace,
+                        artifact_ref,
+                        referrer.kind().as_str(),
+                        referrer.canonical_id()
+                    ],
                 )?;
                 Ok(())
             })
             .await
-            .map_err(sqlite_error)
+            .map_err(artifact_sqlite_error)
     }
 
-    async fn transfer_artifact_ref_owner(
+    async fn acquire_artifact_ref_blob(
         &self,
         namespace: &'static str,
         artifact_ref: String,
-        from: lash_core_execution::ArtifactOwner,
-        to: lash_core_execution::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                let (from_kind, from_id) = from
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let (to_kind, to_id) = to
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                let retired = tx.query_row(
-                    artifact_sql().retirements.select_is_retired.sql(),
-                    params![to_kind, to_id],
-                    |row| row.get::<_, bool>(0),
-                )?;
-                if retired {
-                    return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                        StoreError::ArtifactDestinationOwnerRetired,
-                    )));
-                }
-                let inserted = crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().owners_sqlite.transfer_edge.sql(),
-                    params![namespace, artifact_ref, to_kind, to_id, from_kind, from_id],
-                )?;
-                if inserted == 0 {
-                    let destination_exists = tx.query_row(
-                        artifact_sql().owners.select_edge_exists.sql(),
-                        params![namespace, artifact_ref, to_kind, to_id],
-                        |row| row.get::<_, bool>(0),
-                    )?;
-                    if !destination_exists {
-                        return Err(rusqlite::Error::ToSqlConversionFailure(Box::new(
-                            StoreError::ArtifactStagingEdgeMissing {
-                                artifact: format!("artifact `{artifact_ref}`"),
-                            },
-                        )));
-                    }
-                }
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().owners.delete_edge.sql(),
-                    params![namespace, artifact_ref, from_kind, from_id],
-                )?;
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
+        claim: ReferrerClaim,
+    ) -> Result<(), ArtifactStoreError> {
+        let now_ms = self.clock.timestamp_ms();
+        self.conn.write(move |tx| {
+            let referrer = claim.referrer();
+            if artifact_fenced_tx(tx, referrer)? {
+                return Err(artifact_failure(ArtifactStoreError::ReferrerEnded { referrer: referrer.clone() }));
+            }
+            let exists: bool = tx.query_row(
+                "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
+                params![namespace, artifact_ref], |row| row.get(0))?;
+            if !exists {
+                return Err(artifact_failure(ArtifactStoreError::ArtifactMissing { artifact_ref }));
+            }
+            if let Some(cleanup) = claim.guard_cleanup() {
+                crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
+                    .map_err(sqlite_conversion_error)?;
+            }
+            crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
+                params![namespace, artifact_ref, referrer.kind().as_str(), referrer.canonical_id()])?;
+            Ok(())
+        }).await.map_err(artifact_sqlite_error)
     }
 
-    fn reclaim_unowned_artifact_conn(
+    fn reclaim_unreferenced_artifact_tx(
         tx: &rusqlite::Connection,
         namespace: &str,
         artifact_ref: &str,
     ) -> rusqlite::Result<()> {
-        let blob_ref = tx
+        let blob_ref: Option<String> = tx
             .query_row(
                 artifact_sql().refs.select_blob_ref.sql(),
                 params![namespace, artifact_ref],
-                |row| row.get::<_, String>(0),
+                |row| row.get(0),
             )
             .optional()?;
         let Some(blob_ref) = blob_ref else {
@@ -279,77 +268,77 @@ impl Store {
         };
         crate::conn::cached_execute(
             tx,
-            artifact_sql().refs.delete_unowned.sql(),
+            artifact_sql().refs.delete_unreferenced.sql(),
             params![namespace, artifact_ref],
         )?;
         crate::conn::cached_execute(
             tx,
-            artifact_sql().blobs_sqlite.reclaim_unowned_artifact.sql(),
+            artifact_sql()
+                .blobs_sqlite
+                .reclaim_unreferenced_artifact
+                .sql(),
             params![blob_ref],
         )?;
         Ok(())
     }
 
-    async fn release_artifact_ref_owner(
+    async fn end_artifact_referrer(
         &self,
         namespace: &'static str,
-        artifact_ref: String,
-        owner: lash_core_execution::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().owners.delete_edge.sql(),
-                    params![namespace, artifact_ref, owner_kind, owner_id],
-                )?;
-                Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-
-    async fn retire_artifact_owner(
-        &self,
-        namespace: &'static str,
-        owner: lash_core_execution::ArtifactOwner,
-    ) -> Result<(), StoreError> {
-        self.conn
-            .write(move |tx| {
-                if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
-                    return Err(rusqlite::Error::InvalidParameterName(
-                        "only execution artifact owners can be retired".to_string(),
-                    ));
+        cleanup: ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        let now_ms = self.clock.timestamp_ms();
+        let expected_store = match namespace {
+            MODULE_ARTIFACT_NAMESPACE => ArtifactStoreId::LashlangModule,
+            PROCESS_ENV_NAMESPACE => ArtifactStoreId::ProcessEnv,
+            _ => {
+                return Err(ArtifactStoreError::Backend(
+                    "unknown artifact namespace".into(),
+                ));
+            }
+        };
+        if cleanup
+            .carries
+            .iter()
+            .any(|carry| carry.artifact.store != expected_store)
+        {
+            return Err(ArtifactStoreError::Backend(
+                "cleanup carries an artifact for a different store".into(),
+            ));
+        }
+        self.conn.write(move |tx| {
+            let refs: Vec<String> = {
+                let mut stmt = tx.prepare_cached(artifact_sql().edges.select_referrer_edges_in_namespace.sql())?;
+                stmt.query_map(params![namespace, cleanup.referrer.kind().as_str(), cleanup.referrer.canonical_id()],
+                    |row| row.get(1))?.collect::<rusqlite::Result<_>>()?
+            };
+            if refs.is_empty() && artifact_fenced_tx(tx, &cleanup.referrer)? {
+                return Ok(());
+            }
+            fence_artifact_referrer_tx(tx, &cleanup.referrer, now_ms)?;
+            let mut carries = cleanup.carries.clone();
+            carries.sort_by(|left, right| left.artifact.artifact_ref.cmp(&right.artifact.artifact_ref));
+            for carry in &carries {
+                if artifact_fenced_tx(tx, &carry.to)? { continue; }
+                let artifact_ref = &carry.artifact.artifact_ref;
+                let exists: bool = tx.query_row(
+                    "SELECT EXISTS (SELECT 1 FROM artifact_refs WHERE namespace = ?1 AND artifact_ref = ?2)",
+                    params![namespace, artifact_ref], |row| row.get(0))?;
+                if !exists {
+                    return Err(artifact_failure(ArtifactStoreError::CarryArtifactMissing {
+                        artifact_ref: artifact_ref.clone(), to: carry.to.clone(),
+                    }));
                 }
-                let (owner_kind, owner_id) = owner
-                    .storage_parts()
-                    .map_err(|error| rusqlite::Error::InvalidParameterName(error.to_string()))?;
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().retirements.insert_retirement.sql(),
-                    params![owner_kind, owner_id],
-                )?;
-                let refs = {
-                    let mut stmt =
-                        tx.prepare_cached(artifact_sql().owners_sqlite.select_owned_refs.sql())?;
-                    stmt.query_map(params![namespace, owner_kind, owner_id], |row| row.get(0))?
-                        .collect::<Result<Vec<String>, _>>()?
-                };
-                crate::conn::cached_execute(
-                    tx,
-                    artifact_sql().owners.delete_owner_edges.sql(),
-                    params![namespace, owner_kind, owner_id],
-                )?;
-                for artifact_ref in refs {
-                    Self::reclaim_unowned_artifact_conn(tx, namespace, &artifact_ref)?;
-                }
-                Ok(())
-            })
-            .await
-            .map_err(sqlite_error)
+                crate::conn::cached_execute(tx, artifact_sql().edges.insert_edge.sql(),
+                    params![namespace, artifact_ref, carry.to.kind().as_str(), carry.to.canonical_id()])?;
+            }
+            crate::conn::cached_execute(tx, artifact_sql().edges.delete_referrer_edges_in_namespace.sql(),
+                params![namespace, cleanup.referrer.kind().as_str(), cleanup.referrer.canonical_id()])?;
+            for artifact_ref in refs {
+                Self::reclaim_unreferenced_artifact_tx(tx, namespace, &artifact_ref)?;
+            }
+            Ok(())
+        }).await.map_err(artifact_sqlite_error)
     }
 
     async fn get_artifact_ref_blob(
@@ -407,12 +396,12 @@ impl lash_core_execution::ModuleArtifactStore for Store {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
         bytes: &[u8],
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
-            return Err(lash_core_execution::ArtifactStoreError::Backend(
+            return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
             ));
         }
@@ -422,99 +411,56 @@ impl lash_core_execution::ModuleArtifactStore for Store {
         }
         self.publish_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
-            module_ref.to_string(),
+            module_ref.to_owned(),
             BlobArtifactDescriptor::lashlang_module(),
             bytes.to_vec(),
-            owner.clone(),
+            claim.clone(),
         )
         .await
-        .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        let bytes = self
-            .get_artifact_ref_blob(
-                MODULE_ARTIFACT_NAMESPACE,
-                module_ref.to_string(),
-                format!("lashlang module artifact `{module_ref}`"),
-            )
+    ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(ArtifactStoreError::Encode(
+                "invalid module reference".into(),
+            ));
+        }
+        self.acquire_artifact_ref_blob(
+            MODULE_ARTIFACT_NAMESPACE,
+            module_ref.to_owned(),
+            claim.clone(),
+        )
+        .await
+    }
+
+    async fn end_module_referrer(
+        &self,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_artifact_referrer(MODULE_ARTIFACT_NAMESPACE, cleanup.clone())
             .await
-            .map_err(lash_core_execution::ArtifactStoreError::from)?
-            .ok_or_else(|| {
-                lash_core_execution::ArtifactStoreError::Backend(format!(
-                    "missing module artifact `{module_ref}`"
-                ))
-            })?;
-        self.publish_artifact_ref_blob(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.to_string(),
-            BlobArtifactDescriptor::lashlang_module(),
-            bytes,
-            owner.clone(),
-        )
-        .await
-        .map_err(lash_core_execution::ArtifactStoreError::from)
-    }
-
-    async fn transfer_module_artifact(
-        &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.transfer_artifact_ref_owner(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.to_string(),
-            from.clone(),
-            to.clone(),
-        )
-        .await
-        .map_err(lash_core_execution::ArtifactStoreError::from)
-    }
-
-    async fn release_module_artifact(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.release_artifact_ref_owner(
-            MODULE_ARTIFACT_NAMESPACE,
-            module_ref.to_string(),
-            owner.clone(),
-        )
-        .await
-        .map_err(lash_core_execution::ArtifactStoreError::from)
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.retire_artifact_owner(MODULE_ARTIFACT_NAMESPACE, owner.clone())
-            .await
-            .map_err(lash_core_execution::ArtifactStoreError::from)
     }
 
     async fn get_module_artifact(
         &self,
         module_ref: &str,
-    ) -> Result<Option<Vec<u8>>, lash_core_execution::ArtifactStoreError> {
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
-            return Err(lash_core_execution::ArtifactStoreError::Backend(
+            return Err(ArtifactStoreError::Decode(
                 "invalid module reference".into(),
             ));
         }
         self.get_artifact_ref_blob(
             MODULE_ARTIFACT_NAMESPACE,
-            module_ref.to_string(),
+            module_ref.to_owned(),
             format!("lashlang module artifact `{module_ref}`"),
         )
         .await
-        .map_err(lash_core_execution::ArtifactStoreError::from)
+        .map_err(Into::into)
     }
 }
 
@@ -522,87 +468,371 @@ impl lash_core_execution::ModuleArtifactStore for Store {
 impl lash_core_execution::ProcessExecutionEnvStore for Store {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core_execution::PluginError> {
+    ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core_execution::PluginError::Invoke(
+            return Err(ArtifactStoreError::Encode(
                 "invalid process execution environment reference".into(),
             ));
         }
         if !env_ref.matches_store_bytes(bytes) {
-            return Err(lash_core_execution::PluginError::Session(format!(
-                "process execution environment bytes do not match `{env_ref}`"
-            )));
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: env_ref.as_str().to_owned(),
+            });
         }
-        let artifact_ref = env_ref.as_str().to_string();
         self.publish_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
-            artifact_ref,
+            env_ref.as_str().to_owned(),
             BlobArtifactDescriptor::process_execution_env(),
             bytes.to_vec(),
-            owner.clone(),
+            claim.clone(),
         )
         .await
-        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.transfer_artifact_ref_owner(
+    ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(ArtifactStoreError::Encode(
+                "invalid process execution environment reference".into(),
+            ));
+        }
+        self.acquire_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
-            env_ref.as_str().to_string(),
-            from.clone(),
-            to.clone(),
+            env_ref.as_str().to_owned(),
+            claim.clone(),
         )
         .await
-        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.release_artifact_ref_owner(
-            PROCESS_ENV_NAMESPACE,
-            env_ref.as_str().to_string(),
-            owner.clone(),
-        )
-        .await
-        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.retire_artifact_owner(PROCESS_ENV_NAMESPACE, owner.clone())
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_artifact_referrer(PROCESS_ENV_NAMESPACE, cleanup.clone())
             .await
-            .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core_execution::PluginError> {
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core_execution::PluginError::Invoke(
+            return Err(ArtifactStoreError::Decode(
                 "invalid process execution environment reference".into(),
             ));
         }
-        let artifact_ref = env_ref.as_str().to_string();
         self.get_artifact_ref_blob(
             PROCESS_ENV_NAMESPACE,
-            artifact_ref.clone(),
-            format!("process execution env `{artifact_ref}`"),
+            env_ref.as_str().to_owned(),
+            format!("process execution env `{env_ref}`"),
         )
         .await
-        .map_err(lash_core_execution::runtime::process::artifact_store_plugin_error)
+        .map_err(Into::into)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lash_core_execution::{
+        ArtifactCarry, ArtifactName, ArtifactStoreId, HostArtifactPin, ModuleArtifactStore,
+    };
+
+    fn pin() -> ArtifactReferrer {
+        ArtifactReferrer::HostPin(HostArtifactPin::mint())
+    }
+
+    async fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(&dir.path().join("artifact.db"))
+            .await
+            .expect("open store");
+        (dir, store)
+    }
+
+    async fn edge_count(store: &Store, artifact_ref: &str) -> i64 {
+        let artifact_ref = artifact_ref.to_owned();
+        store.conn.call(move |conn| {
+            conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE namespace = 'lashlang_module' AND artifact_ref = ?1",
+                params![artifact_ref], |row| row.get(0))
+        }).await.expect("edge count")
+    }
+
+    #[tokio::test]
+    async fn publish_acquire_and_read_keep_exact_edges() {
+        let (_dir, store) = store().await;
+        let first = pin();
+        let second = pin();
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(first.clone()).expect("valid test value"),
+                "module-1",
+                b"one",
+            )
+            .await
+            .expect("publish");
+        store
+            .acquire_module_artifact(
+                &ReferrerClaim::unguarded(second.clone()).expect("valid test value"),
+                "module-1",
+            )
+            .await
+            .expect("acquire");
+        store
+            .acquire_module_artifact(
+                &ReferrerClaim::unguarded(second).expect("valid test value"),
+                "module-1",
+            )
+            .await
+            .expect("repeat acquire");
+        assert_eq!(edge_count(&store, "module-1").await, 2);
+        assert_eq!(
+            store
+                .get_module_artifact("module-1")
+                .await
+                .expect("valid test value"),
+            Some(b"one".to_vec())
+        );
+        assert!(matches!(
+            store
+                .acquire_module_artifact(
+                    &ReferrerClaim::unguarded(pin()).expect("valid test value"),
+                    "absent"
+                )
+                .await,
+            Err(ArtifactStoreError::ArtifactMissing { .. })
+        ));
+        assert!(matches!(
+            store
+                .publish_module_artifact(
+                    &ReferrerClaim::unguarded(first).expect("valid test value"),
+                    "module-1",
+                    b"other"
+                )
+                .await,
+            Err(ArtifactStoreError::Immutable { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn guarded_publication_arms_cleanup_with_the_edge() {
+        let (_dir, store) = store().await;
+        let journal = lash_sansio::ExecutionScope::runtime_operation("guarded-publication")
+            .journal_identity()
+            .expect("journal identity");
+        let claim = ReferrerClaim::guarded(
+            ArtifactReferrer::Execution(journal),
+            lash_core_execution::ArtifactCleanupPlan::AwaitJournal,
+        )
+        .expect("execution claim");
+        store
+            .publish_module_artifact(&claim, "guarded-module", b"guarded")
+            .await
+            .expect("publish with guard");
+        let (edges, obligations): (i64, i64) = store.conn.call(|conn| {
+            Ok((
+                conn.query_row("SELECT COUNT(*) FROM artifact_referrer_edges WHERE artifact_ref = 'guarded-module'", [], |row| row.get(0))?,
+                conn.query_row("SELECT COUNT(*) FROM artifact_cleanup_obligations WHERE referrer_kind = 'execution'", [], |row| row.get(0))?,
+            ))
+        }).await.expect("read edge and guard");
+        assert_eq!((edges, obligations), (1, 1));
+    }
+
+    #[tokio::test]
+    async fn process_environment_publish_acquire_and_end_preserve_other_namespace() {
+        use lash_core_execution::ProcessExecutionEnvStore;
+        let (_dir, store) = store().await;
+        let spec = lash_core_execution::ProcessExecutionEnvSpec::new(
+            lash_core_execution::PluginOptions::default(),
+            lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+        );
+        let bytes = spec.to_store_bytes().expect("encode environment");
+        let env_ref = spec.stable_ref().expect("environment reference");
+        let source = pin();
+        let other = pin();
+        store
+            .publish_process_execution_env(
+                &ReferrerClaim::unguarded(source.clone()).expect("source claim"),
+                &env_ref,
+                &bytes,
+            )
+            .await
+            .expect("publish environment");
+        store
+            .acquire_process_execution_env(
+                &ReferrerClaim::unguarded(other.clone()).expect("other claim"),
+                &env_ref,
+            )
+            .await
+            .expect("acquire environment");
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(other).expect("module claim"),
+                env_ref.as_str(),
+                b"module",
+            )
+            .await
+            .expect("publish same reference in module namespace");
+        store
+            .end_process_env_referrer(&ResolvedArtifactCleanup {
+                referrer: source,
+                carries: Vec::new(),
+            })
+            .await
+            .expect("end first environment referrer");
+        assert_eq!(
+            store
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read environment"),
+            Some(bytes)
+        );
+        assert_eq!(
+            store
+                .get_module_artifact(env_ref.as_str())
+                .await
+                .expect("read module"),
+            Some(b"module".to_vec())
+        );
+    }
+
+    #[tokio::test]
+    async fn end_carries_before_sever_and_reclaims_only_after_last_edge() {
+        let (_dir, store) = store().await;
+        let source = pin();
+        let destination = pin();
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(source.clone()).expect("valid test value"),
+                "module-2",
+                b"two",
+            )
+            .await
+            .expect("publish");
+        let resolved = ResolvedArtifactCleanup {
+            referrer: source.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::LashlangModule,
+                    artifact_ref: "module-2".into(),
+                },
+                to: destination.clone(),
+            }],
+        };
+        store
+            .end_module_referrer(&resolved)
+            .await
+            .expect("carry and end");
+        store
+            .end_module_referrer(&resolved)
+            .await
+            .expect("replay end");
+        assert_eq!(edge_count(&store, "module-2").await, 1);
+        assert!(matches!(
+            store
+                .acquire_module_artifact(
+                    &ReferrerClaim::unguarded(source).expect("valid test value"),
+                    "module-2"
+                )
+                .await,
+            Err(ArtifactStoreError::ReferrerEnded { .. })
+        ));
+        store
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer: destination,
+                carries: Vec::new(),
+            })
+            .await
+            .expect("end destination");
+        assert_eq!(edge_count(&store, "module-2").await, 0);
+        assert!(
+            store
+                .get_module_artifact("module-2")
+                .await
+                .expect("valid test value")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_carry_rolls_back_fence_and_allows_retry() {
+        let (_dir, store) = store().await;
+        let source = pin();
+        let destination = pin();
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(source.clone()).expect("valid test value"),
+                "module-3",
+                b"three",
+            )
+            .await
+            .expect("publish");
+        let bad = ResolvedArtifactCleanup {
+            referrer: source.clone(),
+            carries: vec![ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::LashlangModule,
+                    artifact_ref: "missing".into(),
+                },
+                to: destination,
+            }],
+        };
+        assert!(matches!(
+            store.end_module_referrer(&bad).await,
+            Err(ArtifactStoreError::CarryArtifactMissing { .. })
+        ));
+        assert_eq!(edge_count(&store, "module-3").await, 1);
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(source.clone()).expect("valid test value"),
+                "module-4",
+                b"four",
+            )
+            .await
+            .expect("failed carry did not fence");
+        store
+            .end_module_referrer(&ResolvedArtifactCleanup {
+                referrer: source,
+                carries: Vec::new(),
+            })
+            .await
+            .expect("retry end");
+    }
+
+    #[test]
+    fn referrer_columns_reject_empty_ids_and_old_catalogs_have_no_edge_table() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open SQLite");
+        conn.execute_batch(crate::schema::SCHEMA)
+            .expect("create durable core");
+        conn.execute(
+            "INSERT INTO artifact_refs (namespace, artifact_ref, blob_ref) VALUES ('lashlang_module', 'm', 'b')",
+            [],
+        ).expect("insert artifact pointer");
+        assert!(conn.execute(
+            "INSERT INTO artifact_referrer_edges (namespace, artifact_ref, referrer_kind, referrer_id) VALUES ('lashlang_module', 'm', 'host_pin', '')",
+            [],
+        ).is_err());
+        assert!(conn.execute(
+            "INSERT INTO artifact_referrer_fences (referrer_kind, referrer_id, ended_at_ms) VALUES ('host_pin', '', 1)",
+            [],
+        ).is_err());
+
+        let old = rusqlite::Connection::open_in_memory().expect("open old SQLite catalog");
+        old.execute_batch("CREATE TABLE artifact_owners (owner_kind TEXT, owner_id TEXT)")
+            .expect("create old table");
+        assert!(
+            old.query_row(
+                artifact_sql().edges.select_artifact_edges.sql(),
+                params![MODULE_ARTIFACT_NAMESPACE, "m"],
+                |row| row.get::<_, String>(0)
+            )
+            .is_err()
+        );
     }
 }

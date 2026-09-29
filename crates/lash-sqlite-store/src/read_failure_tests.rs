@@ -717,7 +717,12 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
         .expect("build module");
         store
             .publish_module_artifact(
-                &lash_core_execution::ArtifactOwner::host("readonly-test"),
+                &lash_core_execution::ReferrerClaim::unguarded(
+                    lash_core_execution::ArtifactReferrer::HostPin(
+                        lash_core_execution::HostArtifactPin::mint(),
+                    ),
+                )
+                .expect("host pin claim"),
                 module.module_ref().as_str(),
                 &module.to_store_bytes().expect("encode module"),
             )

@@ -108,7 +108,7 @@ async fn sqlite_waiting_processes_are_live_not_prunable() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
+async fn sqlite_prune_cleanup_obligation_survives_reopen() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry();
     let registered = registry
@@ -147,32 +147,38 @@ async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
         .expect("prune with atomic cleanup evidence");
     drop(registry);
 
-    let reopened = backend.reopen().await.process_registry();
-    let pending = reopened
-        .pending_process_artifact_cleanup()
-        .await
-        .expect("read cleanup evidence after reopen");
-    assert_eq!(pending.len(), 1);
-    assert_eq!(pending[0].process_id, registered.id);
-    assert_eq!(pending[0].env_ref, registered.env_ref);
-    assert_eq!(pending[0].input, registered.input);
-    let acknowledgement = reopened
-        .complete_process_artifact_cleanup(&registered.id)
-        .await
-        .expect("ack cleanup evidence");
+    let reopened = backend.reopen().await;
+    let conn = reopened.raw(SqliteDatabase::ProcessRegistry);
+    let (obligation_id, state, kind, referrer_id, body): (String, String, String, String, String) =
+        conn.query_row(
+            "SELECT obligation_id, obligation_state, referrer_kind, referrer_id, cleanup_json \
+             FROM artifact_cleanup_obligations",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .expect("read cleanup obligation after reopen");
+    assert!(obligation_id.starts_with("registry:"));
+    assert_eq!(state, "due");
+    let referrer = lash_core_execution::ArtifactReferrer::decode(&kind, &referrer_id)
+        .expect("decode process referrer");
     assert_eq!(
-        acknowledgement,
-        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
-            process_id: registered.id.clone(),
-        }
+        referrer,
+        lash_core_execution::ArtifactReferrer::ProcessRecord(registered.id)
     );
+    let cleanup = lash_core_execution::ArtifactCleanup::from_json(&body, &referrer)
+        .expect("decode cleanup body");
     assert!(
-        reopened
-            .pending_process_artifact_cleanup()
-            .await
-            .expect("read acknowledged cleanup")
-            .is_empty()
+        matches!(cleanup.plan, lash_core_execution::ArtifactCleanupPlan::Ended { carries } if carries.is_empty())
     );
+    assert!(cleanup.gate.is_none());
 }
 
 /// Lexical half of the retention contract: every `status IN`/`status NOT IN`

@@ -917,11 +917,12 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
-    let store = lashlang::LashlangArtifacts::new(Arc::new(
+    let store = Arc::new(
         crate::test_support::memory_store()
             .await
             .expect("memory store"),
-    ));
+    );
+    let artifacts = lashlang::LashlangArtifacts::new(store.clone());
     // process scan(root: str) -> str { finish root }
     let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
@@ -933,14 +934,22 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
     )
     .expect("link module");
 
-    store
-        .publish_module_artifact(
-            &lash_core_execution::ArtifactOwner::host("sqlite-store-test"),
-            &linked.artifact,
+    let claim =
+        lash_core_execution::ReferrerClaim::unguarded(
+            lash_core_execution::ArtifactReferrer::HostPin(
+                lash_core_execution::HostArtifactPin::mint(),
+            ),
         )
-        .await
-        .expect("put artifact");
-    let restored = store
+        .expect("host pin claim");
+    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+        store.as_ref(),
+        &claim,
+        linked.artifact.module_ref().as_str(),
+        &linked.artifact.to_store_bytes().expect("encode module"),
+    )
+    .await
+    .expect("put artifact");
+    let restored = artifacts
         .get_module_artifact(linked.artifact.module_ref())
         .await
         .expect("get artifact")
@@ -957,21 +966,27 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
 async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_handle() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("artifacts.db");
-    let releasing = lashlang::LashlangArtifacts::new(Arc::new(
-        Store::open(&path).await.expect("open releasing store"),
-    ));
+    let releasing = Arc::new(Store::open(&path).await.expect("open releasing store"));
     let cached = lashlang::LashlangArtifacts::new(Arc::new(
         Store::open(&path).await.expect("open caching store"),
     ));
     // process cache_probe(root: str) -> str { finish root }
     let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
         .expect("build module artifact");
-    let owner = lash_core_execution::ArtifactOwner::host("cross-handle-cache-owner");
+    let referrer = lash_core_execution::ArtifactReferrer::HostPin(
+        lash_core_execution::HostArtifactPin::mint(),
+    );
+    let claim =
+        lash_core_execution::ReferrerClaim::unguarded(referrer.clone()).expect("host pin claim");
 
-    releasing
-        .publish_module_artifact(&owner, &module)
-        .await
-        .expect("publish module through first handle");
+    lash_core_execution::ModuleArtifactStore::publish_module_artifact(
+        releasing.as_ref(),
+        &claim,
+        module.module_ref().as_str(),
+        &module.to_store_bytes().expect("encode module"),
+    )
+    .await
+    .expect("publish module through first handle");
     assert!(
         cached
             .get_module_artifact(module.module_ref())
@@ -979,10 +994,15 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
             .expect("prime second handle cache")
             .is_some()
     );
-    releasing
-        .release_module_artifact(&owner, module.module_ref())
-        .await
-        .expect("release final owner through first handle");
+    lash_core_execution::ModuleArtifactStore::end_module_referrer(
+        releasing.as_ref(),
+        &lash_core_execution::ResolvedArtifactCleanup {
+            referrer,
+            carries: Vec::new(),
+        },
+    )
+    .await
+    .expect("end final referrer");
 
     assert!(
         cached

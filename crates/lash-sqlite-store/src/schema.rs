@@ -566,23 +566,23 @@ CREATE TABLE IF NOT EXISTS artifact_refs (
     PRIMARY KEY (namespace, artifact_ref)
 );
 
--- Exact owner edges for immutable artifacts. The edge is the liveness fact;
+-- Exact referrer edges for immutable artifacts. The edge is the liveness fact;
 -- no maintained count or last-operation field exists on shared bytes.
-CREATE TABLE IF NOT EXISTS artifact_owners (
+CREATE TABLE IF NOT EXISTS artifact_referrer_edges (
     namespace    TEXT NOT NULL,
     artifact_ref TEXT NOT NULL,
-    owner_kind   TEXT NOT NULL CONSTRAINT ck_artifact_owners_owner_kind CHECK (owner_kind IN ('host', 'process', 'execution')),
-    owner_id     TEXT NOT NULL,
-    PRIMARY KEY (namespace, artifact_ref, owner_kind, owner_id),
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_edges_id CHECK (length(referrer_id) > 0),
+    PRIMARY KEY (namespace, artifact_ref, referrer_kind, referrer_id),
     FOREIGN KEY (namespace, artifact_ref) REFERENCES artifact_refs(namespace, artifact_ref) ON DELETE CASCADE
 );
 
--- Execution-owner retirement is a permanent publication fence. Host and
--- process releases are ordinary exact-edge severance and never enter here.
-CREATE TABLE IF NOT EXISTS artifact_owner_retirements (
-    owner_kind TEXT NOT NULL CONSTRAINT ck_artifact_owner_retirements_owner_kind CHECK (owner_kind = 'execution'),
-    owner_id   TEXT NOT NULL,
-    PRIMARY KEY (owner_kind, owner_id)
+-- Every ended referrer has a permanent publication fence.
+CREATE TABLE IF NOT EXISTS artifact_referrer_fences (
+    referrer_kind TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_kind CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CONSTRAINT ck_artifact_referrer_fences_id CHECK (length(referrer_id) > 0),
+    ended_at_ms INTEGER NOT NULL,
+    PRIMARY KEY (referrer_kind, referrer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_session
@@ -630,8 +630,33 @@ CREATE INDEX IF NOT EXISTS idx_process_definitions_registrant
 CREATE INDEX IF NOT EXISTS idx_process_definitions_change
     ON process_definitions(change_seq);
 
-CREATE INDEX IF NOT EXISTS idx_artifact_owners_owner
-    ON artifact_owners(owner_kind, owner_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_referrer_edges_referrer
+    ON artifact_referrer_edges(referrer_kind, referrer_id);
+
+CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
+    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
+    cleanup_json TEXT NOT NULL,
+    obligation_id TEXT NOT NULL,
+    obligation_state TEXT NOT NULL,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    PRIMARY KEY (referrer_kind, referrer_id),
+    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK ((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
+    ON artifact_cleanup_obligations(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
+    ON artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
+    ON artifact_cleanup_obligations(obligation_id)
+    WHERE obligation_state = 'stalled';
+
 
 CREATE TABLE IF NOT EXISTS release_stamp (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_release_stamp_singleton CHECK (singleton = 1),
@@ -1253,11 +1278,29 @@ CREATE TABLE IF NOT EXISTS process_tombstones (
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
-CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
-    process_id       TEXT PRIMARY KEY,
-    cleanup_json     TEXT NOT NULL,
-    FOREIGN KEY (process_id) REFERENCES process_tombstones(process_id) ON DELETE RESTRICT
+CREATE TABLE IF NOT EXISTS artifact_cleanup_obligations (
+    referrer_kind TEXT NOT NULL CHECK (referrer_kind IN ('frame_environment', 'process_record', 'subscription_revision', 'start', 'execution', 'host_pin', 'definition_revision')),
+    referrer_id TEXT NOT NULL CHECK (length(referrer_id) > 0),
+    cleanup_json TEXT NOT NULL,
+    obligation_id TEXT NOT NULL,
+    obligation_state TEXT NOT NULL,
+    obligation_attempts INTEGER NOT NULL DEFAULT 0,
+    obligation_due_at_ms INTEGER,
+    obligation_claim_token TEXT,
+    obligation_stall_reason TEXT,
+    obligation_last_error TEXT,
+    obligation_settled_at_ms INTEGER,
+    PRIMARY KEY (referrer_kind, referrer_id),
+    CONSTRAINT ck_artifact_cleanup_obligations_obligation CHECK ((obligation_state = 'due' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'claimed' AND obligation_due_at_ms IS NOT NULL AND obligation_claim_token IS NOT NULL AND obligation_stall_reason IS NULL AND obligation_settled_at_ms IS NULL) OR (obligation_state = 'stalled' AND obligation_due_at_ms IS NULL AND obligation_claim_token IS NULL AND obligation_stall_reason IN ('attempts_exhausted', 'refused', 'undecodable') AND obligation_settled_at_ms IS NOT NULL))
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_id
+    ON artifact_cleanup_obligations(obligation_id);
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_due
+    ON artifact_cleanup_obligations(obligation_due_at_ms, obligation_id)
+    WHERE obligation_state IN ('due', 'claimed');
+CREATE INDEX IF NOT EXISTS idx_artifact_cleanup_obligations_stalled
+    ON artifact_cleanup_obligations(obligation_id)
+    WHERE obligation_state = 'stalled';
 
 CREATE TABLE IF NOT EXISTS process_segment_handovers (
     process_id       TEXT NOT NULL,

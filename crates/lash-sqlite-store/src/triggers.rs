@@ -590,7 +590,9 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
         );
         let request_fingerprint =
             lash_core_execution::facade_support::trigger_command_fingerprint(&command);
-        let fixed_incarnation = self.fixed_incarnation.clone();
+        let fixed_incarnation = self.fixed_incarnation.clone().unwrap_or_else(|| {
+            lash_core_execution::trigger_incarnation(command.owner_scope(), operation_id)
+        });
         let owner_scope = command.owner_scope().clone();
         let subscription_key = command.subscription_key().unwrap_or_default().to_string();
         let subscription_id = lash_core_execution::facade_support::deterministic_subscription_id(
@@ -667,18 +669,9 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             .map_err(process_sqlite_error)?
                             .map(Self::decode_subscription)
                             .transpose()?;
-                        if let Some(incarnation) = fixed_incarnation {
-                            lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
-                                current,
-                                command,
-                                now,
-                                incarnation,
-                            )?
-                        } else {
-                            lash_core_execution::facade_support::evaluate_trigger_mutation(
-                                current, command, now,
-                            )?
-                        }
+                        lash_core_execution::facade_support::evaluate_trigger_mutation_with_incarnation(
+                            current, command, now, fixed_incarnation,
+                        )?
                     };
                     let records = match &result {
                         Ok(lash_core_execution::TriggerCommandOutcome::Mutation { receipt }) => {
