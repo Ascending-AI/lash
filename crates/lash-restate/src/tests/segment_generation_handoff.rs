@@ -340,7 +340,7 @@ impl Roll {
         let registry = stores.process_registry();
         let continuations: Arc<dyn lash_core::ProcessContinuationStore> = registry.clone();
         let registry: Arc<dyn ProcessRegistry> = registry;
-        let sessions = stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>;
+        let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         let log = SegmentLog::default();
         let gated = Arc::new(GatedContinuations {

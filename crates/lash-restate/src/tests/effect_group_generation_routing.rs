@@ -110,7 +110,7 @@ pub(super) async fn build_endpoint(
         crate::services::LashServiceParts {
             effect_host: &host,
             ingress: ingress.clone(),
-            sessions: stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>,
+            sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
             process_workflow: LashProcessWorkflowImpl::new(
                 Arc::new(IdleRunner),
                 Arc::clone(&registry) as Arc<dyn ProcessRegistry>,

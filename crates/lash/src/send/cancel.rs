@@ -79,7 +79,7 @@ async fn cancel_input(
 /// it before any turn commits, so a cancel reaches the consuming root even
 /// before the input has application evidence.
 async fn root_of_input(parts: &SendParts, input: &InputId) -> Result<TurnId> {
-    if let Some(root) = parts.store.root_of_input(&parts.session_id, input).await? {
+    if let Some(root) = parts.store.root_of_input(input).await? {
         return Ok(root);
     }
     resolve::applications(parts)
@@ -129,7 +129,7 @@ async fn cancel_root(
     let receipt = TurnWorkDriver::for_session(
         std::sync::Arc::clone(&parts.effect_host),
         parts.session_id.to_string(),
-        std::sync::Arc::clone(&parts.store),
+        std::sync::Arc::clone(parts.store.store()),
     )
     .request_cancel(cancel)
     .await

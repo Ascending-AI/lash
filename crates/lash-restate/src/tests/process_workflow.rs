@@ -828,14 +828,14 @@ pub(super) fn snapshot_recovery_tool_factory() -> Arc<dyn lash_core::facade_supp
 
 pub(super) async fn recovery_worker(
     registry: Arc<dyn ProcessRegistry>,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    store_factory: Arc<dyn lash_core::DeploymentStore>,
 ) -> DurableProcessWorker {
     recovery_worker_with_plugins(registry, store_factory, Vec::new()).await
 }
 
 pub(super) async fn recovery_worker_with_plugins(
     registry: Arc<dyn ProcessRegistry>,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    store_factory: Arc<dyn lash_core::DeploymentStore>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
     recovery_worker_with_plugins_and_trace(registry, store_factory, extra_plugins, None).await
@@ -843,7 +843,7 @@ pub(super) async fn recovery_worker_with_plugins(
 
 pub(super) async fn recovery_worker_with_plugins_and_trace(
     registry: Arc<dyn ProcessRegistry>,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    store_factory: Arc<dyn lash_core::DeploymentStore>,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
 ) -> DurableProcessWorker {
@@ -1307,7 +1307,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    )) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,

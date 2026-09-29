@@ -37,8 +37,8 @@ use crate::core::ResolvedQueuedWork;
 use crate::durable_session::DurableSession;
 use crate::error::{EmbedError, Result, SendError};
 use crate::support::{
-    EffectHost, LashSession, ProtocolTurnOptions, RuntimePersistence, TurnActivity,
-    TurnActivitySink, TurnInput, TurnOutcome,
+    EffectHost, LashSession, ProtocolTurnOptions, TurnActivity, TurnActivitySink, TurnInput,
+    TurnOutcome,
 };
 use crate::turn::{TurnOutput, TurnReport};
 use lash_core::{GenerationOptions, ModelSpec, PromptLayer, RunSpec};
@@ -67,7 +67,7 @@ pub(crate) enum SendTarget {
 #[derive(Clone)]
 pub(crate) struct SendParts {
     pub(crate) session_id: SessionId,
-    pub(crate) store: Arc<dyn RuntimePersistence>,
+    pub(crate) store: lash_core::store::SessionStore,
     pub(crate) ops: DurableSessionOps,
     pub(crate) work: Arc<ResolvedQueuedWork>,
     pub(crate) effect_host: Arc<dyn EffectHost>,
@@ -118,13 +118,16 @@ impl SendContext {
             let resident = writer.lock().await;
             return Ok(resident.export_state());
         }
-        lash_core::store::load_persisted_session_state(self.parts.store.as_ref())
-            .await
-            .map_err(EmbedError::Store)?
-            .map(|state| state.to_snapshot())
-            .ok_or_else(|| EmbedError::UnknownSession {
-                session_id: self.parts.session_id.clone(),
-            })
+        lash_core::store::load_session_window_state(
+            &self.parts.store,
+            lash_core::store::WindowSelector::Current,
+        )
+        .await
+        .map_err(EmbedError::Store)?
+        .map(|loaded| loaded.state.to_snapshot())
+        .ok_or_else(|| EmbedError::UnknownSession {
+            session_id: self.parts.session_id.clone(),
+        })
     }
 }
 

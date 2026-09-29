@@ -1,6 +1,5 @@
 use crate::support::{
-    Arc, EffectHost, ProcessWorkWiring, RuntimeEnvironment, RuntimePersistence,
-    SessionStoreFactory, SessionWorkEngine,
+    Arc, DeploymentStore, EffectHost, ProcessWorkWiring, RuntimeEnvironment, SessionWorkEngine,
 };
 use lash_sansio::SessionId;
 
@@ -13,7 +12,7 @@ use lash_sansio::SessionId;
 #[derive(Clone)]
 pub(crate) struct BoundSession {
     session_id: SessionId,
-    store: Arc<dyn RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
     work: Arc<crate::core::ResolvedQueuedWork>,
@@ -24,7 +23,7 @@ pub(crate) struct BoundSession {
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
-    catalog: Arc<dyn SessionStoreFactory>,
+    catalog: Arc<dyn DeploymentStore>,
     scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
     clock: Arc<dyn lash_core::Clock>,
     provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
@@ -37,12 +36,12 @@ pub(crate) struct BoundSession {
 impl BoundSession {
     pub(crate) fn new(
         session_id: SessionId,
-        store: Arc<dyn RuntimePersistence>,
+        store: lash_core::store::SessionStore,
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
         work: Arc<crate::core::ResolvedQueuedWork>,
         residents: Arc<crate::core::residents::ResidentSessions>,
-        catalog: Arc<dyn SessionStoreFactory>,
+        catalog: Arc<dyn DeploymentStore>,
     ) -> Self {
         Self {
             session_id,
@@ -78,8 +77,8 @@ impl BoundSession {
         self.tool_child_context_source.is_some()
     }
 
-    pub(crate) fn store(&self) -> Arc<dyn RuntimePersistence> {
-        Arc::clone(&self.store)
+    pub(crate) fn store(&self) -> lash_core::store::SessionStore {
+        self.store.clone()
     }
 
     pub(crate) fn effect_host(&self) -> Arc<dyn EffectHost> {
@@ -129,7 +128,7 @@ impl BoundSession {
         self.residents.release(&self.session_id, handle).await
     }
 
-    pub(crate) fn catalog(&self) -> Arc<dyn SessionStoreFactory> {
+    pub(crate) fn catalog(&self) -> Arc<dyn DeploymentStore> {
         Arc::clone(&self.catalog)
     }
 

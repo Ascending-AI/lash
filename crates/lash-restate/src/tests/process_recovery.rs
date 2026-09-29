@@ -9,7 +9,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    )) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -152,7 +152,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    )) as Arc<dyn lash_core::DeploymentStore>;
     let registry_a = Arc::new(
         lash_sqlite_store::SqliteProcessRegistry::open(
             &process_db,
@@ -838,7 +838,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
     let process_db = temp.path().join("processes.db");
     let store_factory = Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
         temp.path().join("sessions"),
-    )) as Arc<dyn lash_core::SessionStoreFactory>;
+    )) as Arc<dyn lash_core::DeploymentStore>;
 
     // A worker started the trigger process and crashed before it could run:
     // the durable row exists and is non-terminal. We register it directly to

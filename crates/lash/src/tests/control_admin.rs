@@ -1327,7 +1327,7 @@ async fn config_admin_sets_persisted_tool_access() -> Result<()> {
 
     Box::pin(session.admin().config().set_tool_access(access.clone())).await?;
 
-    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+    let store = lash_core::DeploymentStore::open_existing_store_by_id(
         store_factory.as_ref(),
         &SessionId::from("config-admin-tool-access"),
     )

@@ -126,7 +126,7 @@ pub(super) fn restate_process_work(
 
 /// A session-store catalog over a fresh SQLite memory store set: the catalog
 /// a process-worker test hands its worker.
-pub(super) async fn memory_session_store_factory() -> Arc<dyn lash_core::SessionStoreFactory> {
+pub(super) async fn memory_session_store_factory() -> Arc<dyn lash_core::DeploymentStore> {
     lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory store set")
@@ -209,9 +209,7 @@ pub(super) async fn reconcile_parked_processes(
 }
 
 /// A root session store for `session_id` over a fresh SQLite memory backend.
-pub(super) async fn memory_session_store(
-    session_id: &str,
-) -> Arc<dyn lash_core::RuntimePersistence> {
+pub(super) async fn memory_session_store(session_id: &str) -> lash_core::store::SessionStore {
     memory_session_store_factory()
         .await
         .create_store(&lash_core::testing::store_fixtures::session_store_request(

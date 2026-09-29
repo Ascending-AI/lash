@@ -255,9 +255,7 @@ fn append_identity_field(identity: &mut Vec<u8>, value: &str) {
 }
 
 fn latest_physical_turn_id(state: &SessionSnapshot) -> Result<Option<TurnId>, ContextError> {
-    let read_view = state
-        .read_view()
-        .map_err(|error| ContextError::Session(error.to_string()))?;
+    let read_view = state.read_view();
     Ok(read_view
         .messages()
         .iter()
@@ -298,7 +296,7 @@ struct CompactionSnapshotIdentity<'a> {
     plugin_state_ref: &'a Option<lash_core::store::BlobRef>,
     plugin_state_generations: &'a BTreeMap<String, u64>,
     execution_state_ref: &'a Option<lash_core::store::BlobRef>,
-    token_ledger: &'a [lash_core::TokenLedgerEntry],
+    usage: &'a lash_core::SessionUsageTotals,
     checkpoint_ref: &'a Option<lash_core::store::BlobRef>,
 }
 
@@ -364,7 +362,7 @@ fn compaction_request_identity(
         plugin_state_ref,
         plugin_state_generations,
         execution_state_ref,
-        token_ledger,
+        usage,
         checkpoint_ref,
     } = snapshot;
     let node_indices = session_graph
@@ -405,7 +403,7 @@ fn compaction_request_identity(
             plugin_state_ref,
             plugin_state_generations,
             execution_state_ref,
-            token_ledger,
+            usage,
             checkpoint_ref,
         },
         prompt_text,
@@ -472,9 +470,7 @@ pub(crate) fn prepare_compaction_request(
     snapshot.set_execution_state_snapshot(None);
     snapshot.last_prompt_usage = None;
     let previous_summary = extract_previous_summary(&prefix_messages);
-    snapshot
-        .replace_active_read_state(&prefix_messages)
-        .map_err(|error| ContextError::Session(error.to_string()))?;
+    snapshot.replace_active_read_state(&prefix_messages);
     let base_prompt = match previous_summary {
         Some(previous_summary) => compaction_update_prompt(&previous_summary),
         None => COMPACTION_PROMPT.to_string(),
@@ -648,9 +644,7 @@ async fn summarize_compaction_prefix(
         &prompt_text,
         scoped_effect_controller.execution_scope(),
     )?;
-    let read_view = snapshot
-        .read_view()
-        .map_err(|error| ContextError::Session(error.to_string()))?;
+    let read_view = snapshot.read_view();
     let mut rendered = lash_sansio::session_model::render_prompt(read_view.messages());
     let mut directive = lash_sansio::llm::types::LlmMessage::text(
         lash_sansio::llm::types::LlmRole::User,

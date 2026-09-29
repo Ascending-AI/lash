@@ -508,7 +508,7 @@ async fn generation_drain_status_counts_the_generations_live_processes() {
         .expect("accept the root's input")
         .input_id;
     let lease = lash_core::testing::store_fixtures::seal_drive_fence_for_test(
-        &(session_store.clone() as Arc<dyn lash_core::RuntimePersistence>),
+        &(session_store.clone() as lash_core::store::SessionStore),
         &turn_session,
         "generation-drain-status",
     )

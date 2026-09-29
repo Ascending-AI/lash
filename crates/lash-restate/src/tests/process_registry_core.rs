@@ -47,7 +47,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
             .await
             .expect("open session store"),
     );
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: lash_core::store::SessionStore = store.clone();
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -76,7 +76,7 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     assert!(!first_runs.is_empty());
 
     context.start_replay();
-    let retry_store: Arc<dyn lash_core::RuntimePersistence> =
+    let retry_store: lash_core::store::SessionStore =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = replay_test_runtime(
         &SessionId::from(session_id),
@@ -163,13 +163,13 @@ pub(super) async fn restate_replay_drive_seal_takes_recorded_branch() {
             .await
             .expect("open session store"),
     );
-    let underlying_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let underlying_store: lash_core::store::SessionStore = store.clone();
     let drive_seal_count = Arc::new(AtomicUsize::new(0));
     let probed_store = Arc::new(CommitRetryStore {
         inner: Arc::clone(&underlying_store),
         drive_seal_count: Arc::clone(&drive_seal_count),
     });
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = probed_store;
+    let runtime_store: lash_core::store::SessionStore = probed_store;
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -488,7 +488,7 @@ finish(await handle);
             .await
             .expect("open session store"),
     );
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+    let runtime_store: lash_core::store::SessionStore = store;
     let policy = replay_test_policy(&SessionId::from(session_id));
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -700,7 +700,7 @@ finish(await handle);
             &RestateDurableWaitAddress::for_key(&completion_key).workflow_key,
         );
     context.start_replay_allowing_journal_extension();
-    let retry_store: Arc<dyn lash_core::RuntimePersistence> =
+    let retry_store: lash_core::store::SessionStore =
         Arc::new(CommitRetryStore::new(Arc::clone(&runtime_store)));
     let mut replay = Box::pin(replay_test_runtime_with_plugins_and_registry(
         &SessionId::from(session_id),

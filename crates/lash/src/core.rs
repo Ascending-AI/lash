@@ -1,10 +1,10 @@
 use crate::support::{
-    Arc, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
-    LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginOptions, PluginSpec,
-    PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
+    Arc, DeploymentStore, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime,
+    LashSession, LiveReplayStore, ParkedSession, PluginFactory, PluginHost, PluginOptions,
+    PluginSpec, PluginStack, ProcessRegistry, PromptLayer, PromptLayerSink, ProviderHandle, Result,
     RuntimeEnvironment, RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter,
-    SessionPolicy, SessionSpec, SessionStoreFactory, SessionSummary, SessionWorkEngine,
-    StaticPluginFactory, TerminationPolicy, ToolProvider,
+    SessionPolicy, SessionSpec, SessionSummary, SessionWorkEngine, StaticPluginFactory,
+    TerminationPolicy, ToolProvider,
 };
 use lash_core::Backend;
 use lash_core::facade_support;
@@ -38,7 +38,7 @@ pub struct LashCore {
     /// The one substrate every port and the effect host come from.
     pub(crate) backend: Backend,
     /// The backend's session catalog.
-    pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
+    pub(crate) store_factory: Arc<dyn DeploymentStore>,
     /// The backend's process registry, as the core sees it (watched, and
     /// on the core's clock).
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
@@ -91,7 +91,7 @@ pub use lash_core::session_delete::{
 pub(crate) struct AdministrationSource {
     slot: std::sync::Weak<CoreWorkSlot>,
     env: RuntimeEnvironment,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    store_factory: Arc<dyn DeploymentStore>,
     host_process_engines: lash_core::ProcessEngineRegistry,
 }
 
@@ -500,7 +500,7 @@ impl LashCore {
         let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
         binding.register_resident(&handle);
         let parent_session_id =
-            crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
+            crate::session::recorded_parent_session_id(&binding.store()).await?;
         Ok(LashSession {
             runtime: handle,
             _process_lifecycle_route: process_lifecycle_route,
@@ -559,7 +559,7 @@ impl LashCore {
     /// a host wants to make a past turn forkable later.
     pub async fn pin(&self, node_id: impl AsRef<str>) -> Result<lash_core::ForkPoint> {
         self.store_factory
-            .pin(node_id.as_ref())
+            .pin(&lash_core::NodeId::from(node_id.as_ref()))
             .await
             .map_err(Into::into)
     }
@@ -568,7 +568,7 @@ impl LashCore {
     /// remains forkable through its session-head checkpoint.
     pub async fn unpin(&self, node_id: impl AsRef<str>) -> Result<()> {
         self.store_factory
-            .unpin(node_id.as_ref())
+            .unpin(&lash_core::NodeId::from(node_id.as_ref()))
             .await
             .map_err(Into::into)
     }
@@ -623,33 +623,21 @@ impl LashCore {
             pending_observer_intents,
             policy: fork_policy,
         };
-        let mut fork = store_factory.fork_at(&request).await?;
-        let create_request = lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            session_id: request.session_id,
-            relation: request.relation,
-            pending_observer_intents: request.pending_observer_intents,
-            policy: request.policy,
-        };
-        let branch_store = store_factory
-            .open_existing_store(&create_request)
-            .await
-            .map_err(|error| {
-                lash_core::StoreError::Backend(format!(
-                    "failed to reopen fork store `{}`: {error}",
-                    create_request.session_id
+        let mut fork = store_factory.fork_session(&request).await?;
+        match store_factory.lookup_session(&request.session_id).await? {
+            lash_core::store::SessionLookup::Live(_) => {}
+            lash_core::store::SessionLookup::Deleted | lash_core::store::SessionLookup::Absent => {
+                return Err(lash_core::StoreError::Backend(format!(
+                    "fork session `{}` disappeared before observer publication completed",
+                    request.session_id
                 ))
-            })?
-            .ok_or_else(|| {
-                lash_core::StoreError::Backend(format!(
-                    "fork store `{}` disappeared before observer publication completed",
-                    create_request.session_id
-                ))
-            })?;
+                .into());
+            }
+        }
         fork.observed_processes = lash_core::runtime::reconcile_session_process_observer_intents(
             Some(self.process_registry.as_ref()),
             &fork.session_id,
-            lash_core::runtime::SessionObserverIntentSource::Persisted(branch_store.as_ref()),
+            lash_core::runtime::SessionObserverIntentSource::Persisted(store_factory.as_ref()),
         )
         .await?;
         Ok(fork)
@@ -1067,10 +1055,6 @@ impl LashCoreBuilder {
         // The retained-evidence sweep owns deferred scope retirement (ADR
         // 0067): the catalog learns the host whose journal it sweeps.
         store_factory.bind_effect_host(&env.core.control.effect_host);
-        store_factory.bind_artifact_stores(
-            Arc::clone(&env.core.durability.process_env_store),
-            host_process_engines.clone(),
-        );
         let residents = Arc::new(residents::ResidentSessions::default());
         let session_work = backend.session_work();
         let (session_driver, installed_driver) = Self::build_session_driver(
@@ -1175,7 +1159,7 @@ impl LashCoreBuilder {
         policy: SessionPolicy,
         protocol_factory: Option<Arc<dyn PluginFactory>>,
         plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-        store_factory: &Arc<dyn SessionStoreFactory>,
+        store_factory: &Arc<dyn DeploymentStore>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         process_lifecycle_available: bool,
         recovery_lease: lash_core::engine::RecoveryLeaseConfig,

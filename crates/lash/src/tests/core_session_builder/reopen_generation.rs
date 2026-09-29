@@ -17,7 +17,7 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     .build(crate::testing::runtime_lease_owner())?;
     let mut policy = core.policy.clone();
     policy.session_id = Some(SessionId::from("generation-merge"));
-    let store = lash_core::SessionStoreFactory::create_store(
+    let store = lash_core::DeploymentStore::create_store(
         factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,

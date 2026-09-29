@@ -32,7 +32,7 @@ pub(crate) struct RestateSessionControl {
     pub(crate) namespace: crate::RestateNamespace,
     pub(crate) processes: Arc<dyn lash_core::ProcessRegistry>,
     pub(crate) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-    pub(crate) sessions: Arc<dyn lash_core::SessionStoreFactory>,
+    pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
 }
 
 #[derive(Default)]
@@ -49,7 +49,7 @@ pub(crate) async fn end_lost_root_runs(
     admin: &RestateAdminClient,
     ingress: &RestateIngressClient,
     namespace: &crate::RestateNamespace,
-    sessions: &Arc<dyn lash_core::SessionStoreFactory>,
+    sessions: &Arc<dyn lash_core::DeploymentStore>,
     limit: std::num::NonZeroUsize,
 ) -> Result<LostRootPass, lash_core::StoreError> {
     let mut pass = LostRootPass::default();

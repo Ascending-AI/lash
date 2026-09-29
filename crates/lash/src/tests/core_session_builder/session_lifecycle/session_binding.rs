@@ -118,7 +118,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
         crate::CancelReceipt::Requested { .. }
     ));
 
-    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
+    let store = lash_core::DeploymentStore::open_existing_store_by_id(
         source_catalog.as_ref(),
         &lash_core::SessionId::from("owner-preserved"),
     )

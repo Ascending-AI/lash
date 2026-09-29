@@ -22,7 +22,7 @@ use lash_core::store::{
     ParkEventKind, ParkFeedCursor, ParkId, ParkReason, ParkReasonCode, ParkSummary,
     ProcessParkQuery, TurnParkQuery,
 };
-use lash_core::{Clock, ProcessId, ProcessRegistry, SessionStoreFactory};
+use lash_core::{Clock, DeploymentStore, ProcessId, ProcessRegistry};
 use lash_sansio::{SessionId, TurnId};
 use serde::{Deserialize, Serialize};
 
@@ -33,7 +33,7 @@ use crate::Result;
 /// Obtained from [`LashCore::parked_work`](crate::LashCore::parked_work).
 #[derive(Clone)]
 pub struct ParkedWork {
-    pub(crate) store_factory: Arc<dyn SessionStoreFactory>,
+    pub(crate) store_factory: Arc<dyn DeploymentStore>,
     pub(crate) process_registry: Arc<dyn ProcessRegistry>,
     pub(crate) clock: Arc<dyn Clock>,
     pub(crate) work: Arc<dyn lash_core::SessionWorkEngine>,

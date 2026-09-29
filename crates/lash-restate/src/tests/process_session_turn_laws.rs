@@ -23,7 +23,7 @@ fn parked_provider(
 
 async fn parked_worker(
     registry: Arc<dyn ProcessRegistry>,
-    factory: Arc<dyn lash_core::SessionStoreFactory>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
 ) -> (
     DurableProcessWorker,
     tokio::sync::mpsc::Receiver<()>,
@@ -70,7 +70,7 @@ fn registration_for(child: &SessionId) -> ProcessRegistration {
 async fn worker_for(
     engine_backend: lash_core::Backend,
     registry: Arc<dyn ProcessRegistry>,
-    session_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    session_factory: Arc<dyn lash_core::DeploymentStore>,
     provider: lash_core::facade_support::ProviderHandle,
     extra_plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> DurableProcessWorker {
@@ -133,7 +133,7 @@ fn answering_provider(text: &str) -> lash_core::facade_support::ProviderHandle {
 
 async fn parent_runtime(
     registry: Arc<dyn ProcessRegistry>,
-    factory: Arc<dyn lash_core::SessionStoreFactory>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
 ) -> lash_core::facade_support::LashRuntime {
     let parent = SessionId::from("test-parent");
     let policy = lash_core::SessionPolicy {

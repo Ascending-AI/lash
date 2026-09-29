@@ -631,7 +631,7 @@ impl LiveConformanceHarness {
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress,
-                sessions: stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>,
+                sessions: stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>,
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&process_runner),
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
@@ -848,9 +848,9 @@ impl LiveConformanceHarness {
     /// A maker of session-store factories over this endpoint's store set.
     pub(super) fn session_catalog_factory(
         &self,
-    ) -> impl Fn() -> Arc<dyn lash_core::SessionStoreFactory> + Send + Sync + 'static {
+    ) -> impl Fn() -> Arc<dyn lash_core::DeploymentStore> + Send + Sync + 'static {
         let stores = self.stores.clone();
-        move || stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>
+        move || stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>
     }
 
     pub(super) fn effect_host_factory(

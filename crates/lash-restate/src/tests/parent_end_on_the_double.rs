@@ -32,7 +32,7 @@ struct World {
     backend: lash_core::Backend,
     registry: Arc<dyn ProcessRegistry>,
     session_id: SessionId,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     nonce: u128,
     /// Whether the law's runtime closes root scopes through the registry's
     /// delivering sink itself: `true` exercises the drive's own close, and

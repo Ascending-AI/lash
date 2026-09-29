@@ -67,7 +67,7 @@ pub fn parked_turn_failure(refusal: impl std::fmt::Display) -> HandlerError {
 /// the child's scope names no root (a process opener), or its session has no
 /// store.
 pub(crate) async fn park_refused_group_child(
-    sessions: &dyn lash_core::SessionStoreFactory,
+    sessions: &dyn lash_core::DeploymentStore,
     scope: &lash_core::ExecutionScope,
     refusal: &lash_core::RuntimeEffectControllerError,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
@@ -107,7 +107,7 @@ impl std::error::Error for ParkedTurn {}
 /// the refusal is the turn's terminal answer. A store failure is the store's,
 /// and the handler retries it.
 pub async fn park_generation_refused_turn(
-    sessions: &dyn lash_core::SessionStoreFactory,
+    sessions: &dyn lash_core::DeploymentStore,
     scope: &lash_core::ExecutionScope,
     refusal: lash_core::SessionStateVersionRefusal,
     at_ms: u64,
@@ -117,8 +117,11 @@ pub async fn park_generation_refused_turn(
         | lash_core::ExecutionScope::Turn { session_id, .. } => session_id,
         _ => return Ok(None),
     };
-    let Some(store) = sessions.open_existing_store_by_id(session_id).await? else {
+    if !matches!(
+        sessions.lookup_session(session_id).await?,
+        lash_core::store::SessionLookup::Live(_)
+    ) {
         return Ok(None);
-    };
-    lash_core::park_turn_refused_by_generation(store.as_ref(), scope, refusal, at_ms).await
+    }
+    lash_core::park_turn_refused_by_generation(sessions, scope, refusal, at_ms).await
 }

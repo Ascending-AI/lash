@@ -4,8 +4,7 @@ use super::*;
 async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
-    let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        memory_session_store_factory().await;
+    let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration = counting_tool_registration("restate-process-tool-replay", env_ref);
     let process_id = registry
@@ -90,8 +89,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
 async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
-    let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        memory_session_store_factory().await;
+    let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration =
         counting_tool_registration("restate-process-redrive-after-complete", env_ref);
@@ -220,8 +218,7 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
 #[tokio::test]
 async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_steps() {
     let registry = process_registry();
-    let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        memory_session_store_factory().await;
+    let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let registration = signal_waiting_process_registration().await;
     let process_id = registry
         .register_process(registration.clone())
@@ -328,8 +325,7 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
 async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchanged() {
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
-    let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        memory_session_store_factory().await;
+    let store_factory: Arc<dyn lash_core::DeploymentStore> = memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration =
         counting_tool_registration("restate-process-pre-run-read-invariant", env_ref);

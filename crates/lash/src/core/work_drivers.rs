@@ -1,11 +1,11 @@
 use crate::support::{
-    Arc, ProcessRegistry, ProcessWorkWiring, SessionStoreFactory, SessionWorkEngine, async_trait,
+    Arc, DeploymentStore, ProcessRegistry, ProcessWorkWiring, SessionWorkEngine, async_trait,
 };
 use lash_core::facade_support;
 
 pub(super) struct WakeDeliveryDriverSetup {
     pub(super) registry: Arc<dyn ProcessRegistry>,
-    pub(super) factory: Arc<dyn SessionStoreFactory>,
+    pub(super) factory: Arc<dyn DeploymentStore>,
     pub(super) clock: Arc<dyn lash_core::Clock>,
     pub(super) delivery_policy: lash_core::DeliveryPolicy,
 }

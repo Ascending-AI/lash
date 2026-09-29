@@ -65,7 +65,7 @@ finish(result);
 /// The live pass's store refuses every commit, so its worker dies at its final commit: every effect ran and was
 /// journaled, and nothing was committed.
 struct RefusesEveryCommitStore {
-    inner: Arc<dyn lash_core::RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
 }
 
 #[async_trait::async_trait]
@@ -91,7 +91,7 @@ struct ProductionToolCell {
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
-    runtime_store: Arc<dyn lash_core::RuntimePersistence>,
+    runtime_store: lash_core::store::SessionStore,
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     tool_executions: Arc<AtomicUsize>,
     llm_provider_calls: Arc<AtomicUsize>,
@@ -207,7 +207,7 @@ impl ProductionToolCell {
                 .await
                 .expect("open production-path session store"),
         );
-        let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store;
+        let runtime_store: lash_core::store::SessionStore = store;
         let policy = replay_test_policy(&session_id);
         let initial_state = replay_test_state(&session_id, &policy);
         Self {
@@ -356,7 +356,7 @@ fn assert_binds_result_global(state: Option<&lash_core::plugin::HydratedExecutio
 /// Fails the first turn-final commit before it reaches the store: the crash
 /// window between the last journaled effect and the durable head.
 struct CrashAtFinalCommit {
-    inner: Arc<dyn lash_core::RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
     armed: AtomicBool,
 }
 
@@ -398,7 +398,7 @@ impl ProductionToolCell {
 
     async fn runtime_on(
         &self,
-        store: Arc<dyn lash_core::RuntimePersistence>,
+        store: lash_core::store::SessionStore,
     ) -> lash_core::facade_support::LashRuntime {
         replay_test_runtime_with_plugins(
             &self.session_id,
@@ -470,7 +470,7 @@ async fn assert_crash_at_final_commit_redrive_commits_the_live_state(script: Vec
     assert!(live_head.is_some(), "an RLM turn leaves execution state");
 
     let (cell, host) = ProductionToolCell::durable_scripted("llm_query", script).await;
-    let crashing: Arc<dyn lash_core::RuntimePersistence> = Arc::new(CrashAtFinalCommit {
+    let crashing: lash_core::store::SessionStore = Arc::new(CrashAtFinalCommit {
         inner: Arc::clone(&cell.runtime_store),
         armed: AtomicBool::new(true),
     });
@@ -628,7 +628,7 @@ async fn drive_drain(
 /// Lets the drain's turn-final commit land, then never returns: the worker
 /// dies after its commit, before the drain ends.
 struct DiesAfterFinalCommit {
-    inner: Arc<dyn lash_core::RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
     armed: AtomicBool,
     committed: Arc<tokio::sync::Notify>,
 }
@@ -696,7 +696,7 @@ async fn assert_after_commit_drain_redrive_keeps_the_committed_state(from_head: 
     seed_drain_input(&cell).await;
     let drain_scope = lash_core::ExecutionScope::queue_drain(cell.session_id.clone(), drain_id);
     let committed = Arc::new(tokio::sync::Notify::new());
-    let dying: Arc<dyn lash_core::RuntimePersistence> = Arc::new(DiesAfterFinalCommit {
+    let dying: lash_core::store::SessionStore = Arc::new(DiesAfterFinalCommit {
         inner: Arc::clone(&cell.runtime_store),
         armed: AtomicBool::new(true),
         committed: Arc::clone(&committed),

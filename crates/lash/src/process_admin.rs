@@ -383,23 +383,17 @@ impl Processes {
     }
 
     async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
-        let store = self
-            .core
-            .store_factory
-            .open_existing_store_by_id(session_id)
-            .await
-            .map_err(|error| EmbedError::StoreFactory {
-                session_id: session_id.clone(),
-                message: error.to_string(),
-            })?;
-        let live = match store {
-            Some(store) => match store.load_session_meta().await {
-                Ok(meta) => meta.is_some(),
-                Err(lash_core::StoreError::SessionDeleted { .. }) => false,
-                Err(error) => return Err(EmbedError::Store(error)),
-            },
-            None => false,
-        };
+        let live = matches!(
+            self.core
+                .store_factory
+                .lookup_session(session_id)
+                .await
+                .map_err(|error| EmbedError::StoreFactory {
+                    session_id: session_id.clone(),
+                    message: error.to_string(),
+                })?,
+            lash_core::store::SessionLookup::Live(_)
+        );
         if live {
             Ok(())
         } else {

@@ -396,7 +396,7 @@ impl HandOff {
         let storage = stores.process_registry();
         let continuations: Arc<dyn lash_core::ProcessContinuationStore> = storage.clone();
         let registry: Arc<dyn ProcessRegistry> = storage;
-        let sessions = stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>;
+        let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
         let (host_n, endpoint_n) = Self::build(
             &connection,
             &ingress,
@@ -443,7 +443,7 @@ impl HandOff {
         ingress: &RestateIngressClient,
         registry: &Arc<dyn ProcessRegistry>,
         continuations: &Arc<dyn lash_core::ProcessContinuationStore>,
-        sessions: &Arc<dyn lash_core::SessionStoreFactory>,
+        sessions: &Arc<dyn lash_core::DeploymentStore>,
         build: &'static str,
     ) -> (Arc<RestateEffectHost>, Endpoint) {
         let generation = lash_core::engine::BuildGeneration::for_test(build);

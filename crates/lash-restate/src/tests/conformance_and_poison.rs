@@ -455,7 +455,7 @@ lash_conformance::wake_delivery_crash_tests!({
         Arc::clone(&registry) as Arc<dyn ProcessRegistry>,
         terminal,
     );
-    let factory: Arc<dyn lash_core::SessionStoreFactory> = backend.session_store_factory();
+    let factory: Arc<dyn lash_core::DeploymentStore> = backend.session_store_factory();
     let verify_transport = Arc::clone(&wait_transport);
     let barrier_transport = Arc::clone(&wait_transport);
     (

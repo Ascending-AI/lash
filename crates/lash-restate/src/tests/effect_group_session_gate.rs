@@ -18,10 +18,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use lash_core::store::StoreTestSupport as _;
 use lash_core::store::{IngressStore as _, SessionCommitStore as _};
 use lash_core::{
-    EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
+    DeploymentStore, EffectAddress, ExecutionScope, GroupExecutors, GroupWakePolicy, LoserPolicy,
     RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectLocalExecutor, RuntimeErrorCode, RuntimePersistence, SessionStoreFactory,
-    StoreError,
+    RuntimeEffectLocalExecutor, RuntimeErrorCode, RuntimePersistence, StoreError,
 };
 use lash_sansio::SessionId;
 use restate_sdk::prelude::Endpoint;
@@ -66,7 +65,7 @@ impl lash_core::AttachmentRootSet for OneSessionCatalog {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for OneSessionCatalog {
+impl DeploymentStore for OneSessionCatalog {
     async fn create_store(
         &self,
         _request: &lash_core::SessionStoreCreateRequest,
@@ -99,7 +98,7 @@ impl SessionStoreFactory for OneSessionCatalog {
         &self,
     ) -> Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::count_unsettled_turns",
+            operation: "DeploymentStore::count_unsettled_turns",
         })
     }
 
@@ -108,7 +107,7 @@ impl SessionStoreFactory for OneSessionCatalog {
         _query: &lash_core::store::TurnParkQuery,
     ) -> Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::list_turn_parks",
+            operation: "DeploymentStore::list_turn_parks",
         })
     }
 
@@ -121,7 +120,7 @@ impl SessionStoreFactory for OneSessionCatalog {
         lash_core::StoreError,
     > {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::turn_park_feed",
+            operation: "DeploymentStore::turn_park_feed",
         })
     }
 
@@ -131,7 +130,7 @@ impl SessionStoreFactory for OneSessionCatalog {
         _root: &lash_core::TurnId,
     ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::root_terminal",
+            operation: "DeploymentStore::root_terminal",
         })
     }
 
@@ -140,7 +139,7 @@ impl SessionStoreFactory for OneSessionCatalog {
         _through: lash_core::store::ParkFeedCursor,
     ) -> Result<(), lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "SessionStoreFactory::compact_turn_park_feed",
+            operation: "DeploymentStore::compact_turn_park_feed",
         })
     }
 }
@@ -222,7 +221,7 @@ impl GroupExecutors for CountingExecutors {
 async fn session_catalog(
     dir: &std::path::Path,
     generation: Option<u32>,
-) -> Arc<dyn SessionStoreFactory> {
+) -> Arc<dyn DeploymentStore> {
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.join("session.db"))
             .await
@@ -308,7 +307,7 @@ fn tool_child() -> EffectGroupChildRequest {
     }
 }
 
-fn endpoint(sessions: Arc<dyn SessionStoreFactory>, executors: Arc<CountingExecutors>) -> Endpoint {
+fn endpoint(sessions: Arc<dyn DeploymentStore>, executors: Arc<CountingExecutors>) -> Endpoint {
     let host = crate::RestateEffectHost::new_for_test("http://127.0.0.1:9");
     host.register_group_executors(executors as Arc<dyn GroupExecutors>)
         .expect("register the counting resolver");
@@ -492,7 +491,7 @@ async fn a_refused_redrive_parks_only_a_turn_in_flight() {
         .stamp_session_state_version_for_testing(previous)
         .await
         .expect("stamp the pre-cutover generation");
-    let sessions: Arc<dyn SessionStoreFactory> = Arc::new(OneSessionCatalog {
+    let sessions: Arc<dyn DeploymentStore> = Arc::new(OneSessionCatalog {
         session_id: session_id.clone(),
         store: Arc::clone(&store) as Arc<dyn RuntimePersistence>,
     });

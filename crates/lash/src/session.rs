@@ -9,10 +9,10 @@ use crate::support::{
     Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding, PluginFactory,
     PluginOperations, PluginOptions, ProcessHandleView, PromptLayer, PromptLayerSink,
     ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
-    RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor, SessionError,
-    SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
-    SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
-    ToolManifest, ToolState, TurnInput, build_plugin_host, refuse_foreign_backend_factories,
+    RuntimeSessionState, SessionAdmin, SessionCursor, SessionError, SessionObservation,
+    SessionObservationSubscription, SessionPolicy, SessionReadView, SessionResume, SessionScope,
+    SessionSpec, SessionStoreCreateRequest, SessionUsageReport, ToolManifest, ToolState, TurnInput,
+    build_plugin_host, refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -46,8 +46,8 @@ pub struct SessionBuilder {
 }
 
 struct ResolvedSessionStore {
-    store: Arc<dyn RuntimePersistence>,
-    catalog: Arc<dyn lash_core::SessionStoreFactory>,
+    store: lash_core::store::SessionStore,
+    catalog: Arc<dyn lash_core::DeploymentStore>,
 }
 
 fn empty_runtime_session_state(
@@ -146,17 +146,17 @@ impl SessionBuilder {
     pub async fn open(self) -> Result<LashSession> {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
-        self.reconcile_process_observer_intents(Some(resolved.store.as_ref()))
+        self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         let (state, reopened_persisted_config) = self
-            .load_or_default_state(&policy, Some(resolved.store.as_ref()))
+            .load_or_default_state(&policy, Some(&resolved.store))
             .await?;
         Box::pin(self.open_resolved(state, resolved, reopened_persisted_config, true)).await
     }
 
     async fn reconcile_process_observer_intents(
         &self,
-        store: Option<&dyn RuntimePersistence>,
+        store: Option<&lash_core::store::SessionStore>,
     ) -> Result<()> {
         let Some(store) = store else {
             return Ok(());
@@ -164,7 +164,9 @@ impl SessionBuilder {
         lash_core::runtime::reconcile_session_process_observer_intents(
             self.core.env.process_registry().map(Arc::as_ref),
             &self.session_id,
-            lash_core::runtime::SessionObserverIntentSource::PersistedIfPresent(store),
+            lash_core::runtime::SessionObserverIntentSource::PersistedIfPresent(
+                store.store().as_ref(),
+            ),
         )
         .await?;
         Ok(())
@@ -254,7 +256,7 @@ impl SessionBuilder {
     ) -> Result<LashSession> {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
-        self.reconcile_process_observer_intents(Some(resolved.store.as_ref()))
+        self.reconcile_process_observer_intents(Some(&resolved.store))
             .await?;
         if state.session_id != self.session_id {
             return Err(EmbedError::StoreSessionMismatch {
@@ -292,7 +294,7 @@ impl SessionBuilder {
     async fn load_or_default_state(
         &self,
         policy: &SessionPolicy,
-        store: Option<&dyn RuntimePersistence>,
+        store: Option<&lash_core::store::SessionStore>,
     ) -> Result<(
         RuntimeSessionState,
         Option<lash_core::PersistedSessionConfig>,
@@ -332,16 +334,9 @@ impl SessionBuilder {
 
     async fn load_persisted_state(
         &self,
-        store: &dyn RuntimePersistence,
-    ) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
-        load_persisted_state_admitted(
-            store,
-            &self.session_id,
-            &self.core.drive_owner,
-            &uuid::Uuid::new_v4().to_string(),
-            self.core.env.core.control.lease_timings.ttl_ms(),
-        )
-        .await
+        store: &lash_core::store::SessionStore,
+    ) -> Result<Option<lash_core::store::LoadedSessionWindow>> {
+        load_persisted_window(store).await
     }
 
     async fn open_resolved(
@@ -394,7 +389,7 @@ impl SessionBuilder {
         let binding = Arc::new(
             BoundSession::new(
                 session_id,
-                Arc::clone(&resolved.store),
+                resolved.store.clone(),
                 &env,
                 ports.process.clone(),
                 Arc::clone(&ports.queued),
@@ -438,7 +433,7 @@ impl SessionBuilder {
             binding.register_resident(&handle);
         }
         let recorded_parent_session_id =
-            crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
+            crate::session::recorded_parent_session_id(&binding.store()).await?;
         Ok(LashSession {
             runtime: handle,
             _process_lifecycle_route: process_lifecycle_route,
@@ -463,15 +458,10 @@ impl SessionBuilder {
             policy: policy.clone(),
         };
         let factory = &self.core.store_factory;
-        let store = factory
-            .create_store(&request)
-            .await
-            .map_err(EmbedError::Store)?;
         // Admission is where a store answers a conflicting relation (FIG-1559):
         // a rebind naming another parent is refused rather than absorbed into
         // the row the catalog already holds.
-        store
-            .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(&request))
+        let store = lash_core::runtime::admit_session_view(factory, &request)
             .await
             .map_err(EmbedError::Store)?;
         Ok(ResolvedSessionStore {
@@ -486,7 +476,7 @@ impl SessionBuilder {
 /// The relation is written once at admission and guarded thereafter, so this
 /// is the honest read-back the facade handle reports.
 pub(crate) async fn recorded_parent_session_id(
-    store: &dyn RuntimePersistence,
+    store: &lash_core::store::SessionStore,
 ) -> Result<Option<SessionId>> {
     Ok(store
         .load_session_meta()
@@ -502,23 +492,17 @@ pub(crate) async fn recorded_parent_session_id(
 pub(crate) async fn load_state_from_store(
     session_id: &SessionId,
     policy: &SessionPolicy,
-    store: &dyn RuntimePersistence,
-    owner: &lash_core::LeaseOwnerIdentity,
-    lease_ttl_ms: u64,
+    store: &lash_core::store::SessionStore,
 ) -> Result<RuntimeSessionState> {
-    let loaded = lash_core::store::load_persisted_session_admitted(
+    let loaded = lash_core::store::load_session_window_state(
         store,
-        session_id,
-        owner,
-        &uuid::Uuid::new_v4().to_string(),
-        lease_ttl_ms,
+        lash_core::store::WindowSelector::Current,
     )
     .await
     .map_err(EmbedError::Store)?
-    .unwrap_or_else(|| lash_core::store::LoadedPersistedSession {
+    .unwrap_or_else(|| lash_core::store::LoadedSessionWindow {
         state: empty_runtime_session_state(session_id, policy.clone()),
         config: lash_core::PersistedSessionConfig::new(policy.turn_budget),
-        turn_failure_settlements: Vec::new(),
     });
     let mut state = loaded.state;
     if state.session_id != session_id {
@@ -603,19 +587,14 @@ fn reconcile_loaded_state_policy(
     Ok(())
 }
 
-async fn load_persisted_state_admitted(
-    store: &dyn RuntimePersistence,
-    session_id: &SessionId,
-    owner: &lash_core::LeaseOwnerIdentity,
-    executor_id: &str,
-    lease_ttl_ms: u64,
-) -> Result<Option<lash_core::store::LoadedPersistedSession>> {
-    Ok(lash_core::store::load_persisted_session_admitted(
+/// The session's current frame as runtime state, after the store confirms
+/// this build can read its session-state version.
+async fn load_persisted_window(
+    store: &lash_core::store::SessionStore,
+) -> Result<Option<lash_core::store::LoadedSessionWindow>> {
+    Ok(lash_core::store::load_session_window_state(
         store,
-        session_id,
-        owner,
-        executor_id,
-        lease_ttl_ms,
+        lash_core::store::WindowSelector::Current,
     )
     .await
     .map_err(|source| SessionError::Store {

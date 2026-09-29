@@ -8,7 +8,7 @@ use super::*;
 /// not silently discarded and deferred to the first turn.
 #[tokio::test]
 async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()> {
-    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::default());
+    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_serving(store.clone()).await.into(),
         crate::TurnBudget::Unbounded,

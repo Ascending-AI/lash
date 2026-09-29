@@ -12,7 +12,7 @@ const SEED: u64 = 0xd0a4_b1e5;
 /// once per handle and must never reach `create_store`; these counters are what
 /// makes that a test rather than a claim.
 struct CountingSessionStoreFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     creates: Arc<AtomicUsize>,
     by_id_opens: Arc<AtomicUsize>,
     /// Delay inside the by-id seam so concurrent callers overlap in it.
@@ -20,7 +20,7 @@ struct CountingSessionStoreFactory {
 }
 
 impl CountingSessionStoreFactory {
-    fn new(inner: Arc<dyn SessionStoreFactory>, open_delay_ms: u64) -> Self {
+    fn new(inner: Arc<dyn DeploymentStore>, open_delay_ms: u64) -> Self {
         Self {
             inner,
             creates: Arc::new(AtomicUsize::new(0)),
@@ -61,11 +61,11 @@ impl lash_core::AttachmentRootSet for CountingSessionStoreFactory {
 }
 
 #[async_trait]
-impl SessionStoreFactory for CountingSessionStoreFactory {
+impl DeploymentStore for CountingSessionStoreFactory {
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
         self.creates.fetch_add(1, Ordering::SeqCst);
         self.inner.create_store(request).await
     }
@@ -73,15 +73,14 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
     async fn open_existing_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, String> {
         self.inner.open_existing_store(request).await
     }
 
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
-    {
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
         self.by_id_opens.fetch_add(1, Ordering::SeqCst);
         if self.open_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(self.open_delay_ms)).await;
@@ -100,7 +99,7 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<bool, String> {
-        lash_core::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
+        lash_core::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(
@@ -296,7 +295,7 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
         "a refused enqueue must not materialise session metadata"
     );
     assert!(
-        lash_core::SessionStoreFactory::open_existing_store_by_id(
+        lash_core::DeploymentStore::open_existing_store_by_id(
             factory.as_ref(),
             &SessionId::from("never-created"),
         )
@@ -318,7 +317,7 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
     let (backend, factory) = counting_factory(&double.lash_backend(), 0);
     let core = counting_core(backend.clone())?;
     drop(core.session("deleted-durable").open().await?);
-    lash_core::SessionStoreFactory::delete_session(
+    lash_core::DeploymentStore::delete_session(
         factory.as_ref(),
         &SessionId::from("deleted-durable"),
     )
@@ -488,7 +487,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
         .await?;
     assert_eq!(checkpointed.pending_turn_inputs().await?.len(), 1);
 
-    lash_core::SessionStoreFactory::delete_session(
+    lash_core::DeploymentStore::delete_session(
         factory.as_ref(),
         &SessionId::from("sqlite-checkpointed"),
     )
@@ -828,7 +827,7 @@ impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
 
 /// Read the persisted checkpoint's `tool_state` component bytes.
 async fn persisted_tool_state_bytes(
-    factory: &dyn SessionStoreFactory,
+    factory: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<Vec<u8>> {
     let store = factory
@@ -858,7 +857,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     let session_id = SessionId::from("fig-3353-durable-poll");
     let double = restate_double(SEED).await;
     let backend = double.lash_backend();
-    let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
+    let factory: Arc<dyn DeploymentStore> = backend.session_store_factory();
 
     // A core that carries the session's tool source, to persist tool state.
     // Its send needs the engine's queued-work port; the pending enqueue that
@@ -1014,10 +1013,10 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
 /// instead of inheriting `Ok(None)`, which would have reported every existing
 /// session as absent.
 struct NoByIdLookupFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
 }
 
-const NO_BY_ID_LOOKUP_OPERATION: &str = "SessionStoreFactory::open_existing_store_by_id";
+const NO_BY_ID_LOOKUP_OPERATION: &str = "DeploymentStore::open_existing_store_by_id";
 
 #[async_trait]
 impl lash_core::AttachmentRootSet for NoByIdLookupFactory {
@@ -1050,19 +1049,18 @@ impl lash_core::AttachmentRootSet for NoByIdLookupFactory {
 }
 
 #[async_trait]
-impl SessionStoreFactory for NoByIdLookupFactory {
+impl DeploymentStore for NoByIdLookupFactory {
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
         self.inner.create_store(request).await
     }
 
     async fn open_existing_store_by_id(
         &self,
         _session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
-    {
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: NO_BY_ID_LOOKUP_OPERATION,
         })
@@ -1072,7 +1070,7 @@ impl SessionStoreFactory for NoByIdLookupFactory {
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<bool, String> {
-        lash_core::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
+        lash_core::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(
@@ -1503,7 +1501,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     drop(core.session("create-deleted").create().await?);
-    lash_core::SessionStoreFactory::delete_session(
+    lash_core::DeploymentStore::delete_session(
         factory.as_ref(),
         &SessionId::from("create-deleted"),
     )

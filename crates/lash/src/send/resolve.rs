@@ -46,11 +46,7 @@ fn store_error(error: lash_core::StoreError) -> crate::EmbedError {
 pub(super) async fn applications(
     parts: &SendParts,
 ) -> Result<Vec<lash_core::TurnInputApplication>> {
-    match parts
-        .store
-        .list_turn_input_applications(&parts.session_id)
-        .await
-    {
+    match parts.store.list_turn_input_applications().await {
         Ok(applications) => Ok(applications),
         Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => Ok(Vec::new()),
         Err(error) => Err(store_error(error)),
@@ -64,7 +60,7 @@ pub(super) async fn resolve_input(
 ) -> Result<Resolution> {
     if let Some(root) = parts
         .store
-        .root_of_input(&parts.session_id, &receipt.input_id)
+        .root_of_input(&receipt.input_id)
         .await
         .map_err(store_error)?
     {
@@ -72,7 +68,7 @@ pub(super) async fn resolve_input(
     }
     let open = parts
         .store
-        .list_pending_turn_inputs(&parts.session_id)
+        .list_pending_turn_inputs()
         .await
         .map_err(store_error)?
         .iter()
@@ -81,7 +77,7 @@ pub(super) async fn resolve_input(
     // before interpreting a missing row as a withdrawal.
     if let Some(root) = parts
         .store
-        .root_of_input(&parts.session_id, &receipt.input_id)
+        .root_of_input(&receipt.input_id)
         .await
         .map_err(store_error)?
     {
@@ -168,7 +164,7 @@ async fn terminal_of(parts: &SendParts, turn: &TurnId) -> Result<Option<TurnTerm
     let driver = TurnWorkDriver::for_session(
         std::sync::Arc::clone(&parts.effect_host),
         parts.session_id.to_string(),
-        std::sync::Arc::clone(&parts.store),
+        std::sync::Arc::clone(parts.store.store()),
     );
     match driver
         .await_terminal_with_timeout(&address, TERMINAL_READ)
@@ -189,7 +185,7 @@ async fn terminal_of(parts: &SendParts, turn: &TurnId) -> Result<Option<TurnTerm
 
 /// The session's park, when it holds `root`.
 async fn park_of(parts: &SendParts, root: &TurnId) -> Result<Option<ParkedTurn>> {
-    let park = match parts.store.load_turn_park(&parts.session_id).await {
+    let park = match parts.store.load_turn_park().await {
         Ok(park) => park,
         Err(lash_core::StoreError::UnsupportedStoreOperation { .. }) => None,
         Err(error) => return Err(store_error(error)),

@@ -3,7 +3,7 @@ use crate::rlm::RlmSendBuilderExt as _;
 use lash_core::store::{
     RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimePersistenceDecorator,
 };
-use lash_core::{AttachmentId, AttachmentRootSet, SessionStoreCreateRequest, SessionStoreFactory};
+use lash_core::{AttachmentId, AttachmentRootSet, DeploymentStore, SessionStoreCreateRequest};
 use lash_sansio::SessionId;
 use std::collections::BTreeSet;
 use std::sync::Mutex;
@@ -15,13 +15,13 @@ struct CommitSample {
 }
 
 struct GrowthStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
     samples: Arc<Mutex<Vec<CommitSample>>>,
 }
 
 #[async_trait]
 impl RuntimePersistenceDecorator for GrowthStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+    fn inner(&self) -> &lash_core::store::SessionStore {
         self.inner.as_ref()
     }
 
@@ -48,20 +48,19 @@ impl RuntimePersistenceDecorator for GrowthStore {
 }
 
 struct GrowthFactory {
-    inner: Arc<dyn lash_core::SessionStoreFactory>,
+    inner: Arc<dyn lash_core::DeploymentStore>,
     samples: Arc<Mutex<Vec<CommitSample>>>,
 }
 
 #[async_trait]
-impl SessionStoreFactory for GrowthFactory {
+impl DeploymentStore for GrowthFactory {
     // A decorator forwards the non-creating by-id seam to the catalog it
     // wraps.
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, StoreError> {
-        lash_core::SessionStoreFactory::open_existing_store_by_id(self.inner.as_ref(), session_id)
-            .await
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, StoreError> {
+        lash_core::DeploymentStore::open_existing_store_by_id(self.inner.as_ref(), session_id).await
     }
 
     async fn session_was_deleted(
@@ -81,7 +80,7 @@ impl SessionStoreFactory for GrowthFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> std::result::Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionStore, StoreError> {
         Ok(Arc::new(GrowthStore {
             inner: self.inner.create_store(request).await?,
             samples: Arc::clone(&self.samples),
@@ -92,14 +91,14 @@ impl SessionStoreFactory for GrowthFactory {
     async fn count_unsettled_turns(
         &self,
     ) -> std::result::Result<lash_core::store::UnsettledTurnCounts, lash_core::StoreError> {
-        lash_core::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
+        lash_core::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
     }
 
     async fn list_turn_parks(
         &self,
         query: &lash_core::store::TurnParkQuery,
     ) -> std::result::Result<Vec<lash_core::store::TurnPark>, lash_core::StoreError> {
-        lash_core::SessionStoreFactory::list_turn_parks(self.inner.as_ref(), query).await
+        lash_core::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
     }
 
     async fn turn_park_feed(
@@ -110,7 +109,7 @@ impl SessionStoreFactory for GrowthFactory {
         lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>,
         lash_core::StoreError,
     > {
-        lash_core::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit).await
+        lash_core::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
     }
 
     async fn root_terminal(
@@ -118,14 +117,14 @@ impl SessionStoreFactory for GrowthFactory {
         session_id: &lash_core::SessionId,
         root: &lash_core::TurnId,
     ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
-        lash_core::SessionStoreFactory::root_terminal(self.inner.as_ref(), session_id, root).await
+        lash_core::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root).await
     }
 
     async fn compact_turn_park_feed(
         &self,
         through: lash_core::store::ParkFeedCursor,
     ) -> std::result::Result<(), lash_core::StoreError> {
-        lash_core::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through).await
+        lash_core::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through).await
     }
 }
 

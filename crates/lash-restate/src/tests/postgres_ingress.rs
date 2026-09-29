@@ -85,7 +85,7 @@ async fn backend_for(
 ) -> Option<(
     (DatabaseLock, tempfile::TempDir),
     lash_core::Backend,
-    Arc<dyn lash_core::RuntimePersistence>,
+    lash_core::store::SessionStore,
 )> {
     let url = database_url()?;
     let lock = DatabaseLock::acquire(&url).await;

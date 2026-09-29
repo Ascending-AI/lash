@@ -25,7 +25,7 @@
 //! # Acquisition never creates
 //!
 //! A Durable Session resolves an *existing* store: the catalog seam is
-//! [`SessionStoreFactory::open_existing_store_by_id`](lash_core::SessionStoreFactory::open_existing_store_by_id),
+//! [`DeploymentStore::open_existing_store_by_id`](lash_core::DeploymentStore::open_existing_store_by_id),
 //! never `create_store`. Resolution happens at most once per handle (shared by
 //! its clones) and is reused afterwards. Every queue operation therefore
 //! requires a session id the store already knows: sending to an id that was
@@ -57,9 +57,7 @@
 //! default.
 
 use crate::core::ResolvedQueuedWork;
-use crate::support::{
-    Arc, EffectHost, EmbedError, Result, RuntimePersistence, SessionStoreFactory, TurnInput,
-};
+use crate::support::{Arc, DeploymentStore, EffectHost, EmbedError, Result, TurnInput};
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
 use lash_core::runtime::{
@@ -76,7 +74,7 @@ enum DurableAcquisition {
     Catalog,
     /// An open or just-created session's store; the open or the creation
     /// already proved existence.
-    Bound(Arc<dyn RuntimePersistence>),
+    Bound(lash_core::store::SessionStore),
 }
 
 /// Store-backed access to one session's durable queue and settled reads.
@@ -88,9 +86,9 @@ pub struct DurableSession {
     session_id: SessionId,
     ops: DurableSessionOps,
     acquisition: DurableAcquisition,
-    catalog: Arc<dyn SessionStoreFactory>,
+    catalog: Arc<dyn DeploymentStore>,
     /// Shared by every clone so concurrent operations acquire the store once.
-    store: Arc<OnceCell<Arc<dyn RuntimePersistence>>>,
+    store: Arc<OnceCell<lash_core::store::SessionStore>>,
     /// What a [`send`](Self::send) needs beyond the queue: the engine a
     /// handle waits on, the effect host its terminal reads and cancels go
     /// through, and the live replay its events come from.
@@ -105,7 +103,7 @@ pub struct DurableSession {
 impl DurableSession {
     pub(crate) fn from_catalog(
         session_id: SessionId,
-        catalog: Arc<dyn SessionStoreFactory>,
+        catalog: Arc<dyn DeploymentStore>,
         work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
@@ -137,12 +135,12 @@ impl DurableSession {
     )]
     pub(crate) fn from_binding(
         session_id: SessionId,
-        store: Arc<dyn RuntimePersistence>,
+        store: lash_core::store::SessionStore,
         work: Arc<ResolvedQueuedWork>,
         ingress: lash_core::drive::IngressRelay,
         effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
-        catalog: Arc<dyn SessionStoreFactory>,
+        catalog: Arc<dyn DeploymentStore>,
         provider_resolver: Arc<dyn lash_core::provider::RuntimeProviderResolver>,
     ) -> Self {
         Self {
@@ -167,7 +165,7 @@ impl DurableSession {
     pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
         Ok(crate::send::SendParts {
             session_id: self.session_id.clone(),
-            store: Arc::clone(self.store().await?),
+            store: self.store().await?.clone(),
             ops: self.ops.clone(),
             work: self.work.clone(),
             effect_host: Arc::clone(&self.effect_host),
@@ -187,58 +185,46 @@ impl DurableSession {
     }
 
     /// The acquired store, resolving it once on first use.
-    async fn store(&self) -> Result<&Arc<dyn RuntimePersistence>> {
+    async fn store(&self) -> Result<&lash_core::store::SessionStore> {
         self.store.get_or_try_init(|| self.acquire()).await
     }
 
-    async fn acquire(&self) -> Result<Arc<dyn RuntimePersistence>> {
-        let resolved = match &self.acquisition {
-            DurableAcquisition::Bound(store) => return Ok(Arc::clone(store)),
-            // The seam's two negative answers are kept apart: `Err` is a
-            // catalog that cannot resolve by id, and surfaces as
-            // `StoreFactory` naming that capability; only `Ok(None)` below
-            // becomes "no such session". The method is required on the trait
-            // precisely so an implementor cannot inherit the second answer
-            // while meaning the first.
-            DurableAcquisition::Catalog => self
-                .catalog
-                .open_existing_store_by_id(&self.session_id)
-                .await
-                .map_err(|error| EmbedError::StoreFactory {
-                    session_id: self.session_id.clone(),
-                    message: error.to_string(),
-                })?,
-        };
-        match resolved {
-            Some(store) => Ok(store),
-            None => Err(self.absent_session_error().await),
+    async fn acquire(&self) -> Result<lash_core::store::SessionStore> {
+        if let DurableAcquisition::Bound(store) = &self.acquisition {
+            return Ok(store.clone());
         }
-    }
-
-    /// Distinguish "never created" from "used and deleted" for a caller whose
-    /// acquisition found no store.
-    async fn absent_session_error(&self) -> EmbedError {
-        match self.catalog.session_was_deleted(&self.session_id).await {
-            Ok(true) => {
-                return EmbedError::Store(lash_core::StoreError::SessionDeleted {
-                    session_id: self.session_id.clone(),
-                });
+        // `lookup_session` keeps its answers apart: `Err` is a catalog that
+        // could not answer, and surfaces as `StoreFactory`; `Deleted` and
+        // `Absent` are answers (ADR 0112 §1.1).
+        let lookup = self
+            .catalog
+            .lookup_session(&self.session_id)
+            .await
+            .map_err(|error| EmbedError::StoreFactory {
+                session_id: self.session_id.clone(),
+                message: error.to_string(),
+            })?;
+        match lookup {
+            lash_core::store::SessionLookup::Live(_) => {
+                let runtime: Arc<dyn lash_core::store::RuntimeStore> = self.catalog.clone();
+                Ok(lash_core::store::SessionStore::new(
+                    runtime,
+                    self.session_id.clone(),
+                )?)
             }
-            Ok(false) => {}
-            Err(message) => {
-                return EmbedError::StoreFactory {
+            lash_core::store::SessionLookup::Deleted => {
+                Err(EmbedError::Store(lash_core::StoreError::SessionDeleted {
                     session_id: self.session_id.clone(),
-                    message,
-                };
+                }))
             }
-        }
-        EmbedError::UnknownSession {
-            session_id: self.session_id.clone(),
+            lash_core::store::SessionLookup::Absent => Err(EmbedError::UnknownSession {
+                session_id: self.session_id.clone(),
+            }),
         }
     }
 
     /// Used only by the settled reads, whose job is to report absence.
-    async fn store_if_present(&self) -> Result<Option<&Arc<dyn RuntimePersistence>>> {
+    async fn store_if_present(&self) -> Result<Option<&lash_core::store::SessionStore>> {
         match self.store().await {
             Ok(store) => Ok(Some(store)),
             Err(EmbedError::UnknownSession { .. })
@@ -378,11 +364,7 @@ impl DurableSession {
     /// with the head its admission recorded: the one root the next drive
     /// resumes before admitting anything else.
     pub async fn unfinished_root(&self) -> Result<Option<lash_core::store::UnfinishedRoot>> {
-        Ok(self
-            .store()
-            .await?
-            .unfinished_root(&self.session_id)
-            .await?)
+        Ok(self.store().await?.unfinished_root().await?)
     }
 
     /// Cancels queued work batch.
@@ -394,19 +376,50 @@ impl DurableSession {
         Ok(self.ops.cancel_queued_work_batch(store, batch_id).await?)
     }
 
-    /// Read the canonical settled view of this durable session without opening
-    /// a live runtime or exposing mutations.
+    /// Read the canonical settled view of this durable session's current
+    /// frame without opening a live runtime or exposing mutations.
     ///
     /// This is the inspection path for exporters, debuggers, and administrative
-    /// tooling that must coexist with a live writer. `Ok(None)` means the
-    /// catalog has no readable committed state for this id; unsupported
-    /// backends return
-    /// [`StoreError::UnsupportedStoreOperation`](lash_core::StoreError::UnsupportedStoreOperation).
+    /// tooling that must coexist with a live writer. The view holds the
+    /// current frame only (ADR 0112 §9); earlier frames are paged through
+    /// [`history`](Self::history), and failure evidence through
+    /// [`failure_evidence`](Self::failure_evidence). `Ok(None)` means the
+    /// catalog has no readable committed state for this id.
     pub async fn read(&self) -> Result<Option<crate::persistence::SessionReadView>> {
-        self.catalog
-            .read_session(&self.session_id)
+        let Some(store) = self.store_if_present().await? else {
+            return Ok(None);
+        };
+        lash_core::store::load_session_read_view(store)
             .await
             .map_err(EmbedError::Store)
+    }
+
+    /// One page of this session's history, descending by generation from
+    /// `anchor`, across frame and fork boundaries (ADR 0112 §6).
+    ///
+    /// Both budget limits are required. Continue with the page's `next`
+    /// cursor through [`HistoryAnchor::Cursor`](lash_core::store::HistoryAnchor::Cursor);
+    /// a page with a `next` always holds at least one node.
+    pub async fn history(
+        &self,
+        anchor: lash_core::store::HistoryAnchor,
+        budget: lash_core::store::HistoryBudget,
+    ) -> Result<lash_core::store::HistoryPage> {
+        Ok(self.store().await?.load_ancestors(anchor, budget).await?)
+    }
+
+    /// One page of this session's turn failure evidence, ordered by commit
+    /// time (ADR 0112 §8). `next` is `Some` only when more exists.
+    pub async fn failure_evidence(
+        &self,
+        after: Option<&lash_core::store::FailureEvidenceCursor>,
+        limit: std::num::NonZeroU32,
+    ) -> Result<lash_core::store::FailureEvidencePage> {
+        Ok(self
+            .store()
+            .await?
+            .load_failure_evidence_page(after, limit)
+            .await?)
     }
 
     /// Report whether this session still has durable live session metadata.
@@ -429,11 +442,12 @@ impl DurableSession {
     /// [`exists`](Self::exists) when deciding live/retired/unknown disposition.
     pub async fn was_deleted(&self) -> Result<bool> {
         self.catalog
-            .session_was_deleted(&self.session_id)
+            .lookup_session(&self.session_id)
             .await
-            .map_err(|message| EmbedError::StoreFactory {
+            .map(|lookup| matches!(lookup, lash_core::store::SessionLookup::Deleted))
+            .map_err(|error| EmbedError::StoreFactory {
                 session_id: self.session_id.clone(),
-                message,
+                message: error.to_string(),
             })
     }
 }

@@ -9,8 +9,8 @@ mod park;
 use crate::RuntimeHostConfig;
 use crate::runtime::EmbeddedRuntimeBuilder;
 use crate::{
-    LashRuntime, PluginError, PluginFactory, PluginHost, PluginStack, ProcessExecutionContext,
-    ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry, SessionStoreFactory,
+    DeploymentStore, LashRuntime, PluginError, PluginFactory, PluginHost, PluginStack,
+    ProcessExecutionContext, ProcessInput, ProcessRecord, ProcessRegistration, ProcessRegistry,
 };
 use lash_core::core_internal::RuntimeSessionServices;
 use lash_core_execution::runtime::effect::ProcessRunner;
@@ -59,7 +59,7 @@ impl DurableProcessWorkerConfig {
 
     /// The backend's session catalog, which every session this worker
     /// creates, opens or reconstructs goes through.
-    pub fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+    pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         self.runtime_host.session_store_factory()
     }
 
@@ -521,10 +521,9 @@ impl DurableProcessWorker {
         render: Option<crate::RecordedRender>,
         source_label: &str,
     ) -> Result<LashRuntime, PluginError> {
-        let attachment_manifest_store = self
-            .config
-            .session_store_factory()
-            .create_store(&crate::SessionStoreCreateRequest {
+        let attachment_manifest_store = self.config.session_store_factory();
+        attachment_manifest_store
+            .admit_session(&crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),

@@ -262,7 +262,7 @@ async fn committed_prompt_without_host_prompt_renders_committed_prompt_in_memory
     let committed = lash_core::PromptLayer::new().with_contribution(
         lash_core::PromptContribution::guidance("Committed", "COMMITTED PROMPT"),
     );
-    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(
+    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(
         prompt_probe_state(&SessionId::from("committed-prompt"), committed),
     ));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -291,7 +291,7 @@ async fn explicit_empty_committed_session_prompt_preserves_live_core_prompt_in_m
         &SessionId::from("explicit-empty-prompt"),
         lash_core::PromptLayer::new(),
     );
-    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
+    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
     let captures = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_serving(store.clone()).await.into(),
@@ -377,7 +377,7 @@ async fn sqlite_prompt_probe_store(
 ) -> (
     Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     lash_core::Backend,
-    Arc<dyn lash_core::RuntimePersistence>,
+    lash_core::store::SessionStore,
 ) {
     let backend = double_backend().await;
     let factory = latest_double()
@@ -418,7 +418,7 @@ async fn sqlite_prompt_probe_store(
 async fn sqlite_store_from_literal_legacy_head() -> (
     Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     lash_core::Backend,
-    Arc<dyn lash_core::RuntimePersistence>,
+    lash_core::store::SessionStore,
 ) {
     let (factory, backend, store) = sqlite_prompt_probe_store(
         &SessionId::from("legacy-promptless"),

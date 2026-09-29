@@ -240,7 +240,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
-    let store = lash_core::SessionStoreFactory::open_existing_store(
+    let store = lash_core::DeploymentStore::open_existing_store(
         sqlite_store_factory.as_ref(),
         &store_request,
     )

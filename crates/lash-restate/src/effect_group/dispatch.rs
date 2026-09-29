@@ -37,7 +37,7 @@ pub(crate) struct EffectGroupDispatchImpl {
     pub(super) infinite_retry_policy: RunRetryPolicy,
     /// The catalog a session-scope child reads its owning session's state
     /// generation from at invocation entry (FIG-3619).
-    pub(super) sessions: Arc<dyn lash_core::SessionStoreFactory>,
+    pub(super) sessions: Arc<dyn lash_core::DeploymentStore>,
     /// The lane this dispatcher is bound under (FIG-3795): the route its
     /// self-calls — the child sends — address. An opener records the lane
     /// on the group's index record at `open`, so a group's dispatch and its
@@ -54,7 +54,7 @@ impl EffectGroupDispatchImpl {
         host: &crate::RestateEffectHost,
         ingress: RestateIngressClient,
         infinite_retry_policy: RunRetryPolicy,
-        sessions: Arc<dyn lash_core::SessionStoreFactory>,
+        sessions: Arc<dyn lash_core::DeploymentStore>,
         route: crate::services::ServiceRoute,
         build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
@@ -994,7 +994,7 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
 /// the same branch. A store or catalog failure is retried; a catalog with no
 /// by-id lookup is a wiring fault no retry repairs.
 async fn session_generation_refusal(
-    sessions: &dyn lash_core::SessionStoreFactory,
+    sessions: &dyn lash_core::DeploymentStore,
     request: &EffectGroupChildRequest,
 ) -> HandlerResult<Option<RuntimeEffectControllerError>> {
     let Some(session_id) = request.envelope.invocation.execution_scope().session_id() else {

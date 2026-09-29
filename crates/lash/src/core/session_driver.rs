@@ -1,7 +1,7 @@
 use super::build_plugin_host;
 use crate::support::{
-    Arc, LashRuntime, LiveReplayStore, PluginFactory, RuntimeEnvironment, RuntimeHandle,
-    SessionPolicy, SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, async_trait,
+    Arc, DeploymentStore, LashRuntime, LiveReplayStore, PluginFactory, RuntimeEnvironment,
+    RuntimeHandle, SessionPolicy, SessionRelation, SessionStoreCreateRequest, async_trait,
 };
 use lash_sansio::SessionId;
 
@@ -14,7 +14,7 @@ pub(crate) struct CoreSessionDriverConfig {
     pub(super) policy: SessionPolicy,
     pub(super) protocol_factory: Option<Arc<dyn PluginFactory>>,
     pub(super) plugin_factories: Arc<Vec<Arc<dyn PluginFactory>>>,
-    pub(super) store_factory: Arc<dyn SessionStoreFactory>,
+    pub(super) store_factory: Arc<dyn DeploymentStore>,
     pub(super) live_replay_store: Arc<dyn LiveReplayStore>,
     pub(super) process_lifecycle_available: bool,
 }
@@ -118,33 +118,25 @@ impl CoreSessionDriver {
     ) -> std::result::Result<RuntimeHandle, OpenFailure> {
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
-        let store = self
-            .config
-            .store_factory
-            .create_store(&SessionStoreCreateRequest {
+        let store = lash_core::runtime::admit_session_view(
+            &self.config.store_factory,
+            &SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::default(),
                 policy: policy.clone(),
-            })
-            .await
-            .map_err(|error| match error {
-                error @ (lash_core::StoreError::SessionDeleted { .. }
-                | lash_core::StoreError::SessionClosing { .. }) => {
-                    OpenFailure::SessionRetired(session_retired_error(session_id, error))
-                }
-                error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
-            })?;
-        let state = match crate::session::load_state_from_store(
-            session_id,
-            &policy,
-            store.as_ref(),
-            &self.config.drive_owner,
-            self.config.env.core.control.lease_timings.ttl_ms(),
+            },
         )
         .await
-        {
+        .map_err(|error| match error {
+            error @ (lash_core::StoreError::SessionDeleted { .. }
+            | lash_core::StoreError::SessionClosing { .. }) => {
+                OpenFailure::SessionRetired(session_retired_error(session_id, error))
+            }
+            error => OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string())),
+        })?;
+        let state = match crate::session::load_state_from_store(session_id, &policy, &store).await {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
                 return Err(OpenFailure::Contended);

@@ -360,16 +360,16 @@ pub mod persistence {
     /// Durable session-store inputs and outputs exposed to storage integrators.
     pub use lash_core::runtime::{
         ActiveTurnIngress, AdmissionBoundary, AdmittedQueuedWork, AdmittedTurnInputs,
-        DeliveryPolicy, ForkPoint, ForkSessionReceipt, ForkSessionRequest, LiveReplayOutcome,
-        LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY, PendingTurnInputBatch,
-        PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput, QueuedCheckpointWork,
-        QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
-        QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind,
-        QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState, SessionCommandPayload,
-        SessionCursorError, SessionStoreCreateRequest, SessionStoreFactory, TurnInputAdmissionMode,
-        TurnInputCheckpointBoundary, TurnInputCompletion, TurnInputCompletionData,
-        TurnInputIngress, TurnInputState, TurnInputStateKind, TurnLaneAdmissionPolicy,
-        TurnWorkPayload,
+        DeliveryPolicy, DeploymentStore, DeploymentStoreDecorator, ForkPoint, ForkSessionReceipt,
+        ForkSessionRequest, LiveReplayOutcome, LiveReplaySubscription, PROCESS_WAKE_MERGE_KEY,
+        PendingTurnInputBatch, PendingTurnInputDraft, ProcessWakeSource, QueuedCheckpointTurnInput,
+        QueuedCheckpointWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
+        QueuedWorkBatchPayloads, QueuedWorkCompletion, QueuedWorkEnqueueOutcome, QueuedWorkItem,
+        QueuedWorkKind, QueuedWorkPayload, RuntimeCheckpointComponents, RuntimeSessionState,
+        SessionCommandPayload, SessionCursorError, SessionStoreCreateRequest,
+        TurnInputAdmissionMode, TurnInputCheckpointBoundary, TurnInputCompletion,
+        TurnInputCompletionData, TurnInputIngress, TurnInputState, TurnInputStateKind,
+        TurnLaneAdmissionPolicy, TurnWorkPayload,
     };
     pub use lash_core::session_graph::RealizedNodeTimestamp;
     /// A build generation's drain marks and remaining work (FIG-3799): the
@@ -399,8 +399,9 @@ pub mod persistence {
             select_turn_work_prefix,
         };
     }
+    pub use lash_core::session_graph::WindowAnchor;
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
-    /// of [`RuntimePersistence`], implemented by every store a runtime drives,
+    /// of [`RuntimeStore`], implemented by every store a runtime drives,
     /// and the fence it yields, the one authority every drive write presents.
     pub use lash_core::store::{
         AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence, RootStartNonce, StoredDriveEpoch,
@@ -413,17 +414,27 @@ pub mod persistence {
         IngressRowId, IngressSettlement, ROOT_ADMISSION_STEP, RootAdmission, RootAdmissionAnswer,
         RootAdmissionRefusal, UnfinishedRoot,
     };
+    /// The multi-session store's catalog and bounded history segments, the
+    /// one-session view runtime code holds, and the window loaders (ADR 0112).
+    pub use lash_core::store::{
+        AnchorUnavailable, FailureEvidenceCursor, FailureEvidencePage, HistoryAnchor,
+        HistoryBudget, HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp,
+        LoadedSessionWindow, QueuedWorkStore, RuntimeStore, SessionCatalogStore,
+        SessionHistoryStore, SessionLookup, SessionStore, SessionWindowRead, TurnInputStore,
+        UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowAnchorViolation, WindowSelector,
+        load_session_read_view, load_session_window_state, refresh_session_window,
+    };
     pub use lash_core::store::{
         AppendRequestIdentity, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId, ParkCancelCause,
         ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage, ParkId, ParkReason,
-        ParkReasonCode, ParkSummary, PendingFollowOn, PersistedSessionRead, PhysicalTurn,
-        ProcessPark, ProcessParkKey, ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt,
-        RuntimePersistenceDecorator, RuntimeTurnCommitStamp, RuntimeUsageDelta,
-        RuntimeUsageDeltaIdentity, SemanticBoundaryOperation, SessionCheckpoint, SessionHead,
-        SessionHeadMeta, SessionHeadPayload, TurnPark, TurnParkQuery, TurnParkTarget,
-        TurnParkWrite, UnparkCause, UnsettledTurnCounts, commit_runtime_state_verified,
-        load_persisted_session_state,
+        ParkReasonCode, ParkSummary, PendingFollowOn, PhysicalTurn, ProcessPark, ProcessParkKey,
+        ProcessParkQuery, RuntimeCommit, RuntimeCommitReceipt, RuntimeStoreDecorator,
+        RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+        SemanticBoundaryOperation, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+        TurnCommitFailureCause, TurnCommitOutcome, TurnCommitRecord, TurnPark, TurnParkQuery,
+        TurnParkTarget, TurnParkWrite, UnparkCause, UnsettledTurnCounts,
+        commit_runtime_state_verified, validate_turn_commit_outcome_code,
     };
     /// A logical root's durable terminal evidence and the store segment that
     /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the
@@ -438,7 +449,8 @@ pub mod persistence {
     /// carry them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]
     pub use lash_core::store::{
-        ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
+        ConformanceDeployment, ConformanceStore, DecodedRowCounts, GraphRowCorruption,
+        StoreTestSupport,
     };
     /// The Lashlang module-artifact port a backend's store set supplies.
     pub use lash_core::{
@@ -458,17 +470,16 @@ pub mod persistence {
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
         DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
         FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
-        IngressStore, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
-        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
+        MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
-        ProtocolEvent, RetentionBound, RetentionReport, RuntimePersistence, ScanCoverage,
-        SessionAdmission, SessionBinding, SessionBlobReclaimReport, SessionCommitStore,
-        SessionGraph, SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord,
-        SessionReadView, SessionRelation, SessionStateAdmission, StoreBackend,
-        StoreComponentVersion, StoreError, StoreMaintenance, StorePreflight, StoreReleaseStamp,
-        StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus,
-        StoreSchemaVerdict, TurnInputAdmission, VacuumReport,
-        facade_support::SessionNodeProjection,
+        ProtocolEvent, RetentionBound, RetentionReport, ScanCoverage, SessionAdmission,
+        SessionBinding, SessionBlobReclaimReport, SessionCommitStore, SessionGraph,
+        SessionHistoryRecord, SessionMeta, SessionNodePayload, SessionNodeRecord, SessionReadView,
+        SessionRelation, SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError,
+        StoreMaintenance, StorePreflight, StoreReleaseStamp, StoreReleaseState,
+        StoreSchemaDatabase, StoreSchemaOutcome, StoreSchemaStatus, StoreSchemaVerdict,
+        TurnInputAdmission, VacuumReport, facade_support::SessionNodeProjection,
     };
     pub use lash_core::{
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
@@ -607,7 +618,7 @@ pub mod plugins {
 
 /// Protocol message and content types.
 pub mod messages {
-    pub use lash_core::session_graph::{SessionMessageTreeNode, SharedJsonValue};
+    pub use lash_core::session_graph::SharedJsonValue;
     pub use lash_core::{
         Message, MessageOrigin, MessageRole, Part, PartKind, TurnOutputSource,
         facade_support::MessageSequence, session_model::message::PartAttachment,

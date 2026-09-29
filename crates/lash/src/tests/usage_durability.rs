@@ -103,7 +103,7 @@ async fn usage_durability_core_with_store(
     provider: ProviderHandle,
 ) -> Result<(
     LashCore,
-    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<dyn lash_core::DeploymentStore>,
     lash_restate_test::RestateTestBackend,
 )> {
     let double = restate_double(SEED).await;
@@ -392,7 +392,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
         let head_revision = || {
             let store_factory = Arc::clone(&store_factory);
             async move {
-                let store = SessionStoreFactory::open_existing_store_by_id(
+                let store = DeploymentStore::open_existing_store_by_id(
                     store_factory.as_ref(),
                     &SessionId::from(session_id),
                 )

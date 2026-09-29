@@ -505,7 +505,7 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_a
         relation: lash_core::SessionRelation::Root,
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
-    let store = lash_core::SessionStoreFactory::open_existing_store(catalog.as_ref(), &request)
+    let store = lash_core::DeploymentStore::open_existing_store(catalog.as_ref(), &request)
         .await
         .expect("open the create-only factory's inner store")
         .expect("the queued session exists");
@@ -821,13 +821,11 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     assert_eq!(affected.input_id, undelivered_id);
     assert_eq!(affected.disposition, disposition);
 
-    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
-        store_factory.as_ref(),
-        session_id,
-    )
-    .await
-    .expect("read the opened session\'s store")
-    .expect("opened session retains its in-memory store");
+    let store =
+        lash_core::DeploymentStore::open_existing_store_by_id(store_factory.as_ref(), session_id)
+            .await
+            .expect("read the opened session\'s store")
+            .expect("opened session retains its in-memory store");
     match disposition {
         lash_core::facade_support::TurnCancelDisposition::Drop => {
             let pending = session.durable().pending_turn_inputs().await?;

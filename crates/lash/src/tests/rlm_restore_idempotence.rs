@@ -40,10 +40,10 @@ use lash_core::plugin::{
 };
 use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
 use lash_core::{
-    AppendSessionNodesRequest, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
-    PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, SessionAppendNode, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TurnBudget, TurnInput,
+    AppendSessionNodesRequest, CommitBudget, DeploymentStore, LlmOutputPart, LlmResponse,
+    ModelSpec, PersistedSessionConfig, ProtocolTurnOptions, QueuedWorkBatchingConfig,
+    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionAppendNode, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoreError, TurnBudget, TurnInput,
 };
 use lash_protocol_rlm::{
     InstructionBound, MemoryBound, RlmProtocolPluginConfig, RlmProtocolPluginFactory, RlmSeed,
@@ -64,7 +64,7 @@ enum CommitFault {
 }
 
 struct FaultStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
     fault: Mutex<CommitFault>,
     /// Every commit handed to the store, faulted or not, in order.
     commits: Mutex<Vec<RuntimeCommit>>,
@@ -82,7 +82,7 @@ impl FaultStore {
 
 #[async_trait::async_trait]
 impl RuntimePersistenceDecorator for FaultStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+    fn inner(&self) -> &lash_core::store::SessionStore {
         self.inner.as_ref()
     }
 
@@ -313,7 +313,7 @@ async fn open_with_plugins(
     let runtime_host = EmbeddedRuntimeHost::new(config);
     let runtime_services = PersistentRuntimeServices::new(
         plugins.clone(),
-        store as Arc<dyn RuntimePersistence>,
+        store as lash_core::store::SessionStore,
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -366,7 +366,7 @@ struct Backend {
     /// The backend every runtime of the law takes its ports from.
     backend: lash_core::Backend,
     _double: lash_restate_test::RestateTestBackend,
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     _tempdir: Option<tempfile::TempDir>,
 }
 

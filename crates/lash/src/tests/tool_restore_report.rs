@@ -72,8 +72,8 @@ impl lash_core::facade_support::SessionPlugin for OpenLifecycleProbePlugin {
 async fn seed_session_with_a_persisted_tool(
     backend: &lash_core::Backend,
     session_id: &SessionId,
-) -> Result<Arc<dyn SessionStoreFactory>> {
-    let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
+) -> Result<Arc<dyn DeploymentStore>> {
+    let factory: Arc<dyn DeploymentStore> = backend.session_store_factory();
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
@@ -92,7 +92,7 @@ async fn seed_session_with_a_persisted_tool(
 }
 
 async fn durable_head_revision(
-    factory: &dyn SessionStoreFactory,
+    factory: &dyn DeploymentStore,
     session_id: &SessionId,
 ) -> Result<u64> {
     let store = factory

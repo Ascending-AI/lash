@@ -14,7 +14,7 @@ struct Driver {
     root: TurnId,
     next: std::sync::Mutex<Option<TurnId>>,
     input: lash_core::InputId,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     restored: AtomicBool,
     admission_fails: AtomicBool,
     /// Admission names the root again after it ended: a store that has not
@@ -151,7 +151,7 @@ struct Fixture {
     /// The engine's installation of `driver`, kept for the fixture's life.
     _installation: Arc<dyn SessionDriver>,
     work: crate::RestateSessionWork,
-    factory: Arc<dyn lash_core::SessionStoreFactory>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
     /// The law stores' `ControlIntent` obligation ledger.
     intents: Arc<dyn ObligationLedger>,
     /// The queued command of a [`Fixture::with_command`] session.
@@ -839,7 +839,7 @@ impl SessionControlEngine for InterruptedRelease {
 struct InterruptedClose {
     interrupt: AtomicBool,
     calls: AtomicUsize,
-    factory: Arc<dyn lash_core::SessionStoreFactory>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
 }
 #[async_trait::async_trait]
 impl ScopeCloseSink for InterruptedClose {

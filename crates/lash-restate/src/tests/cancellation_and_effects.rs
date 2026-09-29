@@ -1276,7 +1276,7 @@ pub(super) async fn replay_test_runtime(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: lash_core::store::SessionStore,
 ) -> lash_core::facade_support::LashRuntime {
     Box::pin(replay_test_runtime_with_plugins(
         session_id,
@@ -1303,7 +1303,7 @@ pub(super) async fn replay_test_runtime_with_plugins(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) -> lash_core::facade_support::LashRuntime {
     Box::pin(replay_test_runtime_with_plugins_and_registry(
@@ -1324,7 +1324,7 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
     policy: lash_core::SessionPolicy,
     initial_state: lash_core::RuntimeSessionState,
     host: lash_core::facade_support::RuntimeHostConfig,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     plugin_factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
     process_registry: Option<Arc<dyn ProcessRegistry>>,
 ) -> lash_core::facade_support::LashRuntime {

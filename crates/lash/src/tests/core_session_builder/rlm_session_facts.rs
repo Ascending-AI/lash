@@ -202,13 +202,11 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     // the row never settles.
     drop(session);
     let session_id = lash_core::SessionId::from("rlm-typescript-queued-session-command");
-    let durable_store = lash_core::SessionStoreFactory::open_existing_store_by_id(
-        store_factory.as_ref(),
-        &session_id,
-    )
-    .await
-    .expect("resolve the queued session's store")
-    .expect("the queued session exists");
+    let durable_store =
+        lash_core::DeploymentStore::open_existing_store_by_id(store_factory.as_ref(), &session_id)
+            .await
+            .expect("resolve the queued session's store")
+            .expect("the queued session exists");
     tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let recorded = lash_core::store::load_persisted_session_state(durable_store.as_ref())

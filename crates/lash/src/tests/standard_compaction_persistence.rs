@@ -1603,13 +1603,13 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
 /// settlement-commit failure that used to leave a compacted resident state
 /// advanced with its usage merely staged (FIG-3374 review).
 struct FailArmedCommitStore {
-    inner: Arc<dyn lash_core::RuntimePersistence>,
+    inner: lash_core::store::SessionStore,
     armed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait]
 impl lash_core::store::RuntimePersistenceDecorator for FailArmedCommitStore {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+    fn inner(&self) -> &lash_core::store::SessionStore {
         self.inner.as_ref()
     }
 
@@ -1627,17 +1627,16 @@ impl lash_core::store::RuntimePersistenceDecorator for FailArmedCommitStore {
 }
 
 struct FailArmedCommitFactory {
-    inner: Arc<dyn lash_core::SessionStoreFactory>,
+    inner: Arc<dyn lash_core::DeploymentStore>,
     armed: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[async_trait]
-impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
+impl lash_core::DeploymentStore for FailArmedCommitFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
-    {
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
         self.inner.open_existing_store_by_id(session_id).await
     }
 
@@ -1658,7 +1657,7 @@ impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
         Ok(Arc::new(FailArmedCommitStore {
             inner: self.inner.create_store(request).await?,
             armed: Arc::clone(&self.armed),

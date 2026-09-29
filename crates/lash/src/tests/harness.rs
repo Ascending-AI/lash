@@ -292,8 +292,8 @@ impl DecoratedBackend {
     pub(crate) fn session_store_factory(
         self,
         decorate: impl FnOnce(
-            Arc<dyn lash_core::SessionStoreFactory>,
-        ) -> Arc<dyn lash_core::SessionStoreFactory>,
+            Arc<dyn lash_core::DeploymentStore>,
+        ) -> Arc<dyn lash_core::DeploymentStore>,
     ) -> Self {
         Self {
             layered: self.layered.map_session_store_factory(decorate),

@@ -37,9 +37,9 @@ fn nonce() -> u128 {
 /// A root session store for `session_id` over `factory`: the handle the law's
 /// runtime commits through and the law reads and stamps back.
 async fn law_session_store(
-    factory: Arc<dyn lash_core::SessionStoreFactory>,
+    factory: Arc<dyn lash_core::DeploymentStore>,
     session_id: &str,
-) -> Arc<dyn lash_core::RuntimePersistence> {
+) -> lash_core::store::SessionStore {
     factory
         .create_store(&lash_core::testing::store_fixtures::session_store_request(
             &SessionId::from(session_id),
@@ -138,6 +138,6 @@ lash_conformance::fresh_session_admission_tests!({
     let make = harness.law_persistence();
     (
         harness,
-        move |session_id: &str| -> Arc<dyn lash_core::RuntimePersistence> { make(session_id) },
+        move |session_id: &str| -> lash_core::store::SessionStore { make(session_id) },
     )
 });

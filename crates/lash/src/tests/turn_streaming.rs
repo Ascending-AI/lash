@@ -194,7 +194,7 @@ impl lash_core::facade_support::SessionPlugin for TurnPersistedGraphAppendPlugin
 }
 
 struct CreateOnlySessionStoreFactory {
-    inner: Arc<dyn lash_core::SessionStoreFactory>,
+    inner: Arc<dyn lash_core::DeploymentStore>,
 }
 
 // The fixture narrows the factory surface, but attachment ownership remains
@@ -230,11 +230,11 @@ impl lash_core::AttachmentRootSet for CreateOnlySessionStoreFactory {
 }
 
 #[async_trait]
-impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
+impl lash_core::DeploymentStore for CreateOnlySessionStoreFactory {
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> std::result::Result<Arc<dyn lash_core::RuntimePersistence>, lash_core::StoreError> {
+    ) -> std::result::Result<lash_core::store::SessionStore, lash_core::StoreError> {
         self.inner.create_store(request).await
     }
 
@@ -244,17 +244,15 @@ impl lash_core::SessionStoreFactory for CreateOnlySessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<Option<Arc<dyn lash_core::RuntimePersistence>>, lash_core::StoreError>
-    {
-        lash_core::SessionStoreFactory::open_existing_store_by_id(self.inner.as_ref(), session_id)
-            .await
+    ) -> std::result::Result<Option<lash_core::store::SessionStore>, lash_core::StoreError> {
+        lash_core::DeploymentStore::open_existing_store_by_id(self.inner.as_ref(), session_id).await
     }
 
     async fn session_was_deleted(
         &self,
         session_id: &SessionId,
     ) -> std::result::Result<bool, String> {
-        lash_core::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
+        lash_core::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(

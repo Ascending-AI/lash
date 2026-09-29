@@ -264,7 +264,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
         ))
     };
     state.set_tool_state_snapshot(Some(persisted_tool_state));
-    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
+    let store: lash_core::store::SessionStore = Arc::new(SnapshotStore::with_state(state));
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend_serving(store).await.into(),
         crate::TurnBudget::Unbounded,

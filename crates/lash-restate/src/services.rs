@@ -698,7 +698,7 @@ pub(crate) struct LashServiceParts<'a, R> {
     pub(crate) ingress: RestateIngressClient,
     /// The session catalog a session-scope group child checks its state
     /// generation in before it runs (FIG-3619).
-    pub(crate) sessions: Arc<dyn lash_core::SessionStoreFactory>,
+    pub(crate) sessions: Arc<dyn lash_core::DeploymentStore>,
     /// The process workflow over the deployment's process worker.
     pub(crate) process_workflow: LashProcessWorkflowImpl<R>,
     /// Where the session handlers find the driver the core installs.

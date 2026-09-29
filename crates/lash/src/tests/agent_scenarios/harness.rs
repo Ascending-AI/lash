@@ -367,7 +367,7 @@ impl AgentScenarioSetup {
 
 struct AgentScenarioRuntime {
     core: LashCore,
-    store_factory: Arc<dyn lash_core::SessionStoreFactory>,
+    store_factory: Arc<dyn lash_core::DeploymentStore>,
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
@@ -416,7 +416,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         // evidence a store keeps is per digest, not per session, so a
         // dedicated seeding session records it exactly as a peer writer would.
         let seed_session_id = SessionId::from(format!("{}-attachment-seed", case.session_id));
-        let seed_store = lash_core::SessionStoreFactory::create_store(
+        let seed_store = lash_core::DeploymentStore::create_store(
             runtime.store_factory.as_ref(),
             &lash_core::SessionStoreCreateRequest {
                 owning_process_id: None,

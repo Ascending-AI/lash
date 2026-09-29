@@ -4,12 +4,12 @@
 use super::*;
 
 pub(super) struct CommitRetryStore {
-    pub(super) inner: Arc<dyn lash_core::RuntimePersistence>,
+    pub(super) inner: lash_core::store::SessionStore,
     pub(super) drive_seal_count: Arc<AtomicUsize>,
 }
 
 impl CommitRetryStore {
-    pub(super) fn new(inner: Arc<dyn lash_core::RuntimePersistence>) -> Self {
+    pub(super) fn new(inner: lash_core::store::SessionStore) -> Self {
         Self {
             inner,
             drive_seal_count: Arc::new(AtomicUsize::new(0)),
