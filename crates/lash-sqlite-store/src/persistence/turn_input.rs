@@ -632,8 +632,9 @@ impl IngressStore for Store {
         let input_id = input_id.clone();
         self.conn
             .call(move |conn| {
-                // One point read by primary key; the lifecycle filter the
-                // list applies in SQL is applied to the one row here.
+                // One point read by primary key; the list's lifecycle filter
+                // is applied to the one row here: a row is listed until it is
+                // completed or cancelled, open or admitted to its root alike.
                 let outcome = (|| {
                     let row = conn
                         .prepare_cached(
@@ -653,7 +654,7 @@ impl IngressStore for Store {
                     Ok(row
                         .map(pending_turn_input_read_from_row)
                         .transpose()?
-                        .filter(|read| read.input.state.is_open()))
+                        .filter(|read| !read.input.state.is_terminal()))
                 })();
                 Ok(outcome)
             })

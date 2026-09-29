@@ -669,8 +669,9 @@ impl IngressStore for PostgresSessionStore {
         session_id: &SessionId,
         input_id: &lash_core_execution::InputId,
     ) -> Result<Option<lash_core_execution::PendingTurnInputRead>, StoreError> {
-        // One point read by primary key; the lifecycle filter the list
-        // applies in SQL is applied to the one row here.
+        // One point read by primary key; the list's lifecycle filter is
+        // applied to the one row here: a row is listed until it is completed
+        // or cancelled, open or admitted to its root alike.
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let row = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
@@ -686,7 +687,7 @@ impl IngressStore for PostgresSessionStore {
         Ok(row
             .map(pending_turn_input_read_from_row)
             .transpose()?
-            .filter(|read| read.input.state.is_open()))
+            .filter(|read| !read.input.state.is_terminal()))
     }
 
     async fn list_turn_input_applications(

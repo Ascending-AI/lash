@@ -1544,10 +1544,12 @@ pub trait IngressStore: Send + Sync {
 
     /// List undelivered user inputs for reconciliation or queue preview.
     ///
-    /// Completed and cancelled rows are excluded. A row a root admitted is
-    /// returned as
+    /// Completed and cancelled rows are excluded. A row a root admitted,
+    /// at the root's own admission or at one of its checkpoints, is returned
+    /// as
     /// [`PendingTurnInputReadStatus::Admitted`](crate::PendingTurnInputReadStatus::Admitted)
-    /// naming that root, and every other row as
+    /// naming that root until the root's commit completes it or its terminal
+    /// releases it, and every other row as
     /// [`Open`](crate::PendingTurnInputReadStatus::Open). An admitted row is
     /// answered by its root alone; resubmitting the same input under the same
     /// source key returns the row.
@@ -1556,9 +1558,10 @@ pub trait IngressStore: Send + Sync {
         session_id: &SessionId,
     ) -> Result<Vec<crate::PendingTurnInputRead>, StoreError>;
 
-    /// Read one undelivered user input by id: the row
+    /// Read one pending user input by id: the row
     /// [`list_pending_turn_inputs`](Self::list_pending_turn_inputs) lists for
-    /// `input_id`, or `None` once it is completed, cancelled or unknown.
+    /// `input_id`, with the status the list gives it, or `None` once it is
+    /// completed, cancelled or unknown.
     ///
     /// The default filters that list. Durable backends override it with one
     /// point read by `(session_id, input_id)`, so a follower asking whether

@@ -552,8 +552,10 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
 /// FIG-3976: a checkpoint-admitted input has no root binding while its
 /// delivery is in flight; the commit that completes it binds it to the root
 /// that applied it, so `root_of_input` resolves it by one point read. The
-/// row's own point read, `pending_turn_input`, answers what the undelivered
-/// list answers for it at each stage.
+/// row's own point read, `pending_turn_input`, answers what the pending list
+/// answers for it at each stage: open once enqueued, admitted to its root
+/// from the checkpoint until the root's commit completes it (FIG-4044), and
+/// absent from then on.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -573,7 +575,7 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
         .await
         .expect("enqueue active input");
     assert_eq!(
-        undelivered_status(&store, &session_id, &input.input_id).await,
+        pending_status(&store, &session_id, &input.input_id).await,
         (
             Some(crate::PendingTurnInputReadStatus::Open),
             Some(crate::PendingTurnInputReadStatus::Open)
@@ -609,9 +611,13 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
         "a checkpoint delivery in flight binds no root yet"
     );
     assert_eq!(
-        undelivered_status(&store, &session_id, &input.input_id).await,
-        (None, None),
-        "an accepted checkpoint delivery is no longer undelivered, by id or in the list"
+        pending_status(&store, &session_id, &input.input_id).await,
+        (
+            Some(crate::PendingTurnInputReadStatus::Admitted { root: turn.clone() }),
+            Some(crate::PendingTurnInputReadStatus::Admitted { root: turn.clone() })
+        ),
+        "an accepted checkpoint delivery reads admitted to its root, by id and in the list, \
+         until the root settles it"
     );
 
     end_root(
@@ -629,9 +635,9 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
         "the completing commit binds the input to the root that applied it"
     );
     assert_eq!(
-        undelivered_status(&store, &session_id, &input.input_id).await,
+        pending_status(&store, &session_id, &input.input_id).await,
         (None, None),
-        "a completed input is no longer undelivered, by id or in the list"
+        "the completing commit takes the input out of the pending read, by id and in the list"
     );
     assert_eq!(
         store
@@ -642,12 +648,12 @@ pub async fn a_checkpoint_applied_input_resolves_to_its_root_by_point_read(
     );
 }
 
-/// `input`'s undelivered status by its point read and by the session's list.
+/// `input`'s pending-read status by its point read and by the session's list.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: the reads are established by the caller's setup"
 )]
-async fn undelivered_status(
+async fn pending_status(
     store: &Arc<dyn RuntimePersistence>,
     session_id: &SessionId,
     input: &crate::InputId,
@@ -663,7 +669,7 @@ async fn undelivered_status(
     let listed = store
         .list_pending_turn_inputs(session_id)
         .await
-        .expect("list the undelivered rows")
+        .expect("list the pending rows")
         .into_iter()
         .find(|read| read.input.input_id == *input)
         .map(|read| read.status);
