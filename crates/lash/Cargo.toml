@@ -122,6 +122,7 @@ lash-restate-test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "postgres"] }
 rmp-serde = { workspace = true }
 serde_bytes = { workspace = true }
 trybuild = "1"

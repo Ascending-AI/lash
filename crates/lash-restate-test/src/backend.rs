@@ -1,9 +1,9 @@
 //! The ready-made lash backend on the server double: lash-restate's engine
-//! over a SQLite memory store set (storage only), with every lash-restate
+//! over a storage-only store set, with every lash-restate
 //! service bound on one endpoint that the in-process server serves.
 //!
-//! [`backend`] is the one constructor every fixture funnels through. Its
-//! shape follows the engine/storage split: the stores are built here, the
+//! The constructors follow the engine/storage split: the stores are built
+//! on the server's clock, the
 //! engine is lash-restate's, and the server double stands in for
 //! `restate-server`.
 
@@ -59,7 +59,7 @@ pub type HandlerAttempt = Arc<
 pub enum BackendError {
     #[error(transparent)]
     Server(#[from] StartError),
-    #[error("the SQLite memory store set could not open: {0}")]
+    #[error("the store set could not open: {0}")]
     Stores(String),
     #[error("the Restate authority id is invalid: {0}")]
     Authority(String),
@@ -91,11 +91,12 @@ impl From<RestateRegistrationError> for BackendError {
 /// server alive forever, so the handle is not a backend (FIG-3723). Effects
 /// that must run inside a Restate handler (a turn's) enter one through
 /// [`run_in_handler`](Self::run_in_handler).
-#[derive(Clone)]
-pub struct RestateTestBackend {
+/// SQLite constructors retain the concrete store set for SQL diagnostics;
+/// [`backend_with_store_set`] accepts any storage implementation.
+pub struct RestateTestBackend<Stores: StoreSet + ?Sized = lash_sqlite_store::SqliteStoreSet> {
     server: RestateTestServer,
     restate: Arc<RestateEngine>,
-    stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    stores: Arc<Stores>,
     engine_stores: Arc<dyn StoreSet>,
     clock: Arc<TestClock>,
     connection: RestateConnection,
@@ -105,7 +106,24 @@ pub struct RestateTestBackend {
     authority: RestateAuthorityId,
 }
 
-impl std::fmt::Debug for RestateTestBackend {
+impl<Stores: StoreSet + ?Sized> Clone for RestateTestBackend<Stores> {
+    fn clone(&self) -> Self {
+        Self {
+            server: self.server.clone(),
+            restate: Arc::clone(&self.restate),
+            stores: Arc::clone(&self.stores),
+            engine_stores: Arc::clone(&self.engine_stores),
+            clock: Arc::clone(&self.clock),
+            connection: self.connection.clone(),
+            processes: self.processes.clone(),
+            jobs: Arc::clone(&self.jobs),
+            loans: Arc::clone(&self.loans),
+            authority: self.authority.clone(),
+        }
+    }
+}
+
+impl<Stores: StoreSet + ?Sized> std::fmt::Debug for RestateTestBackend<Stores> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RestateTestBackend")
@@ -140,6 +158,7 @@ pub async fn backend_with(
         None,
         "",
         DeploymentHooks::default(),
+        sqlite_stores,
         decorate_stores,
     )
     .await
@@ -156,7 +175,15 @@ pub async fn backend_with_build(
     label: impl Into<String>,
     hooks: DeploymentHooks,
 ) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed), None, label, hooks, |stores| stores).await
+    RestateTestBackend::build(
+        config.with_seed(seed),
+        None,
+        label,
+        hooks,
+        sqlite_stores,
+        |stores| stores,
+    )
+    .await
 }
 
 /// [`backend`], whose endpoint cuts every process segment after
@@ -172,19 +199,80 @@ pub async fn backend_with_segment_budget(
         Some(segment_effect_budget),
         "",
         DeploymentHooks::default(),
+        sqlite_stores,
         |stores| stores,
     )
     .await
 }
 
-impl RestateTestBackend {
-    async fn build(
+/// A fresh server double whose real endpoint runs over `make_stores`'s store set.
+/// The factory receives the clock moved by the server, so every storage port
+/// uses the same clock as the SQLite fixtures. Provision external storage
+/// before calling this constructor; opening the engine does not run DDL.
+pub async fn backend_with_store_set<StoreFuture>(
+    seed: u64,
+    config: ServerConfig,
+    make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
+) -> Result<RestateTestBackend<dyn StoreSet>, BackendError>
+where
+    StoreFuture: Future<Output = Result<Arc<dyn StoreSet>, BackendError>>,
+{
+    RestateTestBackend::build(
+        config.with_seed(seed),
+        None,
+        "",
+        DeploymentHooks::default(),
+        |clock| async {
+            let stores = make_stores(clock).await?;
+            Ok((Arc::clone(&stores), stores))
+        },
+        |stores| stores,
+    )
+    .await
+}
+
+async fn sqlite_stores(
+    clock: Arc<dyn lash_core::Clock>,
+) -> Result<(Arc<lash_sqlite_store::SqliteStoreSet>, Arc<dyn StoreSet>), BackendError> {
+    // Sequential test IDs keep process names simple within a run. Attempt
+    // interleaving is concurrent and can change which process gets an ID.
+    // A simulation holds hundreds of doubles open at once, so each keeps a
+    // single read connection rather than a reader pool.
+    let memory = lash_sqlite_store::SqliteStoreSetOptions::memory();
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+            lash_sqlite_store::SqliteStoreSetOptions {
+                process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
+                store: lash_sqlite_store::StoreOptions {
+                    connection_policy: lash_sqlite_store::SqliteConnectionPolicy {
+                        read_connections: std::num::NonZeroUsize::MIN,
+                        ..memory.store.connection_policy
+                    },
+                    ..memory.store
+                },
+                ..memory
+            },
+            clock,
+        )
+        .await
+        .map_err(|error| BackendError::Stores(error.to_string()))?,
+    );
+    let ports = Arc::clone(&stores) as Arc<dyn StoreSet>;
+    Ok((stores, ports))
+}
+
+impl<Stores: StoreSet + ?Sized> RestateTestBackend<Stores> {
+    async fn build<StoreFuture>(
         config: ServerConfig,
         segment_effect_budget: Option<u64>,
         first_label: impl Into<String>,
         first_hooks: DeploymentHooks,
+        make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
         decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
-    ) -> Result<Self, BackendError> {
+    ) -> Result<Self, BackendError>
+    where
+        StoreFuture: Future<Output = Result<(Arc<Stores>, Arc<dyn StoreSet>), BackendError>>,
+    {
         let clock = Arc::new(TestClock::new(config.start_time_ms));
         let server = RestateTestServer::new(config)?;
         let follower = Arc::clone(&clock);
@@ -197,6 +285,7 @@ impl RestateTestBackend {
             segment_effect_budget,
             first_label,
             first_hooks,
+            make_stores,
             decorate_stores,
         )
         .await
@@ -215,8 +304,8 @@ impl RestateTestBackend {
         &self,
         namespace: RestateNamespace,
         label: impl Into<String>,
-    ) -> Result<Self, BackendError> {
-        Self::build_on(
+    ) -> Result<RestateTestBackend, BackendError> {
+        RestateTestBackend::build_on(
             self.server.clone(),
             Arc::clone(&self.clock),
             true,
@@ -224,6 +313,7 @@ impl RestateTestBackend {
             None,
             label,
             DeploymentHooks::default(),
+            sqlite_stores,
             |stores| stores,
         )
         .await
@@ -234,7 +324,7 @@ impl RestateTestBackend {
         clippy::fn_params_excessive_bools,
         reason = "the server's first backend and one beside it differ in every one"
     )]
-    async fn build_on(
+    async fn build_on<StoreFuture>(
         server: RestateTestServer,
         clock: Arc<TestClock>,
         beside: bool,
@@ -242,32 +332,14 @@ impl RestateTestBackend {
         segment_effect_budget: Option<u64>,
         first_label: impl Into<String>,
         first_hooks: DeploymentHooks,
+        make_stores: impl FnOnce(Arc<dyn lash_core::Clock>) -> StoreFuture,
         decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
-    ) -> Result<Self, BackendError> {
+    ) -> Result<Self, BackendError>
+    where
+        StoreFuture: Future<Output = Result<(Arc<Stores>, Arc<dyn StoreSet>), BackendError>>,
+    {
         let first_label = first_label.into();
-        // Sequential test IDs keep process names simple within a run. Attempt
-        // interleaving is concurrent and can change which process gets an ID.
-        // A simulation holds hundreds of doubles open at once, so each keeps a
-        // single read connection rather than a reader pool.
-        let memory = lash_sqlite_store::SqliteStoreSetOptions::memory();
-        let stores = Arc::new(
-            lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
-                lash_sqlite_store::SqliteStoreSetOptions {
-                    process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
-                    store: lash_sqlite_store::StoreOptions {
-                        connection_policy: lash_sqlite_store::SqliteConnectionPolicy {
-                            read_connections: std::num::NonZeroUsize::MIN,
-                            ..memory.store.connection_policy
-                        },
-                        ..memory.store
-                    },
-                    ..memory
-                },
-                Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
-            )
-            .await
-            .map_err(|error| BackendError::Stores(error.to_string()))?,
-        );
+        let (stores, ports) = make_stores(Arc::clone(&clock) as Arc<dyn lash_core::Clock>).await?;
         let connection =
             RestateConnection::with_transport(server.ingress_url(), server.transport());
         // The server's first deployment journals under the seed's authority;
@@ -278,7 +350,7 @@ impl RestateTestBackend {
             format!("lash-restate-test-{}", server.config().seed)
         })
         .map_err(|error| BackendError::Authority(error.to_string()))?;
-        let engine_stores = decorate_stores(Arc::clone(&stores) as Arc<dyn StoreSet>);
+        let engine_stores = decorate_stores(ports);
         let restate = Arc::new(RestateEngine::new(
             Arc::clone(&engine_stores),
             RestateConfig::new(
@@ -435,7 +507,7 @@ impl RestateTestBackend {
     /// [`engine_stores`](Self::engine_stores).
     ///
     /// [`backend_with`]: crate::backend_with
-    pub fn stores(&self) -> &Arc<lash_sqlite_store::SqliteStoreSet> {
+    pub fn stores(&self) -> &Arc<Stores> {
         &self.stores
     }
 

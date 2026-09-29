@@ -96,7 +96,7 @@ impl OpenHandler {
     }
 }
 
-impl RestateTestBackend {
+impl<Stores: lash_core::StoreSet + ?Sized> RestateTestBackend<Stores> {
     /// Open a workflow handler on the server under `admitted` and lend its
     /// execution to this task: see [`OpenHandler`].
     pub async fn open_handler(&self, admitted: AdmittedScope) -> Result<OpenHandler, String> {

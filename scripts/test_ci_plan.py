@@ -95,6 +95,12 @@ class ConfidenceConclusionTests(unittest.TestCase):
 class ClassifyTests(unittest.TestCase):
     def test_pr_service_path_map(self) -> None:
         cases = (
+            ("crates/lash/tests/artifact_referrers_evidence.rs", "true", "false"),
+            ("crates/lash/tests/artifact_referrers_evidence/fixture.rs", "true", "false"),
+            ("crates/lash-restate-test/src/backend.rs", "true", "false"),
+            ("crates/lash-lashlang-runtime/src/lib.rs", "true", "false"),
+            ("crates/lash-plugin-process-controls/src/lib.rs", "true", "false"),
+            ("crates/lash-protocol-rlm/src/lib.rs", "true", "false"),
             ("crates/lash-postgres-store/src/lib.rs", "true", "false"),
             ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true", "false"),
             ("crates/lash-store-sql/src/lib.rs", "true", "false"),

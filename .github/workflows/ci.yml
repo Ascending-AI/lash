@@ -1626,6 +1626,11 @@ jobs:
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-store
 
+      - name: Test RLM artifact referrers on Postgres
+        run: |
+          bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
+            bash scripts/ci/store-tests.sh pg-artifact-referrers
+
       - name: Test runtime pool-wait binding
         if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
         run: |

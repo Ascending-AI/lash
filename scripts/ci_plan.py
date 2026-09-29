@@ -357,6 +357,11 @@ UNGATED_JOBS = {
 
 STORE_PR_PACKAGES = frozenset(
     {
+        "crates/lash",
+        "crates/lash-restate-test",
+        "crates/lash-lashlang-runtime",
+        "crates/lash-plugin-process-controls",
+        "crates/lash-protocol-rlm",
         "crates/lash-postgres-store",
         "crates/lash-sqlite-store",
         "crates/lash-core-store",

@@ -16,6 +16,10 @@ use lash::provider::LlmResponse;
 use lash::{LashCore, TurnInput, TurnOutput};
 use lash_sansio::sync::MutexExt;
 
+#[path = "artifact_referrers_evidence/fixture.rs"]
+mod fixture;
+use fixture::Fixture;
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Edge {
     artifact_ref: String,
@@ -23,46 +27,10 @@ struct Edge {
     id: String,
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "acceptance fixture reads the durable edge table"
-)]
-fn sqlite_edges(double: &lash_restate_test::RestateTestBackend) -> Vec<Edge> {
-    let uri = double
-        .stores()
-        .database_uri(lash_sqlite_store::SqliteDatabase::DurableCore);
-    let connection = rusqlite::Connection::open_with_flags(
-        uri,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-    )
-    .expect("open durable core for edge inspection");
-    let mut statement = connection
-        .prepare(
-            "SELECT artifact_ref, referrer_kind, referrer_id
-         FROM artifact_referrer_edges WHERE namespace = 'lashlang_module'
-         ORDER BY artifact_ref, referrer_kind, referrer_id",
-        )
-        .expect("prepare edge read");
-    statement
-        .query_map([], |row| {
-            Ok(Edge {
-                artifact_ref: row.get(0)?,
-                kind: row.get(1)?,
-                id: row.get(2)?,
-            })
-        })
-        .expect("read edges")
-        .map(|row| row.expect("decode edge"))
-        .collect()
-}
-
-async fn wait_edges(
-    double: &lash_restate_test::RestateTestBackend,
-    predicate: impl Fn(&[Edge]) -> bool,
-) -> Vec<Edge> {
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+async fn wait_edges(fixture: &Fixture, predicate: impl Fn(&[Edge]) -> bool) -> Vec<Edge> {
+    match tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
-            let edges = sqlite_edges(double);
+            let edges = fixture.edges().await;
             if predicate(&edges) {
                 return edges;
             }
@@ -70,12 +38,13 @@ async fn wait_edges(
         }
     })
     .await
-    .unwrap_or_else(|_| {
-        panic!(
+    {
+        Ok(edges) => edges,
+        Err(_) => panic!(
             "artifact edges did not reach the expected state: {:?}",
-            sqlite_edges(double)
-        )
-    })
+            fixture.edges().await
+        ),
+    }
 }
 
 fn frame_artifacts(edges: &[Edge]) -> BTreeSet<&str> {
@@ -117,7 +86,7 @@ fn response(code: &str) -> LlmResponse {
 }
 
 fn rlm_core(
-    double: &lash_restate_test::RestateTestBackend,
+    double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     responses: Vec<LlmResponse>,
 ) -> LashCore {
     rlm_core_with_queue(double, Arc::new(Mutex::new(VecDeque::from(responses))))
@@ -125,7 +94,7 @@ fn rlm_core(
 
 #[expect(clippy::expect_used, reason = "test fixture validates its setup")]
 fn rlm_core_with_queue(
-    double: &lash_restate_test::RestateTestBackend,
+    double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
     queue: Arc<Mutex<VecDeque<LlmResponse>>>,
 ) -> LashCore {
     let provider = lash::testing::TestProvider::builder()
@@ -176,7 +145,10 @@ fn rlm_core_with_queue(
     clippy::expect_used,
     reason = "test fixture installs its process worker"
 )]
-fn serve_processes(double: &lash_restate_test::RestateTestBackend, core: &LashCore) {
+fn serve_processes(
+    double: &lash_restate_test::RestateTestBackend<dyn lash_core::StoreSet>,
+    core: &LashCore,
+) {
     let worker = lash_core_worker::DurableProcessWorker::new(
         core.durable_process_worker_config()
             .expect("process-worker config"),
@@ -187,17 +159,15 @@ fn serve_processes(double: &lash_restate_test::RestateTestBackend, core: &LashCo
 
 #[tokio::test]
 async fn cold_reopen_globals_across_turns() {
-    let double =
-        lash_restate_test::backend(0x4031_0001, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x4031_0001).await;
+    let double = &fixture.double;
     // A reopened core may use either provider handle for the same route.
     // Both handles therefore draw from the two-turn script in call order.
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response("const saved = async () => 7; finish('bound');"),
         response("const run = await processes.start({ definition: saved }); finish(await run);"),
     ])));
-    let first_core = rlm_core_with_queue(&double, Arc::clone(&responses));
+    let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
     let first_session = first_core
         .session("artifact-referrers-cold-reopen")
         .open()
@@ -209,7 +179,7 @@ async fn cold_reopen_globals_across_turns() {
         .await
         .expect("first turn");
     assert!(first.is_success());
-    let first_edges = wait_edges(&double, |edges| {
+    let first_edges = wait_edges(&fixture, |edges| {
         edges.len() == 2
             && edges.iter().any(|edge| edge.kind == "frame_environment")
             && edges.iter().any(|edge| edge.kind == "execution")
@@ -221,7 +191,7 @@ async fn cold_reopen_globals_across_turns() {
         .expect("frame edge")
         .id
         .clone();
-    let settled = wait_edges(&double, |edges| {
+    let settled = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment" && edges[0].id == frame_id
     })
     .await;
@@ -229,8 +199,8 @@ async fn cold_reopen_globals_across_turns() {
     drop(first_session);
     drop(first_core);
 
-    let second_core = rlm_core_with_queue(&double, Arc::clone(&responses));
-    serve_processes(&double, &second_core);
+    let second_core = rlm_core_with_queue(double, Arc::clone(&responses));
+    serve_processes(double, &second_core);
     let second_session = second_core
         .session("artifact-referrers-cold-reopen")
         .open()
@@ -250,7 +220,7 @@ async fn cold_reopen_globals_across_turns() {
         "each of the two turns consumes one scripted response"
     );
     assert_eq!(last_cell_finish(&second), Some(serde_json::json!(7)));
-    let after_start = wait_edges(&double, |edges| {
+    let after_start = wait_edges(&fixture, |edges| {
         edges
             .iter()
             .any(|edge| edge.kind == "frame_environment" && edge.id == frame_id)
@@ -265,12 +235,10 @@ async fn cold_reopen_globals_across_turns() {
 
 #[tokio::test]
 async fn overwrite_retains_old_module_until_frame_end() {
-    let double =
-        lash_restate_test::backend(0x4031_0002, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x4031_0002).await;
+    let double = &fixture.double;
     let core = rlm_core(
-        &double,
+        double,
         vec![
             response(
                 "let holder = new Map(); { const old = async () => 11; holder.set('saved', old); } finish('first');",
@@ -293,7 +261,7 @@ async fn overwrite_retains_old_module_until_frame_end() {
         .await
         .expect("first turn");
     assert!(first_turn.is_success(), "first binding: {first_turn:?}");
-    let first = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
+    let first = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
     let old_ref = frame_artifacts(&first)
         .into_iter()
         .next()
@@ -307,7 +275,7 @@ async fn overwrite_retains_old_module_until_frame_end() {
             .expect("second turn")
             .is_success()
     );
-    let rebound = wait_edges(&double, |edges| frame_artifacts(edges).len() == 2).await;
+    let rebound = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 2).await;
     assert!(
         frame_artifacts(&rebound).contains(old_ref.as_str()),
         "overwrite retains the old frame edge"
@@ -320,7 +288,7 @@ async fn overwrite_retains_old_module_until_frame_end() {
             .expect("switch turn")
             .is_success()
     );
-    let after = wait_edges(&double, |edges| {
+    let after = wait_edges(&fixture, |edges| {
         !edges.iter().any(|edge| edge.artifact_ref == old_ref)
     })
     .await;
@@ -332,12 +300,10 @@ async fn overwrite_retains_old_module_until_frame_end() {
 
 #[tokio::test]
 async fn continue_as_carries_only_seeded_definition() {
-    let double =
-        lash_restate_test::backend(0x4031_0003, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x4031_0003).await;
+    let double = &fixture.double;
     let core = rlm_core(
-        &double,
+        double,
         vec![
             response("const carried = async () => 11; finish('carried bound');"),
             response("const dropped = async () => 22; finish('dropped bound');"),
@@ -350,7 +316,7 @@ async fn continue_as_carries_only_seeded_definition() {
             ),
         ],
     );
-    serve_processes(&double, &core);
+    serve_processes(double, &core);
     let session = core
         .session("artifact-referrers-carry")
         .open()
@@ -362,7 +328,7 @@ async fn continue_as_carries_only_seeded_definition() {
         .await
         .expect("first turn");
     assert!(first_turn.is_success(), "first binding: {first_turn:?}");
-    let carried_before = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
+    let carried_before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 1).await;
     let carried_ref = frame_artifacts(&carried_before)
         .into_iter()
         .next()
@@ -376,7 +342,7 @@ async fn continue_as_carries_only_seeded_definition() {
             .expect("second turn")
             .is_success()
     );
-    let before = wait_edges(&double, |edges| frame_artifacts(edges).len() == 2).await;
+    let before = wait_edges(&fixture, |edges| frame_artifacts(edges).len() == 2).await;
     let dropped_ref = frame_artifacts(&before)
         .into_iter()
         .find(|artifact_ref| *artifact_ref != carried_ref)
@@ -394,7 +360,7 @@ async fn continue_as_carries_only_seeded_definition() {
         .await
         .expect("switch turn");
     assert!(switched.is_success(), "carry switch: {switched:?}");
-    let after = wait_edges(&double, |edges| {
+    let after = wait_edges(&fixture, |edges| {
         let frame: Vec<_> = edges
             .iter()
             .filter(|edge| edge.kind == "frame_environment")
@@ -421,12 +387,10 @@ async fn continue_as_carries_only_seeded_definition() {
 
 #[tokio::test]
 async fn first_turn_continue_as_fences_its_initial_frame() {
-    let double =
-        lash_restate_test::backend(0x4031_0004, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x4031_0004).await;
+    let double = &fixture.double;
     let core = rlm_core(
-        &double,
+        double,
         vec![
             response(
                 "const old = async () => 5; await control.continue_as({ task: 'next frame' });",
@@ -470,7 +434,7 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
     }
     assert_eq!(frames.len(), 2, "the switch opens a second frame");
     let first_frame = frames[0].as_str();
-    let after = wait_edges(&double, |edges| {
+    let after = wait_edges(&fixture, |edges| {
         !edges
             .iter()
             .any(|edge| edge.kind == "frame_environment" && edge.id == first_frame)
@@ -486,12 +450,10 @@ async fn first_turn_continue_as_fences_its_initial_frame() {
 
 #[tokio::test]
 async fn named_definition_survives_uncarried_frame_switch() {
-    let double =
-        lash_restate_test::backend(0x4031_0012, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x4031_0012).await;
+    let double = &fixture.double;
     let core = rlm_core(
-        &double,
+        double,
         vec![
             response(
                 "const named = async () => 31; await processes.register({ name: 'saved', definition: named }); finish('registered');",
@@ -513,7 +475,7 @@ async fn named_definition_survives_uncarried_frame_switch() {
             .expect("registration turn")
             .is_success()
     );
-    let registered = wait_edges(&double, |edges| {
+    let registered = wait_edges(&fixture, |edges| {
         edges.iter().any(|edge| edge.kind == "definition_revision")
     })
     .await;
@@ -531,7 +493,7 @@ async fn named_definition_survives_uncarried_frame_switch() {
             .expect("switch turn")
             .is_success()
     );
-    let after = wait_edges(&double, |edges| {
+    let after = wait_edges(&fixture, |edges| {
         edges
             .iter()
             .any(|edge| edge.artifact_ref == module_ref && edge.kind == "definition_revision")
@@ -595,15 +557,13 @@ fn create_definition_cell(binding: &str) -> String {
 /// later turn in the same frame starts it by value after a cold reopen.
 #[tokio::test]
 async fn created_definition_survives_cold_reopen_and_starts_by_value() {
-    let double =
-        lash_restate_test::backend(0x3116_0001, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
+    let fixture = Fixture::new(0x3116_0001).await;
+    let double = &fixture.double;
     let responses = Arc::new(Mutex::new(VecDeque::from(vec![
         response(&create_definition_cell("made")),
         response("const run = await processes.start({ definition: made }); finish(await run);"),
     ])));
-    let first_core = rlm_core_with_queue(&double, Arc::clone(&responses));
+    let first_core = rlm_core_with_queue(double, Arc::clone(&responses));
     let first_session = first_core
         .session("processes-create-cold-reopen")
         .open()
@@ -615,7 +575,7 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
         .await
         .expect("first turn");
     assert!(first.is_success(), "processes.create turn: {first:?}");
-    let created = wait_edges(&double, |edges| {
+    let created = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
     })
     .await;
@@ -624,8 +584,8 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
     drop(first_session);
     drop(first_core);
 
-    let second_core = rlm_core_with_queue(&double, Arc::clone(&responses));
-    serve_processes(&double, &second_core);
+    let second_core = rlm_core_with_queue(double, Arc::clone(&responses));
+    serve_processes(double, &second_core);
     let second_session = second_core
         .session("processes-create-cold-reopen")
         .open()
@@ -642,7 +602,7 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
     );
     assert!(responses.lock_recover().is_empty());
     assert_eq!(last_cell_finish(&second), Some(serde_json::json!(42)));
-    let after_start = wait_edges(&double, |edges| {
+    let after_start = wait_edges(&fixture, |edges| {
         edges.iter().any(|edge| {
             edge.kind == "frame_environment"
                 && edge.id == frame_id
@@ -662,11 +622,9 @@ async fn created_definition_survives_cold_reopen_and_starts_by_value() {
 /// else keeps a created definition alive.
 #[tokio::test]
 async fn created_definition_is_reclaimed_after_session_deletion() {
-    let double =
-        lash_restate_test::backend(0x3116_0002, lash_restate_test::ServerConfig::default())
-            .await
-            .expect("Restate double");
-    let core = rlm_core(&double, vec![response(&create_definition_cell("made"))]);
+    let fixture = Fixture::new(0x3116_0002).await;
+    let double = &fixture.double;
+    let core = rlm_core(double, vec![response(&create_definition_cell("made"))]);
     let session_id = "processes-create-deletion";
     let session = core.session(session_id).open().await.expect("session");
     let created = session
@@ -675,7 +633,7 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         .await
         .expect("create turn");
     assert!(created.is_success(), "processes.create turn: {created:?}");
-    let held = wait_edges(&double, |edges| {
+    let held = wait_edges(&fixture, |edges| {
         edges.len() == 1 && edges[0].kind == "frame_environment"
     })
     .await;
@@ -728,7 +686,7 @@ async fn created_definition_is_reclaimed_after_session_deletion() {
         "the delete runs in the call: {deletion:?}"
     );
 
-    let after = wait_edges(&double, |edges| edges.is_empty()).await;
+    let after = wait_edges(&fixture, |edges| edges.is_empty()).await;
     assert!(after.is_empty(), "no edge survives the session: {after:?}");
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         while modules

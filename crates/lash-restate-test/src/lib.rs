@@ -25,7 +25,7 @@
 //! invocation *is* (the command that created it, its workflow or idempotency
 //! key), never from creation order: invocation ids, random seeds, timer
 //! tie-breaks and random crash points. Handlers run concurrently on Tokio,
-//! with SQLite completing on its own threads, so when two invocations race —
+//! with storage operations completing independently, so when two invocations race —
 //! a durable-wait registration and an index read, say — lash may take a
 //! different path from one run to the next, as it would against
 //! `restate-server`. Tests assert outcomes, not journal bytes. (lash also
@@ -41,7 +41,7 @@ pub mod server;
 
 pub use backend::{
     BackendError, HandlerAttempt, RestateTestBackend, SESSION_DRIVER_SERVICE, TURN_DRIVER_SERVICE,
-    backend, backend_with, backend_with_build, backend_with_segment_budget,
+    backend, backend_with, backend_with_build, backend_with_segment_budget, backend_with_store_set,
 };
 pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;

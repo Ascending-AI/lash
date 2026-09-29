@@ -2905,6 +2905,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "sqlx",
  "tempfile",
  "thiserror",
  "tokio",
