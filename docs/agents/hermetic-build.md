@@ -198,10 +198,12 @@ for the large suites in `[test_runs.large_suites]` of
 request in `[test_runs.pinned]`. A `:test_batch` reserves its own measured row
 when one exists, else its two largest members' requests side by side, and runs at
 most two members at once; the contention floor counts once per batch, not once
-per member. Local
-clients submit at most 16 jobs; CI submits 32. These are in-flight action
-limits, not compiler thread counts. The scheduler admits work against each
-worker's advertised capacity. Keep a fork's Bazel server alive to preserve
+per member. Each local invocation submits at most 16 jobs; each CI invocation
+defaults to 32. These are in-flight action limits, not compiler thread counts
+or an aggregate fleet budget. Concurrent local forks each have their own limit,
+so their combined requests can drive pool contention even when CI is quiet.
+The scheduler admits work against each worker's advertised CPU and memory
+capacity. Keep a fork's Bazel server alive to preserve
 its analysis cache.
 
 The Kiln golden is maintained outside agent forks. Its refresh prewarms the
@@ -704,8 +706,10 @@ upload policy — and `scripts/test_bazel_test_contract.py` refuses an IP
 address, an instance name, a fingerprint, a certificate path or a home
 directory in `.bazelrc`, under `.github/`, or in `scripts/ci_plan.py`.
 
-The local `--jobs=16` and CI `--jobs=32` limits count in-flight remote actions,
-not local cores. Resource defaults live in the unconditional `build` section
+The local `--jobs=16` default lives in `.bazelrc`. CI explicitly overrides it
+through the `jobs` input of `.github/actions/bazel-shared-cache`, which defaults
+to `32`. Neither per-invocation limit reserves capacity or caps the sum across
+clients. Resource defaults live in the unconditional `build` section
 of `.bazelrc`, so forks and CI use identical action keys for inherited requests.
 Measured compiles and test runs state their own requests. Aligning CI's previous
 4 CPU/4 GiB fallback with the local 1 CPU/1.5 GiB fallback changes the keys of

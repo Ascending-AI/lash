@@ -173,8 +173,12 @@ build --incompatible_strict_action_env
 # floor's 74 test actions ran eight at a time while the pool's slots sat
 # idle; at 64 the same run was worse (summed remote queue time 9 s ->
 # 2700-3900 s, the same tests' worker exec times doubled) because 74
-# four-core test actions oversubscribe the pool's 160 CPUs. 16 is shared with
-# CI, which composes its own flag list but inherits `build` lines.
+# four-core test actions oversubscribe the pool's 160 CPUs. The local default
+# is 16 per invocation. CI explicitly overrides it through the `jobs` input of
+# `.github/actions/bazel-shared-cache`, whose default remains 32.
+# Concurrent local forks each get their own 16-action limit, so their combined
+# requests drive contention even when CI is quiet. This is not a fleet budget;
+# the scheduler admits actions against each worker's CPU and memory capacity.
 build --jobs=16
 build --loading_phase_threads=4
 build --local_resources=cpu=8

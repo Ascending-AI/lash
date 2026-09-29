@@ -10,6 +10,11 @@ description: >-
   removes "$RUNNER_TEMP/build-cache". It restores the Bazel repository cache
   and output base and never saves them; cache-warm.yml is the one writer.
 
+inputs:
+  jobs:
+    description: Maximum in-flight Bazel actions per CI invocation, not a pool-wide budget.
+    default: "32"
+
 outputs:
   repository-cache-key:
     description: The Bazel repository cache key this run restored against.
@@ -163,9 +168,10 @@ runs:
         printf '%s' "$CACHE_CERT" > "$RUNNER_TEMP/build-cache/client.crt"
         printf '%s' "$CACHE_KEY" > "$RUNNER_TEMP/build-cache/client.key"
 
-    # The runner submits actions and waits: `--jobs` is a count of in-flight
-    # remote actions, not of local cores, and the pool advertises eight
-    # concurrent slots across two workers. `--remote_local_fallback=false`
+    # The jobs input overrides .bazelrc's local per-invocation default of 16.
+    # Each CI invocation submits at most 32 actions by default; concurrent
+    # clients share the pool, so this is not an aggregate admission budget.
+    # `--remote_local_fallback=false`
     # keeps an unreachable pool a red job rather than a silent two-core
     # compile, which is the intended trust posture.
     # The caller passes the raw secrets in this action's step `env`, and a step
@@ -177,8 +183,13 @@ runs:
         POOL_ENDPOINT: ${{ steps.pool.outputs.endpoint }}
         POOL_INSTANCE: ${{ steps.pool.outputs.instance }}
         POOL_RUNTIME: ${{ steps.pool.outputs.runtime }}
+        POOL_JOBS: ${{ inputs.jobs }}
       run: |
         set -euo pipefail
+        if ! [[ "$POOL_JOBS" =~ ^[1-9][0-9]*$ ]]; then
+          echo "::error::jobs must be a positive integer" >&2
+          exit 1
+        fi
         {
           echo "BAZEL_OUTPUT_USER_ROOT=$RUNNER_TEMP/bazel-output"
           echo "BAZEL_SHARED_CACHE_FLAGS<<EOF"
@@ -193,6 +204,6 @@ runs:
           echo "--remote_default_exec_properties=kiln_executor_runtime=${POOL_RUNTIME}"
           echo "--remote_local_fallback=false"
           echo "--remote_download_outputs=toplevel"
-          echo "--jobs=32"
+          echo "--jobs=${POOL_JOBS}"
           echo "EOF"
         } >> "$GITHUB_ENV"
