@@ -110,13 +110,22 @@ async fn window(
         .expect("committed session has a window")
 }
 
-/// The current window decodes only its frame even after earlier history grows.
-pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeployment>) {
-    let mut state = state("history-window-bounded");
-    admit(store.as_ref(), &state.session_id).await;
+async fn seed_window_fixture(
+    store: &dyn ConformanceDeployment,
+    extra_earlier_nodes: usize,
+) -> (RuntimeSessionState, FrameNodeId) {
+    let mut state = state(&format!("history-window-bounded-{extra_earlier_nodes}"));
+    admit(store, &state.session_id).await;
     state.ensure_agent_frame_initialized();
     append_nodes(&mut state, 40);
-    commit(store.as_ref(), &mut state).await;
+    commit(store, &mut state).await;
+    let mut remaining = extra_earlier_nodes;
+    while remaining > 0 {
+        let count = remaining.min(250);
+        append_nodes(&mut state, count);
+        commit(store, &mut state).await;
+        remaining -= count;
+    }
     let reported = (0..500)
         .map(|_| {
             TokenLedgerEntry::reported(
@@ -130,7 +139,7 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
         })
         .collect::<Vec<_>>();
     for entries in reported.chunks(100) {
-        commit_entries(store.as_ref(), &mut state, entries).await;
+        commit_entries(store, &mut state, entries).await;
     }
     let hole = TokenLedgerEntry {
         source: "turn".to_string(),
@@ -144,10 +153,10 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
             }
         })),
     };
-    commit_entries(store.as_ref(), &mut state, &[hole]).await;
+    commit_entries(store, &mut state, &[hole]).await;
     for ordinal in 0..50 {
         commit_with_evidence(
-            store.as_ref(),
+            store,
             &mut state,
             &[],
             vec![crate::TurnFailureEvidence {
@@ -168,40 +177,48 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
     }
     open_frame(&mut state, "history-middle-frame");
     append_nodes(&mut state, 30);
-    commit(store.as_ref(), &mut state).await;
+    commit(store, &mut state).await;
     let current_frame = open_frame(&mut state, "history-current-frame");
     append_nodes(&mut state, 11);
-    commit(store.as_ref(), &mut state).await;
+    commit(store, &mut state).await;
 
-    let before = store.decoded_row_counts_for_testing();
-    let read = window(store.as_ref(), &state.session_id).await;
-    let after = store.decoded_row_counts_for_testing();
-    assert_eq!(read.current_frame_node_id, Some(current_frame));
-    assert_eq!(read.window.nodes.len(), 12);
-    assert_eq!(after.graph_node_bodies - before.graph_node_bodies, 12);
-    assert_eq!(after.usage_rows - before.usage_rows, 0);
-    assert_eq!(after.usage_holes - before.usage_holes, 3);
-    assert_eq!(after.turn_receipt_bodies - before.turn_receipt_bodies, 0);
-    assert_eq!(
-        read.window.anchor().expect("anchored window").generation,
-        72
-    );
-    assert_eq!(read.usage.outstanding.len(), 3);
-    assert_eq!(read.usage.rows.len(), 1);
-    assert_eq!(read.usage.rows[0].usage.input_tokens, 500);
+    (state, current_frame)
+}
 
-    let ledger = store
-        .load_usage_ledger_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
-        .await
-        .expect("first usage ledger page");
-    assert_eq!(ledger.rows.len(), 7);
-    assert!(ledger.next.is_some());
-    let failures = store
-        .load_failure_evidence_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
-        .await
-        .expect("first failure evidence page");
-    assert_eq!(failures.settlements.len(), 7);
-    assert!(failures.next.is_some());
+/// The current window decodes only its frame even after earlier history grows.
+pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeployment>) {
+    for extra_earlier_nodes in [0, 1_000] {
+        let (state, current_frame) = seed_window_fixture(store.as_ref(), extra_earlier_nodes).await;
+        let before = store.decoded_row_counts_for_testing();
+        let read = window(store.as_ref(), &state.session_id).await;
+        let after = store.decoded_row_counts_for_testing();
+        assert_eq!(read.current_frame_node_id, Some(current_frame));
+        assert_eq!(read.window.nodes.len(), 12);
+        assert_eq!(after.graph_node_bodies - before.graph_node_bodies, 12);
+        assert_eq!(after.usage_rows - before.usage_rows, 0);
+        assert_eq!(after.usage_holes - before.usage_holes, 3);
+        assert_eq!(after.turn_receipt_bodies - before.turn_receipt_bodies, 0);
+        assert_eq!(
+            read.window.anchor().expect("anchored window").generation,
+            72 + extra_earlier_nodes as u64
+        );
+        assert_eq!(read.usage.outstanding.len(), 3);
+        assert_eq!(read.usage.rows.len(), 1);
+        assert_eq!(read.usage.rows[0].usage.input_tokens, 500);
+
+        let ledger = store
+            .load_usage_ledger_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
+            .await
+            .expect("first usage ledger page");
+        assert_eq!(ledger.rows.len(), 7);
+        assert!(ledger.next.is_some());
+        let failures = store
+            .load_failure_evidence_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
+            .await
+            .expect("first failure evidence page");
+        assert_eq!(failures.settlements.len(), 7);
+        assert!(failures.next.is_some());
+    }
 }
 
 /// Node and byte limits take exact prefixes, and a cursor remains pinned after an append.
