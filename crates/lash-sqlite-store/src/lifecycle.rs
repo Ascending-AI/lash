@@ -144,6 +144,31 @@ impl SqliteStore {
         Ok(store)
     }
 
+    /// Open a durable-core catalog under `root` with deterministic write faults.
+    #[cfg(feature = "testing")]
+    pub async fn open_with_fault_injector_for_testing(
+        root: &Path,
+        injector: crate::testing::SqliteFaultInjector,
+    ) -> tokio_rusqlite::Result<Self> {
+        let constructor = "SqliteStore::open_with_fault_injector_for_testing";
+        let location = crate::backend::file_location(root, constructor)?;
+        let identity: Arc<str> = location.identity().into();
+        let core =
+            DatabaseLocation::in_backend(&location, &identity, SqliteDatabase::DurableCore, None);
+        let store = Self::open_at(
+            &core,
+            StoreOptions::default(),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+            None,
+            None,
+            lash_core_execution::FleetFormat::writable_range(),
+            Some(injector),
+        )
+        .await?;
+        warn_process_registry_not_wired(constructor);
+        Ok(store)
+    }
+
     /// Open the durable-core database admitting `writable` as the opening
     /// build's fleet-format writable range.
     ///
