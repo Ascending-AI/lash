@@ -171,7 +171,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
     assert!(
         factory
-            .read_session(&SessionId::from(SESSION_ID))
+            .read_view(&SessionId::from(SESSION_ID))
             .await
             .expect("read a missing session")
             .is_none(),
@@ -179,7 +179,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
     );
 
     let writer = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create read-session writer");
     let mut state = crate::RuntimeSessionState {
@@ -239,7 +239,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         .expect("live writer owns the session");
 
     let view = factory
-        .read_session(&SessionId::from(SESSION_ID))
+        .read_view(&SessionId::from(SESSION_ID))
         .await
         .expect("read alongside live writer")
         .expect("committed session has a read view");
@@ -290,7 +290,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::Deployme
         .expect("delete read-session fixture");
     assert!(
         factory
-            .read_session(&SessionId::from(SESSION_ID))
+            .read_view(&SessionId::from(SESSION_ID))
             .await
             .expect("read deleted session disposition")
             .is_none(),
@@ -352,7 +352,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         "a missing session must not report claimable queued work"
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create peek conformance store");
     assert!(
@@ -419,7 +419,7 @@ async fn session_store_factory_claimable_queued_work_peek(
         crate::SessionRelation::Root,
     );
     let fenced_store = factory
-        .create_store(&fenced_request)
+        .admit_view(&fenced_request)
         .await
         .expect("create claim-fence conformance store");
     fenced_store
@@ -659,14 +659,14 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     );
     assert!(
         factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .expect("open after the fenced commit")
             .is_none(),
         "a fenced commit must leave the session deleted"
     );
 
-    let recreate_error = match factory.create_store(&request).await {
+    let recreate_error = match factory.admit_view(&request).await {
         Ok(_) => panic!("explicit create must not lift a retired session id's fence"),
         Err(error) => error,
     };
@@ -724,7 +724,7 @@ pub async fn process_prune_deletes_owned_session_stores(
             policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         };
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("create process-owned session store");
         crate::conformance::helpers::record_completed_attachment_write(
@@ -748,7 +748,7 @@ pub async fn process_prune_deletes_owned_session_stores(
 
     let pinned_request = &requests[0];
     let pinned_store = factory
-        .open_existing_store(pinned_request)
+        .live_view_for(pinned_request)
         .await
         .expect("open process-owned session for closure pin")
         .expect("process-owned session exists");
@@ -883,7 +883,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     for request in requests {
         assert!(
             factory
-                .open_existing_store(&request)
+                .live_view_for(&request)
                 .await
                 .expect("probe pruned process-owned store")
                 .is_none(),
@@ -896,13 +896,13 @@ pub async fn process_prune_deletes_owned_session_stores(
         // prune omitted would strand rows forever.
         assert!(
             factory
-                .session_was_deleted(&request.session_id)
+                .is_deleted(&request.session_id)
                 .await
                 .expect("probe the deleted set for a pruned process session"),
             "process prune must record session {} as deleted",
             request.session_id
         );
-        let reuse_error = match factory.create_store(&request).await {
+        let reuse_error = match factory.admit_view(&request).await {
             Ok(_) => panic!(
                 "a pruned process-owned session id must stay unbindable: {}",
                 request.session_id
@@ -928,7 +928,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     assert_ne!(next.id, process_id, "a minted id is never reused");
     for session_id in crate::process_runtime_session_ids(&next.id) {
         factory
-            .create_store(&crate::SessionStoreCreateRequest {
+            .admit_view(&crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id,
@@ -963,11 +963,11 @@ pub async fn attachment_reference_lifecycle_with_store(
         crate::SessionRelation::Root,
     );
     let a_manifest = factory
-        .create_store(&a_request)
+        .admit_view(&a_request)
         .await
         .expect("create attachment owner a");
     let b_manifest = factory
-        .create_store(&b_request)
+        .admit_view(&b_request)
         .await
         .expect("create attachment owner b");
     let session_a = crate::SessionAttachmentStore::new(
@@ -1121,7 +1121,7 @@ where
     );
     assert!(
         empty_factory
-            .open_existing_store(&missing)
+            .live_view_for(&missing)
             .await
             .expect("query an empty session catalog")
             .is_none(),
@@ -1137,7 +1137,7 @@ where
                 crate::SessionRelation::Root,
             );
             factory
-                .create_store(&earlier)
+                .admit_view(&earlier)
                 .await
                 .expect("seed the lexicographically earlier session");
         }
@@ -1148,7 +1148,7 @@ where
             crate::SessionRelation::Root,
         );
         let store = factory
-            .create_store(&target)
+            .admit_view(&target)
             .await
             .expect("create the explicitly bound target store");
         assert_eq!(
@@ -1187,7 +1187,7 @@ async fn session_store_factory_never_used_delete_is_noop(factory: Arc<dyn crate:
         .await
         .expect("delete never-used id is a no-op");
     factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("never-used id remains admissible after no-op delete");
 }
@@ -1205,7 +1205,7 @@ async fn session_store_factory_rejects_writes_after_delete(
         crate::SessionRelation::Root,
     );
     let stale = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create write-after-delete fixture");
     factory
@@ -1327,7 +1327,7 @@ async fn session_store_factory_open_missing_returns_none(factory: Arc<dyn crate:
         crate::SessionRelation::Root,
     );
     let opened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("open missing session");
     assert!(
@@ -1350,7 +1350,7 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
     let request = session_store_request(&SessionId::from("session-a"), "model-a", relation);
 
     let created = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
     let created_meta = created
@@ -1361,7 +1361,7 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
     assert_meta_matches_request(&created_meta, &request);
 
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("open existing session store")
         .expect("existing session store");
@@ -1509,7 +1509,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             relation.clone(),
         );
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .unwrap_or_else(|error| panic!("create {label} relation store: {error}"));
         let expected = SessionMeta {
@@ -1537,7 +1537,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
         assert_eq!(loaded, expected, "{label} relation must round-trip");
 
         let reopened = factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .unwrap_or_else(|error| panic!("reopen {label} relation store: {error}"))
             .unwrap_or_else(|| panic!("{label} relation store exists"));
@@ -1568,7 +1568,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Depl
         },
     );
     let _created = factory
-        .create_store(&initial)
+        .admit_view(&initial)
         .await
         .expect("create stable session");
 
@@ -1578,7 +1578,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Depl
         crate::SessionRelation::Root,
     );
     let recreated = factory
-        .create_store(&changed)
+        .admit_view(&changed)
         .await
         .expect("recreate stable session");
     let meta = recreated
@@ -1611,11 +1611,11 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
         crate::SessionRelation::Root,
     );
     let first = factory
-        .create_store(&first_request)
+        .admit_view(&first_request)
         .await
         .expect("create graph parent owner");
     let second = factory
-        .create_store(&second_request)
+        .admit_view(&second_request)
         .await
         .expect("create graph parent intruder");
     let mut first_state = crate::RuntimeSessionState {
@@ -1717,7 +1717,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         crate::SessionRelation::Root,
     );
     let source = factory
-        .create_store(&source_request)
+        .admit_view(&source_request)
         .await
         .expect("create fork source");
     let mut state = crate::RuntimeSessionState {
@@ -1813,7 +1813,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         policy: source_request.policy.clone(),
     };
     factory
-        .fork_at(&delete_first_request)
+        .fork_session(&delete_first_request)
         .await
         .expect("fork live source tip");
     let deduplicated_tip = factory
@@ -1841,7 +1841,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     );
 
     let unretained_error = factory
-        .fork_at(&crate::ForkSessionRequest {
+        .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-unretained"),
             node_id: unpinned_past_node_id.clone(),
@@ -1864,7 +1864,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         policy: source_request.policy.clone(),
     };
     let forked = factory
-        .fork_at(&fork_request)
+        .fork_session(&fork_request)
         .await
         .expect("fork pinned root");
     assert_eq!(forked.node_id, root_node_id);
@@ -1873,7 +1873,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
     // store-validated argument: forks are addressed by node id, and repeated
     // rewinds legitimately name superseded intermediate sessions (FIG-1174).
     let lineage_relation_fork = factory
-        .fork_at(&crate::ForkSessionRequest {
+        .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-relation-lineage"),
             node_id: root_node_id.clone(),
@@ -1894,7 +1894,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         .await
         .expect("remove lineage fork");
     let branch = factory
-        .open_existing_store(&crate::SessionStoreCreateRequest {
+        .live_view_for(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: fork_request.session_id.clone(),
@@ -1989,14 +1989,14 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::Deployment
         "the live branch child edge retains the prefix after unpin"
     );
 
-    let recreate_error = match factory.create_store(&source_request).await {
+    let recreate_error = match factory.admit_view(&source_request).await {
         Ok(_) => panic!("a deleted source session id must never be reused"),
         Err(error) => error,
     };
     assert_session_id_was_used_and_deleted(recreate_error, &source_request.session_id);
 
     let fork_reuse_error = factory
-        .fork_at(&crate::ForkSessionRequest {
+        .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: source_request.session_id.clone(),
             node_id: root_node_id,
@@ -2021,7 +2021,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         crate::SessionRelation::Root,
     );
     let created = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create deleted session");
     let mut state = crate::RuntimeSessionState {
@@ -2094,7 +2094,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     );
     assert!(
         factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .expect("open before delete")
             .is_some(),
@@ -2117,7 +2117,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
     }
     assert!(
         factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .expect("open after delete")
             .is_none(),
@@ -2128,7 +2128,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .await
         .expect("second delete must be idempotent");
 
-    let recreate_error = match factory.create_store(&request).await {
+    let recreate_error = match factory.admit_view(&request).await {
         Ok(_) => panic!("a deleted session id must not be reusable"),
         Err(error) => error,
     };
@@ -2138,7 +2138,7 @@ async fn session_store_factory_delete_removes_store_and_is_idempotent(
         .vacuum()
         .await
         .expect("vacuum after deletion must preserve the permanent id tombstone");
-    let after_vacuum_error = match factory.create_store(&request).await {
+    let after_vacuum_error = match factory.admit_view(&request).await {
         Ok(_) => panic!("vacuum must not make a deleted session id reusable"),
         Err(error) => error,
     };
@@ -2178,7 +2178,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
     let orphan = crate::AttachmentStore::put(
@@ -2266,7 +2266,7 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
 

@@ -22,7 +22,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         crate::SessionRelation::Root,
     );
     let source = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create retained-tombstone source");
     let mut state = crate::RuntimeSessionState {
@@ -61,7 +61,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
         "decrement-to-zero tombstones must be hidden before vacuum"
     );
     let fork_error = factory
-        .fork_at(&crate::ForkSessionRequest {
+        .fork_session(&crate::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("retained-tombstone-fork"),
             node_id: leaf_node_id.clone(),
@@ -109,8 +109,8 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         "tombstone-model",
         crate::SessionRelation::Root,
     );
-    let store_a = factory.create_store(&req_a).await.expect("create store a");
-    let store_b = factory.create_store(&req_b).await.expect("create store b");
+    let store_a = factory.admit_view(&req_a).await.expect("create store a");
+    let store_b = factory.admit_view(&req_b).await.expect("create store b");
 
     let input_a = store_a
         .enqueue_pending_turn_input(
@@ -204,8 +204,8 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
         "tombstone-model",
         crate::SessionRelation::Root,
     );
-    let store_c = factory.create_store(&req_c).await.expect("create store c");
-    let store_d = factory.create_store(&req_d).await.expect("create store d");
+    let store_c = factory.admit_view(&req_c).await.expect("create store c");
+    let store_d = factory.admit_view(&req_d).await.expect("create store d");
 
     let mut state_c = crate::RuntimeSessionState {
         session_id: req_c.session_id.clone(),
@@ -317,7 +317,7 @@ pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
         "tombstone-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
 
     let mut state = crate::RuntimeSessionState {
         session_id: request.session_id.clone(),

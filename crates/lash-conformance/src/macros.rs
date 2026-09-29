@@ -1308,25 +1308,6 @@ macro_rules! fence_integrity_tests {
 
 /// Register the graph-integrity corruption law.
 #[macro_export]
-macro_rules! graph_integrity_tests {
-    ($fixture:block) => {
-        $crate::graph_integrity_tests!(@catalogue $fixture; [
-            (graph_integrity_conformance, "graph-integrity"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, make) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
-            }
-        )*
-    };
-}
-
-#[macro_export]
 macro_rules! session_store_factory_tests {
     ($fixture:block) => {
         $crate::session_store_factory_tests!(@catalogue $fixture; [

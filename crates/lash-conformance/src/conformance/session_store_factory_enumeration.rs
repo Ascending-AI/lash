@@ -36,11 +36,11 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
         },
     );
     let root = factory
-        .create_store(&root_request)
+        .admit_view(&root_request)
         .await
         .expect("create enumeration root");
     factory
-        .create_store(&child_request)
+        .admit_view(&child_request)
         .await
         .expect("create enumeration child");
 

@@ -31,7 +31,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create session store");
     let attachment_id = crate::AttachmentId::parse("c".repeat(64)).expect("valid attachment id");

@@ -18,7 +18,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         },
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create explicitly bound admission store");
     let empty = crate::SessionBinding::root("");
@@ -129,7 +129,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::SessionRelation::Root,
     );
     let root_store = factory
-        .create_store(&root_request)
+        .admit_view(&root_request)
         .await
         .expect("create admission root fixture");
     let root_binding = crate::SessionBinding::from_create_request(&root_request);
@@ -179,7 +179,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         },
     );
     let fork_store = factory
-        .create_store(&fork_request)
+        .admit_view(&fork_request)
         .await
         .expect("create admission fork fixture");
     let fork_binding = crate::SessionBinding::from_create_request(&fork_request);
@@ -233,7 +233,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::SessionRelation::Root,
     );
     let deleted_store = factory
-        .create_store(&deleted_request)
+        .admit_view(&deleted_request)
         .await
         .expect("create admission deletion fixture");
     factory
@@ -270,7 +270,7 @@ pub(super) async fn session_admission_contract(factory: Arc<dyn crate::Deploymen
         crate::SessionRelation::Root,
     );
     let precedence_store = factory
-        .create_store(&precedence_request)
+        .admit_view(&precedence_request)
         .await
         .expect("create precedence live fixture");
     assert_session_id_was_used_and_deleted(

@@ -30,7 +30,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create failure-evidence store");
     let provider = crate::testing::TestProvider::builder()
@@ -137,7 +137,7 @@ pub async fn session_store_factory_mid_stream_failure_evidence(
     drop(runtime);
 
     let reopened = factory
-        .read_session(&SessionId::from(SESSION_ID))
+        .read_view(&SessionId::from(SESSION_ID))
         .await
         .expect("reopen failure-evidence session")
         .expect("failed turn remains readable");

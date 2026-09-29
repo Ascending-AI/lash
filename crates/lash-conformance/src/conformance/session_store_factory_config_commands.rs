@@ -69,7 +69,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create config-command conformance store");
     for model in ["config-a", "config-b", "config-c"] {
@@ -153,7 +153,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create bounded config-command store");
     let total = crate::store::queued_work::MAX_SESSION_COMMAND_BATCHES_PER_RUN + 3;
@@ -407,7 +407,7 @@ where
     let backend = make().await;
     let store = backend
         .session_store_factory()
-        .create_store(request)
+        .admit_view(request)
         .await
         .expect("create config-settlement store");
     (backend, store)

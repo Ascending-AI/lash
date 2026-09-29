@@ -24,7 +24,7 @@ pub async fn session_meta_records_the_process_that_owns_it(
     );
     owned.owning_process_id = Some(owner.clone());
     let store = factory
-        .create_store(&owned)
+        .admit_view(&owned)
         .await
         .expect("create the owned session");
     let meta = store
@@ -46,7 +46,7 @@ pub async fn session_meta_records_the_process_that_owns_it(
         .await
         .expect("rewrite the owned session's observers");
     let reopened = factory
-        .open_existing_store(&owned)
+        .live_view_for(&owned)
         .await
         .expect("reopen the owned session")
         .expect("the owned session exists");
@@ -63,7 +63,7 @@ pub async fn session_meta_records_the_process_that_owns_it(
 
     let unowned_id = SessionId::from("session-meta-unowned");
     let unowned = factory
-        .create_store(&session_store_request(
+        .admit_view(&session_store_request(
             &unowned_id,
             "session-meta-unowned-model",
             crate::SessionRelation::Root,

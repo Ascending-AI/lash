@@ -197,7 +197,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
         "turn-cancel-exact-replay-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let address = crate::TurnAddress::new(
         &request.session_id,
         TurnId::from("turn-cancel-exact-replay:turn"),
@@ -311,7 +311,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         "turn-cancel-closure-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let first = store
         .seal_drive_epoch_for_test(
             &request.session_id,
@@ -603,7 +603,7 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         crate::SessionRelation::Root,
     );
     let session_store = factory
-        .create_store(&session_request)
+        .admit_view(&session_request)
         .await
         .expect("create session-scoped store");
     let session_lease = session_store
@@ -723,7 +723,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
         "turn-cancel-repair-base-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-base-acceptor:turn");
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
     store
@@ -774,7 +774,7 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     drop(store);
 
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen repair store")
         .expect("repair store exists");
@@ -832,7 +832,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
             "turn-cancel-scope-retirement-model",
             crate::SessionRelation::Root,
         );
-        let store = factory.create_store(&request).await.expect("create store");
+        let store = factory.admit_view(&request).await.expect("create store");
         let lease = store
             .seal_drive_epoch_for_test(
                 &request.session_id,
@@ -1021,7 +1021,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
         );
         let turn_id = TurnId::from(format!("turn-cancel-{suffix}:turn"));
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("create cancellation crash store");
         let dropped = store
@@ -1120,7 +1120,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate:
             drop(store);
         }
         let reopened = factory
-            .open_existing_store(&request)
+            .live_view_for(&request)
             .await
             .expect("reopen cancellation store")
             .expect("cancel request admitted the session");
@@ -1289,7 +1289,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
     );
     let turn_id = "turn-cancel-escalation:turn";
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create escalation store");
     let weaker_winner_address = crate::TurnAddress::new(
@@ -1497,7 +1497,7 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
     // acceptor is what the successor reads.
     drop(store);
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen escalation store")
         .expect("session admitted");
@@ -1551,7 +1551,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-repair-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-intent-first:turn");
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -1655,7 +1655,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-repair-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-repair-first:turn");
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -1733,7 +1733,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
         "turn-cancel-repair-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-completion-wins:turn");
     let row = store
         .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
@@ -1812,7 +1812,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
         crate::SessionRelation::Root,
     );
     let store = factory
-        .create_store(&request)
+        .admit_view(&request)
         .await
         .expect("create CAS store");
     let turn_id = TurnId::from("turn-cancel-final-cas:turn");
@@ -1966,7 +1966,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     );
     drop(store);
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen final settlement store")
         .expect("final settlement store remains present");
@@ -2010,7 +2010,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
         "turn-cancel-conflicting-repeat-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-conflicting-repeat:turn");
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
 
@@ -2104,7 +2104,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
 
     drop(store);
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen the conflict store")
         .expect("the conflict store exists");
@@ -2149,7 +2149,7 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
         "turn-cancel-concurrent-opposing-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let turn_id = TurnId::from("turn-cancel-concurrent-opposing:turn");
     let address = crate::TurnAddress::new(&request.session_id, &turn_id);
 
@@ -2215,7 +2215,7 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
 
     drop(store);
     let reopened = factory
-        .open_existing_store(&request)
+        .live_view_for(&request)
         .await
         .expect("reopen the raced store")
         .expect("the raced store exists");
@@ -2268,7 +2268,7 @@ pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
         "turn-cancel-wrong-binding-model",
         crate::SessionRelation::Root,
     );
-    let store = factory.create_store(&request).await.expect("create store");
+    let store = factory.admit_view(&request).await.expect("create store");
     let lease = store
         .seal_drive_epoch_for_test(
             &request.session_id,

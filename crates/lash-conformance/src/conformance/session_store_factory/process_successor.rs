@@ -42,7 +42,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
             crate::SessionRelation::default(),
         );
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("create first-lifetime process-owned session store");
         let mut state = crate::RuntimeSessionState::new(request.policy.clone());
@@ -82,7 +82,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
     for request in &first_requests {
         assert!(
             factory
-                .open_existing_store(request)
+                .live_view_for(request)
                 .await
                 .expect("probe pruned process-owned store")
                 .is_none(),
@@ -91,13 +91,13 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
         );
         assert!(
             factory
-                .session_was_deleted(&request.session_id)
+                .is_deleted(&request.session_id)
                 .await
                 .expect("probe the deleted set for a pruned process session"),
             "process prune must record session {} as deleted",
             request.session_id
         );
-        let reuse_error = match factory.create_store(request).await {
+        let reuse_error = match factory.admit_view(request).await {
             Ok(_) => panic!(
                 "a pruned process-owned session id must stay unbindable: {}",
                 request.session_id
@@ -147,7 +147,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
         );
         assert!(
             factory
-                .open_existing_store(&request)
+                .live_view_for(&request)
                 .await
                 .expect("probe successor session before creation")
                 .is_none(),
@@ -155,7 +155,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
         );
         assert!(
             factory
-                .read_session(&session_id)
+                .read_view(&session_id)
                 .await
                 .expect("read successor session before creation")
                 .is_none(),
@@ -163,13 +163,13 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
         );
         assert!(
             !factory
-                .session_was_deleted(&session_id)
+                .is_deleted(&session_id)
                 .await
                 .expect("probe the deleted set for a successor session"),
             "the successor's session id {session_id} is tombstoned"
         );
         let store = factory
-            .create_store(&request)
+            .admit_view(&request)
             .await
             .expect("the successor binds its own session ids");
         let mut state = crate::RuntimeSessionState::new(request.policy.clone());
@@ -190,7 +190,7 @@ pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
             .await
             .expect("commit successor session state");
         let view = factory
-            .read_session(&session_id)
+            .read_view(&session_id)
             .await
             .expect("read the successor's session")
             .expect("the successor's committed session has a read view");
