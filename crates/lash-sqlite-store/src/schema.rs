@@ -446,8 +446,9 @@ CREATE TABLE IF NOT EXISTS wake_redelivery_fences (
 CREATE INDEX IF NOT EXISTS idx_queued_work_session_command_order
     ON queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
-CREATE INDEX IF NOT EXISTS idx_queued_work_admitted
-    ON queued_work_batches(session_id, admitted_root);
+DROP INDEX IF EXISTS idx_queued_work_admitted;
+CREATE INDEX IF NOT EXISTS idx_queued_work_admission_order
+    ON queued_work_batches(session_id, admitted_root, enqueue_seq);
 
 CREATE TABLE IF NOT EXISTS pending_turn_inputs (
     enqueue_seq       INTEGER NOT NULL,
@@ -491,22 +492,22 @@ CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_obligation_stalled
     ON pending_turn_inputs(obligation_id)
     WHERE obligation_state = 'stalled';
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_session
-    ON pending_turn_inputs(session_id, state, enqueue_seq);
+DROP INDEX IF EXISTS idx_pending_turn_inputs_session;
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_input_order
-    ON pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
+DROP INDEX IF EXISTS idx_pending_turn_input_order;
 
--- The open rows an admission composes from (FIG-3927). The state filter
--- stays in the predicate: settled rows are never admitted and stay in the
--- table for the life of their session, so an index over every unadmitted
--- row would grow with them.
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open
-    ON pending_turn_inputs(session_id, state, enqueue_seq)
-    WHERE admitted_root IS NULL AND state IN ('pending_active', 'deferred_next_turn');
+-- All undelivered inputs, including ones a root already holds. State is the
+-- partial predicate, so settled rows cannot lengthen an open-input scan.
+-- Enqueue order in the key lets list_undelivered avoid a history scan or sort.
+DROP INDEX IF EXISTS idx_pending_turn_inputs_open;
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_open_state
+    ON pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('pending_active', 'deferred_next_turn');
 
-CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_admitted
-    ON pending_turn_inputs(session_id, admitted_root);
+DROP INDEX IF EXISTS idx_pending_turn_inputs_admitted;
+CREATE INDEX IF NOT EXISTS idx_pending_turn_inputs_bound_root
+    ON pending_turn_inputs(session_id, admitted_root)
+    WHERE admitted_root IS NOT NULL;
 
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and
@@ -758,15 +759,13 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// deletion tombstones. Older stores cannot reconstruct an honest creation
 /// time and are rejected under the existing recreate-store policy.
 ///
-/// An additive, index-only catalog change does **not** bump this version. Every
-/// `CREATE INDEX` above is `IF NOT EXISTS` and open always runs the whole
-/// schema, so a same-version file written before the index existed self-heals
-/// into the newer index set on first open, and a newer file stays readable by
-/// the older binary — the two are mutually compatible on the same stamp. Bumping instead
-/// would reject-and-recreate live stores for a change that costs nothing to
-/// apply in place. The idle-arbitration ordering indexes
-/// (`idx_queued_work_session_command_order`,
-/// `idx_pending_turn_input_order`) are added under exactly this carve-out. It
+/// An index-only catalog change does **not** bump this version. Every
+/// `CREATE INDEX` above is `IF NOT EXISTS`, obsolete indexes are dropped by
+/// name, and open always runs the whole schema. A same-version file self-heals
+/// into the current index set on first open, and an older binary can still read
+/// the newer file. Bumping would reject-and-recreate live stores for a change
+/// that can be applied in place. The idle-arbitration ordering index
+/// (`idx_queued_work_session_command_order`) was added under exactly this carve-out. It
 /// covers index-only additions and nothing else: any table, column, or
 /// semantic change bumps.
 /// Version 40 persists per-turn cancellation requests and their undelivered

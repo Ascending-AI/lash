@@ -384,8 +384,8 @@ CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_batches_obligation_stalled
     ON lash_queued_work_batches(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admitted
-    ON lash_queued_work_batches(session_id, admitted_root);
+CREATE INDEX IF NOT EXISTS idx_lash_queued_work_admission_order
+    ON lash_queued_work_batches(session_id, admitted_root, enqueue_seq);
 CREATE INDEX IF NOT EXISTS idx_lash_queued_work_session_command_order
     ON lash_queued_work_batches(session_id, work_kind, enqueued_at_ms, enqueue_seq);
 
@@ -444,18 +444,14 @@ CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_due
 CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_obligation_stalled
     ON lash_pending_turn_inputs(obligation_id)
     WHERE obligation_state = 'stalled';
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_session
-    ON lash_pending_turn_inputs(session_id, state, enqueue_seq);
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_input_order
-    ON lash_pending_turn_inputs(session_id, state, enqueued_at_ms, enqueue_seq);
--- The open rows an admission composes from (FIG-3927). The state filter
--- stays in the predicate: settled rows are never admitted and stay in the
--- table for the life of their session.
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open
-    ON lash_pending_turn_inputs(session_id, state, enqueue_seq)
-    WHERE admitted_root IS NULL AND state IN ('pending_active', 'deferred_next_turn');
-CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_admitted
-    ON lash_pending_turn_inputs(session_id, admitted_root);
+-- All undelivered inputs, including ones a root already holds. Settled rows
+-- cannot lengthen an open-input scan, and the key retains enqueue order.
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_open_state
+    ON lash_pending_turn_inputs(session_id, enqueue_seq)
+    WHERE state IN ('pending_active', 'deferred_next_turn');
+CREATE INDEX IF NOT EXISTS idx_lash_pending_turn_inputs_bound_root
+    ON lash_pending_turn_inputs(session_id, admitted_root)
+    WHERE admitted_root IS NOT NULL;
 
 -- One row per run spec a session's inputs carry (FIG-3838), interned once per
 -- hash in the transaction that admits the input naming it, immutable, and

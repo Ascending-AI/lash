@@ -7,11 +7,11 @@
 //! already runs inside `BEGIN IMMEDIATE` and holds the database write lock for
 //! the whole transaction.
 //!
-//! Every admission scan seeks `idx_pending_turn_inputs_open`, the partial
-//! index over open rows (FIG-3927). SQLite uses a partial index only for a
-//! query whose `WHERE` repeats the index's own terms, so each scan spells
-//! both: `admitted_root IS NULL` and the undelivered state set, which the
-//! vocabulary token renders to exactly the schema's predicate.
+//! Every admission scan seeks `idx_pending_turn_inputs_open_state`, the partial
+//! index over undelivered states. SQLite uses it only when the query repeats
+//! the index's state set, which the vocabulary token renders to exactly the
+//! schema's predicate. Admission also tests `admitted_root IS NULL` so a root
+//! cannot bind an input another root already holds.
 
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
@@ -41,7 +41,7 @@ lash_store_sql::statements! {
         select_pending_active = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
                     admitted_by, run_spec_hash
-             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
@@ -61,7 +61,7 @@ lash_store_sql::statements! {
         admission_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, admitted_root,
                     admitted_by, run_spec_hash
-             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
@@ -91,7 +91,7 @@ lash_store_sql::statements! {
         admission_candidates_active_turn_after_work = "SELECT enqueue_seq, input_id, session_id,
                     source_key, ingress_json, state, input_json, enqueued_at_ms, admitted_root,
                     admitted_by, run_spec_hash
-             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
@@ -108,7 +108,7 @@ lash_store_sql::statements! {
         admission_candidates_active_turn_before_completion = "SELECT enqueue_seq, input_id,
                     session_id, source_key, ingress_json, state, input_json, enqueued_at_ms,
                     admitted_root, admitted_by, run_spec_hash
-             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_open_state
              WHERE session_id = ?1
                AND {{undelivered_turn_input_state(state)}}
                AND admitted_root IS NULL
