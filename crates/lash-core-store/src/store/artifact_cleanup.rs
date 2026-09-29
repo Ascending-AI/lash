@@ -17,6 +17,13 @@ pub trait ArtifactCleanupLedger: ObligationLedger {
     /// `now_ms`: a guard plan inserts only when no row exists, and `Ended`
     /// replaces a guard. Callers arm a guard here before acquiring in an
     /// engine store.
+    ///
+    /// Arming an `Ended` cleanup also inserts the referrer's fence in the
+    /// same transaction, in the store set's artifact database (SQLite's
+    /// durable core; PostgreSQL's one database): this is how an end fact
+    /// with no transaction of its own there — a host pin's release (§3.5) —
+    /// fences and records its end at once, so a publish after it is refused
+    /// before the relay severs anything.
     async fn arm_cleanup(
         &self,
         cleanup: &ArtifactCleanup,

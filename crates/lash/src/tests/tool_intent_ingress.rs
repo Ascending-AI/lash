@@ -140,7 +140,7 @@ async fn register_ingress_trigger_subscription(
 ) -> Result<lash_core::TriggerSubscriptionRecord> {
     let process_env_ref = lash_core::testing::publish_process_execution_env_for_testing(
         env_store,
-        &lash_core::ArtifactOwner::host("process-execution-env-fixture"),
+        &lash_core::testing::host_pin_claim_for_testing(),
         &lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
             lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
@@ -439,53 +439,42 @@ impl ProbeProcessEnvStore {
 impl lash_core::ProcessExecutionEnvStore for ProbeProcessEnvStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core::ArtifactOwner,
+        claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         self.puts.fetch_add(1, Ordering::SeqCst);
         if self.fail_put.load(Ordering::SeqCst) {
-            return Err(lash_core::PluginError::Session(
+            return Err(lash_core::ArtifactStoreError::Backend(
                 "injected process env persist failure".to_string(),
             ));
         }
         self.inner
-            .publish_process_execution_env(owner, env_ref, bytes)
+            .publish_process_execution_env(claim, env_ref, bytes)
             .await
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        from: &lash_core::ArtifactOwner,
-        to: &lash_core::ArtifactOwner,
+        claim: &lash_core::ReferrerClaim,
         env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         self.inner
-            .transfer_process_execution_env(from, to, env_ref)
+            .acquire_process_execution_env(claim, env_ref)
             .await
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        owner: &lash_core::ArtifactOwner,
-        env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner
-            .release_process_execution_env(owner, env_ref)
-            .await
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lash_core::PluginError> {
-        self.inner.retire_process_execution_env_owner(owner).await
+        cleanup: &lash_core::ResolvedArtifactCleanup,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        self.inner.end_process_env_referrer(cleanup).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core::ProcessExecutionEnvRef,
-    ) -> std::result::Result<Option<Vec<u8>>, lash_core::PluginError> {
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         self.inner.get_process_execution_env(env_ref).await
     }
 }

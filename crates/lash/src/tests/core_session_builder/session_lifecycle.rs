@@ -1132,9 +1132,9 @@ finish(value);
             ),
         )
         .expect("compile module through the RLM factory");
-    factory
-        .publish_lashlang_module(
-            &lash_core::ArtifactOwner::host("compile-module-test"),
+    artifact_store
+        .publish_module_artifact(
+            &lash_core::testing::host_pin_claim_for_testing(),
             &compiled.artifact,
         )
         .await
