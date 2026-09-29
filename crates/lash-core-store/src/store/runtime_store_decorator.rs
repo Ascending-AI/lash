@@ -163,7 +163,9 @@ macro_rules! emit_decorator_trait {
         ///
         /// `Inner` is the store the decorator wraps. A decorator over a
         /// deployment names its deployment store here, so the deployment's
-        /// attachment root set and control-intent ledger forward wholesale.
+        /// attachment root set forwards wholesale, and its control-intent
+        /// ledger through the control-intent hooks below, which a decorator
+        /// overrides like any other operation.
         ///
         /// A decorator must not implement the segment traits directly; doing
         /// so would overlap those blanket implementations.
@@ -179,6 +181,79 @@ macro_rules! emit_decorator_trait {
                     self.inner().$name($($arg),*).await
                 }
             )*)*
+
+            /// The deployment's control-intent ledger, forwarded to the
+            /// inner store's unless the decorator intercepts it.
+            async fn begin_session_close(
+                &self,
+                session_id: &SessionId,
+                at_ms: u64,
+            ) -> Result<Option<ControlIntent>, StoreError>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner().begin_session_close(session_id, at_ms).await
+            }
+
+            async fn claim_intent_application(
+                &self,
+                id: ControlIntentId,
+                at_ms: u64,
+            ) -> Result<IntentApplication, StoreError>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner().claim_intent_application(id, at_ms).await
+            }
+
+            async fn acknowledge_intent(
+                &self,
+                id: ControlIntentId,
+                claim: &ClaimToken,
+                at_ms: u64,
+            ) -> Result<IntentSettle, StoreError>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner().acknowledge_intent(id, claim, at_ms).await
+            }
+
+            async fn record_intent_failure(
+                &self,
+                id: ControlIntentId,
+                claim: &ClaimToken,
+                error: &str,
+                retryable: bool,
+                at_ms: u64,
+            ) -> Result<IntentSettle, StoreError>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner()
+                    .record_intent_failure(id, claim, error, retryable, at_ms)
+                    .await
+            }
+
+            async fn load_intent(
+                &self,
+                id: ControlIntentId,
+            ) -> Result<Option<ControlIntent>, StoreError>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner().load_intent(id).await
+            }
+
+            async fn open_root_intent(
+                &self,
+                request: &RootIntentRequest,
+                at_ms: u64,
+            ) -> Result<ControlIntent, RootIntentRefused>
+            where
+                Self::Inner: ControlIntentStore,
+            {
+                self.inner().open_root_intent(request, at_ms).await
+            }
         }
     };
 }
@@ -386,8 +461,8 @@ where
     }
 }
 
-/// A deployment's control-intent ledger forwards wholesale from a decorator
-/// whose inner store keeps one.
+/// A deployment's control-intent ledger answers through the decorator's
+/// hooks, which forward to an inner store that keeps one unless overridden.
 #[async_trait::async_trait]
 impl<T> ControlIntentStore for T
 where
@@ -399,7 +474,7 @@ where
         session_id: &SessionId,
         at_ms: u64,
     ) -> Result<Option<ControlIntent>, StoreError> {
-        self.inner().begin_session_close(session_id, at_ms).await
+        RuntimeStoreDecorator::begin_session_close(self, session_id, at_ms).await
     }
 
     async fn claim_intent_application(
@@ -407,7 +482,7 @@ where
         id: ControlIntentId,
         at_ms: u64,
     ) -> Result<IntentApplication, StoreError> {
-        self.inner().claim_intent_application(id, at_ms).await
+        RuntimeStoreDecorator::claim_intent_application(self, id, at_ms).await
     }
 
     async fn acknowledge_intent(
@@ -416,7 +491,7 @@ where
         claim: &ClaimToken,
         at_ms: u64,
     ) -> Result<IntentSettle, StoreError> {
-        self.inner().acknowledge_intent(id, claim, at_ms).await
+        RuntimeStoreDecorator::acknowledge_intent(self, id, claim, at_ms).await
     }
 
     async fn record_intent_failure(
@@ -427,13 +502,11 @@ where
         retryable: bool,
         at_ms: u64,
     ) -> Result<IntentSettle, StoreError> {
-        self.inner()
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
+        RuntimeStoreDecorator::record_intent_failure(self, id, claim, error, retryable, at_ms).await
     }
 
     async fn load_intent(&self, id: ControlIntentId) -> Result<Option<ControlIntent>, StoreError> {
-        self.inner().load_intent(id).await
+        RuntimeStoreDecorator::load_intent(self, id).await
     }
 
     async fn open_root_intent(
@@ -441,6 +514,6 @@ where
         request: &RootIntentRequest,
         at_ms: u64,
     ) -> Result<ControlIntent, RootIntentRefused> {
-        self.inner().open_root_intent(request, at_ms).await
+        RuntimeStoreDecorator::open_root_intent(self, request, at_ms).await
     }
 }

@@ -49,8 +49,9 @@ macro_rules! emit_deployment_decorator {
         /// store is a deployment. It overrides only the operations it
         /// intercepts: every runtime operation forwards through
         /// [`RuntimeStoreDecorator`], every deployment operation through the
-        /// defaults here, and the deployment's attachment root set and
-        /// control-intent ledger forward wholesale.
+        /// defaults here, the deployment's control-intent ledger through
+        /// [`RuntimeStoreDecorator`]'s control-intent hooks, and its
+        /// attachment root set wholesale.
         ///
         /// A decorator must not implement [`DeploymentStore`] directly; doing
         /// so would overlap the blanket implementation below.
@@ -141,5 +142,41 @@ mod tests {
             declared, listed,
             "`deployment_operations!` must list exactly the `DeploymentStore` operations"
         );
+    }
+    #[test]
+    // A deployment decorator intercepts the control-intent ledger through its
+    // hooks; implementing `ControlIntentStore` directly would overlap the
+    // blanket implementation (E0119).
+    fn a_deployment_decorator_intercepts_control_intents_through_its_hooks() {
+        use crate::StoreError;
+        use crate::runtime::DeploymentStore;
+        use crate::store::{
+            ClaimToken, ControlIntentId, ControlIntentStore, IntentSettle, RuntimeStoreDecorator,
+        };
+
+        struct AcknowledgeHook(std::sync::Arc<dyn DeploymentStore>);
+
+        #[async_trait::async_trait]
+        impl RuntimeStoreDecorator for AcknowledgeHook {
+            type Inner = dyn DeploymentStore;
+
+            fn inner(&self) -> &Self::Inner {
+                self.0.as_ref()
+            }
+
+            async fn acknowledge_intent(
+                &self,
+                id: ControlIntentId,
+                claim: &ClaimToken,
+                at_ms: u64,
+            ) -> Result<IntentSettle, StoreError> {
+                self.inner().acknowledge_intent(id, claim, at_ms).await
+            }
+        }
+
+        impl super::DeploymentStoreDecorator for AcknowledgeHook {}
+
+        fn is_a_deployment<T: DeploymentStore + ControlIntentStore + ?Sized>() {}
+        is_a_deployment::<AcknowledgeHook>();
     }
 }
