@@ -110,7 +110,7 @@ fn rlm_core(
                 Ok(queue
                     .lock_recover()
                     .pop_front()
-                    .unwrap_or_else(|| response("finish('done');")))
+                    .expect("scripted response queue is exhausted"))
             }
         })
         .build()
@@ -182,7 +182,9 @@ async fn cold_reopen_globals_across_turns() {
         .expect("first turn");
     assert!(first.is_success());
     let first_edges = wait_edges(&double, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
+        edges.len() == 2
+            && edges.iter().any(|edge| edge.kind == "frame_environment")
+            && edges.iter().any(|edge| edge.kind == "execution")
     })
     .await;
     let frame_id = first_edges
@@ -213,7 +215,7 @@ async fn cold_reopen_globals_across_turns() {
         .expect("second turn");
     assert!(
         second.is_success(),
-        "a global from the first turn survives cold reopen"
+        "a global from the first turn survives cold reopen: {second:?}"
     );
     let text = second.result.assistant_message().unwrap_or_default();
     assert!(
@@ -246,8 +248,8 @@ async fn overwrite_retains_old_module_until_frame_end() {
     let core = rlm_core(
         &double,
         vec![
-            response("let saved = async () => 11; finish('first');"),
-            response("saved = async () => 22; finish('second');"),
+            response("const holder = { saved: async () => 11 }; finish('first');"),
+            response("holder.saved = async () => 22; finish('second');"),
             response("await control.continue_as({ task: 'new frame' });"),
             response("finish('new frame');"),
         ],
@@ -257,14 +259,12 @@ async fn overwrite_retains_old_module_until_frame_end() {
         .open()
         .await
         .expect("session");
-    assert!(
-        session
-            .send(TurnInput::text("bind first"))
-            .output()
-            .await
-            .expect("first turn")
-            .is_success()
-    );
+    let first_turn = session
+        .send(TurnInput::text("bind first"))
+        .output()
+        .await
+        .expect("first turn");
+    assert!(first_turn.is_success(), "first binding: {first_turn:?}");
     let first = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
     let old_ref = frame_artifacts(&first)
         .into_iter()
@@ -315,8 +315,8 @@ async fn continue_as_carries_only_seeded_definition() {
     let core = rlm_core(
         &double,
         vec![
-            response("let carried = async () => 11; finish('carried bound');"),
-            response("let dropped = async () => 22; finish('dropped bound');"),
+            response("const carried = async () => 11; finish('carried bound');"),
+            response("const dropped = async () => 22; finish('dropped bound');"),
             response("await control.continue_as({ task: 'use seed', seed: { carried } });"),
             response(
                 "const run = await processes.start({ definition: carried }); finish(await run);",
@@ -332,14 +332,12 @@ async fn continue_as_carries_only_seeded_definition() {
         .open()
         .await
         .expect("session");
-    assert!(
-        session
-            .send(TurnInput::text("bind carried definition"))
-            .output()
-            .await
-            .expect("first turn")
-            .is_success()
-    );
+    let first_turn = session
+        .send(TurnInput::text("bind carried definition"))
+        .output()
+        .await
+        .expect("first turn");
+    assert!(first_turn.is_success(), "first binding: {first_turn:?}");
     let carried_before = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
     let carried_ref = frame_artifacts(&carried_before)
         .into_iter()
@@ -366,14 +364,12 @@ async fn continue_as_carries_only_seeded_definition() {
         .expect("frame edge")
         .id
         .clone();
-    assert!(
-        session
-            .send(TurnInput::text("carry one"))
-            .output()
-            .await
-            .expect("switch turn")
-            .is_success()
-    );
+    let switched = session
+        .send(TurnInput::text("carry one"))
+        .output()
+        .await
+        .expect("switch turn");
+    assert!(switched.is_success(), "carry switch: {switched:?}");
     let after = wait_edges(&double, |edges| {
         let frame: Vec<_> = edges
             .iter()
@@ -419,7 +415,7 @@ async fn named_definition_survives_uncarried_frame_switch() {
         &double,
         vec![
             response(
-                "let named = async () => 31; await processes.register({ name: 'saved', definition: named }); finish('registered');",
+                "const named = async () => 31; await processes.register({ name: 'saved', definition: named }); finish('registered');",
             ),
             response("await control.continue_as({ task: 'use saved name' });"),
             response("finish('switched');"),

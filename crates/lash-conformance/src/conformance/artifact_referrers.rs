@@ -261,33 +261,34 @@ where
         .publish_process_execution_env(&source_claim, &env_ref, &env_bytes)
         .await
         .expect("publish source environment");
-    let carry = ResolvedArtifactCleanup {
+    let module_carry = ResolvedArtifactCleanup {
         referrer: source.clone(),
-        carries: vec![
-            ArtifactCarry {
-                artifact: ArtifactName {
-                    store: ArtifactStoreId::LashlangModule,
-                    artifact_ref: key.to_owned(),
-                },
-                to: destination.clone(),
+        carries: vec![ArtifactCarry {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::LashlangModule,
+                artifact_ref: key.to_owned(),
             },
-            ArtifactCarry {
-                artifact: ArtifactName {
-                    store: ArtifactStoreId::ProcessEnv,
-                    artifact_ref: env_ref.as_str().to_owned(),
-                },
-                to: destination.clone(),
+            to: destination.clone(),
+        }],
+    };
+    let env_carry = ResolvedArtifactCleanup {
+        referrer: source,
+        carries: vec![ArtifactCarry {
+            artifact: ArtifactName {
+                store: ArtifactStoreId::ProcessEnv,
+                artifact_ref: env_ref.as_str().to_owned(),
             },
-        ],
+            to: destination.clone(),
+        }],
     };
     handles
         .artifacts
-        .end_module_referrer(&carry)
+        .end_module_referrer(&module_carry)
         .await
         .expect("first delivery");
     handles
         .process_env
-        .end_process_env_referrer(&carry)
+        .end_process_env_referrer(&env_carry)
         .await
         .expect("first environment delivery");
     assert_eq!(
@@ -319,12 +320,12 @@ where
     for _ in 0..2 {
         handles
             .artifacts
-            .end_module_referrer(&carry)
+            .end_module_referrer(&module_carry)
             .await
             .expect("replay delivery");
         handles
             .process_env
-            .end_process_env_referrer(&carry)
+            .end_process_env_referrer(&env_carry)
             .await
             .expect("replay environment delivery");
         assert_eq!(
