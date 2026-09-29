@@ -744,6 +744,7 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         RootTerminalCause::Refused {
             code: refusal.code.clone(),
             message: refusal.message.clone(),
+            refusal_cause: None,
         }
     );
     assert_eq!(
@@ -816,6 +817,38 @@ pub async fn a_refused_root_ends_once_and_its_next_input_admits_a_new_root(
         .expect("admit the next root")
         .expect("the next input heads a new root");
     assert_eq!(admission.input_ids(), vec![next]);
+
+    // A refusal's structured cause is stored with it: a root refused because
+    // its session was deleted answers its inputs with the session-retirement
+    // refusal, not with the bare code.
+    let retirement = lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::SessionDeleted,
+        "the session was deleted under the root",
+    )
+    .with_cause(lash_core::RuntimeErrorCause::SessionDeleted {
+        session_id: parts.session_id.clone(),
+    });
+    parts
+        .store
+        .end_refused_root(&parts.session_id, &next_root, &retirement, at_ms + 3)
+        .await
+        .expect("end the retired root")
+        .expect("the next root had no terminal");
+    let stored = parts
+        .store
+        .root_terminal(&parts.session_id, &next_root)
+        .await
+        .expect("terminal read")
+        .expect("the retired root's terminal");
+    assert_eq!(
+        stored.cause,
+        RootTerminalCause::Refused {
+            code: retirement.code.clone(),
+            message: retirement.message.clone(),
+            refusal_cause: retirement.cause.clone(),
+        },
+        "the stored refusal keeps its session-retirement cause"
+    );
 }
 
 pub async fn cancel_of_a_parked_root_writes_cancelled_settles_its_input_and_drains_the_next(

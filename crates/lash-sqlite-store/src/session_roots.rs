@@ -316,6 +316,7 @@ pub(crate) fn end_refused_root_conn(
     end_unanswered_root_conn(tx, target, at_ms, |_| RootTerminalCause::Refused {
         code: refusal.code.clone(),
         message: refusal.message.clone(),
+        refusal_cause: refusal.cause.clone(),
     })
 }
 

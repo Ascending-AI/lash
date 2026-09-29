@@ -174,8 +174,16 @@ async fn refusal_of(parts: &SendParts, root: &TurnId) -> Result<Option<lash_core
         Err(error) => return Err(store_error(error)),
     };
     Ok(terminal.and_then(|terminal| match terminal.cause {
-        lash_core::store::RootTerminalCause::Refused { code, message } => {
-            Some(lash_core::RuntimeError::new(code, message))
+        lash_core::store::RootTerminalCause::Refused {
+            code,
+            message,
+            refusal_cause,
+        } => {
+            // The structured cause is the refusal's type: a session-retirement
+            // refusal must answer as one, not as its bare code.
+            let mut refusal = lash_core::RuntimeError::new(code, message);
+            refusal.cause = refusal_cause;
+            Some(refusal)
         }
         _ => None,
     }))

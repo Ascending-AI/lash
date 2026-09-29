@@ -131,10 +131,13 @@ pub enum RootTerminalCause {
     /// The root's run ended with a typed refusal no retry could change (a
     /// superseded commit, a finalize refusal): the run's own end, written
     /// before the engine records its outcome (FIG-4018). It keeps the
-    /// refusal, which is the answer of every input the root took.
+    /// refusal, which is the answer of every input the root took, with its
+    /// structured cause: a session-retirement refusal answers as one.
     Refused {
         code: crate::RuntimeErrorCode,
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        refusal_cause: Option<crate::RuntimeErrorCause>,
     },
 }
 
