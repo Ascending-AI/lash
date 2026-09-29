@@ -402,9 +402,10 @@ fn ancestors(
             )
         }
     };
-    let first = visible_header(conn, session, start.as_str())?
-        .filter(|h| !h.tombstoned)
-        .ok_or(missing_anchor(conn, session, start.as_str())?)?;
+    let first = match visible_header(conn, session, start.as_str())?.filter(|h| !h.tombstoned) {
+        Some(row) => row,
+        None => return Err(missing_anchor(conn, session, start.as_str())?),
+    };
     let start_generation = nonnegative("SessionGraph", "generation", first.generation)?;
     if expected.is_some_and(|g| g != start_generation) {
         return Err(corrupt("SessionGraph", "history cursor generation changed"));
@@ -656,7 +657,9 @@ fn usage_page(
         .query_map(
             params![
                 session.as_str(),
-                after.and_then(|n| i64::try_from(n).ok()).unwrap_or(0),
+                after
+                    .map(|n| i64::try_from(n).unwrap_or(i64::MAX))
+                    .unwrap_or(0),
                 i64::from(limit.get()) + 1
             ],
             |row| {
@@ -771,17 +774,20 @@ fn failure_page(
         Some(cursor) => (
             sql.select_failure_settlements_after.sql(),
             vec![
-                session.as_str().into(),
+                session.as_str().to_owned().into(),
                 i64::try_from(cursor.committed_at_ms())
                     .unwrap_or(i64::MAX)
                     .into(),
-                cursor.turn_id().as_str().into(),
+                cursor.turn_id().as_str().to_owned().into(),
                 (i64::from(limit.get()) + 1).into(),
             ],
         ),
         None => (
             sql.select_failure_settlements.sql(),
-            vec![session.as_str().into(), (i64::from(limit.get()) + 1).into()],
+            vec![
+                session.as_str().to_owned().into(),
+                (i64::from(limit.get()) + 1).into(),
+            ],
         ),
     };
     let mut stmt = conn.prepare_cached(query).map_err(sqlite_error)?;

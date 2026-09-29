@@ -24,6 +24,7 @@ impl StoreTestSupport for SqliteStore {
         corruption: GraphRowCorruption,
     ) -> Result<(), StoreError> {
         let node_id = node_id.clone();
+        let fleet = self.fleet_format;
         self.conn
             .write(move |tx| {
                 let sql = &crate::session_sql::session_sql().graph_sqlite;
@@ -59,6 +60,39 @@ impl StoreTestSupport for SqliteStore {
                             tx,
                             sql.set_body_bytes_for_testing.sql(),
                             params![node_id.as_str(), bytes],
+                        )?;
+                    }
+                    GraphRowCorruption::SetPayloadKindToPlugin => {
+                        let (parent, body): (Option<String>, String) = tx.query_row(
+                            "SELECT parent_node_id, node_json FROM graph_nodes WHERE node_id = ?1",
+                            params![node_id.as_str()],
+                            |row| Ok((row.get(0)?, row.get(1)?)),
+                        )?;
+                        let mut node =
+                            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
+                                node_id.as_str().to_owned(),
+                                parent,
+                                &body,
+                                fleet,
+                            )
+                            .map_err(|error| {
+                                rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                            })?;
+                        node.payload = lash_core_execution::SessionNodePayload::Plugin {
+                            plugin_type: "corrupt-anchor-test".to_owned(),
+                            body: lash_core_execution::session_graph::SharedJsonValue::new(
+                                serde_json::json!({}),
+                            ),
+                        };
+                        let body = node.encode_storage_body(fleet).map_err(|error| {
+                            rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                        })?;
+                        let bytes =
+                            i64::try_from(body.len()).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.set_body_for_testing.sql(),
+                            params![node_id.as_str(), body, bytes],
                         )?;
                     }
                 }

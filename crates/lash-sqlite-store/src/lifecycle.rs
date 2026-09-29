@@ -67,14 +67,17 @@ impl SqliteStore {
     }
 
     async fn open_direct(
-        path: &Path,
+        root: &Path,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
         constructor: &'static str,
     ) -> tokio_rusqlite::Result<Self> {
-        validate_file_database_path(path, "Store")?;
+        let location = crate::backend::file_location(root, constructor)?;
+        let identity: Arc<str> = location.identity().into();
+        let core =
+            DatabaseLocation::in_backend(&location, &identity, SqliteDatabase::DurableCore, None);
         let store = Self::open_at(
-            &DatabaseLocation::standalone_file(path),
+            &core,
             options,
             clock,
             None,

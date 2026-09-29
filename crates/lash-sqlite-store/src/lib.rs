@@ -209,13 +209,9 @@ pub struct SqliteStore {
     process_registry: Option<DatabaseTarget>,
     readers: Vec<SqliteConnection>,
     next_reader: AtomicU64,
-    #[cfg(any(test, feature = "testing"))]
     decoded_graph_node_bodies: Arc<AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
     decoded_usage_rows: Arc<AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
     decoded_usage_holes: Arc<AtomicU64>,
-    #[cfg(any(test, feature = "testing"))]
     decoded_turn_receipt_bodies: Arc<AtomicU64>,
     clock: Arc<dyn lash_core_execution::Clock>,
     artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,

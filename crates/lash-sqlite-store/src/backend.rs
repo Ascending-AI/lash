@@ -84,7 +84,10 @@ struct StoreParts {
     clippy::disallowed_methods,
     reason = "a file backend creates the host-supplied root before naming its databases (FIG-2971)"
 )]
-fn file_location(root: &Path, owner: &'static str) -> tokio_rusqlite::Result<SqliteLocation> {
+pub(crate) fn file_location(
+    root: &Path,
+    owner: &'static str,
+) -> tokio_rusqlite::Result<SqliteLocation> {
     crate::location::validate_file_database_path(root, owner)?;
     std::fs::create_dir_all(root).map_err(|error| {
         tokio_rusqlite::Error::Error(rusqlite::Error::SqliteFailure(
@@ -194,19 +197,17 @@ impl SqliteStoreSet {
         let registry = database(SqliteDatabase::ProcessRegistry);
         let triggers = database(SqliteDatabase::Triggers);
 
-        let mut process_env_store = Arc::new(
-            SqliteStore::open_at(
-                &core,
-                options.store,
-                Arc::clone(&clock),
-                None,
-                None,
-                lash_core_execution::FleetFormat::writable_range(),
-                #[cfg(feature = "testing")]
-                None,
-            )
-            .await?,
-        );
+        let mut process_env_store = SqliteStore::open_at(
+            &core,
+            options.store,
+            Arc::clone(&clock),
+            None,
+            None,
+            lash_core_execution::FleetFormat::writable_range(),
+            #[cfg(feature = "testing")]
+            None,
+        )
+        .await?;
         // The durable-core store opens first so its admitted `F` stamps the
         // process registry's durable payloads too (FIG-3796): one fleet row
         // governs both databases.
@@ -215,7 +216,7 @@ impl SqliteStoreSet {
                 &registry,
                 Arc::clone(&clock),
                 core.clone(),
-                lash_core_execution::FleetFormatStore::fleet_format(process_env_store.as_ref()),
+                lash_core_execution::FleetFormatStore::fleet_format(&process_env_store),
                 #[cfg(feature = "testing")]
                 None,
             )
@@ -229,10 +230,9 @@ impl SqliteStoreSet {
             options.store.connection_policy,
         )
         .await?;
-        if let Some(store) = Arc::get_mut(&mut process_env_store) {
-            store.process_registry = Some(registry.target().clone());
-            store.process_registry_attached = true;
-        }
+        process_env_store.process_registry = Some(registry.target().clone());
+        process_env_store.process_registry_attached = true;
+        let process_env_store = Arc::new(process_env_store);
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
         let process_definitions =

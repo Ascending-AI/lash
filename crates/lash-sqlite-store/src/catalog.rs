@@ -101,7 +101,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
         lash_core_execution::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
-            .call(move |conn| {
+            .read(move |conn| {
                 let deleted = conn
                     .query_row(
                         crate::session_sql::session_sql()
@@ -506,15 +506,7 @@ impl lash_core_execution::DeploymentStore for SqliteStore {
         if !self.location.target().exists() {
             return Ok(());
         }
-        let conn = SqliteConnection::open_with_policy(
-            self.location.target(),
-            self.options.connection_policy,
-        )
-        .await
-        .map_err(|error| StoreError::Backend(error.to_string()))?;
-        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
-            .await
-            .map_err(|err| StoreError::Backend(err.to_string()))?;
+        let conn = self.conn.clone();
         let through_seq = i64::try_from(through.store_sequence()).unwrap_or(i64::MAX);
         conn.write_flow(move |tx| {
             let sql = crate::turn_ingress::turn_ingress_sql();

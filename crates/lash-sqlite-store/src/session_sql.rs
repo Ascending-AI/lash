@@ -475,6 +475,7 @@ lash_store_sql::statements! {
         set_parent_for_testing = "UPDATE graph_nodes SET parent_node_id = ?2 WHERE node_id = ?1";
         set_frame_pointer_for_testing = "UPDATE graph_nodes SET frame_node_id = ?2 WHERE node_id = ?1";
         set_body_bytes_for_testing = "UPDATE graph_nodes SET body_bytes = ?2 WHERE node_id = ?1";
+        set_body_for_testing = "UPDATE graph_nodes SET node_json = ?2, body_bytes = ?3 WHERE node_id = ?1";
 
         /// One statement rather than one per node: the rows are known in full
         /// before any of them is written and they all land or none do, so a
