@@ -137,7 +137,7 @@ impl RestateProcessRunner for BuildRunner {
 /// Where a gate holds build N's continuation store: the store call nearest a
 /// cut, before or after it reaches the wrapped store.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum GatePoint {
+pub(super) enum GatePoint {
     BeforeHandoverPut(u64),
     AfterHandoverPut(u64),
     BeforeRetire(u64),
@@ -147,13 +147,24 @@ enum GatePoint {
 /// Build N's continuation store: the shared store, with a one-shot gate that
 /// runs a test future inside the step whose store call reaches it — while
 /// the step is open and its result unjournaled.
-struct GatedContinuations {
+pub(super) struct GatedContinuations {
     inner: Arc<dyn lash_core::ProcessContinuationStore>,
     gate: Mutex<Option<(GatePoint, BoxFuture)>>,
 }
 
 impl GatedContinuations {
-    fn arm(&self, point: GatePoint, future: BoxFuture) {
+    pub(super) fn new(inner: Arc<dyn lash_core::ProcessContinuationStore>) -> Self {
+        Self {
+            inner,
+            gate: Mutex::default(),
+        }
+    }
+
+    pub(super) fn is_armed(&self) -> bool {
+        self.gate.lock_recover().is_some()
+    }
+
+    pub(super) fn arm(&self, point: GatePoint, future: BoxFuture) {
         *self.gate.lock_recover() = Some((point, future));
     }
 
@@ -343,10 +354,7 @@ impl Roll {
         let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         let log = SegmentLog::default();
-        let gated = Arc::new(GatedContinuations {
-            inner: Arc::clone(&continuations),
-            gate: Mutex::default(),
-        });
+        let gated = Arc::new(GatedContinuations::new(Arc::clone(&continuations)));
         let runner_n = Arc::new(BuildRunner::new(
             "N",
             PROGRAM,

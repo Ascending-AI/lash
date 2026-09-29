@@ -11,6 +11,7 @@
 //! waits on the same wait again.
 
 use super::effect_group_generation_routing::{RunLog, build_endpoint, build_endpoint_reading};
+use super::segment_generation_handoff::{GatePoint, GatedContinuations};
 use super::*;
 use lash_restate_test::{
     DeploymentHooks, Refusal, RestateTestServer, ResumeDeployment, ServerConfig,
@@ -428,7 +429,7 @@ struct HandOff {
     deployment_n: lash_restate_test::DeploymentId,
     endpoint_next: Option<Endpoint>,
     deployment_next: Option<lash_restate_test::DeploymentId>,
-    hold_n: Arc<AtomicBool>,
+    gated_n: Arc<GatedContinuations>,
     hold_next: Arc<AtomicBool>,
     registration: ProcessRegistration,
     stores: lash_sqlite_store::SqliteStoreSet,
@@ -451,12 +452,13 @@ impl HandOff {
         let storage = stores.process_registry();
         let continuations: Arc<dyn lash_core::ProcessContinuationStore> = storage.clone();
         let registry: Arc<dyn ProcessRegistry> = storage;
+        let gated_n = Arc::new(GatedContinuations::new(Arc::clone(&continuations)));
         let sessions = stores.session_store_factory() as Arc<dyn lash_core::DeploymentStore>;
         let (host_n, endpoint_n) = Self::build(
             &connection,
             &ingress,
             &registry,
-            &continuations,
+            &(Arc::clone(&gated_n) as Arc<dyn lash_core::ProcessContinuationStore>),
             &sessions,
             "N",
         )
@@ -470,10 +472,9 @@ impl HandOff {
             "N+1",
         )
         .await;
-        let hold_n = Arc::new(AtomicBool::new(false));
         let hold_next = Arc::new(AtomicBool::new(false));
         let deployment_n = server
-            .register_with(endpoint_n, "build-N", holding(&hold_n))
+            .register_with(endpoint_n, "build-N", DeploymentHooks::default())
             .await
             .expect("register build N");
         Self {
@@ -486,7 +487,7 @@ impl HandOff {
             deployment_n,
             endpoint_next: Some(endpoint_next),
             deployment_next: None,
-            hold_n,
+            gated_n,
             hold_next,
             registration: signal_waiting_registration().await,
             stores,
@@ -858,19 +859,24 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
             roll.waiting_in(&process_id, 0).await
         })
         .await;
-        let signal = async |roll: &HandOff| {
-            assert_eq!(
-                roll.host_n
-                    .resolve_await_event(&key, resolution.clone())
-                    .await
-                    .expect("resolve the signal"),
-                ResolveOutcome::Accepted,
-                "{case}: the signal is the wait's first resolution"
-            );
+        let signal = {
+            let host = Arc::clone(&roll.host_n);
+            let key = key.clone();
+            let resolution = resolution.clone();
+            let case = case.clone();
+            async move {
+                assert_eq!(
+                    host.resolve_await_event(&key, resolution)
+                        .await
+                        .expect("resolve the signal"),
+                    ResolveOutcome::Accepted,
+                    "{case}: the signal is the wait's first resolution"
+                );
+            }
         };
         match when {
             Resolved::BeforeWake => {
-                signal(&roll).await;
+                signal.await;
                 roll.until("the process end", async |roll| {
                     roll.ended(&process_id).await
                 })
@@ -880,10 +886,12 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
             }
             Resolved::BetweenWakeAndHandover => {
                 roll.register_next().await;
-                roll.hold_n.store(true, Ordering::SeqCst);
+                // The wake has won the signal race when this store call is
+                // reached, but the handover is not committed yet. Refusing a
+                // run dispatch cannot hold an already-running wait here.
+                roll.gated_n
+                    .arm(GatePoint::BeforeHandoverPut(1), Box::pin(signal));
                 roll.wake(&process_id).await;
-                signal(&roll).await;
-                roll.hold_n.store(false, Ordering::SeqCst);
             }
             Resolved::BetweenHandoverAndRegister => {
                 roll.register_next().await;
@@ -896,7 +904,7 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
                         && !roll.segment_runs(&process_id, 1).is_empty()
                 })
                 .await;
-                signal(&roll).await;
+                signal.await;
                 roll.hold_next.store(false, Ordering::SeqCst);
             }
             Resolved::AfterRegister => {
@@ -906,10 +914,16 @@ async fn l3_a_wait_signal_crosses_the_drain_hand_off_exactly_once() {
                     roll.waiting_in(&process_id, 1).await
                 })
                 .await;
-                signal(&roll).await;
+                signal.await;
             }
         }
         let terminal = roll.terminal(&process_id).await;
+        if when == Resolved::BetweenWakeAndHandover {
+            assert!(
+                !roll.gated_n.is_armed(),
+                "{case}: the handover reached the signal's store gate"
+            );
+        }
         assert_eq!(
             success_value(&terminal),
             Some(serde_json::json!({ "case": case })),
