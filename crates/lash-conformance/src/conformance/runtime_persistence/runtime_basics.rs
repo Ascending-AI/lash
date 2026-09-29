@@ -170,9 +170,9 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
 }
 
 /// The store is multi-session (ADR 0112): a session the catalog never admitted
-/// is `Absent` and its history read is refused as `SessionNotFound`, and a
-/// second admitted session is served beside the first without either seeing
-/// the other's head.
+/// is `Absent` and both commits and history reads refuse it as
+/// `SessionNotFound`. A second admitted session is served beside the first
+/// without either seeing the other's head.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -200,6 +200,12 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
         }
     };
 
+    store
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &SessionId::from("alpha"),
+        ))
+        .await
+        .expect("admit the first session");
     let alpha = state_for("alpha");
     commit_runtime_state_for_test(
         &store,
@@ -210,6 +216,20 @@ pub async fn serves_each_admitted_session_and_refuses_an_unknown_one(store: Arc<
     .expect("the admitted session commits");
 
     let unknown = SessionId::from("never-admitted");
+    let refused_commit = store
+        .commit_runtime_state(RuntimeCommit::persisted_state_for_test(
+            &state_for(unknown.as_str()),
+            &[],
+        ))
+        .await
+        .expect_err("a session the catalog never admitted cannot commit");
+    assert!(
+        matches!(
+            refused_commit,
+            crate::StoreError::SessionNotFound { ref session_id } if *session_id == unknown
+        ),
+        "an unknown session commit is refused as SessionNotFound, got {refused_commit:?}"
+    );
     assert!(
         matches!(
             store

@@ -249,6 +249,7 @@ pub(super) async fn seed_append_receipt_state(
         "append-receipt-seed",
         serde_json::json!({"seed": true}),
     )];
+    lash_core::testing::store_fixtures::admit_conformance_session(store, &state.session_id).await;
     let (commit, _) = append_request_commit(&mut state, "append-receipt-seed", &nodes, None);
     commit_runtime_state_for_test(store, commit, "append-receipt-seed")
         .await

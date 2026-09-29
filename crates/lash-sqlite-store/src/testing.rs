@@ -158,16 +158,30 @@ pub struct SqliteTransactionPause {
 
 impl SqliteTransactionPause {
     /// Wait until the background SQLite thread reaches the armed boundary.
+    /// Panic after ten seconds if no transaction reaches it.
+    pub async fn wait_until_reached(&self) -> u64 {
+        self.wait_until_reached_for(std::time::Duration::from_secs(10))
+            .await
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "test-harness helper: the loop only exits once `reached_ordinal` is `Some`, and a panicked waiter task must abort the test"
     )]
-    pub async fn wait_until_reached(&self) -> u64 {
+    async fn wait_until_reached_for(&self, timeout: std::time::Duration) -> u64 {
         let state = Arc::clone(&self.state);
         tokio::task::spawn_blocking(move || {
-            let mut progress = state.state.lock_recover();
-            while progress.reached_ordinal.is_none() {
-                progress = state.changed.wait(progress).recover();
+            let progress = state.state.lock_recover();
+            let (mut progress, _) = state
+                .changed
+                .wait_timeout_while(progress, timeout, |progress| {
+                    progress.reached_ordinal.is_none()
+                })
+                .recover();
+            if progress.reached_ordinal.is_none() {
+                progress.released = true;
+                state.changed.notify_all();
+                panic!("armed SQLite transaction pause was not reached within {timeout:?}");
             }
             progress.reached_ordinal.expect("pause reached ordinal")
         })
@@ -417,6 +431,22 @@ mod tests {
             point,
             NonZeroU64::new(occurrence).expect("non-zero occurrence"),
         )
+    }
+
+    #[tokio::test]
+    async fn an_unreached_transaction_pause_fails_and_releases() {
+        let injector = SqliteFaultInjector::default();
+        let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
+        let waiter = pause.clone();
+        let failed = tokio::spawn(async move {
+            waiter
+                .wait_until_reached_for(std::time::Duration::from_millis(10))
+                .await
+        })
+        .await
+        .expect_err("an unreached pause must fail");
+        assert!(failed.is_panic());
+        assert!(pause.state.state.lock_recover().released);
     }
 
     #[test]

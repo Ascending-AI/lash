@@ -134,6 +134,19 @@ fn commit_at(
 #[test]
 fn head_revision_cas_holds_across_two_connections() {
     let path = unique_db_path("cas");
+    block_on(async {
+        let store = SqliteStore::open_file_for_testing(&path)
+            .await
+            .expect("open catalog before the writer race");
+        store
+            .admit_session(
+                &lash_core_execution::testing::store_fixtures::root_session_request(
+                    &SessionId::from("root"),
+                ),
+            )
+            .await
+            .expect("admit session before the writer race");
+    });
     let barrier = Arc::new(std::sync::Barrier::new(2));
     let run =
         |path: std::path::PathBuf, barrier: Arc<std::sync::Barrier>, writer_id: &'static str| {

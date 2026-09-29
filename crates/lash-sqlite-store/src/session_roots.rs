@@ -82,7 +82,26 @@ pub(crate) fn root_terminal_conn(
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((Some(kind), Some(cause_json), head_revision, Some(at_ms))) = row else {
+    let Some((kind, cause_json, head_revision, at_ms)) = row else {
+        let deleted = conn
+            .query_row(
+                crate::session_sql::session_sql()
+                    .deleted_sqlite
+                    .exists
+                    .sql(),
+                params![session_id.as_str()],
+                |_| Ok(()),
+            )
+            .optional()
+            .map_err(sqlite_error)?
+            .is_some();
+        if !deleted {
+            return Ok(None);
+        }
+        return Ok(close_session_intent_conn(conn, session_id)?
+            .and_then(|intent| intent.session_deleted_terminal(root)));
+    };
+    let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
         return Ok(None);
     };
     RootTerminal::from_stored(

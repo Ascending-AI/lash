@@ -565,7 +565,7 @@ fn resident_tombstoned_node_ids(root: &Path) -> Vec<String> {
 }
 
 fn raw_node_ids(root: &Path, sql: &str) -> Vec<String> {
-    let conn = rusqlite::Connection::open(catalog_uri(&root)).expect("open catalog");
+    let conn = rusqlite::Connection::open(catalog_uri(root)).expect("open catalog");
     let mut statement = conn.prepare(sql).expect("prepare node id probe");
     statement
         .query_map([], |row| row.get::<_, String>(0))
@@ -672,7 +672,7 @@ async fn sqlite_delete_reclaims_fork_ancestry_orphaned_by_earlier_owner_delete()
         .fork_session(&lash_core_execution::ForkSessionRequest {
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphan-fork-child"),
-            node_id: parent_leaf.clone().into(),
+            node_id: parent_leaf.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             policy: policy.clone(),
         })

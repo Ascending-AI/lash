@@ -1,5 +1,5 @@
 use super::*;
-use lash_core_execution::{ModuleArtifactStore, QueuedWorkStore as _};
+use lash_core_execution::{ModuleArtifactStore, QueuedWorkStore as _, SessionCatalogStore as _};
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {
@@ -134,9 +134,17 @@ async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() 
 async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("readonly.db");
-    SqliteStore::open_file_for_testing(&path)
+    let writable = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("provision store");
+    writable
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&SessionId::from(
+                "readonly-session",
+            )),
+        )
+        .await
+        .expect("admit session before the read-only test");
     let store =
         SqliteStore::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
             .await

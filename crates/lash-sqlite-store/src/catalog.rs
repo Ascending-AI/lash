@@ -143,6 +143,7 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
         &self,
         request: &lash_core_execution::ForkSessionRequest,
     ) -> Result<lash_core_execution::ForkSessionReceipt, StoreError> {
+        lash_core_execution::store::validate_session_id(&request.session_id)?;
         fork_at_in_catalog(
             &self.location,
             request,

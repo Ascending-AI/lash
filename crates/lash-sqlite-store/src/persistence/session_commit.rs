@@ -174,6 +174,7 @@ impl SessionCommitStore for SqliteStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
+        lash_core_execution::store::validate_session_id(&commit.session_id)?;
         let planner =
             lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format())?;
         let blob_profile = self.options.blob_profile;
@@ -185,21 +186,23 @@ impl SessionCommitStore for SqliteStore {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
+                    let admitted = tx
+                        .query_row(
+                            session_sql().meta_sqlite.exists_materialized.sql(),
+                            params![commit.session_id.as_str()],
+                            |_| Ok(()),
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                        .is_some();
+                    if !admitted {
+                        return Err(StoreError::SessionNotFound {
+                            session_id: commit.session_id.clone(),
+                        });
+                    }
                     super::drive_epoch::require_commit_fences_conn(tx, commit)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
-                    crate::session_meta::write_session_meta(
-                        tx,
-                        &SessionMeta {
-                            owning_process_id: None,
-                            session_id: commit.session_id.clone(),
-                            relation: lash_core_execution::SessionRelation::Root,
-                            pending_observer_intents: Vec::new(),
-                        },
-                        crate::session_meta::SessionMetaWrite::Insert,
-                        now,
-                        fleet,
-                    )?;
                     planner.validate_node_derivation()?;
                     // A root's commit settles its park (FIG-3586, FIG-3600
                     // S7), in the commit's transaction, whichever of its

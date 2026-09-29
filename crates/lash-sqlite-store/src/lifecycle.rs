@@ -249,13 +249,9 @@ impl SqliteStore {
             process_registry: process_registry.cloned(),
             readers,
             next_reader: AtomicU64::new(0),
-            #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_usage_rows: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_usage_holes: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock,
             artifact_publication_pause: Mutex::new(None),
@@ -287,13 +283,9 @@ impl SqliteStore {
             process_registry: None,
             readers,
             next_reader: AtomicU64::new(0),
-            #[cfg(any(test, feature = "testing"))]
             decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_usage_rows: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_usage_holes: Arc::new(AtomicU64::new(0)),
-            #[cfg(any(test, feature = "testing"))]
             decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             artifact_publication_pause: Mutex::new(None),

@@ -156,6 +156,23 @@ fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCr
     }
 }
 
+#[tokio::test]
+async fn fork_session_rejects_a_malformed_target_session_id() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let store = backend.store().await;
+    let request = lash_core_execution::ForkSessionRequest {
+        session_id: SessionId::from("bad\0session"),
+        node_id: lash_core_execution::NodeId::from("missing-fork-point"),
+        relation: lash_core_execution::SessionRelation::Root,
+        pending_observer_intents: Vec::new(),
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+    };
+    assert!(matches!(
+        store.fork_session(&request).await,
+        Err(lash_core_execution::StoreError::InvalidSessionId { .. })
+    ));
+}
+
 lash_conformance::attachment_adoption_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let factory = backend.store().await;
