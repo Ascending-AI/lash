@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4100): section 6 is implemented as described there.
+A sweep adopts and finishes crashed condemnations first, a delete that keeps
+failing stalls typed, and the host lever `release_attachment_condemnation` is
+deleted.
+
 Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
 passages are historical under
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
@@ -359,41 +364,83 @@ that owner is what removes the row class's exemption from section 1 — a
 condemnation is not protocol scaffolding that lives outside the axiom, it is a
 durable row with an owner like any other.
 
-The obligation is exact: **complete or release each adopted condemnation before
-starting new work.** Adoption comes first, and it verifies blob state through
-the same witness the sweep uses everywhere else — "the backend says the blob is
-gone" and "the backend errored" are different answers, and only the first
-completes the delete. Release is limited to abandoned `Condemned` or `Deleting`
-work. A completed delete retires its condemnation row outright (FIG-2795): the
-same fenced condemnation already deleted every manifest row for the digest, so
-the durable fact that the bytes are absent is the absence of upload evidence
-rather than a phase that has to be kept. A fresh put claims a surviving
-`Condemned` row with an opaque token while recording the new write intent,
-restores the bytes, and clears the phase only after success; failure releases
-its token. FIG-1510's stuck-forever state becomes unreachable, with no timer
-anywhere.
+Amended 2026-09-29 (FIG-4100): this section now describes what is built. The
+attachment sweep (`reclaim_unreferenced_attachments`) implements it on SQLite
+and PostgreSQL, and the host lever `release_attachment_condemnation` is
+deleted. Attachment GC is lash's own protocol, so lash recovers its own crashed
+sweeps; a host cannot judge fencing safely and has no lever for it.
 
-The generation pin is the **sweep pass's own generation**, not a session-lease
-token: a factory sweeper holds no session-execution lease, so it cannot pin the
-ADR 0029 fencing token. It borrows 0029's *shape* — a condemnation records the
-generation of the pass that created it, and a later pass adopts only what an
-older generation left — so two concurrent levers cannot adopt the same row. The
-generation proves the old pass is dead; the witness decides what state the blob
-is in. It is the same shape as an effect-group drain adopting lost runners.
+**Generations.** Every sweep pass opens with
+`AttachmentRootSet::begin_attachment_sweep`, which mints a generation from a
+durable counter that only rises (`attachment_sweep_clock`). Every condemnation
+the pass creates or adopts records that generation in `sweep_generation`, and
+every sweep transition — arm, retire, spare, record a failed delete — is a
+compare-and-swap on it, so a pass moves only rows it owns. The generation pin
+is the **sweep pass's own generation**, not a session-lease token: a factory
+sweeper holds no session-execution lease, so it cannot pin the ADR 0029 fencing
+token. It borrows 0029's *shape*.
+
+**The generation proves the old pass is dead, without a timer.** A pass holds
+its generation's liveness for as long as it runs. On SQLite, which runs in one
+process (ADR 0106), that is an in-process registry the pass leaves when it
+returns, is cancelled, or dies with its process. On PostgreSQL it is a
+session-scoped advisory lock keyed on the catalog and the generation, held on
+a dedicated connection that the server releases when the connection closes. A
+later pass adopts only rows whose generation is older than its own *and* whose
+pass is proven dead: on PostgreSQL the adopter takes that key itself. Its
+probe waits a moment for a closing connection to let go, and a probe that
+times out leaves the rows to their pass: the wait never authorizes a
+reclamation. A live peer's rows are deferred, never adopted, so a slow sweeper
+cannot have its row finished under it and then land a late delete on bytes a
+writer put back.
+
+**Adopt, then complete, then condemn.** The obligation is exact: **complete
+each adopted condemnation before starting new work.** Adoption is one CAS per
+row — stamp the new generation where the row still carries the generation it
+was read with, no restoring writer holds it, and its delete is not stalled —
+so two sweepers adopting at once claim each row exactly once and delete its
+bytes once. For each adopted row the pass arms a `Condemned` row, re-stats the
+blob through the same witness the sweep uses everywhere else, deletes it if
+present, and retires the row. "The backend says the blob is gone" and "the
+backend errored" are different answers, and only the first completes the
+delete: bytes already gone count as success, and a row already settled is a
+no-op. Only then does the pass list the backend and condemn new candidates.
+A restoring writer's row belongs to that writer and is never adopted; ADR
+0028's writer recovery is unchanged.
+
+**A delete that keeps failing stalls, typed.** A failed final `HEAD` or
+physical delete keeps the row: it returns from `Deleting` to `Condemned`, so a
+writer can still reclaim the digest, with its failed-attempt count raised and
+the error recorded, and the next sweep adopts and retries it, one attempt per
+sweep. A failure retrying cannot change (credentials, authorization, a
+terminal or contract failure) stalls the row at once as `refused`; a
+retryable failure stalls it as `attempts_exhausted` once
+`MAX_ATTACHMENT_DELETE_ATTEMPTS` (5) deletes have failed. A stalled row is
+never retried, so the sweep never spins, and it is never dropped while its
+bytes may remain. Each sweep reports stalled digests in
+`AttachmentReclamationReport::stalled_ids`, which keeps it `Incomplete`. A
+completed delete retires its condemnation row outright (FIG-2795): the same
+fenced condemnation already deleted every manifest row for the digest, so the
+durable fact that the bytes are absent is the absence of upload evidence
+rather than a phase that has to be kept. A fresh put claims a surviving
+`Condemned` row, stalled or not, with an opaque token while recording the new
+write intent, restores the bytes, and clears the phase only after success;
+failure releases its token. FIG-1510's stuck-forever state becomes
+unreachable, with no timer anywhere.
 
 `list_condemnations()` is the enumeration surface (FIG-1510), and its stated
 purpose is operator inspection: "what is stuck right now" must be answerable
-without waiting for a sweep to run.
+without waiting for a sweep to run. It is the stalled listing: each row
+carries its phase, provenance, failed-attempt count, last delete error and
+typed stall reason.
 
-**This refines ADR 0028's condemnation-recovery rule.** 0028 keeps its state
-machine timestamp-free — that is unchanged and load-bearing — but it makes
-clearing a condemnation left by a sweeper that died mid-delete *host policy*,
-with the host calling `release_attachment_condemnation` after deciding the
-sweeper is gone. Here that recovery becomes automatic and structural: the next
-sweep adopts it, under a generation that proves the predecessor dead. The host
-lever remains scoped to abandoned `Condemned` and `Deleting` rows; it cannot
-manufacture upload evidence for a digest whose bytes are gone, and lash still
-expires nothing on a clock.
+**This supersedes ADR 0028's condemnation-recovery rule.** 0028 keeps its
+state machine timestamp-free — that is unchanged and load-bearing — but it
+made clearing a condemnation left by a sweeper that died mid-delete *host
+policy*, with the host calling `release_attachment_condemnation` after deciding
+the sweeper was gone. That recovery is now automatic and structural: the next
+sweep adopts the row under a generation whose predecessor is proven dead, and
+the host lever is deleted. lash still expires nothing on a clock.
 
 Effect-group VO state severs the same way. The effect-group row owns the group
 VO's state. Group retirement issues the idempotent VO purge inline — the owner
@@ -457,10 +504,10 @@ it never consulted, which section 2 forbids.
 * Singly-owned row classes lose their root-set and GC touchpoints outright
   rather than gaining better ones, and multi-referenced classes converge on one
   edges-backed predicate instead of the hand-copied liveness SQL.
-* This ADR refines ADR 0028's condemnation recovery (adoption becomes automatic
-  and generation-fenced; the host lever and the timestamp-free state machine
-  both survive) and leaves ADR 0023 intact — terminality arms eligibility, the
-  host's `RetentionBound` and watermark still bound execution.
+* This ADR supersedes ADR 0028's condemnation recovery (adoption is automatic
+  and generation-fenced, the host lever is deleted, and the timestamp-free
+  state machine survives) and leaves ADR 0023 intact — terminality arms
+  eligibility, the host's `RetentionBound` and watermark still bound execution.
 
 ### Children and sequencing
 

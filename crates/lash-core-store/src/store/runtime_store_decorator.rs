@@ -433,28 +433,47 @@ where
         self.inner().fence()
     }
 
+    async fn begin_attachment_sweep(&self) -> Result<AttachmentSweepGeneration, StoreError> {
+        self.inner().begin_attachment_sweep().await
+    }
+
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &AttachmentSweepGeneration,
+    ) -> Result<AttachmentCondemnationAdoption, StoreError> {
+        self.inner()
+            .adopt_attachment_condemnations(generation)
+            .await
+    }
+
     async fn condemn_attachment(
         &self,
         id: &crate::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
         self.inner()
-            .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
+            .condemn_attachment(id, intent_grace_cutoff_epoch_ms, generation)
             .await
     }
 
     async fn arm_attachment_delete(
         &self,
         id: &crate::AttachmentId,
+        generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentDeleteArming, StoreError> {
-        self.inner().arm_attachment_delete(id).await
+        self.inner().arm_attachment_delete(id, generation).await
     }
 
-    async fn release_attachment_condemnation(
+    async fn settle_attachment_condemnation(
         &self,
         id: &crate::AttachmentId,
-    ) -> Result<(), StoreError> {
-        self.inner().release_attachment_condemnation(id).await
+        generation: &AttachmentSweepGeneration,
+        settlement: AttachmentCondemnationSettlement,
+    ) -> Result<AttachmentSettlementOutcome, StoreError> {
+        self.inner()
+            .settle_attachment_condemnation(id, generation, settlement)
+            .await
     }
 
     async fn recover_abandoned_attachment_write(
@@ -462,13 +481,6 @@ where
         id: &crate::AttachmentId,
     ) -> Result<(), StoreError> {
         self.inner().recover_abandoned_attachment_write(id).await
-    }
-
-    async fn retire_attachment_condemnation(
-        &self,
-        id: &crate::AttachmentId,
-    ) -> Result<(), StoreError> {
-        self.inner().retire_attachment_condemnation(id).await
     }
 }
 

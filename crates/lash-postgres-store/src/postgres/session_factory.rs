@@ -925,11 +925,29 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         lash_core_execution::AttachmentGcFence::Fenced
     }
 
+    async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
+    {
+        crate::attachments::begin_attachment_sweep(&self.pool, &self.catalog_id).await
+    }
+
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, lash_core_execution::StoreError>
+    {
+        crate::attachments::adopt_attachment_condemnations(&self.pool, &self.catalog_id, generation)
+            .await
+    }
+
     async fn condemn_attachment(
         &self,
         id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
+        let generation = crate::attachments::sweep_generation_sql(generation)?;
         let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
         // The same per-digest lock a writer's `begin_attachment_write` takes:
         // the root predicate below and that writer's manifest insert cannot
@@ -954,6 +972,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                 .sql(),
         )
         .bind(id.as_str())
+        .bind(generation)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -986,7 +1005,9 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
     async fn arm_attachment_delete(
         &self,
         id: &lash_core_execution::AttachmentId,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
+        let generation = crate::attachments::sweep_generation_sql(generation)?;
         // Under the same per-digest advisory key the writer half takes, and in a
         // transaction: a bare pooled UPDATE could commit *inside* a writer's
         // open `begin_attachment_write` — after it read `condemned` and before
@@ -1001,6 +1022,7 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
                 .sql(),
         )
         .bind(id.as_str())
+        .bind(generation)
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -1014,13 +1036,6 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         })
     }
 
-    async fn release_attachment_condemnation(
-        &self,
-        id: &lash_core_execution::AttachmentId,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        crate::attachments::release_attachment_condemnation(&self.pool, id.as_str()).await
-    }
-
     async fn recover_abandoned_attachment_write(
         &self,
         id: &lash_core_execution::AttachmentId,
@@ -1028,24 +1043,20 @@ impl lash_core_execution::AttachmentRootSet for PostgresStore {
         crate::attachments::recover_abandoned_attachment_write(&self.pool, id.as_str()).await
     }
 
-    async fn retire_attachment_condemnation(
+    async fn settle_attachment_condemnation(
         &self,
         id: &lash_core_execution::AttachmentId,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
-        crate::attachments::lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
-        sqlx::query(
-            crate::attachments::attachment_sql()
-                .condemnation
-                .delete_armed
-                .sql(),
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+        settlement: lash_core_execution::AttachmentCondemnationSettlement,
+    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, lash_core_execution::StoreError>
+    {
+        crate::attachments::settle_attachment_condemnation(
+            &self.pool,
+            id.as_str(),
+            generation,
+            settlement,
         )
-        .bind(id.as_str())
-        .execute(&mut *tx)
         .await
-        .map_err(store_sqlx_error)?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(())
     }
 }
 

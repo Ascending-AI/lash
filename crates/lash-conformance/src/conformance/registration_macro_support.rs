@@ -3,6 +3,7 @@
 pub use super::admitted_head_redrive::*;
 pub use super::artifact_store::*;
 pub use super::attachment_adoption::*;
+pub use super::attachment_condemnation_recovery::*;
 pub use super::attachment_owner::*;
 pub use super::attachment_store::*;
 pub use super::await_event_cold::*;

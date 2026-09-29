@@ -312,26 +312,50 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         AttachmentRootSet::fence(self.factory)
     }
 
+    async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<crate::AttachmentSweepGeneration, crate::StoreError> {
+        AttachmentRootSet::begin_attachment_sweep(self.factory).await
+    }
+
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &crate::AttachmentSweepGeneration,
+    ) -> Result<crate::AttachmentCondemnationAdoption, crate::StoreError> {
+        AttachmentRootSet::adopt_attachment_condemnations(self.factory, generation).await
+    }
+
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &crate::AttachmentSweepGeneration,
     ) -> Result<crate::AttachmentCondemnation, crate::StoreError> {
-        AttachmentRootSet::condemn_attachment(self.factory, id, intent_grace_cutoff_epoch_ms).await
+        AttachmentRootSet::condemn_attachment(
+            self.factory,
+            id,
+            intent_grace_cutoff_epoch_ms,
+            generation,
+        )
+        .await
     }
 
     async fn arm_attachment_delete(
         &self,
         id: &AttachmentId,
+        generation: &crate::AttachmentSweepGeneration,
     ) -> Result<crate::AttachmentDeleteArming, crate::StoreError> {
-        AttachmentRootSet::arm_attachment_delete(self.factory, id).await
+        AttachmentRootSet::arm_attachment_delete(self.factory, id, generation).await
     }
 
-    async fn release_attachment_condemnation(
+    async fn settle_attachment_condemnation(
         &self,
         id: &AttachmentId,
-    ) -> Result<(), crate::StoreError> {
-        AttachmentRootSet::release_attachment_condemnation(self.factory, id).await
+        generation: &crate::AttachmentSweepGeneration,
+        settlement: crate::AttachmentCondemnationSettlement,
+    ) -> Result<crate::AttachmentSettlementOutcome, crate::StoreError> {
+        AttachmentRootSet::settle_attachment_condemnation(self.factory, id, generation, settlement)
+            .await
     }
 
     async fn recover_abandoned_attachment_write(
@@ -339,13 +363,6 @@ impl AttachmentRootSet for EmptySnapshotFactoryRoots<'_> {
         id: &AttachmentId,
     ) -> Result<(), crate::StoreError> {
         AttachmentRootSet::recover_abandoned_attachment_write(self.factory, id).await
-    }
-
-    async fn retire_attachment_condemnation(
-        &self,
-        id: &AttachmentId,
-    ) -> Result<(), crate::StoreError> {
-        AttachmentRootSet::retire_attachment_condemnation(self.factory, id).await
     }
 }
 
@@ -1472,10 +1489,12 @@ async fn writer_after_delete_arming_restores_the_deleted_digest() {
     );
 }
 
-/// SKIP-ON-CONTENTION between sweepers: a digest another sweeper already holds
-/// is deferred, not waited on, and no delete is issued for it.
+/// SKIP-ON-CONTENTION between sweepers: a digest a live peer sweeper holds is
+/// deferred, not waited on, and no delete is issued for it. Once that peer is
+/// dead, the next sweep adopts its condemnation and finishes the delete
+/// (ADR 0067 §6); no host lever is involved.
 #[tokio::test]
-async fn a_peer_sweepers_condemnation_defers_the_digest() {
+async fn a_live_peers_condemnation_defers_and_a_dead_peers_is_adopted() {
     let fixture = fenced_fixture(&SessionId::from("peer-sweeper")).await;
     let bytes = vec![3, 3, 3];
     let id = content_id(&bytes);
@@ -1485,15 +1504,18 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
         .await
         .expect("seed the unreferenced blob");
 
-    // A peer sweeper's condemnation.
+    // A peer sweeper's condemnation, held while the peer runs.
+    let peer = AttachmentRootSet::begin_attachment_sweep(fixture.factory.as_ref())
+        .await
+        .expect("peer pass");
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0, &peer)
             .await
             .expect("first condemn"),
         crate::AttachmentCondemnation::Condemned
     );
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0)
+        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &id, 0, &peer)
             .await
             .expect("second condemn"),
         crate::AttachmentCondemnation::AlreadyCondemned,
@@ -1506,6 +1528,7 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
             .await
             .expect("sweep");
     assert_eq!(report.condemn_deferred_ids, vec![id.clone()]);
+    assert_eq!(report.adopted_count, 0, "a live peer's row is not adopted");
     assert!(
         report.deleted_while_referenced.is_empty(),
         "a fenced sweep must never delete a referenced blob: {:?}",
@@ -1519,17 +1542,22 @@ async fn a_peer_sweepers_condemnation_defers_the_digest() {
         .await
         .expect("a deferred digest keeps its bytes");
 
-    // The host-owned lever clears a condemnation a dead sweeper left behind; the
-    // next sweep then collects the digest normally.
-    AttachmentRootSet::release_attachment_condemnation(fixture.factory.as_ref(), &id)
-        .await
-        .expect("release");
+    // The peer dies without settling its condemnation.
+    drop(peer);
     let report =
         reclaim_unreferenced_attachments(fixture.factory.as_ref(), &backend, collecting_policy())
             .await
             .expect("second sweep");
+    assert_eq!(report.adopted_count, 1);
     assert_eq!(report.reclaimed_count, 1);
     assert!(report.condemn_deferred_ids.is_empty());
+    assert!(
+        AttachmentRootSet::list_condemnations(fixture.factory.as_ref())
+            .await
+            .expect("list condemnations")
+            .is_empty(),
+        "the adopted condemnation is retired"
+    );
 }
 
 /// A stuck intent is a root: a turn-owned intent whose turn never commits keeps
@@ -1545,10 +1573,18 @@ async fn a_stuck_intent_retains_the_blob() {
         .expect("put under a turn owner");
     drop(binding);
 
+    let pass = AttachmentRootSet::begin_attachment_sweep(fixture.factory.as_ref())
+        .await
+        .expect("pass");
     assert_eq!(
-        AttachmentRootSet::condemn_attachment(fixture.factory.as_ref(), &reference.id, u64::MAX)
-            .await
-            .expect("condemn"),
+        AttachmentRootSet::condemn_attachment(
+            fixture.factory.as_ref(),
+            &reference.id,
+            u64::MAX,
+            &pass
+        )
+        .await
+        .expect("condemn"),
         crate::AttachmentCondemnation::RootPresent,
         "an uncommitted intent whose owner was never superseded is a live root"
     );

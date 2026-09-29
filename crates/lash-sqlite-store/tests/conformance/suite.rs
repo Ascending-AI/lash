@@ -309,8 +309,8 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         .execute_batch(
             "PRAGMA ignore_check_constraints = ON;
              INSERT INTO attachment_condemnations
-                 (attachment_id, phase, write_token, write_session_id)
-             VALUES ('corrupt-condemnation', 'future-phase', NULL, NULL);",
+                 (attachment_id, phase, write_token, write_session_id, sweep_generation)
+             VALUES ('corrupt-condemnation', 'future-phase', NULL, NULL, 1);",
         )
         .expect("inject unknown persisted phase");
     assert!(matches!(
@@ -321,10 +321,23 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
         .execute_batch(
             "DELETE FROM attachment_condemnations;
              INSERT INTO attachment_condemnations
-                 (attachment_id, phase, write_token, write_session_id)
-             VALUES ('corrupt-condemnation', 'deleting', 'opaque', 'session');",
+                 (attachment_id, phase, write_token, write_session_id, sweep_generation)
+             VALUES ('corrupt-condemnation', 'deleting', 'opaque', 'session', 1);",
         )
         .expect("inject inconsistent persisted provenance");
+    assert!(matches!(
+        lash_core_execution::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
+        Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })
+    ));
+    connection
+        .execute_batch(
+            "DELETE FROM attachment_condemnations;
+             INSERT INTO attachment_condemnations
+                 (attachment_id, phase, sweep_generation, delete_attempts,
+                  last_delete_error, stall_reason)
+             VALUES ('corrupt-condemnation', 'condemned', 1, 1, 'failed', 'future-reason');",
+        )
+        .expect("inject an unknown persisted stall reason");
     assert!(matches!(
         lash_core_execution::AttachmentRootSet::list_condemnations(factory.as_ref()).await,
         Err(lash_core_execution::StoreError::StoredDataCorrupt { .. })

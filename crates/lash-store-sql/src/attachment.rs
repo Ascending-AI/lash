@@ -7,6 +7,9 @@
 //! tables are therefore always read and written inside one transaction, which
 //! is why they are one family.
 //!
+//! [`sweep_clock`] mints the generation each sweep pass stamps on the
+//! condemnations it owns.
+//!
 //! The third, [`blob`], is the bytes those rules govern when the backend is
 //! the SQLite session catalog itself. It exists on SQLite only; PostgreSQL
 //! takes an external attachment backend.
@@ -39,3 +42,4 @@
 pub mod blob;
 pub mod condemnation;
 pub mod manifest;
+pub mod sweep_clock;

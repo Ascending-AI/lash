@@ -53,7 +53,11 @@ table lash_artifact_referrer_fences
   primary-key (referrer_kind, referrer_id)
 table lash_attachment_condemnations
   column attachment_id text not-null
+  column delete_attempts integer not-null default
+  column last_delete_error text nullable
   column phase text not-null
+  column stall_reason text nullable
+  column sweep_generation bigint not-null
   column write_session_id text nullable
   column write_token text nullable
   primary-key (attachment_id)
@@ -68,6 +72,10 @@ table lash_attachment_manifest
   column write_id text nullable
   column written_at_ms bigint nullable
   primary-key (session_id, attachment_id)
+table lash_attachment_sweep_clock
+  column generation bigint not-null
+  column singleton boolean not-null default
+  primary-key (singleton)
 table lash_blobs
   column content bytea not-null
   column hash text not-null

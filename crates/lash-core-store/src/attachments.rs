@@ -12,8 +12,10 @@ use std::sync::{Arc, Mutex};
 use lash_sansio::{AttachmentCreateMeta, AttachmentId, AttachmentRef};
 
 use crate::store::{
-    AttachmentCondemnation, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentWriteFence, AttachmentWritePermit, StoreError,
+    AttachmentCondemnation, AttachmentCondemnationAdoption, AttachmentCondemnationPhase,
+    AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
+    AttachmentIntent, AttachmentManifest, AttachmentSettlementOutcome, AttachmentSweepGeneration,
+    AttachmentWriteFence, AttachmentWritePermit, MAX_ATTACHMENT_DELETE_ATTEMPTS, StoreError,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,7 +130,9 @@ pub enum AttachmentStoreError {
         #[source]
         source: Box<StoreError>,
     },
-    /// A per-blob root-set operation failed during reclamation.
+    /// A root-set operation failed during reclamation: opening the sweep's
+    /// pass, adopting a dead predecessor's condemnations, or a per-blob
+    /// condemnation transition or root probe.
     #[error("attachment root set {operation} failed: {source}")]
     RootSetOperationFailed {
         operation: &'static str,
@@ -136,7 +140,7 @@ pub enum AttachmentStoreError {
         source: Box<StoreError>,
     },
     #[error(
-        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a completed delete retires the condemnation and the retry then re-puts the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
+        "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a completed or failed delete settles the condemnation and the retry then re-puts the bytes. A condemnation left by a sweeper that died mid-delete is adopted and finished by the next sweep."
     )]
     ReclamationInFlight {
         attachment_id: AttachmentId,
@@ -326,12 +330,13 @@ pub trait AttachmentRootSet: Send + Sync {
 
     /// Enumerate the factory's durable condemnation authority in digest order.
     ///
+    /// This is the operator's listing of what is stuck right now (ADR 0067 §6).
     /// The result includes sweep-owned and restoring-write-owned rows in every
-    /// non-free phase. Restoring ownership exposes its session identity but
-    /// never the opaque write token. Implementations must fail closed when a
-    /// persisted phase or provenance combination is unknown or inconsistent.
-    /// This inspection-only operation neither adopts nor mutates rows;
-    /// generation-fenced adoption from ADR 0067 section 6 remains future work.
+    /// non-free phase, with each row's failed-delete count, last error and
+    /// typed stall. Restoring ownership exposes its session identity but never
+    /// the opaque write token. Implementations must fail closed when a
+    /// persisted phase, provenance or failure combination is unknown or
+    /// inconsistent. Inspection only: it neither adopts nor mutates rows.
     async fn list_condemnations(
         &self,
     ) -> Result<Vec<crate::store::AttachmentCondemnationRecord>, StoreError> {
@@ -360,14 +365,14 @@ pub trait AttachmentRootSet: Send + Sync {
     /// sweep's unfenced path, which cannot exclude a concurrent writer from the
     /// query/delete window. See [`reclaim_unreferenced_attachments`].
     ///
-    /// # Answering `Fenced` is a nine-method claim, across two traits
+    /// # Answering `Fenced` is a ten-method claim, across two traits
     ///
     /// The fence is only real when *all* of the following are implemented
-    /// against the same durable store, with each one a single conditional
-    /// mutation:
+    /// against the same durable store, with each transition a single
+    /// conditional mutation:
     ///
     /// 1. [`AttachmentManifest::begin_attachment_write`] — the **writer half**,
-    ///    on the manifest trait, not this one. Overriding the four methods below
+    ///    on the manifest trait, not this one. Overriding the methods below
     ///    while leaving this at its default means writers record intents without
     ///    consulting the condemnation, so a sweep deletes bytes behind a live
     ///    intent while this method reports `Fenced`. There is no fence without
@@ -375,19 +380,20 @@ pub trait AttachmentRootSet: Send + Sync {
     /// 2. [`AttachmentManifest::complete_attachment_write`] and
     ///    [`AttachmentManifest::abort_attachment_write`] — fenced and matched on
     ///    the attempt identity the writer half minted.
-    /// 3. [`Self::condemn_attachment`] — `Free -> Condemned`, conditional on the
-    ///    root predicate, clearing every manifest row for the digest.
-    /// 4. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`, conditional
-    ///    on the condemnation still being held.
-    /// 5. [`Self::retire_attachment_condemnation`] — delete the condemnation row
-    ///    after the physical delete succeeds.
-    /// 6. [`Self::release_attachment_condemnation`] — an unclaimed abandoned
-    ///    `Condemned` or `Deleting` sweep transition back to `Free`.
-    /// 7. [`Self::recover_abandoned_attachment_write`] — a host-authorized,
+    /// 3. [`Self::begin_attachment_sweep`] — mint a pass generation and hold
+    ///    the liveness that proves the pass has not died.
+    /// 4. [`Self::adopt_attachment_condemnations`] — claim a dead pass's rows.
+    /// 5. [`Self::condemn_attachment`] — `Free -> Condemned`, conditional on
+    ///    the root predicate, clearing every manifest row for the digest.
+    /// 6. [`Self::arm_attachment_delete`] — `Condemned -> Deleting`,
+    ///    conditional on the pass still owning the condemnation.
+    /// 7. [`Self::settle_attachment_condemnation`] — retire, spare, or record
+    ///    a failed delete, conditional on the pass owning the row.
+    /// 8. [`Self::recover_abandoned_attachment_write`] — a host-authorized,
     ///    quiescent recovery that clears one restoring writer's claim and
-    ///    intent, retiring `Condemned` only when the associated intent became a
-    ///    committed root while the claim was held.
-    /// 8. This method, answering [`AttachmentGcFence::Fenced`].
+    ///    intent, retiring `Condemned` only when the associated intent became
+    ///    a committed root while the claim was held.
+    /// 9. This method, answering [`AttachmentGcFence::Fenced`].
     ///
     /// A partial implementation is worse than none: it silences the sweep's
     /// best-effort warning while keeping the loss. As a backstop the sweep
@@ -399,8 +405,47 @@ pub trait AttachmentRootSet: Send + Sync {
         AttachmentGcFence::BestEffort
     }
 
-    /// `Free -> Condemned` for one digest, conditional on there being no live
-    /// root — the GC half of the fence.
+    /// Open one sweep pass: mint a generation newer than every earlier pass's
+    /// and hold the liveness that proves this pass is running.
+    ///
+    /// The returned value owns that liveness. While it is held no other pass
+    /// adopts the rows it stamps; once it is dropped — the pass ends, its task
+    /// is cancelled, or its process dies — a later pass may. The proof must
+    /// not be a timer: an authority whose store runs in one process keeps an
+    /// in-process registry, one shared across processes holds a lock that the
+    /// database releases when the holder's connection goes away.
+    ///
+    /// Unfenced authorities never condemn, so the default refuses.
+    async fn begin_attachment_sweep(&self) -> Result<AttachmentSweepGeneration, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::begin_attachment_sweep",
+        })
+    }
+
+    /// Adopt every sweep-owned condemnation an older, dead generation left
+    /// (ADR 0067 §6): the first thing a fenced sweep does.
+    ///
+    /// Each adoption is one conditional mutation per row — stamp `generation`
+    /// where the row still carries the older generation it was read with, no
+    /// restoring writer holds it, its delete is not stalled, and the owning
+    /// pass is proven dead — so two sweepers adopting at once claim each row
+    /// exactly once. A row whose pass is still live is reported in
+    /// [`AttachmentCondemnationAdoption::held_by_live_pass`] and left alone; a
+    /// stalled row is reported in [`AttachmentCondemnationAdoption::stalled`]
+    /// and never retried. A restoring writer's row belongs to that writer and
+    /// is not reported.
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &AttachmentSweepGeneration,
+    ) -> Result<AttachmentCondemnationAdoption, StoreError> {
+        let _ = generation;
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "AttachmentRootSet::adopt_attachment_condemnations",
+        })
+    }
+
+    /// `Free -> Condemned` for one digest, stamped with `generation`,
+    /// conditional on there being no live root — the GC half of the fence.
     ///
     /// The same mutation clears every manifest row for the digest. A digest with
     /// no live root is one whose remaining rows are aged, owner-dead intents;
@@ -419,67 +464,79 @@ pub trait AttachmentRootSet: Send + Sync {
     /// implementation is not a fence.
     ///
     /// It never blocks: an existing condemnation returns
-    /// [`AttachmentCondemnation::AlreadyCondemned`] and the digest is deferred
-    /// to the next sweep.
+    /// [`AttachmentCondemnation::AlreadyCondemned`] and the digest is deferred.
     async fn condemn_attachment(
         &self,
         id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentCondemnation, StoreError> {
-        let _ = (id, intent_grace_cutoff_epoch_ms);
+        let _ = (id, intent_grace_cutoff_epoch_ms, generation);
         Ok(AttachmentCondemnation::Unsupported)
     }
 
-    /// `Condemned -> Deleting` for one digest: the CAS that authorizes the
-    /// physical backend delete.
+    /// `Condemned -> Deleting` for one digest `generation` owns: the CAS that
+    /// authorizes the physical backend delete.
     ///
     /// Returns [`AttachmentDeleteArming::Revoked`] when the condemnation is no
-    /// longer there, which is exactly the case where a writer took the digest
-    /// back. The sweep then issues no delete at all, so the physical delete is
-    /// only ever issued for a digest this call armed — no SQL/blob-store
-    /// atomicity required. `Revoked` MUST mean the caller does not own this
-    /// digest's delete and must not release it: either a writer already
-    /// returned it to `Free`, or the transition is owned elsewhere (a digest
-    /// already in `Deleting` also answers `Revoked`, which the sweep cannot
-    /// reach — arming requires having won the condemnation first). An
-    /// implementation that answers `Revoked` for a condemnation this caller
-    /// still owns strands that digest, since the sweep will not hand it back.
+    /// longer this generation's unclaimed `Condemned` row, which covers exactly
+    /// the case where a writer took the digest back. The sweep then issues no
+    /// delete at all, so the physical delete is only ever issued for a digest
+    /// this call armed — no SQL/blob-store atomicity required.
     ///
     /// The default is an error, not `Revoked`: it is only ever reached by an
     /// authority that implemented [`Self::condemn_attachment`] without this,
-    /// which would otherwise condemn digests it can never arm or hand back —
-    /// blocking writers permanently. Failing loudly makes the sweep release the
-    /// condemnation and report the digest in
-    /// [`AttachmentReclamationReport::failed_ids`] instead.
+    /// which would otherwise condemn digests it can never arm — blocking
+    /// writers permanently. Failing loudly makes the sweep report the digest in
+    /// [`AttachmentReclamationReport::failed_ids`].
     async fn arm_attachment_delete(
         &self,
         id: &AttachmentId,
+        generation: &AttachmentSweepGeneration,
     ) -> Result<AttachmentDeleteArming, StoreError> {
-        let _ = id;
+        let _ = (id, generation);
         Err(StoreError::UnsupportedStoreOperation {
             operation: "AttachmentRootSet::arm_attachment_delete (required alongside \
                         condemn_attachment)",
         })
     }
 
-    /// Release an abandoned sweep's `Condemned` or `Deleting` digest to `Free`.
+    /// Settle one condemnation `generation` owns.
     ///
-    /// The sweep calls this on every path where it abandons a digest it had
-    /// condemned, including a failed physical delete. It conditionally removes
-    /// only an un-tokened `Condemned` or `Deleting` row. A stale sweep therefore
-    /// cannot revoke an active restoring writer. Hosts use the same operation
-    /// after establishing that a sweeper died before completing the physical
-    /// delete.
-    async fn release_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
-        let _ = id;
-        Ok(())
+    /// [`Deleted`](AttachmentCondemnationSettlement::Deleted) retires the
+    /// `Deleting` row: the digest returns to `Free` holding no upload
+    /// evidence, because condemning it already cleared every manifest row.
+    /// No byte-absence fact is retained, and none is needed: adoption finds no
+    /// upload evidence and refuses with
+    /// [`StoreError::UnknownAttachment`](crate::StoreError::UnknownAttachment)
+    /// until someone actually puts the bytes again.
+    /// [`Spared`](AttachmentCondemnationSettlement::Spared) removes an
+    /// unclaimed `Condemned` or `Deleting` row without a delete.
+    /// [`Failed`](AttachmentCondemnationSettlement::Failed) returns `Deleting`
+    /// to `Condemned` with one more failed attempt, so writers can reclaim the
+    /// digest and the next sweep retries it, or stalls it when the settlement
+    /// says so.
+    ///
+    /// Every settlement is conditional on `generation` still owning the row: a
+    /// settlement that finds a restoring writer's claim, another generation,
+    /// or no row answers [`AttachmentSettlementOutcome::NotOwned`] and changes
+    /// nothing. Unfenced authorities never create a condemnation, so the
+    /// default is a no-op.
+    async fn settle_attachment_condemnation(
+        &self,
+        id: &AttachmentId,
+        generation: &AttachmentSweepGeneration,
+        settlement: AttachmentCondemnationSettlement,
+    ) -> Result<AttachmentSettlementOutcome, StoreError> {
+        let _ = (id, generation, settlement);
+        Ok(AttachmentSettlementOutcome::NotOwned)
     }
 
     /// Recover one abandoned restoring write without a timer or stale-writer race.
     ///
-    /// This is an explicit host-policy lever under ADR 0014, separate from
-    /// [`Self::release_attachment_condemnation`] so ordinary sweep cleanup cannot
-    /// clear a live writer's claim. Before calling it, the host MUST establish
+    /// This is an explicit host-policy lever under ADR 0014 for a *writer* the
+    /// host has stopped; a sweeper's own condemnations are recovered by the next
+    /// sweep, never by a host. Before calling it, the host MUST establish
     /// that no restoring writer for this digest is running. The operation clears
     /// the claim and the precisely associated unstamped, uncommitted manifest
     /// intent in one mutation; an intent already carrying upload evidence is
@@ -503,19 +560,6 @@ pub trait AttachmentRootSet: Send + Sync {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "AttachmentRootSet::recover_abandoned_attachment_write",
         })
-    }
-
-    /// No byte-absence fact is retained, and none is needed: the condemnation
-    /// already cleared every manifest row for the digest, so adoption finds no
-    /// upload evidence and refuses with
-    /// [`StoreError::UnknownAttachment`](crate::StoreError::UnknownAttachment)
-    /// until someone actually puts the bytes again. A retained tombstone would
-    /// name no owner and no reclaim trigger, and a digest that never returned
-    /// would keep its row forever. Unfenced authorities never create a
-    /// condemnation, so the default is a no-op.
-    async fn retire_attachment_condemnation(&self, id: &AttachmentId) -> Result<(), StoreError> {
-        let _ = id;
-        Ok(())
     }
 }
 
@@ -582,16 +626,22 @@ pub struct AttachmentReclamationReport {
     pub deleted_while_referenced: Vec<AttachmentId>,
     /// Whether this sweep's deletes were fenced against concurrent writers.
     pub fence: AttachmentGcFence,
-    /// Digests this sweep deferred on contention rather than waiting: either a
-    /// peer sweeper already held the condemnation, or a writer revoked it before
-    /// the delete could be armed. Both are ordinary outcomes — the digest is
-    /// simply left for the next sweep.
+    /// Digests this sweep deferred on contention rather than waiting: a live
+    /// peer sweep or a restoring writer already held the condemnation, or a
+    /// writer revoked it before the delete could be armed. These are ordinary
+    /// outcomes — the digest is simply left for the next sweep.
     ///
-    /// A digest that keeps appearing here across sweeps with no other sweeper
-    /// and no writer is a condemnation left behind by a sweeper that died
-    /// mid-delete; see
-    /// [`AttachmentRootSet::release_attachment_condemnation`].
+    /// A condemnation left behind by a sweeper that died is never deferred:
+    /// the next sweep adopts it and finishes the delete first (ADR 0067 §6).
     pub condemn_deferred_ids: Vec<AttachmentId>,
+    /// Condemned digests whose delete is stalled
+    /// ([`AttachmentDeleteStallReason`]): the sweeps stopped retrying them.
+    /// [`AttachmentRootSet::list_condemnations`] names each one's reason,
+    /// attempt count and last error.
+    pub stalled_ids: Vec<AttachmentId>,
+    /// Condemnations this sweep adopted from a dead predecessor, whether it
+    /// finished them or not.
+    pub adopted_count: usize,
 }
 
 impl crate::store::MaintenanceReport for AttachmentReclamationReport {
@@ -603,6 +653,7 @@ impl crate::store::MaintenanceReport for AttachmentReclamationReport {
         if self.owner_death_proof_degraded
             || !self.failed_ids.is_empty()
             || !self.condemn_deferred_ids.is_empty()
+            || !self.stalled_ids.is_empty()
         {
             crate::store::MaintenanceSweep::Incomplete
         } else if self.reclaimed_count > 0 {
@@ -693,26 +744,46 @@ pub struct AttachmentReclamationPolicy {
 ///    Whoever loses the CAS yields; nobody waits.
 /// 3. **Only an armed digest is deleted.** The physical backend delete is issued
 ///    exclusively for a digest [`AttachmentRootSet::arm_attachment_delete`]
-///    moved to `Deleting`. A successful delete retires the condemnation row
-///    outright, and condemnation has already cleared every manifest row for the
-///    digest, so the bytes are unadoptable until somebody puts them again; an
-///    abandoned or failed delete releases back to `Free`. A writer that arrives
-///    while the delete is in flight records nothing and retries. A failed put
-///    preserves `Condemned` unless its intent became a committed root while the
-///    claim was held, in which case that root returns it to `Free`.
+///    moved to `Deleting`. A successful delete, or bytes already gone, retires
+///    the condemnation row outright, and condemnation has already cleared every
+///    manifest row for the digest, so the bytes are unadoptable until somebody
+///    puts them again. A writer that arrives while the delete is in flight
+///    records nothing and retries. A failed put preserves `Condemned` unless
+///    its intent became a committed root while the claim was held, in which
+///    case that root returns it to `Free`.
 ///    That is why no SQL/blob-store atomicity is needed: the authority's state
 ///    machine, not the backend, decides whether bytes may die.
-/// 4. **Skip on contention.** A digest another sweeper has already condemned is
-///    recorded in [`AttachmentReclamationReport::condemn_deferred_ids`] and left
-///    for the next sweep. The sweep never blocks a writer and never waits on a
-///    peer.
+/// 4. **Skip on contention.** A digest a live peer sweep or a restoring writer
+///    already holds is recorded in
+///    [`AttachmentReclamationReport::condemn_deferred_ids`] and left for later.
+///    The sweep never blocks a writer and never waits on a peer.
 ///
-/// Reclamation is still driven by the host: the sweep condemns only what it was
-/// about to delete anyway, and a condemnation lives no longer than the sweep's
-/// own candidate handling. Clearing one left behind by a sweeper that died
-/// mid-delete is host policy (ADR 0014), exposed as
-/// [`AttachmentRootSet::release_attachment_condemnation`] — lash expires nothing
-/// on a timer.
+/// # Adoption first: a crashed sweep is finished by the next one
+///
+/// Every pass runs under its own generation
+/// ([`AttachmentRootSet::begin_attachment_sweep`]), stamped on every
+/// condemnation it creates, and the authority keeps that generation's
+/// liveness for as long as the pass runs. Before it condemns anything new, a
+/// pass adopts every condemnation an older generation left whose pass is
+/// provably dead ([`AttachmentRootSet::adopt_attachment_condemnations`]) and
+/// completes it: it arms a `Condemned` row, re-stats the bytes, deletes them
+/// if present, and retires the row. Bytes already gone count as success, and a
+/// row already settled is a no-op. Adoption is one CAS per row, so two
+/// sweepers adopting at once claim each row exactly once and delete it once.
+///
+/// A failed final `HEAD` or physical delete keeps the row: it returns to
+/// `Condemned`, so a writer can still reclaim the digest, with one more
+/// failed attempt recorded, and the next sweep adopts and retries it. A
+/// failure retrying cannot change (credentials, authorization, a terminal or
+/// contract failure) stalls the row at once, and a retryable one stalls once
+/// [`MAX_ATTACHMENT_DELETE_ATTEMPTS`] deletes have failed. A stalled row is
+/// never retried and never dropped while its bytes may remain: it is reported
+/// in [`AttachmentReclamationReport::stalled_ids`] and, with its typed reason,
+/// in [`AttachmentRootSet::list_condemnations`].
+///
+/// Reclamation is still driven by the host: the sweep condemns only what it
+/// was about to delete anyway, and lash expires nothing on a timer. Clearing a
+/// condemnation is never host policy; there is no host lever for it.
 ///
 /// # Unfenced authorities are best-effort
 ///
@@ -754,22 +825,83 @@ pub async fn reclaim_unreferenced_attachments<R>(
 where
     R: AttachmentRootSet + ?Sized,
 {
-    let now = now_epoch_ms();
     let grace_period_ms = policy.grace_period_ms;
-    let intent_grace_cutoff = now.saturating_sub(grace_period_ms);
-    let live = root_set.live_attachment_refs(intent_grace_cutoff).await;
-    let blobs = backend
-        .list()
-        .await
-        .map_err(AttachmentReclamationFailure::failed_before_any_work)?;
     let mut fence = root_set.fence();
     let mut report = AttachmentReclamationReport {
-        scanned_blob_count: blobs.len(),
         owner_death_proof_degraded: !root_set.can_prove_process_owner_death(),
         fence,
         ..AttachmentReclamationReport::default()
     };
+    // (0) Adoption first (ADR 0067 §6). A fenced pass opens its generation and
+    // finishes every condemnation a dead predecessor left before it looks at a
+    // single new candidate, so a crash between condemn and delete strands
+    // neither the row nor the bytes.
+    let generation = if fence == AttachmentGcFence::Fenced {
+        Some(root_set.begin_attachment_sweep().await.map_err(|source| {
+            AttachmentReclamationFailure::failed_before_any_work(
+                AttachmentStoreError::RootSetOperationFailed {
+                    operation: "begin sweep",
+                    source: Box::new(source),
+                },
+            )
+        })?)
+    } else {
+        None
+    };
     let mut first_failure = None;
+    let mut settled = HashSet::new();
+    if let Some(generation) = &generation {
+        let adoption = match root_set.adopt_attachment_condemnations(generation).await {
+            Ok(adoption) => adoption,
+            Err(source) => {
+                return Err(AttachmentReclamationFailure::failed(
+                    AttachmentStoreError::RootSetOperationFailed {
+                        operation: "adopt condemnations",
+                        source: Box::new(source),
+                    },
+                    report,
+                ));
+            }
+        };
+        let AttachmentCondemnationAdoption {
+            adopted,
+            held_by_live_pass,
+            stalled,
+        } = adoption;
+        settled.extend(held_by_live_pass.iter().cloned());
+        settled.extend(stalled.iter().cloned());
+        report.condemn_deferred_ids.extend(held_by_live_pass);
+        report.stalled_ids.extend(stalled);
+        report.adopted_count = adopted.len();
+        for condemnation in adopted {
+            settled.insert(condemnation.digest.clone());
+            complete_condemnation(
+                root_set,
+                backend,
+                generation,
+                Candidate {
+                    id: &condemnation.digest,
+                    phase: condemnation.phase,
+                    delete_attempts: condemnation.delete_attempts,
+                },
+                grace_period_ms,
+                &mut report,
+                &mut first_failure,
+            )
+            .await;
+        }
+    }
+    let now = now_epoch_ms();
+    let intent_grace_cutoff = now.saturating_sub(grace_period_ms);
+    let live = root_set.live_attachment_refs(intent_grace_cutoff).await;
+    let blobs = match backend.list().await {
+        Ok(blobs) => blobs,
+        Err(error) if report.adopted_count == 0 => {
+            return Err(AttachmentReclamationFailure::failed_before_any_work(error));
+        }
+        Err(error) => return Err(AttachmentReclamationFailure::failed(error, report)),
+    };
+    report.scanned_blob_count = blobs.len();
     let live = match live {
         Ok(live) => live,
         Err(err) => {
@@ -828,7 +960,7 @@ where
         );
     }
     for blob in blobs {
-        if live.contains(&blob.id) {
+        if settled.contains(&blob.id) || live.contains(&blob.id) {
             continue;
         }
         if within_grace(blob.last_modified_epoch_ms, now, grace_period_ms) {
@@ -841,24 +973,60 @@ where
         // created, and either way the physical delete below is never issued
         // behind a live intent. An unfenced authority answers `Unsupported` and
         // the legacy re-check path runs instead.
-        let condemned = match root_set
-            .condemn_attachment(&blob.id, intent_grace_cutoff)
-            .await
+        if let Some(generation) = generation
+            .as_ref()
+            .filter(|_| fence == AttachmentGcFence::Fenced)
         {
-            Ok(AttachmentCondemnation::Condemned) => true,
-            // A root appeared since the snapshot: not garbage.
-            Ok(AttachmentCondemnation::RootPresent) => continue,
-            // Skip-on-contention: a peer sweeper owns this digest.
-            Ok(AttachmentCondemnation::AlreadyCondemned) => {
-                report.condemn_deferred_ids.push(blob.id);
-                continue;
-            }
-            Ok(AttachmentCondemnation::Unsupported) => {
-                // A self-declared `Fenced` authority that cannot actually
-                // condemn is a partial implementation. Believe the transition,
-                // not the flag: this sweep's deletes ran the unfenced path, so
-                // it reports itself best-effort like any other unfenced sweep.
-                if fence == AttachmentGcFence::Fenced {
+            match root_set
+                .condemn_attachment(&blob.id, intent_grace_cutoff, generation)
+                .await
+            {
+                Ok(AttachmentCondemnation::Condemned) => {
+                    if live.is_empty()
+                        && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll
+                    {
+                        warn_empty_root_set_refused(&report, &blob.id, policy);
+                        let _ = root_set
+                            .settle_attachment_condemnation(
+                                &blob.id,
+                                generation,
+                                AttachmentCondemnationSettlement::Spared,
+                            )
+                            .await;
+                        return Err(AttachmentReclamationFailure::refused(
+                            crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
+                            report,
+                        ));
+                    }
+                    complete_condemnation(
+                        root_set,
+                        backend,
+                        generation,
+                        Candidate {
+                            id: &blob.id,
+                            phase: AttachmentCondemnationPhase::Condemned,
+                            delete_attempts: 0,
+                        },
+                        grace_period_ms,
+                        &mut report,
+                        &mut first_failure,
+                    )
+                    .await;
+                    continue;
+                }
+                // A root appeared since the snapshot: not garbage.
+                Ok(AttachmentCondemnation::RootPresent) => continue,
+                // Skip-on-contention: a live peer sweep or a writer holds it.
+                Ok(AttachmentCondemnation::AlreadyCondemned) => {
+                    report.condemn_deferred_ids.push(blob.id);
+                    continue;
+                }
+                Ok(AttachmentCondemnation::Unsupported) => {
+                    // A self-declared `Fenced` authority that cannot actually
+                    // condemn is a partial implementation. Believe the
+                    // transition, not the flag: this sweep's deletes run the
+                    // unfenced path, so it reports itself best-effort like any
+                    // other unfenced sweep.
                     tracing::error!(
                         attachment_id = %blob.id,
                         "attachment root authority reported `Fenced` but answered \
@@ -870,58 +1038,15 @@ where
                     fence = AttachmentGcFence::BestEffort;
                     report.fence = AttachmentGcFence::BestEffort;
                 }
-                false
-            }
-            // Could not reach the authority: do not delete a blob we cannot
-            // fence.
-            Err(error) => {
-                record_reclamation_failure(
-                    &mut report,
-                    &mut first_failure,
-                    blob.id,
-                    AttachmentStoreError::RootSetOperationFailed {
-                        operation: "condemn",
-                        source: Box::new(error),
-                    },
-                );
-                continue;
-            }
-        };
-        if condemned {
-            if live.is_empty() && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll {
-                tracing::warn!(
-                    live_root_count = live.len(),
-                    scanned_blob_count = report.scanned_blob_count,
-                    deletion_candidate_id = %blob.id,
-                    grace_period_ms,
-                    empty_root_set_policy = ?policy.empty_root_set,
-                    "attachment GC refused an empty live root set with a deletion-eligible blob"
-                );
-                release_condemnation(root_set, true, &blob.id).await;
-                return Err(AttachmentReclamationFailure::refused(
-                    crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized,
-                    report,
-                ));
-            }
-            // Arm before the final HEAD. Once `Deleting` is recorded, a writer
-            // cannot revoke the condemnation between observing absent bytes and
-            // retiring the condemnation row.
-            match root_set.arm_attachment_delete(&blob.id).await {
-                Ok(AttachmentDeleteArming::Armed) => {}
-                // This sweep no longer owns the transition. It must not release
-                // or reclaim a writer's token or a newer sweep.
-                Ok(AttachmentDeleteArming::Revoked) => {
-                    report.condemn_deferred_ids.push(blob.id);
-                    continue;
-                }
+                // Could not reach the authority: do not delete a blob we cannot
+                // fence.
                 Err(error) => {
-                    release_condemnation(root_set, true, &blob.id).await;
                     record_reclamation_failure(
                         &mut report,
                         &mut first_failure,
                         blob.id,
                         AttachmentStoreError::RootSetOperationFailed {
-                            operation: "arm delete",
+                            operation: "condemn",
                             source: Box::new(error),
                         },
                     );
@@ -929,95 +1054,60 @@ where
                 }
             }
         }
-        // (b) Delete-time freshness re-check: the snapshot's freshness is stale, so
-        // re-stat the blob immediately before deleting. A concurrent
-        // new-intent-plus-`put` of the same content id — landed after the root
-        // snapshot — refreshes the blob's modification time; spare it so a
-        // newly-referenced blob is never reclaimed out from under its intent.
-        let freshness = backend.head(&blob.id).await;
-        // Every abandonment from here on must hand the digest back, or a
-        // condemnation this sweep created would outlive its candidate and block
-        // writers for good.
-        match freshness {
+        // (b) Unfenced path. Delete-time freshness re-check: the snapshot's
+        // freshness is stale, so re-stat the blob immediately before deleting.
+        // A concurrent new-intent-plus-`put` of the same content id — landed
+        // after the root snapshot — refreshes the blob's modification time;
+        // spare it so a newly-referenced blob is never reclaimed out from
+        // under its intent.
+        match backend.head(&blob.id).await {
             Ok(Some(fresh)) => {
                 if within_grace(
                     fresh.last_modified_epoch_ms,
                     now_epoch_ms(),
                     grace_period_ms,
                 ) {
-                    release_condemnation(root_set, condemned, &blob.id).await;
                     continue;
                 }
             }
-            // Already gone (a lifecycle expiry or concurrent delete). A fenced
-            // sweep owns `Deleting`, so settle it exactly as a completed
-            // physical delete does: retire the condemnation row.
-            Ok(None) => {
-                if condemned
-                    && let Err(error) = root_set.retire_attachment_condemnation(&blob.id).await
-                {
-                    record_reclamation_failure(
-                        &mut report,
-                        &mut first_failure,
-                        blob.id,
-                        AttachmentStoreError::RootSetOperationFailed {
-                            operation: "retire condemnation",
-                            source: Box::new(error),
-                        },
-                    );
-                }
-                continue;
-            }
+            // Already gone (a lifecycle expiry or concurrent delete).
+            Ok(None) => continue,
             // Could not re-stat: treat as a per-blob failure rather than risk
             // deleting a blob we can no longer vouch for.
             Err(error) => {
-                release_condemnation(root_set, condemned, &blob.id).await;
                 record_reclamation_failure(&mut report, &mut first_failure, blob.id, error);
                 continue;
             }
         }
-        if !condemned {
-            // Unfenced fallback: a targeted root re-check for THIS id. The `live`
-            // snapshot was taken before the per-blob loop began; a session may have
-            // recorded a fresh intent for this content id since. It observes an
-            // intent recorded before the delete because the facade's `put` records
-            // the write-ahead intent BEFORE the backend `put`. It cannot observe one
-            // recorded after it, which is the window only the fence closes.
-            match root_set
-                .has_live_attachment_ref(&blob.id, intent_grace_cutoff)
-                .await
-            {
-                Ok(true) => continue,
-                Ok(false) => {}
-                // Could not probe the root set: do not delete a blob we can no longer
-                // prove is unreferenced.
-                Err(error) => {
-                    record_reclamation_failure(
-                        &mut report,
-                        &mut first_failure,
-                        blob.id,
-                        AttachmentStoreError::RootSetOperationFailed {
-                            operation: "probe live reference",
-                            source: Box::new(error),
-                        },
-                    );
-                    continue;
-                }
+        // A targeted root re-check for THIS id. The `live` snapshot was taken
+        // before the per-blob loop began; a session may have recorded a fresh
+        // intent for this content id since. It observes an intent recorded
+        // before the delete because the facade's `put` records the write-ahead
+        // intent BEFORE the backend `put`. It cannot observe one recorded after
+        // it, which is the window only the fence closes.
+        match root_set
+            .has_live_attachment_ref(&blob.id, intent_grace_cutoff)
+            .await
+        {
+            Ok(true) => continue,
+            Ok(false) => {}
+            // Could not probe the root set: do not delete a blob we can no longer
+            // prove is unreferenced.
+            Err(error) => {
+                record_reclamation_failure(
+                    &mut report,
+                    &mut first_failure,
+                    blob.id,
+                    AttachmentStoreError::RootSetOperationFailed {
+                        operation: "probe live reference",
+                        source: Box::new(error),
+                    },
+                );
+                continue;
             }
         }
-        if !condemned
-            && live.is_empty()
-            && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll
-        {
-            tracing::warn!(
-                live_root_count = live.len(),
-                scanned_blob_count = report.scanned_blob_count,
-                deletion_candidate_id = %blob.id,
-                grace_period_ms,
-                empty_root_set_policy = ?policy.empty_root_set,
-                "attachment GC refused an empty live root set with a deletion-eligible blob"
-            );
-            release_condemnation(root_set, condemned, &blob.id).await;
+        if live.is_empty() && policy.empty_root_set != EmptyRootSetPolicy::AuthorizeDeleteAll {
+            warn_empty_root_set_refused(&report, &blob.id, policy);
             // The refusal carries the work already done — including any
             // `deleted_while_referenced` detections — instead of discarding it.
             return Err(AttachmentReclamationFailure::refused(
@@ -1025,56 +1115,20 @@ where
                 report,
             ));
         }
-        let deleted = backend.delete(&blob.id).await;
-        match deleted {
+        match backend.delete(&blob.id).await {
             Ok(()) => {
                 report.reclaimed_count += 1;
-                // (e) Post-delete detection probe, taken while the digest is
-                // still `Deleting`. Under a fenced authority this must never
-                // answer `true`: no writer can record a root for an armed digest,
-                // so a root here means the fence is not holding (transitions that
-                // are not atomic with intent recording, or two authorities over
-                // one backend). Under an unfenced authority it is the loss
-                // detector for the window the legacy path cannot close. Either
-                // way the bytes are already gone; a failed probe cannot un-delete
-                // them.
-                if let Ok(true) = root_set
-                    .has_live_attachment_ref(&blob.id, intent_grace_cutoff)
-                    .await
-                {
-                    tracing::error!(
-                        attachment_id = %blob.id,
-                        fence = ?fence,
-                        "attachment GC deleted a blob that a live root exists for; the \
-                         bytes are unrecoverable from lash. Under a fenced root authority \
-                         this indicates the condemnation CAS is not atomic with intent \
-                         recording; under an unfenced one it is the delete-window race \
-                         the fence exists to close"
-                    );
-                    report.deleted_while_referenced.push(blob.id.clone());
-                }
-                // (f) Preserve the byte-absence fact. Adoption can now
-                // distinguish an absent blob from a digest that was merely
-                // condemned and later abandoned. A fresh put claims this row
-                // with its write-ahead intent and clears it only after
-                // restoring the bytes.
-                if condemned
-                    && let Err(error) = root_set.retire_attachment_condemnation(&blob.id).await
-                {
-                    record_reclamation_failure(
-                        &mut report,
-                        &mut first_failure,
-                        blob.id.clone(),
-                        AttachmentStoreError::RootSetOperationFailed {
-                            operation: "retire condemnation",
-                            source: Box::new(error),
-                        },
-                    );
-                }
+                detect_deleted_while_referenced(
+                    root_set,
+                    &blob.id,
+                    intent_grace_cutoff,
+                    fence,
+                    &mut report,
+                )
+                .await;
             }
             Err(error) => {
-                record_reclamation_failure(&mut report, &mut first_failure, blob.id.clone(), error);
-                release_condemnation(root_set, condemned, &blob.id).await;
+                record_reclamation_failure(&mut report, &mut first_failure, blob.id, error);
             }
         }
     }
@@ -1096,14 +1150,271 @@ fn record_reclamation_failure(
     }
 }
 
-/// Hand a condemned digest back to `Free`. A no-op for an unfenced sweep, which
-/// never created one.
-async fn release_condemnation<R>(root_set: &R, condemned: bool, id: &AttachmentId)
-where
+fn warn_empty_root_set_refused(
+    report: &AttachmentReclamationReport,
+    id: &AttachmentId,
+    policy: AttachmentReclamationPolicy,
+) {
+    tracing::warn!(
+        live_root_count = 0,
+        scanned_blob_count = report.scanned_blob_count,
+        deletion_candidate_id = %id,
+        grace_period_ms = policy.grace_period_ms,
+        empty_root_set_policy = ?policy.empty_root_set,
+        "attachment GC refused an empty live root set with a deletion-eligible blob"
+    );
+}
+
+/// One condemnation a fenced pass owns and is about to complete.
+struct Candidate<'a> {
+    id: &'a AttachmentId,
+    phase: AttachmentCondemnationPhase,
+    /// Failed deletes recorded before this pass.
+    delete_attempts: u32,
+}
+
+/// Arm (when still `Condemned`), re-stat, delete, and settle one condemnation
+/// `generation` owns. Every outcome settles the row: bytes gone retire it,
+/// refreshed bytes spare it, and a failure keeps it for the next sweep or
+/// stalls it — the row is never dropped while the bytes may remain.
+async fn complete_condemnation<R>(
+    root_set: &R,
+    backend: &dyn AttachmentStore,
+    generation: &AttachmentSweepGeneration,
+    candidate: Candidate<'_>,
+    grace_period_ms: u64,
+    report: &mut AttachmentReclamationReport,
+    first_failure: &mut Option<AttachmentStoreError>,
+) where
     R: AttachmentRootSet + ?Sized,
 {
-    if condemned {
-        let _ = root_set.release_attachment_condemnation(id).await;
+    let id = candidate.id;
+    if candidate.phase == AttachmentCondemnationPhase::Condemned {
+        // Arm before the final HEAD. Once `Deleting` is recorded, a writer
+        // cannot revoke the condemnation between observing absent bytes and
+        // retiring the condemnation row.
+        match root_set.arm_attachment_delete(id, generation).await {
+            Ok(AttachmentDeleteArming::Armed) => {}
+            // This pass no longer owns the transition: a writer took the
+            // digest back. It must not settle a writer's claim.
+            Ok(AttachmentDeleteArming::Revoked) => {
+                report.condemn_deferred_ids.push(id.clone());
+                return;
+            }
+            // The row stays `Condemned` under this generation; the next sweep
+            // adopts it.
+            Err(error) => {
+                record_reclamation_failure(
+                    report,
+                    first_failure,
+                    id.clone(),
+                    AttachmentStoreError::RootSetOperationFailed {
+                        operation: "arm delete",
+                        source: Box::new(error),
+                    },
+                );
+                return;
+            }
+        }
+    }
+    // Delete-time freshness re-check. Under the fence this is a cheap
+    // pre-filter: bytes refreshed within the window are spared.
+    match backend.head(id).await {
+        Ok(Some(fresh))
+            if within_grace(
+                fresh.last_modified_epoch_ms,
+                now_epoch_ms(),
+                grace_period_ms,
+            ) =>
+        {
+            settle(
+                root_set,
+                id,
+                generation,
+                AttachmentCondemnationSettlement::Spared,
+                report,
+                first_failure,
+            )
+            .await;
+            return;
+        }
+        Ok(Some(_)) => {}
+        // Already gone (a lifecycle expiry, a concurrent delete, or a crashed
+        // predecessor's delete that landed): exactly as a completed delete.
+        Ok(None) => {
+            settle(
+                root_set,
+                id,
+                generation,
+                AttachmentCondemnationSettlement::Deleted,
+                report,
+                first_failure,
+            )
+            .await;
+            return;
+        }
+        Err(error) => {
+            record_failed_delete(
+                root_set,
+                &candidate,
+                generation,
+                error,
+                report,
+                first_failure,
+            )
+            .await;
+            return;
+        }
+    }
+    match backend.delete(id).await {
+        Ok(()) => {
+            report.reclaimed_count += 1;
+            detect_deleted_while_referenced(
+                root_set,
+                id,
+                now_epoch_ms().saturating_sub(grace_period_ms),
+                AttachmentGcFence::Fenced,
+                report,
+            )
+            .await;
+            settle(
+                root_set,
+                id,
+                generation,
+                AttachmentCondemnationSettlement::Deleted,
+                report,
+                first_failure,
+            )
+            .await;
+        }
+        Err(error) => {
+            record_failed_delete(
+                root_set,
+                &candidate,
+                generation,
+                error,
+                report,
+                first_failure,
+            )
+            .await;
+        }
+    }
+}
+
+/// Keep a condemnation whose final `HEAD` or delete failed: it returns to
+/// `Condemned` with one more attempt, and stalls when retrying cannot help or
+/// the attempts reach the bound.
+async fn record_failed_delete<R>(
+    root_set: &R,
+    candidate: &Candidate<'_>,
+    generation: &AttachmentSweepGeneration,
+    error: AttachmentStoreError,
+    report: &mut AttachmentReclamationReport,
+    first_failure: &mut Option<AttachmentStoreError>,
+) where
+    R: AttachmentRootSet + ?Sized,
+{
+    let attempts = candidate.delete_attempts.saturating_add(1);
+    let stall = if !error.is_retryable() {
+        Some(AttachmentDeleteStallReason::Refused)
+    } else if attempts >= MAX_ATTACHMENT_DELETE_ATTEMPTS {
+        Some(AttachmentDeleteStallReason::AttemptsExhausted)
+    } else {
+        None
+    };
+    let message = error.to_string();
+    record_reclamation_failure(report, first_failure, candidate.id.clone(), error);
+    match root_set
+        .settle_attachment_condemnation(
+            candidate.id,
+            generation,
+            AttachmentCondemnationSettlement::Failed {
+                stall,
+                error: message.clone(),
+            },
+        )
+        .await
+    {
+        Ok(AttachmentSettlementOutcome::Applied) => {
+            if let Some(reason) = stall {
+                tracing::error!(
+                    attachment_id = %candidate.id,
+                    attempts,
+                    reason = reason.as_str(),
+                    error = %message,
+                    "attachment GC stalled a condemned digest whose delete keeps failing; \
+                     no sweep retries it and its bytes remain"
+                );
+                report.stalled_ids.push(candidate.id.clone());
+            }
+        }
+        // Unreachable while this pass holds its generation; the row is
+        // whoever owns it now.
+        Ok(AttachmentSettlementOutcome::NotOwned) => {}
+        // The row stays `Deleting` under this generation; the next sweep
+        // adopts it and re-stats the bytes.
+        Err(_) => {}
+    }
+}
+
+/// Settle one owned condemnation, reporting a failed settlement. A row left
+/// unsettled stays with this generation and the next sweep adopts it.
+async fn settle<R>(
+    root_set: &R,
+    id: &AttachmentId,
+    generation: &AttachmentSweepGeneration,
+    settlement: AttachmentCondemnationSettlement,
+    report: &mut AttachmentReclamationReport,
+    first_failure: &mut Option<AttachmentStoreError>,
+) where
+    R: AttachmentRootSet + ?Sized,
+{
+    if let Err(error) = root_set
+        .settle_attachment_condemnation(id, generation, settlement)
+        .await
+    {
+        record_reclamation_failure(
+            report,
+            first_failure,
+            id.clone(),
+            AttachmentStoreError::RootSetOperationFailed {
+                operation: "settle condemnation",
+                source: Box::new(error),
+            },
+        );
+    }
+}
+
+/// Post-delete detection probe, taken while the digest is still `Deleting`
+/// under a fenced authority. There it must never answer `true`: no writer can
+/// record a root for an armed digest, so a root here means the fence is not
+/// holding (transitions that are not atomic with intent recording, or two
+/// authorities over one backend). Under an unfenced authority it is the loss
+/// detector for the window the legacy path cannot close. Either way the bytes
+/// are already gone; a failed probe cannot un-delete them.
+async fn detect_deleted_while_referenced<R>(
+    root_set: &R,
+    id: &AttachmentId,
+    intent_grace_cutoff: u64,
+    fence: AttachmentGcFence,
+    report: &mut AttachmentReclamationReport,
+) where
+    R: AttachmentRootSet + ?Sized,
+{
+    if let Ok(true) = root_set
+        .has_live_attachment_ref(id, intent_grace_cutoff)
+        .await
+    {
+        tracing::error!(
+            attachment_id = %id,
+            fence = ?fence,
+            "attachment GC deleted a blob that a live root exists for; the \
+             bytes are unrecoverable from lash. Under a fenced root authority \
+             this indicates the condemnation CAS is not atomic with intent \
+             recording; under an unfenced one it is the delete-window race \
+             the fence exists to close"
+        );
+        report.deleted_while_referenced.push(id.clone());
     }
 }
 
@@ -1163,9 +1474,8 @@ impl AttachmentStore for UnavailableAttachmentStore {
 /// back to the caller as [`AttachmentStoreError::ReclamationInFlight`].
 ///
 /// The bound exists so a condemnation abandoned by a sweeper that died
-/// mid-delete surfaces as a typed, actionable error instead of spinning
-/// forever; clearing such a condemnation is host policy — see
-/// [`AttachmentRootSet::release_attachment_condemnation`].
+/// mid-delete surfaces as a typed, retryable error instead of spinning
+/// forever; the next sweep adopts and finishes that condemnation.
 const RECLAMATION_FENCE_ATTEMPTS: u32 = 64;
 
 /// The first few re-acquires are pure yields, for the common case where the

@@ -88,9 +88,11 @@ lost bytes. The sweep condemns before deleting
 (`AttachmentRootSet::condemn_attachment`, refused if any root or intent exists),
 arms the delete (`arm_attachment_delete`, refused if a writer revoked), issues
 the physical delete only for an armed digest, then retires the condemnation row
-after success (`retire_attachment_condemnation`). A fenced final `HEAD` that
-finds the bytes already absent settles the same way without issuing a redundant
-delete.
+after success (`settle_attachment_condemnation` with `Deleted`). A fenced final
+`HEAD` that finds the bytes already absent settles the same way without issuing
+a redundant delete. Every sweep transition belongs to the sweep pass's
+generation, and a sweep adopts and finishes a crashed predecessor's
+condemnations before it condemns anything new (ADR 0067 §6).
 
 **Adoption is gated on positive upload evidence, not on a tombstone
 (FIG-2795).** A completed upload stamps `written_at_ms` on the writer's manifest
@@ -112,7 +114,9 @@ attempt: `abort_attachment_write` deletes just the unstamped, uncommitted row
 carrying its `write_id`, and a stale permit settles nothing at all. It preserves
 `Condemned` unless the same intent became a committed root while the claim was
 held; that newer root supersedes the old unarmed condemnation before the older
-sweep can arm it. A failed or abandoned delete still releases to `Free`.
+sweep can arm it. A failed delete returns `Deleting` to `Condemned`, where a
+writer may reclaim the digest and the next sweep retries it; a delete that
+keeps failing stalls with a typed reason (ADR 0067 §6).
 Whoever loses a CAS
 yields: a writer parks and retries, and a sweep that meets a peer's condemnation
 defers the digest to the next sweep. Nothing waits on a
@@ -123,11 +127,13 @@ spinning, since a physical delete against remote storage takes real time; that
 delay is politeness between CAS attempts, and it is the *only* place time
 appears. No transition, and above all no reclamation, is ever authorized by
 elapsed time.
-Clearing a condemnation left behind by a sweeper that died mid-delete is host
-policy under ADR 0014, exposed as
-`AttachmentRootSet::release_attachment_condemnation`. That operation removes
-only tokenless `Condemned` or `Deleting` state, so an older sweep cannot revoke a
-restoring writer that won the digest meanwhile. The separate
+Amended 2026-09-29 (FIG-4100): clearing a condemnation left behind by a
+sweeper that died mid-delete is no longer host policy, and the host lever
+`AttachmentRootSet::release_attachment_condemnation` is deleted. Attachment GC
+is lash's own protocol, and a host cannot judge fencing safely: the next sweep
+adopts a dead sweeper's `Condemned` or `Deleting` row under a generation that
+proves the predecessor dead, and finishes the delete (ADR 0067 §6). A restoring
+writer's claim is never adopted. The separate
 `recover_abandoned_attachment_write` lever clears a writer token and its
 associated uncommitted intent, but only after the host establishes that the
 writer is no longer running. It applies the same newer-root rule as failed-put
@@ -140,13 +146,14 @@ The freshness re-check survives as what it always was, a cheap pre-filter. It
 now runs only after the sweep arms the digest as `Deleting`; writers arriving in
 that window record no intent and retry after the sweep settles the phase.
 
-Answering `Fenced` is a claim about nine methods across two traits —
+Answering `Fenced` is a claim about ten methods across two traits —
 `AttachmentManifest::begin_attachment_write`, `complete_attachment_write`, and
 `abort_attachment_write` plus the root set's `fence`,
-`condemn_attachment`, `arm_attachment_delete`, and
-`retire_attachment_condemnation`, `release_attachment_condemnation`, and
-`recover_abandoned_attachment_write` — and a partial implementation is worse than
-none, because it silences the warning while keeping the loss. The sweep
+`begin_attachment_sweep`, `adopt_attachment_condemnations`,
+`condemn_attachment`, `arm_attachment_delete`,
+`settle_attachment_condemnation`, and `recover_abandoned_attachment_write` —
+and a partial implementation is worse than none,
+because it silences the warning while keeping the loss. The sweep
 downgrades its own report to `BestEffort` when a self-declared fenced authority
 cannot condemn, but it cannot detect a missing writer half; that one is on the
 implementer.

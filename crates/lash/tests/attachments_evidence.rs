@@ -424,10 +424,6 @@ fn drain_area_witnesses() {
     fn meth_0122<T: lash::persistence::AttachmentRootSet>(_: &T) {
         let _ = T::fence;
     }
-    // W0123: lash::persistence::AttachmentRootSet::release_attachment_condemnation [function]
-    fn meth_0123<T: lash::persistence::AttachmentRootSet>(_: &T) {
-        let _ = T::release_attachment_condemnation;
-    }
     // W0124: lash::persistence::AttachmentCondemnation [enum]
     type_witness::<lash::persistence::AttachmentCondemnation>();
     // W0125: lash::persistence::AttachmentCondemnation::AlreadyCondemned [variant]

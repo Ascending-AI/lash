@@ -774,12 +774,12 @@ macro_rules! effect_host_cold_await_event_tests {
     };
 }
 
-/// Register the attachment-condemnation cold-reopen crash law.
+/// Register the attachment-condemnation cold-reopen adoption law (ADR 0067 §6).
 #[macro_export]
 macro_rules! attachment_condemnation_recovery_tests {
     ($fixture:block) => {
         $crate::attachment_condemnation_recovery_tests!(@catalogue $fixture; [
-            (attachment_condemnation_delete_crash_survives_cold_reopen, "attachment-condemnation-delete-crash"),
+            (cold_reopen_adopts_old_generation_before_new_deletes, "attachment-condemnation-cold-reopen-adoption"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
@@ -800,6 +800,8 @@ macro_rules! attachment_adoption_tests {
         $crate::attachment_adoption_tests!(@catalogue $fixture;
             bytes [
                 (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
+                (concurrent_adoption_deletes_once, "attachment-condemnation-concurrent-adoption"),
+                (persistently_failing_delete_stalls_typed, "attachment-condemnation-delete-stall"),
             ]
             roots [
                 (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),

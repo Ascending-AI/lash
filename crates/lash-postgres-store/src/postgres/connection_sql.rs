@@ -85,6 +85,18 @@ lash_store_sql::statements! {
         /// so there is nothing to derive the key from.
         lock_xact_evidence_retention = "SELECT pg_advisory_xact_lock(715423, 0)";
 
+        /// Try the session-scoped **exclusive** advisory lock in class `?1`
+        /// keyed on text `?2`, answering whether this connection took it.
+        ///
+        /// Session-scoped on purpose: an attachment sweep pass holds it on a
+        /// dedicated connection for its whole life, and the server releases
+        /// it exactly when that connection goes away, which is the pass's
+        /// liveness proof.
+        try_lock_session_by_class_and_text = "SELECT pg_try_advisory_lock(?1, hashtext(?2))";
+
+        /// Set this transaction's `lock_timeout` to `?1`, reverting at its end.
+        set_local_lock_timeout = "SELECT set_config('lock_timeout', ?1, true)";
+
         /// Take the session-scoped **shared** advisory lock `(?1, ?2)`.
         ///
         /// Shared and session-scoped, not exclusive and transaction-scoped:

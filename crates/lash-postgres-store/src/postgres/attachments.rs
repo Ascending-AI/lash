@@ -10,6 +10,7 @@ use std::sync::LazyLock;
 use lash_sansio::SessionId;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
 use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
+use lash_store_sql::attachment::sweep_clock::SweepClockStatements;
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
 use crate::*;
@@ -83,8 +84,9 @@ lash_store_sql::statements! {
         /// `READ COMMITTED` cannot hold "read the absence, then insert"
         /// atomic, so a peer sweeper is detected by the conflict rather than
         /// by a prior read. SQLite reads the absence under its write lock.
-        insert_condemned = "INSERT INTO attachment_condemnations (attachment_id, phase)
-             VALUES (?1, 'condemned')
+        insert_condemned = "INSERT INTO attachment_condemnations
+                 (attachment_id, phase, sweep_generation)
+             VALUES (?1, 'condemned', ?2)
              ON CONFLICT (attachment_id) DO NOTHING";
     }
 }
@@ -118,6 +120,8 @@ pub(crate) struct AttachmentSql {
     pub(crate) condemnation: CondemnationStatements,
     /// `attachment_condemnations` statements only PostgreSQL issues.
     pub(crate) condemnation_postgres: CondemnationPostgresStatements,
+    /// `attachment_sweep_clock` statements both backends issue verbatim.
+    pub(crate) sweep_clock: SweepClockStatements,
 }
 
 static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
@@ -128,6 +132,7 @@ static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
         manifest_process_owner: ManifestProcessOwnerStatements::render(dialect),
         condemnation: CondemnationStatements::render(dialect),
         condemnation_postgres: CondemnationPostgresStatements::render(dialect),
+        sweep_clock: SweepClockStatements::render(dialect),
     }
 });
 
@@ -251,46 +256,300 @@ pub(crate) async fn lock_attachment_fence_tx(
     Ok(())
 }
 
-/// Release only sweep-owned state under the digest's fence lock. A stale sweep
-/// cannot clear a restoring writer's token.
-pub(crate) async fn release_attachment_condemnation(
-    pool: &PgPool,
-    attachment_id: &str,
-) -> Result<(), StoreError> {
-    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
-    lock_attachment_fence_tx(&mut tx, attachment_id).await?;
-    sqlx::query(attachment_sql().condemnation.delete_sweep_owned.sql())
-        .bind(attachment_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-    tx.commit().await.map_err(store_sqlx_error)
+/// Advisory-lock class for attachment sweep pass liveness, keyed on the
+/// catalog and the pass's generation. A pass holds its key as a
+/// session-scoped lock on a dedicated connection for its whole life; the
+/// server releases it when that connection closes, whether the pass returned,
+/// was cancelled, or its process died. Nothing else takes the key exclusively,
+/// so a probe that acquires it has proven the pass dead.
+pub(crate) const ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE: i32 = 715_424;
+
+/// How long an adoption probe waits for a pass's liveness key before it
+/// treats the pass as live. A closing connection releases its lock a moment
+/// after the client drops it, so the probe waits that moment out rather than
+/// deferring a just-crashed pass's rows. The wait decides nothing on expiry:
+/// a probe that times out leaves the rows to their pass.
+const ATTACHMENT_SWEEP_LIVENESS_PROBE_TIMEOUT: &str = "500ms";
+
+/// How many generations a pass mints before giving up on a liveness key no
+/// other live pass shares. Keys are hashed, so a collision is possible and
+/// astronomically rare; minting again sidesteps it.
+const ATTACHMENT_SWEEP_MINT_ATTEMPTS: u32 = 3;
+
+fn sweep_liveness_key(catalog_id: &str, generation: i64) -> String {
+    format!("{catalog_id}:{generation}")
 }
 
-/// Enumerate the durable condemnation authority without exposing write
-/// tokens. Persisted phase/provenance combinations are decoded strictly so a
-/// corrupt row cannot be mistaken for sweep-owned maintenance work.
-pub(crate) async fn list_attachment_condemnations(
+/// A live sweep pass's dedicated connection. Dropping it closes the
+/// connection, and the server releases the pass's liveness key with it.
+struct PostgresSweepLiveness {
+    _connection: std::sync::Mutex<sqlx::PgConnection>,
+}
+
+/// Mint a sweep generation and take its liveness key on a dedicated
+/// connection held for the pass's life.
+pub(crate) async fn begin_attachment_sweep(
     pool: &PgPool,
-) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
-    let rows = sqlx::query_as::<_, (String, String, Option<String>, Option<String>)>(
-        attachment_sql().condemnation.select_all.sql(),
+    catalog_id: &str,
+) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
+    let mut connection = pool.acquire().await.map_err(store_sqlx_error)?.detach();
+    for _ in 0..ATTACHMENT_SWEEP_MINT_ATTEMPTS {
+        let generation: i64 =
+            sqlx::query_scalar(attachment_sql().sweep_clock.mint_generation.sql())
+                .bind(true)
+                .fetch_one(&mut connection)
+                .await
+                .map_err(store_sqlx_error)?;
+        let held: bool = sqlx::query_scalar(
+            crate::connection_sql::connection_sql()
+                .try_lock_session_by_class_and_text
+                .sql(),
+        )
+        .bind(ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE)
+        .bind(sweep_liveness_key(catalog_id, generation))
+        .fetch_one(&mut connection)
+        .await
+        .map_err(store_sqlx_error)?;
+        if held {
+            let generation = u64::try_from(generation).map_err(|_| {
+                StoreError::Backend(format!(
+                    "attachment sweep clock minted negative generation {generation}"
+                ))
+            })?;
+            return Ok(lash_core_execution::AttachmentSweepGeneration::new(
+                generation,
+                Box::new(PostgresSweepLiveness {
+                    _connection: std::sync::Mutex::new(connection),
+                }),
+            ));
+        }
+    }
+    Err(StoreError::Backend(format!(
+        "no attachment sweep generation with a free liveness key after {ATTACHMENT_SWEEP_MINT_ATTEMPTS} mints"
+    )))
+}
+
+/// Whether generation `generation`'s pass has provably ended: its liveness
+/// key can be taken. A dead pass never becomes live again, because no pass
+/// takes another generation's key, so the answer stays true once given.
+async fn sweep_pass_is_dead(
+    pool: &PgPool,
+    catalog_id: &str,
+    generation: i64,
+) -> Result<bool, StoreError> {
+    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .set_local_lock_timeout
+            .sql(),
     )
+    .bind(ATTACHMENT_SWEEP_LIVENESS_PROBE_TIMEOUT)
+    .execute(&mut *tx)
+    .await
+    .map_err(store_sqlx_error)?;
+    let probe = sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_class_and_text
+            .sql(),
+    )
+    .bind(ATTACHMENT_SWEEP_LIVENESS_LOCK_NAMESPACE)
+    .bind(sweep_liveness_key(catalog_id, generation))
+    .execute(&mut *tx)
+    .await;
+    match probe {
+        Ok(_) => {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            Ok(true)
+        }
+        Err(sqlx::Error::Database(error)) if error.code().as_deref() == Some("55P03") => {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            Ok(false)
+        }
+        Err(error) => Err(store_sqlx_error(error)),
+    }
+}
+
+/// Adopt every sweep-owned row an older generation left whose pass is dead,
+/// one CAS per row under the digest's fence lock.
+pub(crate) async fn adopt_attachment_condemnations(
+    pool: &PgPool,
+    catalog_id: &str,
+    generation: &lash_core_execution::AttachmentSweepGeneration,
+) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
+    let mine = sweep_generation_sql(generation)?;
+    let rows = sqlx::query_as::<_, (String, i64, String, i32, Option<String>)>(
+        attachment_sql().condemnation.select_adoptable.sql(),
+    )
+    .bind(mine)
     .fetch_all(pool)
     .await
     .map_err(store_sqlx_error)?;
+    let mut dead = std::collections::BTreeMap::new();
+    let mut adoption = lash_core_execution::AttachmentCondemnationAdoption::default();
+    for (digest, owner, phase, delete_attempts, stall_reason) in rows {
+        let id = attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
+        if stall_reason.is_some() {
+            adoption.stalled.push(id);
+            continue;
+        }
+        let owner_dead = match dead.get(&owner) {
+            Some(owner_dead) => *owner_dead,
+            None => {
+                let owner_dead = sweep_pass_is_dead(pool, catalog_id, owner).await?;
+                dead.insert(owner, owner_dead);
+                owner_dead
+            }
+        };
+        if !owner_dead {
+            adoption.held_by_live_pass.push(id);
+            continue;
+        }
+        let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+        lock_attachment_fence_tx(&mut tx, id.as_str()).await?;
+        let adopted = sqlx::query(attachment_sql().condemnation.adopt.sql())
+            .bind(id.as_str())
+            .bind(mine)
+            .bind(owner)
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .rows_affected();
+        tx.commit().await.map_err(store_sqlx_error)?;
+        if adopted == 1 {
+            let phase = match phase.as_str() {
+                "condemned" => lash_core_execution::AttachmentCondemnationPhase::Condemned,
+                "deleting" => lash_core_execution::AttachmentCondemnationPhase::Deleting,
+                unknown => {
+                    return Err(StoreError::StoredDataCorrupt {
+                        record_kind: "attachment condemnation",
+                        message: format!("attachment `{id}` has unknown phase `{unknown}`"),
+                    });
+                }
+            };
+            let delete_attempts =
+                u32::try_from(delete_attempts).map_err(|_| StoreError::StoredDataCorrupt {
+                    record_kind: "attachment condemnation",
+                    message: format!(
+                        "attachment `{id}` has delete attempt count {delete_attempts}"
+                    ),
+                })?;
+            adoption
+                .adopted
+                .push(lash_core_execution::AdoptedAttachmentCondemnation {
+                    digest: id,
+                    phase,
+                    delete_attempts,
+                });
+        }
+    }
+    Ok(adoption)
+}
+
+/// Settle one condemnation `generation` owns, under the digest's fence lock.
+/// A restoring writer's token is never cleared here.
+pub(crate) async fn settle_attachment_condemnation(
+    pool: &PgPool,
+    attachment_id: &str,
+    generation: &lash_core_execution::AttachmentSweepGeneration,
+    settlement: lash_core_execution::AttachmentCondemnationSettlement,
+) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
+    let generation = sweep_generation_sql(generation)?;
+    let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
+    lock_attachment_fence_tx(&mut tx, attachment_id).await?;
+    let statements = &attachment_sql().condemnation;
+    let settled = match settlement {
+        lash_core_execution::AttachmentCondemnationSettlement::Deleted => {
+            sqlx::query(statements.delete_armed.sql())
+                .bind(attachment_id)
+                .bind(generation)
+                .execute(&mut *tx)
+                .await
+        }
+        lash_core_execution::AttachmentCondemnationSettlement::Spared => {
+            sqlx::query(statements.delete_spared.sql())
+                .bind(attachment_id)
+                .bind(generation)
+                .execute(&mut *tx)
+                .await
+        }
+        lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
+            sqlx::query(statements.record_failed_delete.sql())
+                .bind(attachment_id)
+                .bind(generation)
+                .bind(error)
+                .bind(stall.map(|reason| reason.as_str()))
+                .execute(&mut *tx)
+                .await
+        }
+    }
+    .map_err(store_sqlx_error)?
+    .rows_affected();
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(if settled == 1 {
+        lash_core_execution::AttachmentSettlementOutcome::Applied
+    } else {
+        lash_core_execution::AttachmentSettlementOutcome::NotOwned
+    })
+}
+
+pub(crate) fn sweep_generation_sql(
+    generation: &lash_core_execution::AttachmentSweepGeneration,
+) -> Result<i64, StoreError> {
+    i64::try_from(generation.generation()).map_err(|_| {
+        StoreError::Backend(format!(
+            "attachment sweep generation {} exceeds the stored range",
+            generation.generation()
+        ))
+    })
+}
+
+/// Enumerate the durable condemnation authority without exposing write
+/// tokens. Persisted phase/provenance/failure combinations are decoded
+/// strictly so a corrupt row cannot be mistaken for sweep-owned maintenance
+/// work.
+pub(crate) async fn list_attachment_condemnations(
+    pool: &PgPool,
+) -> Result<Vec<lash_core_execution::AttachmentCondemnationRecord>, StoreError> {
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        i32,
+        Option<String>,
+        Option<String>,
+    );
+    let rows = sqlx::query_as::<_, Row>(attachment_sql().condemnation.select_all.sql())
+        .fetch_all(pool)
+        .await
+        .map_err(store_sqlx_error)?;
     let mut condemnations = rows
         .into_iter()
-        .map(|(digest, phase, write_token, write_session_id)| {
-            let digest =
-                attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
-            lash_core_execution::store::decode_attachment_condemnation_record(
+        .map(
+            |(
                 digest,
-                &phase,
-                write_token.is_some(),
-                write_session_id.map(SessionId::from),
-            )
-        })
+                phase,
+                write_token,
+                write_session_id,
+                delete_attempts,
+                last_delete_error,
+                stall_reason,
+            )| {
+                let digest =
+                    attachment_id_from_sql("attachment condemnation", "attachment_id", digest)?;
+                lash_core_execution::store::decode_attachment_condemnation_record(
+                    lash_core_execution::store::StoredAttachmentCondemnation {
+                        digest,
+                        phase,
+                        write_token_present: write_token.is_some(),
+                        write_session_id: write_session_id.map(SessionId::from),
+                        delete_attempts: i64::from(delete_attempts),
+                        last_delete_error,
+                        stall_reason,
+                    },
+                )
+            },
+        )
         .collect::<Result<Vec<_>, StoreError>>()?;
     condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
     Ok(condemnations)

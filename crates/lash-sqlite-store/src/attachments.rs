@@ -17,8 +17,10 @@ use std::sync::LazyLock;
 
 use crate::schema_layout::Schema;
 use lash_sansio::SessionId;
+use lash_sansio::sync::MutexExt;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
 use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};
+use lash_store_sql::attachment::sweep_clock::SweepClockStatements;
 use lash_store_sql::{SchemaTables, TableLayout, Vocabulary, VocabularyTerm};
 
 use super::*;
@@ -95,11 +97,13 @@ lash_store_sql::statements! {
         /// sweeper through the insert's `ON CONFLICT` instead.
         select_exists = "SELECT 1 FROM attachment_condemnations WHERE attachment_id = ?1";
 
-        /// No `ON CONFLICT`: the absence of the row was read under the same
-        /// write lock this insert commits under, so a conflict here is a
-        /// defect and the constraint error is kept rather than swallowed.
-        insert_condemned = "INSERT INTO attachment_condemnations (attachment_id, phase)
-             VALUES (?1, 'condemned')";
+        /// Condemn `?1` for sweep generation `?2`. No `ON CONFLICT`: the
+        /// absence of the row was read under the same write lock this insert
+        /// commits under, so a conflict here is a defect and the constraint
+        /// error is kept rather than swallowed.
+        insert_condemned = "INSERT INTO attachment_condemnations
+                 (attachment_id, phase, sweep_generation)
+             VALUES (?1, 'condemned', ?2)";
     }
 }
 
@@ -123,6 +127,7 @@ const ATTACHMENT_OWNER: Vocabulary = Vocabulary::new(&[
 const CATALOG_TABLES: &[&str] = &[
     lash_store_sql::attachment::manifest::TABLE,
     lash_store_sql::attachment::condemnation::TABLE,
+    lash_store_sql::attachment::sweep_clock::TABLE,
     "deleted_sessions",
     "graph_nodes",
     "runtime_turn_commits",
@@ -159,6 +164,8 @@ pub(crate) struct AttachmentSql {
     pub(crate) condemnation: CondemnationStatements,
     /// `attachment_condemnations` statements only SQLite issues.
     pub(crate) condemnation_sqlite: CondemnationSqliteStatements,
+    /// `attachment_sweep_clock` statements both backends issue verbatim.
+    pub(crate) sweep_clock: SweepClockStatements,
 }
 
 /// The family's own tables live in the session catalog and are never reached
@@ -175,6 +182,7 @@ static ATTACHMENT_SQL: LazyLock<AttachmentSql> = LazyLock::new(|| {
         manifest_process_owner: ManifestProcessOwnerStatements::render(beside_registry),
         condemnation: CondemnationStatements::render(catalog),
         condemnation_sqlite: CondemnationSqliteStatements::render(catalog),
+        sweep_clock: SweepClockStatements::render(catalog),
     }
 });
 
@@ -336,6 +344,9 @@ impl SqliteStore {
                             row.get::<_, String>(1)?,
                             row.get::<_, Option<String>>(2)?,
                             row.get::<_, Option<String>>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
                         ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()
@@ -344,23 +355,146 @@ impl SqliteStore {
             .map_err(sqlite_error)?;
         let mut condemnations = rows
             .into_iter()
-            .map(|(digest, phase, write_token, write_session_id)| {
-                let digest = AttachmentId::parse(&digest).map_err(|error| {
-                    stored_data_corrupt(
-                        "attachment condemnation",
-                        format!("attachment_id is not a valid attachment id: {error}"),
-                    )
-                })?;
-                lash_core_execution::store::decode_attachment_condemnation_record(
+            .map(
+                |(
                     digest,
-                    &phase,
-                    write_token.is_some(),
-                    write_session_id.map(SessionId::from),
-                )
-            })
+                    phase,
+                    write_token,
+                    write_session_id,
+                    delete_attempts,
+                    last_delete_error,
+                    stall_reason,
+                )| {
+                    let digest = AttachmentId::parse(&digest).map_err(|error| {
+                        stored_data_corrupt(
+                            "attachment condemnation",
+                            format!("attachment_id is not a valid attachment id: {error}"),
+                        )
+                    })?;
+                    lash_core_execution::store::decode_attachment_condemnation_record(
+                        lash_core_execution::store::StoredAttachmentCondemnation {
+                            digest,
+                            phase,
+                            write_token_present: write_token.is_some(),
+                            write_session_id: write_session_id.map(SessionId::from),
+                            delete_attempts,
+                            last_delete_error,
+                            stall_reason,
+                        },
+                    )
+                },
+            )
             .collect::<Result<Vec<_>, StoreError>>()?;
         condemnations.sort_by(|left, right| left.digest.cmp(&right.digest));
         Ok(condemnations)
+    }
+
+    /// Open one sweep pass: mint the next generation and register it live in
+    /// this process. SQLite runs in one process (ADR 0106), so the registry
+    /// is the whole liveness proof: a pass that ended, was cancelled, or died
+    /// with its process is absent from it.
+    pub(crate) async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<lash_core_execution::AttachmentSweepGeneration, StoreError> {
+        let generation = self
+            .conn
+            .write(|tx| {
+                tx.query_row(
+                    attachment_sql().sweep_clock.mint_generation.sql(),
+                    params![true],
+                    |row| row.get::<_, i64>(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)?;
+        let generation = u64::try_from(generation).map_err(|_| {
+            stored_data_corrupt(
+                "attachment sweep clock",
+                format!("minted generation {generation} is negative"),
+            )
+        })?;
+        let liveness = LiveSweep::register(self.sweep_catalog_key(), generation);
+        Ok(lash_core_execution::AttachmentSweepGeneration::new(
+            generation,
+            Box::new(liveness),
+        ))
+    }
+
+    /// Adopt every sweep-owned row an older generation left whose pass is no
+    /// longer live, in one `BEGIN IMMEDIATE` transaction.
+    pub(crate) async fn adopt_attachment_condemnations(
+        &self,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, StoreError> {
+        let mine = sweep_generation_sql(generation)?;
+        let catalog = self.sweep_catalog_key();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome: Result<_, StoreError> = (|| {
+                    let rows = {
+                        let mut statement = tx
+                            .prepare_cached(attachment_sql().condemnation.select_adoptable.sql())
+                            .map_err(sqlite_error)?;
+                        statement
+                            .query_map(params![mine], |row| {
+                                Ok((
+                                    row.get::<_, String>(0)?,
+                                    row.get::<_, i64>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, i64>(3)?,
+                                    row.get::<_, Option<String>>(4)?,
+                                ))
+                            })
+                            .map_err(sqlite_error)?
+                            .collect::<rusqlite::Result<Vec<_>>>()
+                            .map_err(sqlite_error)?
+                    };
+                    let mut adoption =
+                        lash_core_execution::AttachmentCondemnationAdoption::default();
+                    for (digest, owner, phase, delete_attempts, stall_reason) in rows {
+                        let id = AttachmentId::parse(&digest).map_err(|error| {
+                            stored_data_corrupt(
+                                "attachment condemnation",
+                                format!("attachment_id is not a valid attachment id: {error}"),
+                            )
+                        })?;
+                        if stall_reason.is_some() {
+                            adoption.stalled.push(id);
+                            continue;
+                        }
+                        if LiveSweep::is_live(&catalog, owner) {
+                            adoption.held_by_live_pass.push(id);
+                            continue;
+                        }
+                        let adopted = crate::conn::cached_execute(
+                            tx,
+                            attachment_sql().condemnation.adopt.sql(),
+                            params![digest, mine, owner],
+                        )
+                        .map_err(sqlite_error)?;
+                        if adopted == 1 {
+                            adoption.adopted.push(adopted_condemnation(
+                                id,
+                                &phase,
+                                delete_attempts,
+                            )?);
+                        }
+                    }
+                    Ok(adoption)
+                })();
+                Ok(match outcome {
+                    Ok(adoption) => TxOutcome::Commit(Ok(adoption)),
+                    Err(err) => TxOutcome::Rollback(Err(err)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
+    /// The key this catalog's live sweep passes are registered under: the
+    /// database target the host opened it at.
+    fn sweep_catalog_key(&self) -> String {
+        self.location.target().to_string()
     }
 
     /// `Free -> Condemned` for one digest, conditional on there being no live
@@ -371,7 +505,9 @@ impl SqliteStore {
         &self,
         attachment_id: &AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, StoreError> {
+        let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
         let cutoff = crate::clamp_epoch_ms(intent_grace_cutoff_epoch_ms);
         let live_ref_sql = live_root_sql(self.process_registry_attached);
@@ -404,7 +540,7 @@ impl SqliteStore {
                         crate::conn::cached_execute(
                             tx,
                             attachment_sql().condemnation_sqlite.insert_condemned.sql(),
-                            params![attachment_id],
+                            params![attachment_id, generation],
                         )
                         .map_err(sqlite_error)?;
                         // The digest is proven unrooted, so every remaining manifest
@@ -428,13 +564,16 @@ impl SqliteStore {
             .map_err(sqlite_error)?
     }
 
-    /// `Condemned -> Deleting`: the CAS that authorizes the physical delete. A
-    /// writer that revoked the condemnation removed the row, so the conditional
-    /// UPDATE matches nothing and the delete is never issued.
+    /// `Condemned -> Deleting` under `generation`: the CAS that authorizes the
+    /// physical delete. A writer that revoked or claimed the condemnation, or
+    /// a pass that adopted it, leaves nothing to match, and the delete is never
+    /// issued.
     pub(crate) async fn arm_attachment_delete(
         &self,
         attachment_id: &AttachmentId,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentDeleteArming, StoreError> {
+        let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
         let armed = self
             .conn
@@ -442,7 +581,7 @@ impl SqliteStore {
                 crate::conn::cached_execute(
                     tx,
                     attachment_sql().condemnation.arm_delete.sql(),
-                    params![attachment_id],
+                    params![attachment_id, generation],
                 )
             })
             .await
@@ -454,23 +593,53 @@ impl SqliteStore {
         })
     }
 
-    /// A stale sweep cannot clear a restoring writer's token.
-    pub(crate) async fn release_attachment_condemnation(
+    /// Settle one condemnation `generation` owns. A restoring writer's token is
+    /// never cleared here.
+    pub(crate) async fn settle_attachment_condemnation(
         &self,
         attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+        settlement: lash_core_execution::AttachmentCondemnationSettlement,
+    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, StoreError> {
+        let generation = sweep_generation_sql(generation)?;
         let attachment_id = attachment_id.as_str().to_string();
-        self.conn
-            .write(move |tx| {
-                crate::conn::cached_execute(
-                    tx,
-                    attachment_sql().condemnation.delete_sweep_owned.sql(),
-                    params![attachment_id],
-                )
+        let settled = self
+            .conn
+            .write(move |tx| match settlement {
+                lash_core_execution::AttachmentCondemnationSettlement::Deleted => {
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().condemnation.delete_armed.sql(),
+                        params![attachment_id, generation],
+                    )
+                }
+                lash_core_execution::AttachmentCondemnationSettlement::Spared => {
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().condemnation.delete_spared.sql(),
+                        params![attachment_id, generation],
+                    )
+                }
+                lash_core_execution::AttachmentCondemnationSettlement::Failed { stall, error } => {
+                    crate::conn::cached_execute(
+                        tx,
+                        attachment_sql().condemnation.record_failed_delete.sql(),
+                        params![
+                            attachment_id,
+                            generation,
+                            error,
+                            stall.map(|reason| reason.as_str())
+                        ],
+                    )
+                }
             })
             .await
             .map_err(sqlite_error)?;
-        Ok(())
+        Ok(if settled == 1 {
+            lash_core_execution::AttachmentSettlementOutcome::Applied
+        } else {
+            lash_core_execution::AttachmentSettlementOutcome::NotOwned
+        })
     }
 
     /// Retire `Condemned` only when its associated intent became committed, otherwise preserve
@@ -524,27 +693,85 @@ impl SqliteStore {
             .await
             .map_err(sqlite_error)?
     }
+}
 
-    /// Delete the condemnation row after the physical delete succeeds: the
-    /// digest returns to `Free` holding no upload evidence, because the
-    /// condemnation already cleared every manifest row for it.
-    pub(crate) async fn retire_attachment_condemnation(
-        &self,
-        attachment_id: &AttachmentId,
-    ) -> Result<(), StoreError> {
-        let attachment_id = attachment_id.as_str().to_string();
-        self.conn
-            .write(move |tx| {
-                crate::conn::cached_execute(
-                    tx,
-                    attachment_sql().condemnation.delete_armed.sql(),
-                    params![attachment_id],
-                )
-            })
-            .await
-            .map_err(sqlite_error)?;
-        Ok(())
+/// The sweep passes running in this process, by catalog and generation.
+static LIVE_SWEEPS: LazyLock<std::sync::Mutex<std::collections::HashSet<(String, u64)>>> =
+    LazyLock::new(Default::default);
+
+/// One registered live sweep pass. Dropping it — the pass returning or its
+/// task being cancelled — removes the registration; a process that dies takes
+/// the whole registry with it.
+struct LiveSweep {
+    catalog: String,
+    generation: u64,
+}
+
+impl LiveSweep {
+    fn register(catalog: String, generation: u64) -> Self {
+        LIVE_SWEEPS
+            .lock_recover()
+            .insert((catalog.clone(), generation));
+        Self {
+            catalog,
+            generation,
+        }
     }
+
+    fn is_live(catalog: &str, generation: i64) -> bool {
+        u64::try_from(generation).is_ok_and(|generation| {
+            LIVE_SWEEPS
+                .lock_recover()
+                .contains(&(catalog.to_owned(), generation))
+        })
+    }
+}
+
+impl Drop for LiveSweep {
+    fn drop(&mut self) {
+        LIVE_SWEEPS
+            .lock_recover()
+            .remove(&(std::mem::take(&mut self.catalog), self.generation));
+    }
+}
+
+fn sweep_generation_sql(
+    generation: &lash_core_execution::AttachmentSweepGeneration,
+) -> Result<i64, StoreError> {
+    i64::try_from(generation.generation()).map_err(|_| {
+        StoreError::Backend(format!(
+            "attachment sweep generation {} exceeds the stored range",
+            generation.generation()
+        ))
+    })
+}
+
+fn adopted_condemnation(
+    digest: AttachmentId,
+    phase: &str,
+    delete_attempts: i64,
+) -> Result<lash_core_execution::AdoptedAttachmentCondemnation, StoreError> {
+    let phase = match phase {
+        "condemned" => lash_core_execution::AttachmentCondemnationPhase::Condemned,
+        "deleting" => lash_core_execution::AttachmentCondemnationPhase::Deleting,
+        unknown => {
+            return Err(stored_data_corrupt(
+                "attachment condemnation",
+                format!("attachment `{digest}` has unknown phase `{unknown}`"),
+            ));
+        }
+    };
+    let delete_attempts = u32::try_from(delete_attempts).map_err(|_| {
+        stored_data_corrupt(
+            "attachment condemnation",
+            format!("attachment `{digest}` has delete attempt count {delete_attempts}"),
+        )
+    })?;
+    Ok(lash_core_execution::AdoptedAttachmentCondemnation {
+        digest,
+        phase,
+        delete_attempts,
+    })
 }
 
 #[async_trait::async_trait]

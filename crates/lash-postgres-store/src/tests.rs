@@ -918,12 +918,20 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
     crate::attachments::FENCE_WRITER_WINDOW_DELAY_MS
         .store(20, std::sync::atomic::Ordering::Relaxed);
 
+    let pass = lash_core_execution::AttachmentRootSet::begin_attachment_sweep(&factory)
+        .await
+        .expect("open an attachment sweep pass");
     // Both orderings, every round: the fixed code holds for all of them.
     for round in 0..12 {
         assert_eq!(
-            lash_core_execution::AttachmentRootSet::condemn_attachment(&factory, &attachment_id, 0)
-                .await
-                .expect("condemn"),
+            lash_core_execution::AttachmentRootSet::condemn_attachment(
+                &factory,
+                &attachment_id,
+                0,
+                &pass
+            )
+            .await
+            .expect("condemn"),
             lash_core_execution::AttachmentCondemnation::Condemned,
             "round {round}: the digest must start each round rootless and free"
         );
@@ -944,10 +952,13 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             // outcome, and the invariant below holds for either ordering.
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-        let armed =
-            lash_core_execution::AttachmentRootSet::arm_attachment_delete(&factory, &attachment_id)
-                .await
-                .expect("arm");
+        let armed = lash_core_execution::AttachmentRootSet::arm_attachment_delete(
+            &factory,
+            &attachment_id,
+            &pass,
+        )
+        .await
+        .expect("arm");
         let fence = writer.await.expect("join writer").expect("fenced write");
 
         let contains_ref = lash_core_execution::AttachmentManifest::list_all_refs(&*store)
@@ -992,12 +1003,14 @@ async fn arming_a_delete_and_a_concurrent_writer_never_both_win() {
             ),
         }
 
-        lash_core_execution::AttachmentRootSet::release_attachment_condemnation(
+        lash_core_execution::AttachmentRootSet::settle_attachment_condemnation(
             &factory,
             &attachment_id,
+            &pass,
+            lash_core_execution::AttachmentCondemnationSettlement::Spared,
         )
         .await
-        .expect("release");
+        .expect("spare");
         if contains_ref {
             lash_core_execution::AttachmentManifest::forget(&*store, &session_id, &attachment_id)
                 .await

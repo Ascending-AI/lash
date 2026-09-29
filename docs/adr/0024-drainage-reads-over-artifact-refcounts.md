@@ -1,16 +1,26 @@
 # Drainage reads over artifact refcounts
 
-A host that retires old definition artifacts or env blobs must know when nothing in-flight
-still needs them — recovery of a process whose artifact is gone is a hard
-`process_module_artifact_missing` failure, so retirement without evidence is data loss. We
-added a registry aggregate: `live_reference_summary()` groups non-terminal processes by
-(identity definition, env ref) with counts, computed on demand from process rows. A definition
-or env ref absent from the summary is drained and safe to retire; the counts double as an
-"in-flight per version" drainage signal for host UIs.
+Amended 2026-09-29 (FIG-4100): the summary is drainage information, not a
+retirement authority. An earlier version of this record told hosts that a ref
+absent from the summary could be retired. That advice is deleted. The
+summary counts only non-terminal processes, while
+[ADR 0113](0113-artifacts-are-kept-alive-only-by-their-referrers.md) §1 keeps
+an artifact alive for as long as any of its seven referrer kinds holds an edge
+to it. Reclamation follows ADR 0113's referrer rule: an artifact's bytes go
+when its last referrer edge is cut, by lash, never because a host read a
+summary.
+
+Recovery of a process whose artifact is gone is a hard
+`process_module_artifact_missing` failure, so a host that wants to see which
+definition and env versions are still in flight needs a drainage read. We
+added a registry aggregate: `live_reference_summary()` groups non-terminal
+processes by (identity definition, env ref) with counts, computed on demand
+from process rows. The counts are an "in-flight per version" drainage signal
+for host UIs.
 
 We rejected maintaining live reference counts inside the artifact/env stores: it couples two
 deliberately separate store families, adds a write to every process lifecycle transition, and a
-drift bug silently corrupts retirement decisions — whereas the aggregate is recomputed from
+drift bug silently corrupts the drainage signal — whereas the aggregate is recomputed from
 truth on every call. Client-side counting via paged list reads was rejected as a substrate
 gap: every retiring host would re-implement the same scan, paying full row payloads to compute
 a count.

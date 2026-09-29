@@ -79,11 +79,14 @@ pub use admission_plan::{
 };
 pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_manifest::{
-    AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
-    AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
-    AttachmentManifestEntry, AttachmentOwner, AttachmentOwnerKind, AttachmentWriteFence,
-    AttachmentWritePermit, AttachmentWriteToken, decode_attachment_condemnation_record,
-    decode_attachment_owner,
+    AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
+    AttachmentCondemnationPhase, AttachmentCondemnationProvenance, AttachmentCondemnationRecord,
+    AttachmentCondemnationSettlement, AttachmentDeleteArming, AttachmentDeleteStallReason,
+    AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwner,
+    AttachmentOwnerKind, AttachmentSettlementOutcome, AttachmentSweepGeneration,
+    AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
+    MAX_ATTACHMENT_DELETE_ATTEMPTS, StoredAttachmentCondemnation,
+    decode_attachment_condemnation_record, decode_attachment_owner,
 };
 pub use capture::{
     CAPTURE_BATCH_MAX_BYTES, CAPTURE_BATCH_MAX_FRAMES, CaptureAck, CaptureAttemptReset,

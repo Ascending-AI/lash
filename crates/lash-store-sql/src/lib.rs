@@ -108,6 +108,7 @@ pub const TABLES: &[&str] = &[
     attachment::blob::TABLE,
     attachment::condemnation::TABLE,
     attachment::manifest::TABLE,
+    attachment::sweep_clock::TABLE,
     draining_generations::TABLE,
     process::abandoned_consumer_holds::TABLE,
     process::change_clock::TABLE,
@@ -184,6 +185,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
     statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);
+    statements.extend_from_slice(attachment::sweep_clock::SweepClockStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryStatements::NEUTRAL);
     statements.extend_from_slice(trigger::deliveries::DeliveryObligationStatements::NEUTRAL);
     statements.extend_from_slice(trigger::mutation_receipts::MutationReceiptStatements::NEUTRAL);

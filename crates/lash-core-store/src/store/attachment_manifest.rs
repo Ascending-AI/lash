@@ -235,30 +235,36 @@ pub enum AttachmentWriteFence {
 ///            ┌───────────────────────────────────────────────┐
 ///            │                                               v
 ///   ┌────────┴─┐  condemn: no root, and every manifest  ┌───────────┐
-///   │   Free   │ ───── row for the digest is deleted ──> │ Condemned │
-///   └──────────┘ <──── release (sweep abandons) ─────────└───────────┘
-///       ^   ^                                                 │ arm
-///       │   │                                                 v
-///       │   │                                           ┌───────────┐
-///       │   └──── release (delete failed/abandoned) ────│ Deleting  │
+///   │   Free   │ ───── row for the digest is deleted ──> │ Condemned │ <─┐
+///   └──────────┘ <──── spare (sweep gives it back) ──────└───────────┘   │
+///       ^   ^                                                 │ arm      │ delete failed:
+///       │   │                                                 v          │ attempts + 1,
+///       │   │                                           ┌───────────┐    │ stalled past
+///       │   └──── spare (bytes refreshed) ──────────────│ Deleting  │ ───┘ the bound
 ///       │                                               └───────────┘
 ///       │                                                     │
-///       └──── delete succeeded: the condemnation row is ───────┘
-///             retired, and no manifest row survives to
-///             make the digest adoptable again
+///       └──── delete succeeded or bytes already gone: the ────┘
+///             condemnation row is retired, and no manifest
+///             row survives to make the digest adoptable again
 /// ```
 ///
 /// * `Free` — the ordinary state. A writer records its intent and the digest is
 ///   rooted; a sweeper that finds no root may condemn it.
 /// * `Condemned` — a sweeper claimed the digest for deletion but has issued no
-///   physical delete yet. A writer arriving here claims the phase with its
-///   attempt identity and records its intent in one mutation, so the sweeper's
-///   later arm CAS fails. Success clears the claimed phase after bytes exist;
-///   failure releases the claim while preserving `Condemned`, unless the same
-///   intent became committed while the claim was held; that root returns the
-///   digest to `Free` before the old sweep can arm.
+///   physical delete yet, or its delete failed. A writer arriving here claims
+///   the phase with its attempt identity and records its intent in one
+///   mutation, so the sweeper's later arm CAS fails. Success clears the claimed
+///   phase after bytes exist; failure releases the claim while preserving
+///   `Condemned`, unless the same intent became committed while the claim was
+///   held; that root returns the digest to `Free` before the old sweep can arm.
 /// * `Deleting` — the physical delete is in flight. A writer arriving here
 ///   cannot un-issue it, so it records nothing and retries.
+///
+/// Every sweep-owned row names the sweep generation that owns it
+/// ([`AttachmentSweepGeneration`]). Only that generation moves it, and a later
+/// sweep adopts it only once the owning pass is provably dead (ADR 0067 §6):
+/// a crashed sweeper's `Condemned` or `Deleting` row is finished by the next
+/// sweep, never by a host.
 ///
 /// There is no terminal post-delete phase. Condemnation deletes every manifest
 /// row for the digest, and a completed delete deletes the condemnation row, so
@@ -273,8 +279,10 @@ pub enum AttachmentCondemnation {
     /// A live root (committed ref or intent) exists: the digest is not garbage.
     /// The sweep skips it and never waits.
     RootPresent,
-    /// Another sweeper already holds a condemnation for this digest. The sweep
-    /// defers the digest to the next sweep rather than contending for it.
+    /// A condemnation for this digest already exists: a live peer sweep owns
+    /// it, a restoring writer holds it, or its delete is stalled. The sweep
+    /// defers the digest rather than contending for it; a condemnation left by
+    /// a dead sweep is adopted at the start of the next sweep instead.
     AlreadyCondemned,
     /// This root authority implements no fence. The sweep falls back to its
     /// best-effort, unfenced path — see
@@ -283,6 +291,10 @@ pub enum AttachmentCondemnation {
 }
 
 /// One durable attachment-condemnation row exposed to host maintenance code.
+///
+/// This is the operator's listing of what is stuck right now (ADR 0067 §6): a
+/// row a sweep keeps failing to delete carries its attempt count, its last
+/// error and, past the retry bound, its typed stall.
 ///
 /// The restoring write's attempt identity remains private to the store
 /// implementation. A host needs the owning session to establish quiescence
@@ -296,6 +308,137 @@ pub struct AttachmentCondemnationRecord {
     pub phase: AttachmentCondemnationPhase,
     /// Authority that currently owns the persisted phase.
     pub provenance: AttachmentCondemnationProvenance,
+    /// Physical deletes of this digest that failed, across every sweep.
+    pub delete_attempts: u32,
+    /// The most recent failed delete's error, when one failed.
+    pub last_delete_error: Option<String>,
+    /// Why no sweep retries the delete any more, when it stalled.
+    pub stalled: Option<AttachmentDeleteStallReason>,
+}
+
+/// Why a condemned digest's physical delete stopped being retried.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AttachmentDeleteStallReason {
+    /// Retryable failures reached [`MAX_ATTACHMENT_DELETE_ATTEMPTS`].
+    AttemptsExhausted,
+    /// The backend refused the delete with a failure retrying cannot change:
+    /// credentials, authorization, or a terminal or contract failure.
+    Refused,
+}
+
+impl AttachmentDeleteStallReason {
+    /// Every reason, in declaration order.
+    pub const ALL: [Self; 2] = [Self::AttemptsExhausted, Self::Refused];
+
+    /// The stored label.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::AttemptsExhausted => "attempts_exhausted",
+            Self::Refused => "refused",
+        }
+    }
+
+    fn from_label(label: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|reason| reason.as_str() == label)
+    }
+}
+
+/// How many failed physical deletes of one condemned digest the sweeps make,
+/// one per sweep, before the condemnation stalls
+/// [`AttemptsExhausted`](AttachmentDeleteStallReason::AttemptsExhausted).
+pub const MAX_ATTACHMENT_DELETE_ATTEMPTS: u32 = 5;
+
+/// One attachment sweep pass: the generation its condemnations are stamped
+/// with, and the liveness that proves the pass has not died (ADR 0067 §6).
+///
+/// A root authority mints a fresh generation for every pass and keeps the
+/// pass's liveness for as long as this value is held. Dropping it — the pass
+/// returning, its task being cancelled, or its process dying — ends that
+/// liveness, and from then on a later pass may adopt the rows it left. The
+/// proof is structural, never a timer: an in-process registry where the
+/// store runs in one process, a session-scoped lock held on a dedicated
+/// connection where it does not.
+pub struct AttachmentSweepGeneration {
+    generation: u64,
+    _liveness: Box<dyn std::any::Any + Send + Sync>,
+}
+
+impl AttachmentSweepGeneration {
+    /// Generation `generation`, live for as long as `liveness` is held.
+    pub fn new(generation: u64, liveness: Box<dyn std::any::Any + Send + Sync>) -> Self {
+        Self {
+            generation,
+            _liveness: liveness,
+        }
+    }
+
+    /// The generation this pass stamps on the rows it owns.
+    #[must_use]
+    pub const fn generation(&self) -> u64 {
+        self.generation
+    }
+}
+
+impl std::fmt::Debug for AttachmentSweepGeneration {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AttachmentSweepGeneration")
+            .field("generation", &self.generation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// One condemnation a sweep adopted from a dead predecessor.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AdoptedAttachmentCondemnation {
+    pub digest: crate::AttachmentId,
+    /// `Condemned` still needs arming; `Deleting` may already have deleted the
+    /// bytes.
+    pub phase: AttachmentCondemnationPhase,
+    /// Failed deletes recorded before adoption.
+    pub delete_attempts: u32,
+}
+
+/// What adoption found among the sweep-owned condemnations of older
+/// generations.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AttachmentCondemnationAdoption {
+    /// Rows whose pass is dead, now owned by the adopting generation.
+    pub adopted: Vec<AdoptedAttachmentCondemnation>,
+    /// Rows whose pass is still live: left to that pass.
+    pub held_by_live_pass: Vec<crate::AttachmentId>,
+    /// Rows whose delete stalled: listed, never retried.
+    pub stalled: Vec<crate::AttachmentId>,
+}
+
+/// How a sweep settles a condemnation its generation owns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AttachmentCondemnationSettlement {
+    /// The bytes are gone, deleted by this pass or already absent: retire the
+    /// `Deleting` row.
+    Deleted,
+    /// The pass gives the digest back without deleting it: remove the
+    /// unclaimed `Condemned` or `Deleting` row.
+    Spared,
+    /// The final `HEAD` or the physical delete failed: `Deleting ->
+    /// Condemned`, one more failed attempt, and `error` recorded. With `stall`
+    /// the row stops being adopted; without it the next sweep retries.
+    Failed {
+        stall: Option<AttachmentDeleteStallReason>,
+        error: String,
+    },
+}
+
+/// Whether a settlement applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AttachmentSettlementOutcome {
+    Applied,
+    /// The row is not this generation's in the phase the settlement expects:
+    /// a restoring writer claimed it, or it is already settled.
+    NotOwned,
 }
 
 /// Public projection of a persisted attachment-condemnation phase.
@@ -316,49 +459,88 @@ pub enum AttachmentCondemnationProvenance {
     RestoringWrite { session_id: SessionId },
 }
 
-/// Decode the persisted phase and token/session presence used by durable store
-/// implementations without exposing the token itself.
+/// One persisted condemnation row, as a durable store reads it back.
+#[derive(Clone, Debug)]
+pub struct StoredAttachmentCondemnation {
+    pub digest: crate::AttachmentId,
+    pub phase: String,
+    pub write_token_present: bool,
+    pub write_session_id: Option<SessionId>,
+    pub delete_attempts: i64,
+    pub last_delete_error: Option<String>,
+    pub stall_reason: Option<String>,
+}
+
+/// Decode a persisted condemnation row used by durable store implementations
+/// without exposing the write token.
 pub fn decode_attachment_condemnation_record(
-    digest: crate::AttachmentId,
-    phase: &str,
-    write_token_present: bool,
-    write_session_id: Option<SessionId>,
+    row: StoredAttachmentCondemnation,
 ) -> Result<AttachmentCondemnationRecord, StoreError> {
-    let phase = match phase {
+    let StoredAttachmentCondemnation {
+        digest,
+        phase,
+        write_token_present,
+        write_session_id,
+        delete_attempts,
+        last_delete_error,
+        stall_reason,
+    } = row;
+    let corrupt = |message: String| StoreError::StoredDataCorrupt {
+        record_kind: "attachment condemnation",
+        message,
+    };
+    let phase = match phase.as_str() {
         "condemned" => AttachmentCondemnationPhase::Condemned,
         "deleting" => AttachmentCondemnationPhase::Deleting,
         unknown => {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "attachment condemnation",
-                message: format!("attachment `{digest}` has unknown phase `{unknown}`"),
-            });
+            return Err(corrupt(format!(
+                "attachment `{digest}` has unknown phase `{unknown}`"
+            )));
         }
     };
     let provenance = match (write_token_present, write_session_id) {
         (false, None) => AttachmentCondemnationProvenance::SweepOwned,
         (true, Some(session_id)) if phase != AttachmentCondemnationPhase::Deleting => {
-            super::validate_session_id(&session_id).map_err(|error| {
-                StoreError::StoredDataCorrupt {
-                    record_kind: "attachment condemnation",
-                    message: error.to_string(),
-                }
-            })?;
+            super::validate_session_id(&session_id).map_err(|error| corrupt(error.to_string()))?;
             AttachmentCondemnationProvenance::RestoringWrite { session_id }
         }
         (write_token_present, write_session_id) => {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "attachment condemnation",
-                message: format!(
-                    "attachment `{digest}` has inconsistent phase/provenance: phase `{phase:?}`, write token present {write_token_present}, write session present {}",
-                    write_session_id.is_some()
-                ),
-            });
+            return Err(corrupt(format!(
+                "attachment `{digest}` has inconsistent phase/provenance: phase `{phase:?}`, write token present {write_token_present}, write session present {}",
+                write_session_id.is_some()
+            )));
         }
     };
+    let delete_attempts = u32::try_from(delete_attempts).map_err(|_| {
+        corrupt(format!(
+            "attachment `{digest}` has delete attempt count {delete_attempts}"
+        ))
+    })?;
+    let stalled = stall_reason
+        .map(|label| {
+            AttachmentDeleteStallReason::from_label(&label).ok_or_else(|| {
+                corrupt(format!(
+                    "attachment `{digest}` has unknown stall reason `{label}`"
+                ))
+            })
+        })
+        .transpose()?;
+    if (delete_attempts == 0) != last_delete_error.is_none()
+        || (stalled.is_some()
+            && (delete_attempts == 0 || phase != AttachmentCondemnationPhase::Condemned))
+    {
+        return Err(corrupt(format!(
+            "attachment `{digest}` has inconsistent delete failure state: phase `{phase:?}`, {delete_attempts} attempts, error present {}, stall {stalled:?}",
+            last_delete_error.is_some()
+        )));
+    }
     Ok(AttachmentCondemnationRecord {
         digest,
         phase,
         provenance,
+        delete_attempts,
+        last_delete_error,
+        stalled,
     })
 }
 
@@ -366,21 +548,73 @@ pub fn decode_attachment_condemnation_record(
 mod condemnation_record_decode_tests {
     use super::*;
 
+    fn row(phase: &str) -> StoredAttachmentCondemnation {
+        StoredAttachmentCondemnation {
+            digest: crate::AttachmentId::parse("digest").unwrap(),
+            phase: phase.to_owned(),
+            write_token_present: false,
+            write_session_id: None,
+            delete_attempts: 0,
+            last_delete_error: None,
+            stall_reason: None,
+        }
+    }
+
     #[test]
     fn unknown_phase_and_inconsistent_provenance_fail_closed() {
-        let digest = || crate::AttachmentId::parse("digest").unwrap();
-        for result in [
-            decode_attachment_condemnation_record(digest(), "future-phase", false, None),
-            decode_attachment_condemnation_record(digest(), "condemned", true, None),
-            decode_attachment_condemnation_record(
-                digest(),
-                "deleting",
-                true,
-                Some(SessionId::from("session")),
-            ),
+        for stored in [
+            row("future-phase"),
+            StoredAttachmentCondemnation {
+                write_token_present: true,
+                ..row("condemned")
+            },
+            StoredAttachmentCondemnation {
+                write_token_present: true,
+                write_session_id: Some(SessionId::from("session")),
+                ..row("deleting")
+            },
         ] {
-            assert!(matches!(result, Err(StoreError::StoredDataCorrupt { .. })));
+            assert!(matches!(
+                decode_attachment_condemnation_record(stored),
+                Err(StoreError::StoredDataCorrupt { .. })
+            ));
         }
+    }
+
+    #[test]
+    fn unknown_or_inconsistent_delete_failure_state_fails_closed() {
+        let failed = |stall: Option<&str>| StoredAttachmentCondemnation {
+            delete_attempts: 1,
+            last_delete_error: Some("backend down".to_owned()),
+            stall_reason: stall.map(str::to_owned),
+            ..row("condemned")
+        };
+        for stored in [
+            failed(Some("future-reason")),
+            StoredAttachmentCondemnation {
+                last_delete_error: None,
+                ..failed(None)
+            },
+            StoredAttachmentCondemnation {
+                delete_attempts: -1,
+                ..failed(None)
+            },
+            StoredAttachmentCondemnation {
+                phase: "deleting".to_owned(),
+                ..failed(Some("refused"))
+            },
+        ] {
+            assert!(matches!(
+                decode_attachment_condemnation_record(stored),
+                Err(StoreError::StoredDataCorrupt { .. })
+            ));
+        }
+        let stalled = decode_attachment_condemnation_record(failed(Some("attempts_exhausted")))
+            .expect("a stalled condemnation decodes");
+        assert_eq!(
+            stalled.stalled,
+            Some(AttachmentDeleteStallReason::AttemptsExhausted)
+        );
     }
 }
 
@@ -391,10 +625,11 @@ pub enum AttachmentDeleteArming {
     /// `Condemned -> Deleting`: this sweeper owns the delete. Writers arriving
     /// from here on retry instead of writing bytes.
     Armed,
-    /// This caller no longer owns an armable condemnation. A writer may hold
-    /// the existing phase with a restoration token, or the row may be absent or
-    /// in another phase. The delete is not issued and this caller must not
-    /// release state it does not own.
+    /// This caller's generation no longer owns an armable condemnation. A
+    /// writer may hold the existing phase with a restoration token, or the row
+    /// may be absent, in another phase, or owned by another generation. The
+    /// delete is not issued and this caller must not settle state it does not
+    /// own.
     Revoked,
 }
 

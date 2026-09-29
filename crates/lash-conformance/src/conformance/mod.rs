@@ -24,9 +24,13 @@ pub use lash_core::testing::coordinate_tool_provider_with_services;
 mod attachment_adoption;
 pub use attachment_adoption::{
     AttachmentBytesFactory, abandoned_attachment_write_recovery_after_cold_reopen,
-    attachment_condemnation_delete_crash_survives_cold_reopen,
     attachment_condemnation_enumeration_conformance,
     attachment_owner_identity_round_trips_conformance, cross_owner_attachment_adoption_conformance,
+};
+mod attachment_condemnation_recovery;
+pub use attachment_condemnation_recovery::{
+    cold_reopen_adopts_old_generation_before_new_deletes, concurrent_adoption_deletes_once,
+    persistently_failing_delete_stalls_typed,
 };
 
 #[cfg(feature = "lashlang")]

@@ -2245,7 +2245,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
 /// Verifies that:
 /// 1. `list_uncommitted(cutoff).await` lists uncommitted intents when `cutoff >= intent_at_epoch_ms`.
 /// 2. `has_live_attachment_ref(id, cutoff)` reports `false` for uncommitted aged intents with dead/no owners, and `true` for committed refs.
-/// 3. `condemn_attachment(id, cutoff)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
+/// 3. `condemn_attachment(id, cutoff, pass)` allows condemnation of uncommitted aged intents with dead/no owners when `cutoff >= intent_at_epoch_ms`.
 /// 4. `live_attachment_refs(cutoff)` forgets uncommitted aged intents and retains committed refs.
 #[expect(
     clippy::expect_used,
@@ -2376,10 +2376,17 @@ async fn session_store_factory_attachment_large_cutoff_conformance(
 
     // 3. condemn_attachment with large cutoff:
     if crate::AttachmentRootSet::fence(&*factory) != crate::AttachmentGcFence::BestEffort {
-        let cond_res =
-            crate::AttachmentRootSet::condemn_attachment(&*factory, &cond_target_id, u64::MAX)
-                .await
-                .expect("condemn_attachment with u64::MAX");
+        let pass = crate::AttachmentRootSet::begin_attachment_sweep(&*factory)
+            .await
+            .expect("open an attachment sweep pass");
+        let cond_res = crate::AttachmentRootSet::condemn_attachment(
+            &*factory,
+            &cond_target_id,
+            u64::MAX,
+            &pass,
+        )
+        .await
+        .expect("condemn_attachment with u64::MAX");
         assert_eq!(
             cond_res,
             crate::AttachmentCondemnation::Condemned,

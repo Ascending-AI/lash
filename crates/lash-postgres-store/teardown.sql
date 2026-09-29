@@ -92,6 +92,8 @@ DROP TABLE IF EXISTS lash_attachment_manifest CASCADE;
 
 DROP TABLE IF EXISTS lash_attachment_condemnations CASCADE;
 
+DROP TABLE IF EXISTS lash_attachment_sweep_clock CASCADE;
+
 DROP TABLE IF EXISTS lash_process_change_clock CASCADE;
 
 DROP TABLE IF EXISTS lash_processes CASCADE;

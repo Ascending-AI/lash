@@ -4,11 +4,12 @@ use pretty_assertions::assert_eq;
 
 /// The attachment GC fence is a durable, clockless CAS state machine over one
 /// digest: `Free -> Condemned -> Deleting`, with `Condemned -> Free` whenever a
-/// writer takes the digest back, `Deleting -> Free` when a host abandons or
-/// recovers a failed delete, and `Deleting -> (no row)` when the physical
-/// delete completes. There is no terminal byte-absence phase: a completed
-/// delete retires the row and clears the digest's manifest evidence, and
-/// adoption is gated on that evidence rather than on a tombstone.
+/// writer takes the digest back or the owning pass spares it, `Deleting ->
+/// Condemned` when the physical delete fails, and `Deleting -> (no row)` when
+/// it completes. Every sweep transition belongs to the pass generation that
+/// owns the row. There is no terminal byte-absence phase: a completed delete
+/// retires the row and clears the digest's manifest evidence, and adoption is
+/// gated on that evidence rather than on a tombstone.
 ///
 /// Every transition is exercised here rather than in per-backend tests, so a
 /// divergence between the in-memory, SQLite, and PostgreSQL implementations of
@@ -45,9 +46,28 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     // Nothing is aged out at cutoff 0, so a recorded intent is unambiguously a
     // root and a forgotten one leaves no row at all.
     const ROOT_CUTOFF: u64 = 0;
-    let condemn =
-        || crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF);
-    let arm = || crate::AttachmentRootSet::arm_attachment_delete(&*factory, &attachment_id);
+    let pass = crate::AttachmentRootSet::begin_attachment_sweep(&*factory)
+        .await
+        .expect("open an attachment sweep pass");
+    let peer = crate::AttachmentRootSet::begin_attachment_sweep(&*factory)
+        .await
+        .expect("open a peer attachment sweep pass");
+    assert!(
+        peer.generation() > pass.generation(),
+        "every pass mints a newer generation"
+    );
+    let condemn = || {
+        crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF, &pass)
+    };
+    let arm = || crate::AttachmentRootSet::arm_attachment_delete(&*factory, &attachment_id, &pass);
+    let settle = |settlement| {
+        crate::AttachmentRootSet::settle_attachment_condemnation(
+            &*factory,
+            &attachment_id,
+            &pass,
+            settlement,
+        )
+    };
 
     // A recorded intent is a root: `Free -> Condemned` refuses.
     assert!(
@@ -74,17 +94,41 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "a rootless digest must be condemnable"
     );
     assert_eq!(
-        condemn().await.expect("second condemn"),
+        crate::AttachmentRootSet::condemn_attachment(&*factory, &attachment_id, ROOT_CUTOFF, &peer)
+            .await
+            .expect("peer condemn"),
         crate::AttachmentCondemnation::AlreadyCondemned,
         "a peer sweeper's condemnation is skipped, never waited on"
     );
-    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
-        .await
-        .expect("release condemned digest");
     assert_eq!(
-        condemn().await.expect("condemn after release"),
+        crate::AttachmentRootSet::arm_attachment_delete(&*factory, &attachment_id, &peer)
+            .await
+            .expect("peer arm"),
+        crate::AttachmentDeleteArming::Revoked,
+        "only the owning generation arms its condemnation"
+    );
+    assert_eq!(
+        crate::AttachmentRootSet::settle_attachment_condemnation(
+            &*factory,
+            &attachment_id,
+            &peer,
+            crate::AttachmentCondemnationSettlement::Spared,
+        )
+        .await
+        .expect("peer spare"),
+        crate::AttachmentSettlementOutcome::NotOwned,
+        "only the owning generation settles its condemnation"
+    );
+    assert_eq!(
+        settle(crate::AttachmentCondemnationSettlement::Spared)
+            .await
+            .expect("spare condemned digest"),
+        crate::AttachmentSettlementOutcome::Applied
+    );
+    assert_eq!(
+        condemn().await.expect("condemn after spare"),
         crate::AttachmentCondemnation::Condemned,
-        "release must recover a digest abandoned before physical delete"
+        "a spared digest is Free again"
     );
 
     // `Condemned -> Free` by writer revoke: the delete can no longer be armed.
@@ -115,7 +159,7 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
     );
 
     // `Condemned -> Deleting`: a writer now parks instead of putting bytes into
-    // an in-flight delete, and only the release lets it through.
+    // an in-flight delete, until the delete settles.
     crate::AttachmentManifest::forget(store.store().as_ref(), &request.session_id, &attachment_id)
         .await
         .expect("forget the ref again");
@@ -149,18 +193,42 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         "a parked writer must record no intent"
     );
 
-    // `Deleting -> Free` is the explicit abandon/recovery path.
-    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
+    // A failed delete is `Deleting -> Condemned`: the row is kept for the next
+    // sweep, and a writer may reclaim the digest at once.
+    assert_eq!(
+        settle(crate::AttachmentCondemnationSettlement::Failed {
+            stall: None,
+            error: "scripted delete failure".to_owned(),
+        })
         .await
-        .expect("release");
+        .expect("record the failed delete"),
+        crate::AttachmentSettlementOutcome::Applied
+    );
+    let reclaiming_intent = intent();
+    let crate::AttachmentWriteFence::Granted(reclaiming_permit) =
+        crate::AttachmentManifest::begin_attachment_write(
+            store.store().as_ref(),
+            reclaiming_intent.clone(),
+        )
+        .await
+        .expect("write after the failed delete")
+    else {
+        panic!("a digest whose delete failed must grant the next writer immediately");
+    };
+    crate::AttachmentManifest::complete_attachment_write(
+        store.store().as_ref(),
+        &reclaiming_intent,
+        reclaiming_permit,
+    )
+    .await
+    .expect("the reclaiming write settles the kept condemnation");
     assert!(
-        matches!(
-            crate::AttachmentManifest::begin_attachment_write(store.store().as_ref(), intent())
-                .await
-                .expect("write after the release"),
-            crate::AttachmentWriteFence::Granted(_)
-        ),
-        "a released digest must grant the next writer immediately"
+        crate::AttachmentRootSet::list_condemnations(&*factory)
+            .await
+            .expect("list condemnations after the reclaiming write")
+            .iter()
+            .all(|record| record.digest != attachment_id),
+        "a successful reclaiming write retires the kept condemnation"
     );
 
     // A completed delete retires the condemnation row outright. The fence is
@@ -178,9 +246,12 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
         arm().await.expect("arm before successful delete"),
         crate::AttachmentDeleteArming::Armed
     );
-    crate::AttachmentRootSet::retire_attachment_condemnation(&*factory, &attachment_id)
-        .await
-        .expect("record successful delete");
+    assert_eq!(
+        settle(crate::AttachmentCondemnationSettlement::Deleted)
+            .await
+            .expect("record successful delete"),
+        crate::AttachmentSettlementOutcome::Applied
+    );
     assert!(
         crate::AttachmentRootSet::list_condemnations(&*factory)
             .await
@@ -189,9 +260,13 @@ pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
             .all(|record| record.digest != attachment_id),
         "a completed delete retires the condemnation row"
     );
-    crate::AttachmentRootSet::release_attachment_condemnation(&*factory, &attachment_id)
-        .await
-        .expect("release a retired digest is idempotent");
+    assert_eq!(
+        settle(crate::AttachmentCondemnationSettlement::Deleted)
+            .await
+            .expect("retiring a retired digest"),
+        crate::AttachmentSettlementOutcome::NotOwned,
+        "retiring is idempotent: a row already dropped is a no-op"
+    );
     let adoption_error = crate::AttachmentManifest::commit_refs(
         store.store().as_ref(),
         &request.session_id,

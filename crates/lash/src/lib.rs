@@ -461,19 +461,22 @@ pub mod persistence {
         ConformanceDeployment, ConformanceStore, DecodedRowCounts, GraphRowCorruption,
         StoreTestSupport,
     };
+    pub use lash_core::{
+        AdoptedAttachmentCondemnation, AttachmentCondemnation, AttachmentCondemnationAdoption,
+        AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
+        AttachmentCondemnationRecord, AttachmentCondemnationSettlement, AttachmentDeleteArming,
+        AttachmentDeleteStallReason, AttachmentReclamationPolicy, AttachmentRootSet,
+        AttachmentSettlementOutcome, AttachmentStore, AttachmentStoreError,
+        AttachmentStoreFailureClass, AttachmentStorePersistence, AttachmentSweepGeneration,
+        AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken, EmptyRootSetPolicy,
+        MAX_ATTACHMENT_DELETE_ATTEMPTS, ProcessExecutionEnvStore, StoredAttachment, StoredBlobRef,
+        attachments::AttachmentReclamationFailure, facade_support::AttachmentGcFence,
+        facade_support::AttachmentReclamationReport, facade_support::SessionAttachmentStore,
+        facade_support::reclaim_unreferenced_attachments,
+    };
     /// The Lashlang module-artifact port a backend's store set supplies.
     pub use lash_core::{
         ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
-    };
-    pub use lash_core::{
-        AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
-        AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentReclamationPolicy,
-        AttachmentRootSet, AttachmentStore, AttachmentStoreError, AttachmentStoreFailureClass,
-        AttachmentStorePersistence, AttachmentWriteFence, AttachmentWritePermit,
-        AttachmentWriteToken, EmptyRootSetPolicy, ProcessExecutionEnvStore, StoredAttachment,
-        StoredBlobRef, attachments::AttachmentReclamationFailure,
-        facade_support::AttachmentGcFence, facade_support::AttachmentReclamationReport,
-        facade_support::SessionAttachmentStore, facade_support::reclaim_unreferenced_attachments,
     };
     pub use lash_core::{
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,

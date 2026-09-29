@@ -616,29 +616,42 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
     fn fence(&self) -> lash_core_execution::AttachmentGcFence {
         lash_core_execution::AttachmentGcFence::Fenced
     }
+    async fn begin_attachment_sweep(
+        &self,
+    ) -> Result<lash_core_execution::AttachmentSweepGeneration, lash_core_execution::StoreError>
+    {
+        SqliteStore::begin_attachment_sweep(self).await
+    }
+    async fn adopt_attachment_condemnations(
+        &self,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+    ) -> Result<lash_core_execution::AttachmentCondemnationAdoption, lash_core_execution::StoreError>
+    {
+        SqliteStore::adopt_attachment_condemnations(self, generation).await
+    }
     async fn condemn_attachment(
         &self,
         id: &lash_core_execution::AttachmentId,
         intent_grace_cutoff_epoch_ms: u64,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentCondemnation, lash_core_execution::StoreError> {
-        let store = self;
-        store
-            .condemn_attachment(id, intent_grace_cutoff_epoch_ms)
-            .await
+        SqliteStore::condemn_attachment(self, id, intent_grace_cutoff_epoch_ms, generation).await
     }
     async fn arm_attachment_delete(
         &self,
         id: &lash_core_execution::AttachmentId,
+        generation: &lash_core_execution::AttachmentSweepGeneration,
     ) -> Result<lash_core_execution::AttachmentDeleteArming, lash_core_execution::StoreError> {
-        let store = self;
-        store.arm_attachment_delete(id).await
+        SqliteStore::arm_attachment_delete(self, id, generation).await
     }
-    async fn release_attachment_condemnation(
+    async fn settle_attachment_condemnation(
         &self,
         id: &lash_core_execution::AttachmentId,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        let store = self;
-        store.release_attachment_condemnation(id).await
+        generation: &lash_core_execution::AttachmentSweepGeneration,
+        settlement: lash_core_execution::AttachmentCondemnationSettlement,
+    ) -> Result<lash_core_execution::AttachmentSettlementOutcome, lash_core_execution::StoreError>
+    {
+        SqliteStore::settle_attachment_condemnation(self, id, generation, settlement).await
     }
     async fn recover_abandoned_attachment_write(
         &self,
@@ -646,13 +659,6 @@ impl lash_core_execution::AttachmentRootSet for SqliteStore {
     ) -> Result<(), lash_core_execution::StoreError> {
         let store = self;
         store.recover_abandoned_attachment_write(id).await
-    }
-    async fn retire_attachment_condemnation(
-        &self,
-        id: &lash_core_execution::AttachmentId,
-    ) -> Result<(), lash_core_execution::StoreError> {
-        let store = self;
-        store.retire_attachment_condemnation(id).await
     }
 }
 
