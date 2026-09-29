@@ -1429,3 +1429,186 @@ async fn live_restate_tool_group_close_and_retirement_crash_matrix() {
     group_close_and_retirement_crash_matrix(Engine::live("group-close-retirement", None).await)
         .await;
 }
+
+// ---------------------------------------------------------------------------
+// Cell replay and nested journal isolation (ADR 0103)
+// ---------------------------------------------------------------------------
+
+struct CellIsolationTool(Arc<AtomicUsize>);
+
+#[async_trait::async_trait]
+impl lash_core::ToolProvider for CellIsolationTool {
+    fn tool_manifests(&self) -> Vec<lash_core::ToolManifest> {
+        vec![tool_definition().manifest()]
+    }
+    fn resolve_contract(&self, name: &str) -> Option<Arc<lash_core::ToolContract>> {
+        (name == TOOL).then(|| Arc::new(tool_definition().contract()))
+    }
+    async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
+        let ordinal = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+        lash_core::ToolOutcome::ok(json!({"ordinal": ordinal})).into()
+    }
+}
+
+async fn cell_parity(
+    engine: Engine,
+    crash: bool,
+) -> (serde_json::Value, lash_core::plugin::HydratedExecutionState) {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let tools = Arc::new(AtomicUsize::new(0));
+    let provider = lash_core::testing::TestProvider::builder().kind("cell-parity").complete({
+        let calls = Arc::clone(&calls);
+        move |_request| {
+            let ordinal = calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                let code = match ordinal {
+                    0 => "<typescript>const first = await tools.count_call({}); print(first);</typescript>",
+                    1 => "<typescript>const second = await tools.count_call({}); finish({ first, second });</typescript>",
+                    2 => "<typescript>finish({ first, second });</typescript>",
+                    _ => panic!("a recorded outer model call ran again"),
+                };
+                Ok::<_, LlmTransportError>(LlmResponse {
+                    parts: vec![LlmOutputPart::Text { text: code.into(), response_meta: None }],
+                    terminal_reason: lash_core::LlmTerminalReason::Stop,
+                    ..Default::default()
+                })
+            }
+        }
+    }).build().into_handle();
+    let backend = engine.lash_backend();
+    let rlm = lash_protocol_rlm::RlmProtocolPluginFactory::new(
+        lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+            .channel(lash_protocol_rlm::RlmChannel::Cell)
+            .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+            .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+            .build(),
+        &backend,
+    );
+    let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, rlm)
+        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
+        .provider(provider)
+        .model(model_spec())
+        .tools(Arc::new(CellIsolationTool(Arc::clone(&tools))) as Arc<dyn lash_core::ToolProvider>)
+        .build(lash_core::LeaseOwnerIdentity::opaque("cell-parity", "test"))
+        .expect("cell runtime");
+    let session = created_session(&core, "cell-parity-session")
+        .await
+        .open()
+        .await
+        .expect("cell session");
+    if crash {
+        engine.crash_on(
+            CrashRule::new(CrashPoint::BeforeRunResultEnding {
+                suffix: ":~seal".into(),
+            })
+            .service(lash_restate_test::TURN_DRIVER_SERVICE),
+        );
+    }
+    let output = tokio::time::timeout(
+        BOUND,
+        session
+            .send(lash::TurnInput::text("two isolated cells"))
+            .id("cell-parity-root")
+            .output(),
+    )
+    .await
+    .expect("cell replay finishes")
+    .expect("cell turn output");
+    assert!(
+        matches!(
+            output.result.outcome,
+            lash_core::facade_support::TurnOutcome::Finished(_)
+        ),
+        "{:?}",
+        output.result.errors
+    );
+    let store = engine.lash_backend().session_store_factory();
+    let read = store
+        .load_session_window(
+            &session.session_id(),
+            lash_core::store::WindowSelector::Current,
+        )
+        .await
+        .expect("read committed window")
+        .expect("committed head");
+    let persisted = lash_core::store::window_state(read, store.fleet_format())
+        .expect("restore committed head")
+        .state;
+    let state = persisted
+        .execution_state_hydration()
+        .expect("hydrate committed interpreter")
+        .expect("cell execution state");
+    assert_eq!(
+        output.final_value(),
+        Some(&json!({"first": {"ordinal": 1}, "second": {"ordinal": 2}})),
+        "each cell receives its own nested result"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 2, "outer results replay");
+    assert_eq!(
+        tools.load(Ordering::SeqCst),
+        2,
+        "the same issue ordinal in two cells executes once per cell"
+    );
+    if crash {
+        assert_eq!(engine.crashes(), 1, "the cell seal crash actually fired");
+    }
+    let finish = serde_json::to_value(&output.result.outcome).expect("finish JSON");
+    assert!(
+        finish.to_string().contains("ordinal"),
+        "the cell did not finish its rebuilt values: {finish}"
+    );
+    Box::pin(session.close()).await.expect("close cell session");
+    let reopened = core
+        .session("cell-parity-session")
+        .open()
+        .await
+        .expect("reopen cell state");
+    let restored = tokio::time::timeout(
+        BOUND,
+        reopened
+            .send(lash::TurnInput::text("read persisted globals"))
+            .id("cell-parity-read")
+            .output(),
+    )
+    .await
+    .expect("restored globals finish")
+    .expect("read globals");
+    assert_eq!(
+        restored.final_value(),
+        output.final_value(),
+        "a fresh cell reads both committed globals"
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 3);
+    assert_eq!(
+        tools.load(Ordering::SeqCst),
+        2,
+        "reloading globals performs no nested tool effect"
+    );
+    Box::pin(reopened.close())
+        .await
+        .expect("close reopened session");
+    engine.finish().await;
+    (finish, state)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cell_replay_positional_parity_and_nested_isolation_on_the_double() {
+    let reference = cell_parity(Engine::double(0x4148, None).await, false).await;
+    let replay = cell_parity(Engine::double(0x4148, None).await, true).await;
+    assert_eq!(
+        replay, reference,
+        "the positional replay rebuilds the same cell result"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "live Restate; scripts/ci/restate_suite.py suite crash-windows"]
+async fn live_restate_cell_replay_positional_parity_and_nested_isolation() {
+    let reference = cell_parity(Engine::double(0x4148, None).await, false).await;
+    let replay = cell_parity(Engine::live("cell-parity-replay", None).await, true).await;
+    assert_eq!(
+        replay, reference,
+        "the live positional engine agrees after cold cell replay"
+    );
+}

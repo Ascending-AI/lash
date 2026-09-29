@@ -462,6 +462,60 @@ enum WatchLoss {
 mod tests {
     use super::*;
 
+    #[tokio::test(start_paused = true)]
+    async fn cancel_watch_fault_ladder_ends_typed() {
+        use crate::RuntimeErrorCode;
+        use std::cell::Cell;
+
+        let calls = Cell::new(0);
+        let started = tokio::time::Instant::now();
+        let error = retry_cancel_watch::<(), _, _>("test gate", || {
+            calls.set(calls.get() + 1);
+            std::future::ready(Err(RuntimeError::new(
+                RuntimeErrorCode::TransientCancelWatch,
+                "gate transport unavailable",
+            )))
+        })
+        .await
+        .expect_err("an exhausted watch ends the attempt");
+        assert_eq!(calls.get(), 8);
+        assert_eq!(started.elapsed(), Duration::from_millis(2575));
+        assert_eq!(error.code, RuntimeErrorCode::TransientCancelWatch);
+        assert!(error.message.contains("8 attempt(s)"));
+
+        let calls = Cell::new(0);
+        let recovered = retry_cancel_watch("recovering gate", || {
+            calls.set(calls.get() + 1);
+            std::future::ready(if calls.get() < 8 {
+                Err(RuntimeError::new(
+                    RuntimeErrorCode::TransientCancelWatch,
+                    "retry",
+                ))
+            } else {
+                Ok(17)
+            })
+        })
+        .await
+        .expect("the final permitted watch can recover");
+        assert_eq!(recovered, 17);
+        assert_eq!(calls.get(), 8);
+
+        let calls = Cell::new(0);
+        let started = tokio::time::Instant::now();
+        let error = retry_cancel_watch::<(), _, _>("terminal gate", || {
+            calls.set(calls.get() + 1);
+            std::future::ready(Err(RuntimeError::new(
+                RuntimeErrorCode::SessionDeleted,
+                "gate owner is gone",
+            )))
+        })
+        .await
+        .expect_err("a terminal watch fault never retries");
+        assert_eq!(calls.get(), 1);
+        assert_eq!(started.elapsed(), Duration::ZERO);
+        assert_eq!(error.code, RuntimeErrorCode::TransientCancelWatch);
+    }
+
     #[test]
     fn the_first_recorded_origin_wins() {
         let stop = LocalTurnStop::new();

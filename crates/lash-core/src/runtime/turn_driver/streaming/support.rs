@@ -194,3 +194,56 @@ pub(super) fn remember_attempt_correlation(
         correlations.push(correlation_id.clone());
     }
 }
+
+pub(super) fn take_attempt_reset(
+    prose: &mut Vec<TurnActivityId>,
+    reasoning: &mut Vec<TurnActivityId>,
+) -> TurnEvent {
+    TurnEvent::ModelAttemptReset {
+        assistant_prose_correlation_ids: std::mem::take(prose),
+        reasoning_correlation_ids: std::mem::take(reasoning),
+    }
+}
+
+#[cfg(test)]
+mod attempt_reset_tests {
+    use super::*;
+
+    #[test]
+    fn attempt_reset_retracts_only_both_nonempty_current_epoch_sets() {
+        let mut prose = Vec::new();
+        let mut reasoning = Vec::new();
+        for epoch in 0..3 {
+            let p = TurnActivityId::new(format!("prose-{epoch}"));
+            let r = TurnActivityId::new(format!("reasoning-{epoch}"));
+            let r2 = TurnActivityId::new(format!("reasoning-{epoch}-second"));
+            for id in [&p, &p] {
+                remember_attempt_correlation(&mut prose, id);
+            }
+            for id in [&r, &r2, &r] {
+                remember_attempt_correlation(&mut reasoning, id);
+            }
+            let event = take_attempt_reset(&mut prose, &mut reasoning);
+            let TurnEvent::ModelAttemptReset {
+                assistant_prose_correlation_ids,
+                reasoning_correlation_ids,
+            } = event
+            else {
+                panic!("reset event");
+            };
+            assert_eq!(assistant_prose_correlation_ids, vec![p]);
+            assert_eq!(reasoning_correlation_ids, vec![r, r2]);
+            assert!(prose.is_empty());
+            assert!(reasoning.is_empty());
+        }
+        let TurnEvent::ModelAttemptReset {
+            assistant_prose_correlation_ids,
+            reasoning_correlation_ids,
+        } = take_attempt_reset(&mut prose, &mut reasoning)
+        else {
+            panic!("empty generation boundary");
+        };
+        assert!(assistant_prose_correlation_ids.is_empty());
+        assert!(reasoning_correlation_ids.is_empty());
+    }
+}

@@ -234,6 +234,7 @@ lash_conformance::effect_controller_response_derivation_tests!(@catalogue {
         effect_controller_response_derivation_terminals,
         "effect-controller-response-derivation-terminals"
     ),
+    (attempt_history_terminal_variants_survive_result_replay, "attempt-terminal-replay"),
 ]);
 
 /// The RLM protocol factory the FIG-3587 drift laws redrive cells with, its

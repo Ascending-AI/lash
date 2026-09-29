@@ -232,6 +232,11 @@ async fn process_tier(
 }
 
 mod in_process {
+    lash_conformance::model_call_drift_park_tests!(@law [] {
+        let (guard, tier) = super::tier("cold-in_process", false).await;
+        (guard, tier.prefix, tier.effect_host, tier.stores, tier.runner, tier.rlm)
+    }; (runtime_drive_cold_replay_ignores_live_input_and_hook_drift, "runtime-cold-drive-replay"));
+
     lash_conformance::tool_call_identity_tests!({ super::tier("in-process", false).await });
     lash_conformance::tool_call_identity_process_tests!({
         super::process_tier("in-process", false).await
@@ -239,6 +244,11 @@ mod in_process {
 }
 
 mod double {
+    lash_conformance::model_call_drift_park_tests!(@law [] {
+        let (guard, tier) = super::tier("cold-double", true).await;
+        (guard, tier.prefix, tier.effect_host, tier.stores, tier.runner, tier.rlm)
+    }; (runtime_drive_cold_replay_ignores_live_input_and_hook_drift, "runtime-cold-drive-replay"));
+
     lash_conformance::tool_call_identity_tests!({ super::tier("double", true).await });
     lash_conformance::tool_call_identity_process_tests!({
         super::process_tier("double", true).await

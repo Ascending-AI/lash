@@ -295,13 +295,15 @@ macro_rules! model_call_drift_park_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::model_call_drift_park_tests!(@law [$(#[$attr])*] $fixture;
             (model_call_drift_parks_then_completes_once_restored, "model-call-drift-park"));
+        $crate::model_call_drift_park_tests!(@law [$(#[$attr])*] $fixture;
+            (runtime_drive_cold_replay_ignores_live_input_and_hook_drift, "runtime-cold-drive-replay"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
             let (_guard, prefix, host, stores, runner, protocol) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, stores, runner, protocol).await;
+            $crate::registration_macro_support::$law(&prefix, host, stores, runner, protocol).await;
         }
     };
 }

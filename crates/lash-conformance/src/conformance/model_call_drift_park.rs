@@ -388,3 +388,174 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
         "the finished turn's commit clears the park"
     );
 }
+
+/// A fresh worker replays the production drive despite later ingress and changed response hooks.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance fixture asserts its setup and replay"
+)]
+pub async fn runtime_drive_cold_replay_ignores_live_input_and_hook_drift(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    protocol: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+) {
+    use crate::testing::runtime_helpers::{RuntimeTestPlugin, RuntimeTestPluginFactory};
+    let session_id = SessionId::from(format!("{prefix}-cold-drive"));
+    let turn_id = TurnId::from(format!("{prefix}-cold-root"));
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let hook_calls = Arc::new(AtomicUsize::new(0));
+    let provider = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let calls = Arc::clone(&provider_calls);
+            move |request| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                assert!(
+                    serde_json::to_string(&request.messages)
+                        .expect("request JSON")
+                        .contains("original input")
+                );
+                async {
+                    Ok(crate::LlmResponse {
+                        parts: vec![crate::LlmOutputPart::Text {
+                            text: ANSWER_CELL.into(),
+                            response_meta: None,
+                        }],
+                        terminal_reason: crate::LlmTerminalReason::Stop,
+                        ..Default::default()
+                    })
+                }
+            }
+        })
+        .build();
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(provider.into_handle()));
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+    let parts = DriftParts {
+        session_id: session_id.clone(),
+        host,
+        store: Arc::clone(&store),
+        probe: super::cell_binding_drift::Probe::Registered,
+        executions: Arc::new(AtomicUsize::new(0)),
+        protocol,
+    };
+    let runtime = build_runtime(parts.clone(), None).await;
+    runtime
+        .enqueue_turn_input(
+            crate::TurnInput::text("original input"),
+            crate::TurnInputIngress::next_turn(),
+            Some(turn_id.to_string()),
+        )
+        .await
+        .expect("accept original input");
+    drop(runtime);
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let make_attempt = |drift: bool| -> crate::ConformanceTurnAttempt {
+        let mut parts = parts.clone();
+        let calls = Arc::clone(&hook_calls);
+        parts.protocol.push(Arc::new(RuntimeTestPluginFactory {
+            build: Arc::new(move |_| {
+                let calls = Arc::clone(&calls);
+                Ok(Arc::new(RuntimeTestPlugin {
+                    before_turn: None,
+                    checkpoint: None,
+                    presentation_steps: Vec::new(),
+                    runtime_event: None,
+                    external_registrar: Some(Arc::new(move |reg| {
+                        let calls = Arc::clone(&calls);
+                        reg.output().response(Arc::new(move |context| {
+                            calls.fetch_add(1, Ordering::SeqCst);
+                            let mut response = context.response;
+                            if drift {
+                                response.parts = vec![crate::LlmOutputPart::Text {
+                                    text: "<typescript>finish(\"wrong replay\");</typescript>"
+                                        .into(),
+                                    response_meta: None,
+                                }];
+                            }
+                            Box::pin(async move {
+                                Ok(crate::AssistantResponseTransform {
+                                    response,
+                                    events: Vec::new(),
+                                })
+                            })
+                        }));
+                        Ok(())
+                    })),
+                }))
+            }),
+        }));
+        let tx = tx.clone();
+        Arc::new(move |scoped| {
+            let parts = parts.clone();
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = build_runtime(parts, None).await;
+                if drift {
+                    runtime
+                        .enqueue_turn_input(
+                            crate::TurnInput::text("later live input"),
+                            crate::TurnInputIngress::next_turn(),
+                            Some("later-live-input".into()),
+                        )
+                        .await
+                        .expect("accept later input");
+                } else {
+                    runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
+                }
+                let frames = runtime
+                    .drive_next_root(
+                        "cold-drive-request",
+                        crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scoped),
+                    )
+                    .await
+                    .expect("drive recorded root")
+                    .expect("root ran");
+                let turn = frames.into_final_turn().expect("terminal physical turn");
+                let _ = tx.send(turn);
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    runner
+        .run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
+            make_attempt(false),
+            make_attempt(true),
+        )
+        .await;
+    let turn = rx.recv().await.expect("cold worker returned the turn");
+    assert!(
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "{:?}",
+        turn.errors
+    );
+    assert_eq!(
+        turn.outcome,
+        crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue {
+            value: serde_json::json!("answered once")
+        })
+    );
+    assert_eq!(
+        provider_calls.load(Ordering::SeqCst),
+        1,
+        "replay never purchases the recorded completion again"
+    );
+    assert_eq!(
+        hook_calls.load(Ordering::SeqCst),
+        1,
+        "the recorded response derivation ignores the cold worker's changed hook"
+    );
+    let pending = store
+        .list_pending_turn_inputs(&session_id)
+        .await
+        .expect("pending input rows");
+    assert_eq!(pending.len(), 1, "later input is left for the next root");
+    assert_eq!(turn.llm_calls.len(), 1);
+}

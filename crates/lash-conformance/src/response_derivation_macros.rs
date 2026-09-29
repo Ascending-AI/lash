@@ -5,6 +5,7 @@ macro_rules! effect_controller_response_derivation_tests {
     ($fixture:block) => {
         $crate::effect_controller_response_derivation_tests!(@catalogue $fixture; [
             (effect_controller_response_derivation_terminals, "effect-controller-response-derivation-terminals"),
+            (attempt_history_terminal_variants_survive_result_replay, "attempt-terminal-replay"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

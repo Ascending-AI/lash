@@ -6,7 +6,10 @@ use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
 
 mod response_derivation;
-pub use response_derivation::effect_controller_response_derivation_terminals;
+pub use response_derivation::{
+    attempt_history_terminal_variants_survive_result_replay,
+    effect_controller_response_derivation_terminals,
+};
 mod outstanding_waits;
 pub(super) use outstanding_waits::effect_host_lists_registered_unresolved_waits;
 

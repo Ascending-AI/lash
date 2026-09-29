@@ -1057,19 +1057,12 @@ impl RuntimeTurnDriver<'_> {
                     crate::plugin::AssistantStreamFinishReason::AttemptReset,
                 )
                 .await;
-                let assistant_prose_correlation_ids =
-                    std::mem::take(state.assistant_prose_attempt_correlations);
-                let reasoning_correlation_ids =
-                    std::mem::take(state.reasoning_attempt_correlations);
-                // The reset observes the provider generation boundary itself,
-                // even when the discarded attempt produced no output. Empty
-                // correlation lists are therefore meaningful host evidence.
                 forwarder.send_semantic_turn_activity(
                     None,
-                    TurnEvent::ModelAttemptReset {
-                        assistant_prose_correlation_ids,
-                        reasoning_correlation_ids,
-                    },
+                    take_attempt_reset(
+                        state.assistant_prose_attempt_correlations,
+                        state.reasoning_attempt_correlations,
+                    ),
                 );
                 fold_llm_stream_event(
                     state.stream_accumulator,

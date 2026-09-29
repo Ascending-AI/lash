@@ -931,77 +931,7 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
     Ok(())
 }
 
-#[tokio::test]
-pub(super) async fn session_observation_retracts_two_retried_visible_attempts_live_and_on_replay()
--> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        double_backend().await,
-        crate::TurnBudget::Unbounded,
-    ))
-    .provider(retrying_visible_stream_provider())
-    .model(mock_model_spec())
-    .build(crate::testing::runtime_lease_owner())?;
-    let session = core
-        .session("retry-visible-observation")
-        .created()
-        .await
-        .open()
-        .await?;
-    let cursor = session.observe().current_observation().cursor;
-    let lash_core::facade_support::SessionObservationSubscription::Subscribed(mut subscription) =
-        session.observe().subscribe_from_cursor(&cursor)?
-    else {
-        panic!("fresh cursor should subscribe without a gap");
-    };
-    let live_collector = tokio::spawn(async move {
-        let mut events = Vec::new();
-        loop {
-            let event = tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                futures_util::StreamExt::next(&mut subscription),
-            )
-            .await
-            .expect("timed out waiting for live observation")
-            .expect("live observation subscription closed")
-            .expect("live observation event");
-            let committed = matches!(
-                event.payload,
-                lash_core::SessionObservationEventPayload::Committed { .. }
-            );
-            events.push(event);
-            if committed {
-                break;
-            }
-        }
-        events
-    });
-
-    let output = session
-        .send(TurnInput::text("retry twice after visible output"))
-        .output()
-        .await?;
-    assert_eq!(output.assistant_message(), Some("prose-3"));
-    let live_events = live_collector.await.expect("live collector task");
-
-    let lash_core::facade_support::SessionResume::Replayed {
-        events: replay_events,
-    } = session.observe().resume_from_cursor(&cursor)?
-    else {
-        panic!("recent cursor should replay all attempt activity");
-    };
-
-    assert_eq!(
-        render_observed_attempt_text(&live_events),
-        ("prose-3".to_string(), "reasoning-3".to_string())
-    );
-    assert_eq!(
-        render_observed_attempt_text(&replay_events),
-        ("prose-3".to_string(), "reasoning-3".to_string())
-    );
-    assert_eq!(model_attempt_resets(&live_events), 2);
-    assert_eq!(model_attempt_resets(&replay_events), 2);
-    Ok(())
-}
+include!("observations/attempt_reset.rs");
 
 #[tokio::test]
 pub(super) async fn session_observation_rejects_cursor_from_another_session() -> Result<()> {
