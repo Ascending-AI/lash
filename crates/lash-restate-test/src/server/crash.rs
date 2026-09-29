@@ -18,6 +18,11 @@ pub enum CrashPoint {
     /// has this 0-based journal command index: the point for a run whose name
     /// differs from one execution to the next (it embeds a fresh id).
     BeforeRunResultAt { index: usize },
+    /// Before the server stores the result of a `ctx.run` whose name ends
+    /// with `suffix`: the point for a run whose name embeds an id the
+    /// scenario only learns as it runs (a live server's keys are unique to
+    /// each run), such as a tool call's `lash:<call id>:present`.
+    BeforeRunResultEnding { suffix: String },
     /// Before the server stores the `ctx.run` command named `name`: the run
     /// never reaches the journal, and the replay issues it anew.
     BeforeRun { name: String },
@@ -38,6 +43,10 @@ pub struct CrashRule {
     /// The object or workflow key the crashing invocation addresses; `None`
     /// matches any key.
     pub key: Option<String>,
+    /// A suffix the key must end with: the point for a key that embeds an
+    /// id the scenario only learns as it runs, such as a process segment's
+    /// `<process id>#<ordinal>`.
+    pub key_suffix: Option<String>,
     /// Fire only on attempts numbered at most this (1-based); `None` fires
     /// on any attempt.
     pub max_attempt: Option<u32>,
@@ -51,6 +60,7 @@ impl CrashRule {
             service: None,
             handler: None,
             key: None,
+            key_suffix: None,
             max_attempt: None,
             times: 1,
         }
@@ -69,6 +79,12 @@ impl CrashRule {
     /// Crash only an invocation addressing this object or workflow key.
     pub fn key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
+        self
+    }
+
+    /// Crash only an invocation whose key ends with `suffix`.
+    pub fn key_ending(mut self, suffix: impl Into<String>) -> Self {
+        self.key_suffix = Some(suffix.into());
         self
     }
 
@@ -99,6 +115,10 @@ impl CrashRule {
                 .key
                 .as_deref()
                 .is_some_and(|key| Some(key) != site.key.as_deref())
+            || self
+                .key_suffix
+                .as_deref()
+                .is_some_and(|suffix| !site.key.as_deref().is_some_and(|key| key.ends_with(suffix)))
             || self.max_attempt.is_some_and(|max| site.attempt > max)
         {
             return false;
@@ -112,6 +132,13 @@ impl CrashRule {
             }
             CrashPoint::BeforeRunResultAt { index } => {
                 site.ty == MessageType::ProposeRunCompletion && site.run_index == Some(*index)
+            }
+            CrashPoint::BeforeRunResultEnding { suffix } => {
+                site.ty == MessageType::ProposeRunCompletion
+                    && site
+                        .run_name
+                        .as_deref()
+                        .is_some_and(|name| name.ends_with(suffix.as_str()))
             }
             CrashPoint::BeforeRun { name } => {
                 site.ty == MessageType::RunCommand && site.run_name.as_deref() == Some(name)

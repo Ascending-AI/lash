@@ -57,9 +57,12 @@ Three properties of that boundary had drifted from the rest of the runtime:
   `ToolPresentationInput::context.artifacts.retain_text(label, text)`, which the
   runtime binds to the session's content-addressed `SessionAttachmentStore`
   (manifest-referenced, so mark-and-sweep GC retains it). The hint names the
-  `AttachmentRef`; because the `put` runs inside the journaled boundary it
-  happens exactly once, and the recorded `artifacts` list names what was
-  retained.
+  `AttachmentRef`; because the `put` runs inside the journaled boundary, a
+  recorded presentation replays unchanged and never puts again, and the
+  recorded `artifacts` list names what was retained. A crash after the `put`
+  and before the outcome is journaled runs the chain again, and its `put`
+  repeats harmlessly: the store is content-addressed, so it converges on the
+  same blob (amended FIG-4095).
 
 Amended 2026-09-28 (FIG-3932): standard protocol now registers one required
 `ToolPresentationPresenter` before the ordered optional steps. Its
@@ -98,3 +101,14 @@ but its example is historical: [ADR 0116](0116-tools-are-opaque.md) deletes orch
 now serves every tool child's journaled attempt. A declared start's launch
 receipt and wait are recorded too, so nothing a presentation depends on
 re-runs.
+
+## Amendment (FIG-4095, 2026-09-29): the put may repeat, the record does not
+
+Decision C said the retained `put` happens exactly once. One recorded
+presentation can follow more than one `put`: the deployment can die after
+the `put` landed and before the `PresentToolResult` outcome reached the
+journal, and the redrive then runs the chain again. The repeated `put`
+converges on the same content-addressed blob, so the store holds one blob,
+the journal one presentation, and every later replay serves that record
+without running a step. `crates/lash-restate-test/tests/crash_windows.rs`
+crashes in that window on the server double and on a live `restate-server`.

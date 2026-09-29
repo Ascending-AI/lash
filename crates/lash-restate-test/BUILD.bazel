@@ -71,6 +71,23 @@ lash_rust_integration_test(
 )
 
 lash_rust_integration_test(
+    name = "crash_windows__test",
+    crate_features = [],
+    crate_name = "crash_windows",
+    crate_root = "tests/crash_windows.rs",
+    declared_features = [],
+    exec_properties = sized_exec_properties("lash-internal-restate-test", "crash_windows", "//crates/lash-restate-test:crash_windows__test"),
+    extra_compile_data = [],
+    library = ":lash-restate-test",
+    library_crate_name = "lash_restate_test",
+    manifest_dir = "crates/lash-restate-test",
+    package_name = "lash-internal-restate-test",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
     name = "drop__test",
     crate_features = [],
     crate_name = "drop",
@@ -384,6 +401,7 @@ lash_batch_test(
     jobs = 2,
     tests = [
         ":admission_invariant__test",
+        ":crash_windows__test",
         ":drop__test",
         ":follow_on_crash_replay__test",
         ":host_send_wait__test",

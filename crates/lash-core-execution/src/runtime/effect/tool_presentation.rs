@@ -8,8 +8,10 @@
 //! [`ToolPresentationArtifacts`](crate::plugin::ToolPresentationArtifacts)
 //! capability. Because the chain runs inside the journaled boundary, a replay
 //! serves this record verbatim — a step added, removed, or changed between
-//! execution and replay cannot change what the model was shown, and a retained
-//! blob is `put` exactly once.
+//! execution and replay cannot change what the model was shown. A retained
+//! blob is `put` again only when a crash lost the outcome before the journal
+//! recorded it, and the content-addressed store converges that repeat on the
+//! same blob (FIG-4095).
 
 use std::future::Future;
 use std::pin::Pin;
