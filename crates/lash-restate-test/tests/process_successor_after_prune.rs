@@ -69,7 +69,14 @@ impl lash_core::ProcessEngine for RecordingEngine {
                 .filter_map(serde_json::Value::as_str)
             {
                 let session_id = lash_core::SessionId::from(session_id.to_string());
-                if matches!(factory.read_session(&session_id).await, Ok(Some(_))) {
+                if matches!(
+                    lash_core::SessionCommitStore::load_session_head_meta(
+                        factory.as_ref(),
+                        &session_id
+                    )
+                    .await,
+                    Ok(Some(_))
+                ) {
                     predecessor_sessions_visible.push(session_id.to_string());
                 }
             }
@@ -83,14 +90,19 @@ impl lash_core::ProcessEngine for RecordingEngine {
                 .filter_map(serde_json::Value::as_str)
             {
                 let session_id = lash_core::SessionId::from(session_id.to_string());
-                if matches!(factory.session_was_deleted(&session_id).await, Ok(false)) {
+                if matches!(
+                    lash_core::SessionCatalogStore::lookup_session(factory.as_ref(), &session_id)
+                        .await,
+                    Ok(lash_core::store::SessionLookup::Live(_)
+                        | lash_core::store::SessionLookup::Absent)
+                ) {
                     predecessor_bound_not_deleted.push(session_id.to_string());
                 }
             }
-            // The durable catalog is the bound-or-tombstoned truth:
-            // `read_session` answers `None` for a bound id whose store has
-            // not committed yet, and `session_was_deleted` answers `false`
-            // for an id that was never bound.
+            // The durable catalog is the bound-or-tombstoned truth: the head
+            // read answers `None` for a bound id that has not committed yet,
+            // and the lookup answers `Absent`, not `Deleted`, for an id that
+            // was never bound.
             let catalog = factory
                 .list_sessions(&lash_core::SessionListFilter::default())
                 .await

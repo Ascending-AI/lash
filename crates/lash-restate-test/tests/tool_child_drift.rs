@@ -481,18 +481,16 @@ impl Turn {
     /// The session's park, once one with at least `attempts` refusals is
     /// recorded, moving virtual time on so the child retries.
     async fn park_with(&self, attempts: u32) -> lash_core::store::TurnPark {
-        let store = lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref())
-            .open_existing_store_by_id(&lash_core::SessionId::from(SESSION))
-            .await
-            .expect("open the session's store")
-            .expect("the session has a store");
+        let store = lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref());
         let parked = tokio::time::timeout(Duration::from_secs(30), async {
             loop {
-                if let Some(park) = store
-                    .load_turn_park(&lash_core::SessionId::from(SESSION))
-                    .await
-                    .expect("read the park")
-                    .filter(|park| park.attempts >= attempts)
+                if let Some(park) = lash_core::SessionCommitStore::load_turn_park(
+                    store.as_ref(),
+                    &lash_core::SessionId::from(SESSION),
+                )
+                .await
+                .expect("read the park")
+                .filter(|park| park.attempts >= attempts)
                 {
                     return park;
                 }
@@ -577,14 +575,12 @@ impl Turn {
                 self.backend.server().invocations()
             ),
         };
-        let park = lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref())
-            .open_existing_store_by_id(&lash_core::SessionId::from(SESSION))
-            .await
-            .expect("open the session's store")
-            .expect("the session has a store")
-            .load_turn_park(&lash_core::SessionId::from(SESSION))
-            .await
-            .expect("read the park");
+        let park = lash_core::SessionCommitStore::load_turn_park(
+            lash_core::StoreSet::session_store_factory(self.backend.stores().as_ref()).as_ref(),
+            &lash_core::SessionId::from(SESSION),
+        )
+        .await
+        .expect("read the park");
         (answer, self.world, park)
     }
 }

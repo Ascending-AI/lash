@@ -215,23 +215,20 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
                 .collect()
         })
         .unwrap_or_default();
-    let store = lash_core::SessionStoreFactory::open_existing_store_by_id(
-        backend.stores().session_store_factory().as_ref(),
-        &lash_core::SessionId::from(SESSION),
-    )
-    .await
-    .expect("open the session store")
-    .expect("the session exists");
+    let store = backend.stores().session_store_factory();
+    let session_id = lash_core::SessionId::from(SESSION);
     let follow_on_committed = lash_core::store::SessionCommitStore::committed_turn_exists(
         store.as_ref(),
+        &session_id,
         &lash::TurnId::from(FOLLOW_ON),
     )
     .await
     .expect("read the follow-on's receipt");
-    let owed_after = lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
-        .await
-        .expect("load the head")
-        .and_then(|head| head.pending_follow_on);
+    let owed_after =
+        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref(), &session_id)
+            .await
+            .expect("load the head")
+            .and_then(|head| head.pending_follow_on);
     Run {
         answer,
         llm_calls: llm_calls.load(Ordering::SeqCst),

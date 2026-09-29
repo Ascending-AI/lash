@@ -21,7 +21,7 @@ use lash_core::engine::{DriveOutcome, DriveRequestId, DriveStop, RootOutcome};
 use lash_core::facade_support::{TurnFinish, TurnOutcome, TurnStop};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
-use lash_core::{SessionId, SessionStoreFactory as _, StoreSet as _};
+use lash_core::{SessionId, StoreSet as _, TurnInputStore as _};
 use lash_restate_test::{
     RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
 };
@@ -696,14 +696,7 @@ async fn dropped_schedule_is_reconciled() {
     let session_id = SessionId::from("dropped-schedule");
     // The row commits through the store alone: its obligation is armed, but
     // no acceptance ran, so no drive was ever asked for.
-    let store = world
-        .backend
-        .stores()
-        .session_store_factory()
-        .open_existing_store_by_id(&session_id)
-        .await
-        .expect("open the session store")
-        .expect("the session exists");
+    let store = world.backend.stores().session_store_factory();
     let input_id = store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
             session_id.clone(),
@@ -787,14 +780,7 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
         .expect("the first turn is running");
     // A row lands with no ask of its own — lost-ask-shaped ingress while
     // the session's turn invocation is live on the engine.
-    let store = world
-        .backend
-        .stores()
-        .session_store_factory()
-        .open_existing_store_by_id(&session_id)
-        .await
-        .expect("open the session store")
-        .expect("the session exists");
+    let store = world.backend.stores().session_store_factory();
     let behind = store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
             session_id.clone(),
