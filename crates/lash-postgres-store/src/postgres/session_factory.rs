@@ -1256,6 +1256,7 @@ pub(crate) async fn delete_session_tx(
 /// the batch. Process runtime session ids are lash-minted, but they are just as
 /// unbindable as host-facing ids once deleted, so a row left tombstoned under
 /// one of them could never be reached by a session-scoped vacuum again.
+#[allow(clippy::result_large_err)]
 pub(crate) async fn delete_process_sessions_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_ids: &[SessionId],

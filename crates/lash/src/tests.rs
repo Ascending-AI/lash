@@ -699,6 +699,73 @@ struct BoundSessionStore {
     drive_epochs: lash_core::store::InMemoryDriveEpochs,
 }
 
+macro_rules! impl_unsupported_capture_store {
+    ($store:ty) => {
+        #[async_trait]
+        impl lash_core::store::TurnCaptureStore for $store {
+            async fn open_capture_writer(
+                &self,
+                _request: &lash_core::store::OpenCaptureWriter,
+            ) -> std::result::Result<lash_core::store::CaptureWriterLease, lash_core::StoreError>
+            {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::open_capture_writer",
+                })
+            }
+
+            async fn append_capture_batch(
+                &self,
+                _batch: &lash_core::store::CaptureBatch,
+            ) -> std::result::Result<lash_core::store::CaptureAck, lash_core::StoreError> {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::append_capture_batch",
+                })
+            }
+
+            async fn persist_attempt_reset(
+                &self,
+                _reset: &lash_core::store::CaptureAttemptReset,
+            ) -> std::result::Result<lash_core::store::CaptureWriterLease, lash_core::StoreError>
+            {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::persist_attempt_reset",
+                })
+            }
+
+            async fn advance_capture_base(
+                &self,
+                _advance: &lash_core::store::CaptureBaseAdvance,
+            ) -> std::result::Result<(), lash_core::StoreError> {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::advance_capture_base",
+                })
+            }
+
+            async fn seal_turn_capture(
+                &self,
+                _request: &lash_core::store::SealTurnCapture,
+            ) -> std::result::Result<lash_core::store::SealedCapture, lash_core::StoreError> {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::seal_turn_capture",
+                })
+            }
+
+            async fn read_stopped_partial(
+                &self,
+                _request: &lash_core::store::StoppedPartialReadRequest,
+            ) -> std::result::Result<lash_core::store::StoppedPartialRead, lash_core::StoreError>
+            {
+                Err(lash_core::StoreError::UnsupportedStoreOperation {
+                    operation: "TurnCaptureStore::read_stopped_partial",
+                })
+            }
+        }
+    };
+}
+
+impl_unsupported_capture_store!(SnapshotStore);
+impl_unsupported_capture_store!(BoundSessionStore);
+
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
 
 lash_core::impl_current_fleet_format!(BoundSessionStore);

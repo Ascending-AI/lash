@@ -347,15 +347,15 @@ pub(crate) fn seal_capture_conn(
         return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
     }
     let through = unsigned(next)?.saturating_sub(1);
-    if let Some(recorded) = request.recorded_watermark {
-        if through < recorded {
-            return Err(StoreError::CaptureSealBelowWatermark {
-                session_id: session.clone(),
-                turn_id: turn.clone(),
-                sealed_through: through,
-                recorded,
-            });
-        }
+    if let Some(recorded) = request.recorded_watermark
+        && through < recorded
+    {
+        return Err(StoreError::CaptureSealBelowWatermark {
+            session_id: session.clone(),
+            turn_id: turn.clone(),
+            sealed_through: through,
+            recorded,
+        });
     }
     conn.execute(
         SQL.writers.fence_turn.sql(),
@@ -677,8 +677,22 @@ impl TurnCaptureStore for Store {
                             });
                         }
                         return Ok(CaptureAck {
-                            first_sequence: unsigned(existing[0].0)?,
-                            last_sequence: unsigned(existing.last().expect("nonempty").0)?,
+                            first_sequence: unsigned(
+                                existing
+                                    .first()
+                                    .ok_or_else(|| {
+                                        stored_data_corrupt("TurnCapture", "missing batch head")
+                                    })?
+                                    .0,
+                            )?,
+                            last_sequence: unsigned(
+                                existing
+                                    .last()
+                                    .ok_or_else(|| {
+                                        stored_data_corrupt("TurnCapture", "missing batch tail")
+                                    })?
+                                    .0,
+                            )?,
                         });
                     }
                     let (_, _, next, _) = turn_row(tx, session, turn)?

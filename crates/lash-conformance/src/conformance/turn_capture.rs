@@ -11,6 +11,7 @@ use lash_core::facade_support::TurnAddress;
 use lash_sansio::llm::types::StreamBlockIdentity;
 use lash_sansio::{CaptureBase, PartialItem, SessionId, StopReason};
 
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
 async fn fixture(
     factory: Arc<dyn SessionStoreFactory>,
     label: &str,
@@ -28,6 +29,7 @@ async fn fixture(
     (store, TurnAddress::new(session, format!("turn-{label}")))
 }
 
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
 async fn writer(
     store: &dyn RuntimePersistence,
     turn: &TurnAddress,
@@ -59,6 +61,7 @@ fn text_frames() -> Vec<CaptureFrame> {
     ]
 }
 
+#[expect(clippy::expect_used, reason = "conformance fixture setup")]
 async fn append(
     store: &dyn RuntimePersistence,
     writer: &crate::store::CaptureWriterLease,

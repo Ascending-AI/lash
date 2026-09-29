@@ -45,6 +45,51 @@ impl lash::persistence::FleetFormatStore for FacadeStore {
     }
 }
 
+#[async_trait]
+impl lash_core::store::TurnCaptureStore for FacadeStore {
+    async fn open_capture_writer(
+        &self,
+        _request: &lash_core::store::OpenCaptureWriter,
+    ) -> Result<lash_core::store::CaptureWriterLease, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn append_capture_batch(
+        &self,
+        _batch: &lash_core::store::CaptureBatch,
+    ) -> Result<lash_core::store::CaptureAck, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn persist_attempt_reset(
+        &self,
+        _reset: &lash_core::store::CaptureAttemptReset,
+    ) -> Result<lash_core::store::CaptureWriterLease, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn advance_capture_base(
+        &self,
+        _advance: &lash_core::store::CaptureBaseAdvance,
+    ) -> Result<(), StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn seal_turn_capture(
+        &self,
+        _request: &lash_core::store::SealTurnCapture,
+    ) -> Result<lash_core::store::SealedCapture, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+
+    async fn read_stopped_partial(
+        &self,
+        _request: &lash_core::store::StoppedPartialReadRequest,
+    ) -> Result<lash_core::store::StoppedPartialRead, StoreError> {
+        unreachable!("compile-only facade store")
+    }
+}
+
 lash_core::impl_noop_attachment_manifest!(FacadeStore);
 
 #[async_trait]
@@ -422,6 +467,7 @@ fn persistence_types_are_nameable(
         drive_fence: None,
         root_terminal: None,
         park_root: None,
+        stopped_partial: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,
         current_frame_node_id: None,

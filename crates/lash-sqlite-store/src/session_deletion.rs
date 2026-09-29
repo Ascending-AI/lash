@@ -10,6 +10,7 @@ pub(super) fn warn_process_registry_not_wired(path: &'static str) {
     );
 }
 
+#[allow(clippy::result_large_err)]
 pub(super) async fn delete_session_from_catalog(
     catalog: &DatabaseLocation,
     session_id: &SessionId,
