@@ -726,7 +726,7 @@ pub mod remote {
             RemoteProcessWorkSnapshot, RemoteRecordedRender, RemoteRuntimeAttribution,
             RemoteRuntimeInvocation, RemoteRuntimeReplay, RemoteRuntimeReplayAttribution,
             RemoteRuntimeSubject, RemoteScopeGrant, RemoteScopeId, RemoteSessionScope,
-            RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
+            RemoteSessionTurnResult, RemoteStartLifetime, RemoteToolFailureClass, RemoteTurnBudget,
         };
     }
 
