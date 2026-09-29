@@ -194,13 +194,51 @@ impl ArtifactCleanupAuthorities for Authorities {
     }
 }
 
-/// What each store was asked to apply, and a scripted failure per store.
+/// What each store was asked to apply and to acquire, and a scripted
+/// failure per store.
 #[derive(Default)]
 struct Applied {
     env: Mutex<Vec<ResolvedArtifactCleanup>>,
     modules: Mutex<Vec<ResolvedArtifactCleanup>>,
     engine: Mutex<Vec<ResolvedArtifactCleanup>>,
     module_failure: Mutex<Option<fn() -> ArtifactStoreError>>,
+    /// Every edge an acquisition added, in any store.
+    acquired: Mutex<Vec<(ArtifactReferrer, String)>>,
+    /// Artifacts no store holds bytes for.
+    absent: Mutex<Vec<String>>,
+    /// A referrer every store has fenced.
+    fenced: Mutex<Option<ArtifactReferrer>>,
+}
+
+impl Applied {
+    fn acquire(&self, claim: &ReferrerClaim, artifact_ref: &str) -> Result<(), ArtifactStoreError> {
+        let fenced = self
+            .fenced
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        if fenced.as_ref() == Some(claim.referrer()) {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: claim.referrer().clone(),
+            });
+        }
+        if self
+            .absent
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .any(|absent| absent == artifact_ref)
+        {
+            return Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: artifact_ref.to_owned(),
+            });
+        }
+        self.acquired
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push((claim.referrer().clone(), artifact_ref.to_owned()));
+        Ok(())
+    }
 }
 
 fn record(into: &Mutex<Vec<ResolvedArtifactCleanup>>, cleanup: &ResolvedArtifactCleanup) {
@@ -232,10 +270,10 @@ impl ProcessExecutionEnvStore for EnvStore {
 
     async fn acquire_process_execution_env(
         &self,
-        _claim: &ReferrerClaim,
-        _env_ref: &ProcessExecutionEnvRef,
+        claim: &ReferrerClaim,
+        env_ref: &ProcessExecutionEnvRef,
     ) -> Result<(), ArtifactStoreError> {
-        Ok(())
+        self.0.acquire(claim, env_ref.as_str())
     }
 
     async fn end_process_env_referrer(
@@ -269,10 +307,10 @@ impl ModuleArtifactStore for Modules {
 
     async fn acquire_module_artifact(
         &self,
-        _claim: &ReferrerClaim,
-        _module_ref: &str,
+        claim: &ReferrerClaim,
+        module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
-        Ok(())
+        self.0.acquire(claim, module_ref)
     }
 
     async fn end_module_referrer(
@@ -339,10 +377,12 @@ impl crate::ProcessEngine for Engine {
 
     async fn acquire_engine_artifact(
         &self,
-        _claim: &ReferrerClaim,
-        _artifact_ref: &str,
+        claim: &ReferrerClaim,
+        artifact_ref: &str,
     ) -> Result<(), PluginError> {
-        Ok(())
+        self.0
+            .acquire(claim, artifact_ref)
+            .map_err(PluginError::from)
     }
 }
 
@@ -575,6 +615,94 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
             ))]
         )]
     );
+}
+
+impl Harness {
+    fn retain(&self, process_id: &ProcessId) {
+        *self
+            .authorities
+            .retained
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(RetainedStart {
+            process_id: process_id.clone(),
+            env_ref: Some(ProcessExecutionEnvRef::new("env-retained")),
+            input: Arc::new(ProcessInput::Engine {
+                kind: ENGINE_KIND.to_owned(),
+                payload: serde_json::json!({}),
+            }),
+        });
+    }
+
+    fn acquired(&self) -> Vec<(ArtifactReferrer, String)> {
+        std::mem::take(
+            &mut *self
+                .applied
+                .acquired
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+/// FIG-4130, ADR 0113 §3.3: a refusal's end of `Start(key)` carries nothing,
+/// yet a record the key registered meanwhile has its content held under its
+/// `ProcessRecord` before the key's edges are severed. A name with no stored
+/// bytes was never `Start(key)`'s to keep, and is skipped.
+#[tokio::test]
+async fn an_ended_start_holds_the_key_record_content_before_it_severs() {
+    let harness = harness();
+    let process_id = ProcessId::fixture("registered-meanwhile");
+    harness.retain(&process_id);
+    harness
+        .applied
+        .absent
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push("mod-start".to_owned());
+    let start = ArtifactReferrer::Start(start_key());
+    assert_eq!(
+        harness
+            .deliver(ArtifactCleanup::ended(start.clone(), Vec::new(), None))
+            .await,
+        Ok(())
+    );
+    let record = ArtifactReferrer::ProcessRecord(process_id);
+    assert_eq!(
+        harness.acquired(),
+        vec![
+            (record.clone(), "env-retained".to_owned()),
+            (record, "own-start".to_owned()),
+        ]
+    );
+    let (env, modules, engine) = harness.applied();
+    assert_eq!(env, vec![resolved(&start, Vec::new())]);
+    assert_eq!(modules, vec![resolved(&start, Vec::new())]);
+    assert_eq!(engine, vec![resolved(&start, Vec::new())]);
+}
+
+/// A pruned record's own cleanup owns what it held: the end holds nothing
+/// under it and severs the key as usual.
+#[tokio::test]
+async fn an_ended_start_holds_nothing_under_a_pruned_record() {
+    let harness = harness();
+    let process_id = ProcessId::fixture("pruned");
+    harness.retain(&process_id);
+    *harness
+        .applied
+        .fenced
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(ArtifactReferrer::ProcessRecord(process_id));
+    let start = ArtifactReferrer::Start(start_key());
+    assert_eq!(
+        harness
+            .deliver(ArtifactCleanup::ended(start.clone(), Vec::new(), None))
+            .await,
+        Ok(())
+    );
+    assert_eq!(harness.acquired(), Vec::new());
+    let (env, modules, engine) = harness.applied();
+    assert_eq!((env.len(), modules.len(), engine.len()), (1, 1, 1));
 }
 
 /// ADR 0113 §3.3, "Lost": with no record, the start ends once its starter's

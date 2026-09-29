@@ -1557,3 +1557,33 @@ refusal under
 [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md). Other
 malformed IDs remain corruption; the blanket `StoredDataCorrupt` sentence in §1
 has this exception.
+
+## Amendment (FIG-4130, 2026-09-29)
+
+§2.5 step 3 and §3.3 "Refused". A host key is global (ADR 0107, FIG-4111
+amendment), so a terminal refusal can end `Start(key)` with no carries on a
+stale read: another start's row commits after the refusing start read the
+key and before its `Ended` record and fence. That start checked for a fence
+before there was one, so it relies on `Start(key)`'s cleanup to carry its
+content onto `ProcessRecord(id)`.
+
+**Rule.** Resolving `Ended` for a `Start(key)` referrer, the executor first
+reads `get_process_by_start_key` and, for a record, acquires the record's
+content (its `env_ref` and `engine.start_artifacts(payload)`) under
+`ProcessRecord(record.id)`, in each store that holds it. Only then does it
+apply the end. The read follows the fence, which the `Ended` record's arming
+inserted: a row it misses commits later, and that row's start meets the
+fence and holds its own content (§3.2). So every row registered under the
+key holds its content under its record before `Start(key)`'s edges are
+severed.
+
+It is an acquisition, not a carry. A name with no stored bytes was never
+held by `Start(key)` (its start met the fence while staging and acquires it
+itself after its row), so it is skipped rather than stalled as
+`CarryArtifactMissing`. A pruned record answers `ReferrerEnded`, and its own
+cleanup owns what it held. The refusing start writes no edge; it no longer
+reads the registry again after ending the key.
+
+Law: `a_start_key_end_applied_before_the_rescue_keeps_the_concurrent_start_held`
+(`crates/lash-conformance/src/conformance/process_prune_start_staging.rs`) on
+SQLite and PostgreSQL.

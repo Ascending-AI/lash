@@ -177,5 +177,7 @@ A global key lets two originators' starts meet under one `Start(key)` referrer
 A terminal refusal that ends `Start(key)` never strands a concurrent start
 staged there. After its row commits, a start that staged under `Start(key)`
 checks for the fence and, if it finds one, holds its content under
-`ProcessRecord(id)` itself. The refusing start reads the registry again after
-ending the key, and holds the content of a row it finds.
+`ProcessRecord(id)` itself. A row that committed before the fence, after the
+refusing start read the key, is held by the cleanup executor when it applies
+`Start(key)`'s end (ADR 0113, FIG-4130 amendment); the refusing start no
+longer reads the registry again.

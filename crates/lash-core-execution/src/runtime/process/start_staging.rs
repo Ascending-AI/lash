@@ -306,11 +306,12 @@ pub async fn register_process_start(
 ///
 /// A key is global, so another start may be staged under `Start(key)` while
 /// this one is refused (FIG-4111). Its row can commit between the read below
-/// and the end: `Start(key)` then carries nothing onto it. Either that start
-/// meets the fence once its row commits and holds its own content under
-/// `ProcessRecord` ([`stage_and_register`]), or it looked before the fence
-/// existed, and then the read after the end finds its row and holds the row's
-/// content here.
+/// and the end, and `Start(key)`'s end then carries nothing onto it. Either
+/// that start meets the fence once its row commits and holds its own content
+/// under `ProcessRecord` ([`stage_and_register`]), or it looked before the
+/// fence existed, and then the cleanup executor, which reads the key's record
+/// after the fence, holds the row's content under it before it severs
+/// anything (FIG-4130).
 async fn abandon_start(
     stores: &ProcessStartStores<'_>,
     start_key: StartKey,
@@ -326,47 +327,7 @@ async fn abandon_start(
     {
         return Ok(());
     }
-    ports
-        .end(ArtifactReferrer::Start(start_key.clone()))
-        .await?;
-    if let Some(retained) = stores.registry.get_process_by_start_key(&start_key).await?
-        && let Err(error) = hold_retained_start(stores, ports, &retained).await
-    {
-        // This start's refusal stands either way; the row is another start's.
-        tracing::warn!(
-            process_id = %retained.id,
-            %error,
-            "could not hold a concurrent start's content after abandoning its key"
-        );
-    }
-    Ok(())
-}
-
-/// Hold `retained`'s environment and engine artifacts under its
-/// `ProcessRecord`: what `Start(key)`'s guard would have carried onto it.
-async fn hold_retained_start(
-    stores: &ProcessStartStores<'_>,
-    ports: &ArtifactReferrerPorts,
-    retained: &ProcessRecord,
-) -> Result<(), RuntimeEffectControllerError> {
-    let claim = ReferrerClaim::unguarded(ArtifactReferrer::ProcessRecord(retained.id.clone()))
-        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-    if let (Some(env_store), Some(env_ref)) = (stores.env_store, retained.env_ref.as_ref()) {
-        let env = StagedEnv {
-            env_ref: env_ref.clone(),
-            bytes: None,
-            staged: false,
-        };
-        acquire_env(env_store.as_ref(), &claim, &env).await?;
-    }
-    if let (Some(engines), ProcessInput::Engine { kind, payload }) =
-        (stores.engines, retained.input.as_ref())
-    {
-        let names = engines.require(kind)?.start_artifacts(payload)?;
-        if !names.is_empty() {
-            ports.acquire(engines, &claim, &names).await?;
-        }
-    }
+    ports.end(ArtifactReferrer::Start(start_key)).await?;
     Ok(())
 }
 
