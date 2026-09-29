@@ -146,10 +146,25 @@ pub enum CredentialExecuteError<E> {
 type PersistFuture = Pin<Box<dyn Future<Output = Result<(), CredentialError>> + Send>>;
 type PersistCallback<C> = dyn Fn(C) -> PersistFuture + Send + Sync;
 
+#[derive(Clone, Copy, Debug)]
+enum TerminalRefreshFailure {
+    InvalidGrant,
+    Other,
+}
+
+impl From<TerminalRefreshFailure> for CredentialError {
+    fn from(failure: TerminalRefreshFailure) -> Self {
+        Self::new(match failure {
+            TerminalRefreshFailure::InvalidGrant => CredentialErrorKind::InvalidGrant,
+            TerminalRefreshFailure::Other => CredentialErrorKind::Other,
+        })
+    }
+}
+
 struct State<C> {
     value: C,
     generation: u64,
-    failure_latch: Option<CredentialError>,
+    terminal_failure: Option<TerminalRefreshFailure>,
 }
 
 struct Inner<C: Credential> {
@@ -180,7 +195,7 @@ impl<C: Credential> Debug for CredentialManager<C> {
             .debug_struct("CredentialManager")
             .field("credential", &state.value)
             .field("generation", &state.generation)
-            .field("failure_latched", &state.failure_latch.is_some())
+            .field("terminal_failure", &state.terminal_failure)
             .field("policy", &self.inner.policy)
             .finish()
     }
@@ -207,7 +222,7 @@ impl<C: Credential> CredentialManager<C> {
                 state: RwLock::new(State {
                     value,
                     generation: 0,
-                    failure_latch: None,
+                    terminal_failure: None,
                 }),
                 refresh_gate: tokio::sync::Mutex::new(()),
                 refresher,
@@ -254,14 +269,15 @@ impl<C: Credential> CredentialManager<C> {
         if current.generation != generation {
             return Ok(current);
         }
-        if let Some(error) = self.inner.state.read_recover().failure_latch.clone() {
-            return Err(error);
-        }
-
         let refreshed = match self.inner.refresher.refresh(&current.value, cause).await {
             Ok(value) => value,
             Err(error) => {
-                self.inner.state.write_recover().failure_latch = Some(error.clone());
+                let failure = match error.kind {
+                    CredentialErrorKind::InvalidGrant => TerminalRefreshFailure::InvalidGrant,
+                    CredentialErrorKind::Other => TerminalRefreshFailure::Other,
+                    CredentialErrorKind::Transient => return Err(error),
+                };
+                self.inner.state.write_recover().terminal_failure = Some(failure);
                 return Err(error);
             }
         };
@@ -274,13 +290,12 @@ impl<C: Credential> CredentialManager<C> {
 
         let next = {
             let mut state = self.inner.state.write_recover();
-            state.value = refreshed;
-            state.generation = state.generation.saturating_add(1);
             // Persistence failure is returned to the refresh leader below, but
             // must not poison later leases: the rotated in-memory credential is
             // live and falling back to (or indefinitely blocking on) the dead
             // credential would defeat the refresh.
-            state.failure_latch = None;
+            state.value = refreshed;
+            state.generation = state.generation.saturating_add(1);
             Lease {
                 value: state.value.clone(),
                 generation: state.generation,
@@ -327,8 +342,8 @@ impl<C: Credential> CredentialManager<C> {
 
     fn current_lease(&self) -> Result<Lease<C>, CredentialError> {
         let state = self.inner.state.read_recover();
-        if let Some(error) = &state.failure_latch {
-            return Err(error.clone());
+        if let Some(failure) = state.terminal_failure {
+            return Err(failure.into());
         }
         Ok(Lease {
             value: state.value.clone(),
@@ -463,6 +478,28 @@ mod tests {
         }
     }
 
+    struct RecoveringRefresher {
+        calls: AtomicUsize,
+        cause: RefreshCause,
+    }
+
+    #[async_trait]
+    impl CredentialRefresher<TestCredential> for RecoveringRefresher {
+        async fn refresh(
+            &self,
+            current: &TestCredential,
+            cause: RefreshCause,
+        ) -> Result<TestCredential, CredentialError> {
+            assert_eq!(current.secret, "old");
+            assert_eq!(cause, self.cause);
+            if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(CredentialError::transient())
+            } else {
+                Ok(credential("new", 1000))
+            }
+        }
+    }
+
     fn credential(secret: &str, expires_secs: u64) -> TestCredential {
         TestCredential {
             secret: secret.to_string(),
@@ -470,7 +507,10 @@ mod tests {
         }
     }
 
-    fn manager(refresher: Arc<TestRefresher>, now_secs: u64) -> CredentialManager<TestCredential> {
+    fn manager(
+        refresher: Arc<impl CredentialRefresher<TestCredential> + 'static>,
+        now_secs: u64,
+    ) -> CredentialManager<TestCredential> {
         CredentialManager::with_clock_and_policy(
             credential("old", 100),
             refresher,
@@ -480,6 +520,111 @@ mod tests {
                 skew: Duration::ZERO,
             },
         )
+    }
+
+    async fn assert_transient_refresh_recovers(
+        original: &CredentialManager<TestCredential>,
+        recovery: &CredentialManager<TestCredential>,
+        refresher: &RecoveringRefresher,
+    ) {
+        assert_eq!(
+            original.lease().await.unwrap_err(),
+            CredentialError::transient()
+        );
+        assert_eq!(original.snapshot().secret, "old");
+        assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
+
+        let lease = recovery.lease().await.unwrap();
+        assert_eq!(lease.value.secret, "new");
+        assert_eq!(lease.generation, 1);
+        let mut calls = 0;
+        let result = recovery
+            .execute(&mut calls, |calls, lease| {
+                Box::pin(async move {
+                    *calls += 1;
+                    Ok::<_, CredentialCallError<&'static str>>((
+                        lease.value.secret,
+                        lease.generation,
+                    ))
+                })
+            })
+            .await
+            .unwrap();
+        assert_eq!(result, ("new".to_string(), 1));
+        assert_eq!(calls, 1);
+        assert_eq!(refresher.calls.load(Ordering::SeqCst), 2);
+        let original_lease = original.lease().await.unwrap();
+        assert_eq!(original_lease.value.secret, "new");
+        assert_eq!(original_lease.generation, 1);
+    }
+
+    #[tokio::test]
+    async fn transient_refresh_recovers_on_next_acquisition() {
+        let refresher = Arc::new(RecoveringRefresher {
+            calls: AtomicUsize::new(0),
+            cause: RefreshCause::Proactive,
+        });
+        let manager = manager(Arc::clone(&refresher), 200);
+        assert_transient_refresh_recovers(&manager, &manager, &refresher).await;
+    }
+
+    #[tokio::test]
+    async fn transient_refresh_recovers_through_cloned_manager() {
+        let refresher = Arc::new(RecoveringRefresher {
+            calls: AtomicUsize::new(0),
+            cause: RefreshCause::Proactive,
+        });
+        let manager = manager(Arc::clone(&refresher), 200);
+        let cloned = manager.clone();
+        assert_transient_refresh_recovers(&manager, &cloned, &refresher).await;
+    }
+
+    #[tokio::test]
+    async fn transient_rejected_refresh_recovers_on_next_provider_attempt() {
+        let refresher = Arc::new(RecoveringRefresher {
+            calls: AtomicUsize::new(0),
+            cause: RefreshCause::Rejected,
+        });
+        let manager = manager(Arc::clone(&refresher), 0);
+        let cloned = manager.clone();
+        let mut attempts = Vec::new();
+        async fn call(
+            attempts: &mut Vec<(String, u64)>,
+            lease: Lease<TestCredential>,
+        ) -> Result<String, CredentialCallError<&'static str>> {
+            attempts.push((lease.value.secret.clone(), lease.generation));
+            if lease.value.secret == "old" {
+                Err(CredentialCallError::PreOutputAuth("401"))
+            } else {
+                Ok(lease.value.secret)
+            }
+        }
+        assert!(matches!(
+            manager.execute(&mut attempts, |attempts, lease| Box::pin(call(attempts, lease))).await,
+            Err(CredentialExecuteError::Credential(error)) if error == CredentialError::transient()
+        ));
+        let unchanged = cloned.lease().await.unwrap();
+        assert_eq!(unchanged.value.secret, "old");
+        assert_eq!(unchanged.generation, 0);
+        assert_eq!(
+            cloned
+                .execute(&mut attempts, |attempts, lease| Box::pin(call(
+                    attempts, lease
+                )))
+                .await
+                .unwrap(),
+            "new"
+        );
+        assert_eq!(
+            attempts,
+            [
+                ("old".to_string(), 0),
+                ("old".to_string(), 0),
+                ("new".to_string(), 1)
+            ]
+        );
+        assert_eq!(refresher.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(manager.lease().await.unwrap().generation, 1);
     }
 
     #[tokio::test]
@@ -608,16 +753,65 @@ mod tests {
             CredentialError::transient()
         );
         assert_eq!(manager.snapshot().secret, "new");
+        let cloned = manager.clone();
+        for manager in [&manager, &cloned] {
+            let lease = manager.lease().await.unwrap();
+            assert_eq!(lease.value.secret, "new");
+            assert_eq!(lease.generation, 1);
+            let value = manager
+                .execute(&mut (), |(), lease| {
+                    Box::pin(async move {
+                        Ok::<_, CredentialCallError<&'static str>>(lease.value.secret)
+                    })
+                })
+                .await
+                .unwrap();
+            assert_eq!(value, "new");
+        }
+        assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
-    async fn invalid_grant_is_typed_and_non_retryable() {
-        let refresher = Arc::new(TestRefresher {
-            calls: AtomicUsize::new(0),
-            result: Err(CredentialError::invalid_grant()),
-        });
-        let error = manager(refresher, 200).lease().await.unwrap_err();
-        assert_eq!(error.kind, CredentialErrorKind::InvalidGrant);
-        assert!(!error.is_retryable());
+    async fn terminal_refresh_failures_reject_future_leases_and_provider_attempts() {
+        for kind in [
+            CredentialErrorKind::InvalidGrant,
+            CredentialErrorKind::Other,
+        ] {
+            let expected = CredentialError::new(kind);
+            let refresher = Arc::new(TestRefresher {
+                calls: AtomicUsize::new(0),
+                result: Err(expected.clone()),
+            });
+            let manager = manager(Arc::clone(&refresher), 200);
+            let cloned = manager.clone();
+            assert_eq!(manager.lease().await.unwrap_err(), expected);
+            for manager in [&manager, &cloned] {
+                let error = manager.lease().await.unwrap_err();
+                assert_eq!(error, expected);
+                assert!(!error.is_retryable());
+                assert_eq!(
+                    manager
+                        .refresh_if_current(0, RefreshCause::Rejected)
+                        .await
+                        .unwrap_err(),
+                    expected
+                );
+                let mut calls = 0;
+                let result = manager
+                    .execute(&mut calls, |calls, _| {
+                        Box::pin(async move {
+                            *calls += 1;
+                            Ok::<_, CredentialCallError<&'static str>>(())
+                        })
+                    })
+                    .await;
+                assert!(
+                    matches!(result, Err(CredentialExecuteError::Credential(error)) if error == expected)
+                );
+                assert_eq!(calls, 0);
+            }
+            assert_eq!(refresher.calls.load(Ordering::SeqCst), 1);
+            assert_eq!(manager.snapshot().secret, "old");
+        }
     }
 }
