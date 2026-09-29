@@ -372,6 +372,163 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
     Ok(())
 }
 
+/// Counts `load_session_window` calls on the catalog it wraps.
+struct WindowLoads {
+    inner: Arc<dyn lash_core::DeploymentStore>,
+    loads: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl lash_core::store::RuntimeStoreDecorator for WindowLoads {
+    type Inner = dyn lash_core::DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
+        self.inner.as_ref()
+    }
+
+    async fn load_session_window(
+        &self,
+        session_id: &SessionId,
+        selector: lash_core::store::WindowSelector,
+    ) -> std::result::Result<Option<lash_core::store::SessionWindowRead>, StoreError> {
+        self.loads.fetch_add(1, Ordering::SeqCst);
+        self.inner.load_session_window(session_id, selector).await
+    }
+}
+
+impl lash_core::DeploymentStoreDecorator for WindowLoads {}
+
+/// ADR 0112 §14.6b: overflow recovery starts a new frame without a reload.
+/// After the recovered turn's commits the head, the window base and the
+/// resident state all name the recovery frame, the resident graph is that
+/// frame alone, and nothing read the window back.
+#[tokio::test]
+async fn overflow_recovery_starts_a_frame_without_a_reload() -> Result<()> {
+    let session_id = "standard-compaction-recovery-residency";
+    let base = double_backend().await;
+    let catalog = base.session_store_factory();
+    let loads = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&loads);
+    let backend = DecoratedBackend::over(base).session_store_factory(move |inner| {
+        Arc::new(WindowLoads {
+            inner,
+            loads: counted,
+        })
+    });
+    let (provider, _requests) = standard_compaction_provider_recorded(vec![
+        LlmResponse {
+            terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
+            terminal_diagnostic: Some("prompt is too long".to_string()),
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        },
+        response_with_usage("recovery summary", 1),
+        response_with_usage("verdict response", 1),
+    ]);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(model_spec("standard-compaction-model", None, 200_000))
+    .plugin(Arc::new(
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    let overflow = session
+        .send(TurnInput::text("summarize the report"))
+        .id("standard-compaction-residency-overflow")
+        .output()
+        .await?;
+    assert!(
+        overflow.result.is_context_overflow(),
+        "{:?}",
+        overflow.result
+    );
+    let old_frame = session
+        .read_view()
+        .to_snapshot()
+        .current_frame_node_id
+        .expect("the first frame");
+    let loads_before = loads.load(Ordering::SeqCst);
+    assert!(
+        loads_before > 0,
+        "the counter sits on the open's window read"
+    );
+
+    let recovered = session
+        .send(TurnInput::text("now give me the verdict"))
+        .id("standard-compaction-residency-verdict")
+        .output()
+        .await?;
+    assert!(recovered.result.is_success(), "{:?}", recovered.result);
+    assert_eq!(
+        loads.load(Ordering::SeqCst),
+        loads_before,
+        "the recovery frame is adopted from its commit; nothing reloads the window"
+    );
+
+    let writer = session.runtime.writer();
+    let state = writer
+        .lock()
+        .await
+        .export_persisted_state()
+        .await
+        .expect("export the resident state");
+    let new_frame = state
+        .current_frame_node_id
+        .clone()
+        .expect("the recovered state names its frame");
+    assert_ne!(new_frame, old_frame, "recovery starts a new frame");
+    let window = lash_core::runtime::live_session_view(&catalog, &SessionId::from(session_id))
+        .await?
+        .expect("the session is live")
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await?
+        .expect("the session has a head");
+    assert_eq!(window.current_frame_node_id.as_ref(), Some(&new_frame));
+    let anchor = window
+        .window
+        .anchor()
+        .expect("a durable window is anchored");
+    assert_eq!(
+        anchor.frame_node_id, new_frame,
+        "the window base is the recovery FrameOpen"
+    );
+    assert_eq!(anchor.previous_frame_node_id.as_ref(), Some(&old_frame));
+    let resident = state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    let durable = window
+        .window
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        resident, durable,
+        "the resident nodes are the recovery frame's"
+    );
+    assert!(
+        state
+            .persisted_node_ids
+            .iter()
+            .all(|node_id| resident.contains(node_id)),
+        "every persisted id is resident"
+    );
+    assert_eq!(state.agent_frames.len(), 1, "one frame record is resident");
+    assert_eq!(state.agent_frames[0].frame_node_id, new_frame);
+    assert_eq!(
+        state.agent_frames[0].previous_frame_node_id.as_ref(),
+        Some(&old_frame)
+    );
+    Ok(())
+}
+
 fn sqlite_head_and_max_generation(
     stores: &lash_sqlite_store::SqliteStoreSet,
     session_id: &SessionId,
