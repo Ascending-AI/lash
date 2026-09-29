@@ -681,6 +681,11 @@ async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
     .expect("frozen fixture should be JSON");
     raw["compilation_dialect"] = serde_json::json!("future_dialect");
     raw["ir"] = serde_json::json!({"language": "typescript", "main": {"FutureExpr": null}});
+    let enveloped = serde_json::json!({
+        "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+        "encoding": 1,
+        "artifact": raw,
+    });
     let item = DurableItem {
         surface: DurableSurface::ModuleArtifact,
         cursor: "lashlang:v1:sha256:future".to_string(),
@@ -688,9 +693,7 @@ async fn a_future_module_artifact_refusal_names_recompile_and_republish() {
         session_id: None,
         status: None,
         owner_record: None,
-        payload: DurablePayload::Json(
-            serde_json::to_string(&raw).expect("future fixture should encode"),
-        ),
+        payload: DurablePayload::Json(enveloped.to_string()),
     };
     let report = probe_store(
         &FakeStore::default().with_items(DurableSurface::ModuleArtifact, vec![item]),

@@ -137,6 +137,14 @@ fn module_artifact(payload: Payload<'_>) -> Vec<Extraction> {
                 }];
             }
         };
+        if let Ok(raw) = serde_json::from_slice::<serde_json::Value>(bytes)
+            && (raw.get("family").is_none() || raw.get("encoding").is_none())
+        {
+            return vec![Extraction::Undecodable {
+                format,
+                reason: "module artifact carries no family and encoding envelope".to_string(),
+            }];
+        }
         match lashlang::ModuleArtifact::from_store_bytes(bytes) {
             Ok(_) => vec![Extraction::IdentityMatch { format }],
             Err(lashlang::ModuleArtifactError::Codec(reason)) => vec![Extraction::Undecodable {
@@ -610,8 +618,8 @@ mod tests {
     #[test]
     #[cfg(feature = "rlm")]
     fn a_frozen_predecessor_module_artifact_is_undecodable() {
-        // A pre-FIG-3571 artifact stores a renamed `canonical_ir` and no
-        // program language, so the one-carrier artifact cannot decode it.
+        // A pre-1.0 artifact has no family or encoding envelope. Its old
+        // `canonical_ir` shape cannot establish a stored identity family.
         let mut raw: serde_json::Value = serde_json::from_str(include_str!(
             "../../../lashlang/tests/fixtures/module-artifact-old.json"
         ))
@@ -629,17 +637,28 @@ mod tests {
         ));
         let reasons = undecodable(&extractions, DurableFormat::ModuleArtifact);
         assert_eq!(reasons.len(), 1, "{reasons:?}");
-        assert!(reasons[0].contains("`ir`"), "{reasons:?}");
+        assert!(
+            reasons[0].contains("no family and encoding envelope"),
+            "{reasons:?}"
+        );
     }
 
     #[test]
     #[cfg(feature = "rlm")]
     fn a_frozen_trigger_manifest_artifact_is_a_shape_refusal() {
+        let raw: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../lashlang/tests/fixtures/module-artifact-old.json"
+        ))
+        .expect("frozen fixture should be JSON");
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
-                include_str!("../../../lashlang/tests/fixtures/module-artifact-old.json")
-                    .to_string(),
+                serde_json::json!({
+                    "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+                    "encoding": 1,
+                    "artifact": raw,
+                })
+                .to_string(),
             ),
         ));
         let detail = extractions
@@ -668,7 +687,12 @@ mod tests {
         let extractions = extract(&item(
             DurableSurface::ModuleArtifact,
             DurablePayload::Json(
-                serde_json::to_string(&raw).expect("future fixture should encode"),
+                serde_json::json!({
+                    "family": lashlang::LASHLANG_SEMANTIC_HASH_VERSION,
+                    "encoding": 1,
+                    "artifact": raw,
+                })
+                .to_string(),
             ),
         ));
         let detail = extractions
