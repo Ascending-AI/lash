@@ -33,7 +33,40 @@ export type NodeData = {
   terminalKind?: string | null;
   [k: string]: unknown;
 } & NodeData1;
-export type EditableValue = unknown;
+/**
+ * An editable field carries its authored kind at every depth. Literal keys are data, including `$expr`, `kind` and `value`.
+ */
+export type EditableValue =
+  | {
+      kind: 'null';
+      value: null;
+    }
+  | {
+      kind: 'bool';
+      value: boolean;
+    }
+  | {
+      kind: 'number';
+      value: number;
+    }
+  | {
+      kind: 'string';
+      value: string;
+    }
+  | {
+      kind: 'list';
+      value: EditableValue[];
+    }
+  | {
+      kind: 'expr';
+      value: string;
+    }
+  | {
+      kind: 'object';
+      value: {
+        [k: string]: EditableValue;
+      };
+    };
 export type NodeData1 =
   | {
       description?: string | null;

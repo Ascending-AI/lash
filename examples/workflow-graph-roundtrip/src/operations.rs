@@ -1,8 +1,6 @@
-use serde_json::{Value, json};
-
 use crate::display;
 use crate::mock_tools;
-use crate::{OperationCatalogEntry, OperationField};
+use crate::{EditableValue, OperationCatalogEntry, OperationField};
 
 pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
     let mut entries = display::OPERATIONS
@@ -43,7 +41,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
                 .map(|field| OperationField {
                     name: field.name.to_string(),
                     field_type: field.field_type.to_string(),
-                    default: field.default.json(),
+                    default: field.default.editable(),
                 })
                 .collect(),
         }
@@ -57,7 +55,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             None,
-            vec![field("name", "identifier", json!("my_process"))],
+            vec![field("name", "identifier", "my_process")],
         ),
         entry(
             "effect.sleep",
@@ -67,7 +65,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             Some("sleep"),
             None,
-            vec![field("duration", "expression", json!("\"1s\""))],
+            vec![field("duration", "expression", "\"1s\"")],
         ),
         entry(
             "effect.wait_signal",
@@ -77,7 +75,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             Some("wait_signal"),
             None,
-            vec![field("signal", "string", json!("continue"))],
+            vec![field("signal", "string", "continue")],
         ),
         entry(
             "control.if",
@@ -87,7 +85,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             None,
-            vec![field("condition", "expression", json!("true"))],
+            vec![field("condition", "expression", "true")],
         ),
         entry(
             "control.while",
@@ -97,7 +95,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             None,
-            vec![field("condition", "expression", json!("false"))],
+            vec![field("condition", "expression", "false")],
         ),
         entry(
             "control.for",
@@ -108,8 +106,8 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             vec![
-                field("binding", "identifier", json!("item")),
-                field("iterable", "expression", json!("[1, 2, 3]")),
+                field("binding", "identifier", "item"),
+                field("iterable", "expression", "[1, 2, 3]"),
             ],
         ),
         entry(
@@ -121,8 +119,8 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             vec![
-                field("target", "assignment_target", json!("state.count")),
-                field("expression", "expression", json!("0")),
+                field("target", "assignment_target", "state.count"),
+                field("expression", "expression", "0"),
             ],
         ),
         entry(
@@ -134,8 +132,8 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             vec![
-                field("binding", "identifier", json!("value")),
-                field("expression", "expression", json!("0")),
+                field("binding", "identifier", "value"),
+                field("expression", "expression", "0"),
             ],
         ),
         entry(
@@ -146,7 +144,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             None,
-            vec![field("expression", "expression", json!("1 + 1"))],
+            vec![field("expression", "expression", "1 + 1")],
         ),
         entry(
             "stmt.opaque",
@@ -159,7 +157,7 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             vec![field(
                 "source",
                 "expression",
-                json!(r#"await display.show_message({ text: "raw" })"#),
+                r#"await display.show_message({ text: "raw" })"#,
             )],
         ),
         entry(
@@ -170,16 +168,16 @@ pub(crate) fn entries() -> Vec<OperationCatalogEntry> {
             None,
             None,
             Some("finish"),
-            vec![field("expression", "expression", json!("0"))],
+            vec![field("expression", "expression", "0")],
         ),
     ]);
     entries
 }
 
-fn display_default(field_type: &str) -> Value {
+fn display_default(field_type: &str) -> EditableValue {
     match field_type {
-        "number" => json!(0),
-        _ => json!(""),
+        "number" => EditableValue::Number(0.0),
+        _ => EditableValue::String(String::new()),
     }
 }
 
@@ -210,11 +208,15 @@ fn entry(
     }
 }
 
-fn field(name: &str, field_type: &str, default: Value) -> OperationField {
+fn field(name: &str, field_type: &str, default: &str) -> OperationField {
     OperationField {
         name: name.to_string(),
         field_type: field_type.to_string(),
-        default,
+        default: if field_type == "expression" {
+            EditableValue::Expr(default.to_string())
+        } else {
+            EditableValue::String(default.to_string())
+        },
     }
 }
 

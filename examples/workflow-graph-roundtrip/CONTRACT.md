@@ -122,11 +122,22 @@ reads or writes. A title that could not be read back the same way — one holdin
 `*/`, a newline, or the separator itself — is refused with `canonical_source`
 rather than silently rewritten.
 
-`data.fields` contains JSON-editable literal arguments. In the default graph
-that includes strings such as `text`, `key`, `value`, `name`, `state`, `list`,
-`item`, and `target`; numeric `pct`; sleep `duration`; and wait `signal`.
-Values may be null, booleans, numbers, strings, lists, or objects. An opaque
-node is edited through `data.source` as one complete Lashlang statement.
+`data.fields` maps argument names to recursive editable values. Each value has
+an explicit `kind` and `value`. The kinds are `null`, `bool`, `number`, `string`,
+`list`, `object`, and `expr`. Lists contain editable values; objects map arbitrary
+literal keys to editable values. Catalog field defaults use the same encoding.
+
+For example, literal source `inputs: {"$expr": "1 + 1"}` projects as:
+
+```json
+{"kind": "object", "value": {"$expr": {"kind": "string", "value": "1 + 1"}}}
+```
+
+The executable expression `inputs: 1 + 1` instead uses
+`{"kind": "expr", "value": "(1 + 1)"}`. An object's keys never decide its
+kind. Null uses `{"kind": "null", "value": null}`. Untagged values are rejected.
+This is an in-place contract change; the schema version stays unchanged.
+An opaque node is edited through `data.source` as one complete statement.
 
 The adapter renders structured expression slots as canonical TypeScript text:
 

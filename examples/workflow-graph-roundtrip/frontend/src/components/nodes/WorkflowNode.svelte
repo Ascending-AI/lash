@@ -1,4 +1,5 @@
 <script>
+  import { editableKind, editableText } from '../../lib/editableValue.js';
   import { Handle, Position } from '@xyflow/svelte';
   import { getContext } from 'svelte';
   import { kindMeta, WAITING_EFFECTS } from '../../lib/nodeKinds.js';
@@ -118,7 +119,7 @@
     if (!name || Object.prototype.hasOwnProperty.call(fields, name)) return;
     node.data.fields = {
       ...fields,
-      [name]: fieldDefaultValue({ type: newFieldType, default: newFieldType === 'number' ? 0 : '' }),
+      [name]: fieldDefaultValue({ type: newFieldType, default: { kind: newFieldType === 'expression' ? 'expr' : newFieldType, value: newFieldType === 'number' ? 0 : '' } }),
     };
     newFieldName = '';
     newFieldType = 'string';
@@ -150,16 +151,10 @@
   }
   function onNumber(key, e) {
     const n = Number(e.currentTarget.value);
-    if (!Number.isNaN(n)) node.data.fields[key] = n;
+    if (!Number.isNaN(n)) node.data.fields[key] = { kind: 'number', value: n };
   }
 
-  function fieldType(v) {
-    if (typeof v === 'number') return 'number';
-    if (typeof v === 'boolean') return 'boolean';
-    if (typeof v === 'string') return 'string';
-    if (v !== null && typeof v === 'object' && typeof v.$expr === 'string') return 'expr';
-    return 'other';
-  }
+
 </script>
 
 <div
@@ -343,70 +338,70 @@
         {@const hint = describeExpectedType(expected)}
         <label class="wf-field" class:has-remove={kind === 'call'}>
           <span class="wf-key">{key}</span>
-          {#if fieldType(v) === 'string' && enumOpts}
+          {#if editableKind(v) === 'string' && enumOpts}
             <span class="wf-field-cell">
               <select
                 class="wf-input wf-enum nodrag"
-                value={enumMemberFromText(v, enumOpts) ?? '__custom__'}
+                value={enumMemberFromText(v.value, enumOpts) ?? '__custom__'}
                 onpointerdown={(e) => e.stopPropagation()}
                 onchange={(e) => {
-                  node.data.fields[key] = e.currentTarget.value;
+                  node.data.fields[key] = { kind: 'string', value: e.currentTarget.value };
                   commit();
                 }}
               >
-                {#if enumMemberFromText(v, enumOpts) === null}
-                  <option value="__custom__" disabled>{v ? v : '— choose —'}</option>
+                {#if enumMemberFromText(v.value, enumOpts) === null}
+                  <option value="__custom__" disabled>{v.value || '— choose —'}</option>
                 {/if}
                 {#each enumOpts as member (member)}<option value={member}>{member}</option>{/each}
               </select>
               {#if hint}<span class="wf-fieldhint">expects {hint}</span>{/if}
             </span>
-          {:else if fieldType(v) === 'number'}
+          {:else if editableKind(v) === 'number'}
             <span class="wf-field-cell">
               <input
                 class="wf-input wf-input--num"
                 type="number"
-                value={v}
+                value={v.value}
                 oninput={(e) => onNumber(key, e)}
                 onchange={commit}
               />
               {#if hint}<span class="wf-fieldhint">expects {hint}</span>{/if}
             </span>
-          {:else if fieldType(v) === 'boolean'}
+          {:else if editableKind(v) === 'bool'}
             <input
               class="wf-check"
               type="checkbox"
-              checked={v}
+              checked={v.value}
               onchange={(e) => {
-                node.data.fields[key] = e.currentTarget.checked;
+                node.data.fields[key] = { kind: 'bool', value: e.currentTarget.checked };
                 commit();
               }}
             />
-          {:else if fieldType(v) === 'string'}
+          {:else if editableKind(v) === 'string'}
             <span class="wf-field-cell">
               <input
                 class="wf-input"
                 type="text"
-                value={v}
+                value={v.value}
                 spellcheck="false"
-                oninput={(e) => (node.data.fields[key] = e.currentTarget.value)}
+                oninput={(e) => (node.data.fields[key] = { kind: 'string', value: e.currentTarget.value })}
                 onchange={commit}
               />
               {#if hint}<span class="wf-fieldhint">expects {hint}</span>{/if}
             </span>
-          {:else if fieldType(v) === 'expr'}
+          {:else if editableKind(v) === 'expr'}
             <ExpressionField
-              value={v.$expr}
+              value={v.value}
               kind="expression"
               builder="value"
               {availableVars}
               expectedType={expected}
               placeholder="expression…"
-              onInput={(text) => (node.data.fields[key] = { $expr: text })}
+              onInput={(text) => (node.data.fields[key] = { kind: 'expr', value: text })}
               onCommit={commit}
             />
           {:else}
-            <code class="wf-ro">{JSON.stringify(v)}</code>
+            <code class="wf-ro">{editableText(v)}</code>
           {/if}
           {#if kind === 'call'}
             <button

@@ -29,10 +29,10 @@ describe('stepLabel — plain-language, never leaks jargon', () => {
     [{ kind: 'terminal', terminalKind: 'fail', expression: '"e"' }, 'fail', 'Stop with an error'],
     [{ kind: 'process', name: 'onboarding' }, 'process', 'Background task'],
     [{ kind: 'opaque', source: 'foo()' }, 'opaque', 'Advanced step'],
-    [{ kind: 'effect', effect: 'start_process', fields: { name: 'w' } }, 'start', 'Start'],
-    [{ kind: 'effect', effect: 'await_join', fields: { name: 'w' } }, 'await', 'Wait for'],
-    [{ kind: 'effect', effect: 'wait_signal', fields: { signal: 'go' } }, 'waitSignal', 'Wait for'],
-    [{ kind: 'effect', effect: 'sleep', fields: { duration: '400ms' } }, 'sleep', 'Wait for'],
+    [{ kind: 'effect', effect: 'start_process', fields: { name: { kind: 'string', value: 'w' } } }, 'start', 'Start'],
+    [{ kind: 'effect', effect: 'await_join', fields: { name: { kind: 'string', value: 'w' } } }, 'await', 'Wait for'],
+    [{ kind: 'effect', effect: 'wait_signal', fields: { signal: { kind: 'string', value: 'go' } } }, 'waitSignal', 'Wait for'],
+    [{ kind: 'effect', effect: 'sleep', fields: { duration: { kind: 'string', value: '400ms' } } }, 'sleep', 'Wait for'],
   ];
   for (const [data, category, lead] of cases) {
     it(`${data.kind}/${data.effect ?? ''} → ${category}`, () => {
@@ -80,14 +80,14 @@ describe('stepLabel — plain-language, never leaks jargon', () => {
       title: 'recent',
       nameSource: 'derived',
       operation: 'recent',
-      fields: { channel: 'team-platform', since: 'yesterday' },
+      fields: { channel: { kind: 'string', value: 'team-platform' }, since: { kind: 'string', value: 'yesterday' } },
     });
     const github = nd('github', {
       kind: 'call',
       title: 'recent',
       nameSource: 'derived',
       operation: 'recent',
-      fields: { repo: 'acme/widgets', since: 'yesterday' },
+      fields: { repo: { kind: 'string', value: 'acme/widgets' }, since: { kind: 'string', value: 'yesterday' } },
     });
 
     expect(operationCatalogEntry(slack, catalog)?.id).toBe('slack.recent');
@@ -188,7 +188,7 @@ describe('stepSummary — collapsed-card gist (item 3)', () => {
     const slack = nd('slack', {
       kind: 'call',
       operation: 'recent',
-      fields: { channel: 'team-platform', since: 'yesterday' },
+      fields: { channel: { kind: 'string', value: 'team-platform' }, since: { kind: 'string', value: 'yesterday' } },
     });
     expect(stepSummary(slack)).toBe('team-platform · yesterday');
   });
@@ -197,7 +197,7 @@ describe('stepSummary — collapsed-card gist (item 3)', () => {
     const node = nd('n', {
       kind: 'call',
       operation: 'do',
-      fields: { unread: true, limit: 20, query: { $expr: 'topic' } },
+      fields: { unread: { kind: 'bool', value: true }, limit: { kind: 'number', value: 20 }, query: { kind: 'expr', value: 'topic' } },
     });
     expect(stepSummary(node)).toBe('Yes · 20 · topic');
   });
@@ -206,7 +206,7 @@ describe('stepSummary — collapsed-card gist (item 3)', () => {
     const node = nd('n', {
       kind: 'call',
       operation: 'do',
-      fields: { a: '', b: 'one', c: 'two', d: 'three', e: 'four' },
+      fields: { a: { kind: 'string', value: '' }, b: { kind: 'string', value: 'one' }, c: { kind: 'string', value: 'two' }, d: { kind: 'string', value: 'three' }, e: { kind: 'string', value: 'four' } },
     });
     expect(stepSummary(node)).toBe('one · two · three');
   });
@@ -218,11 +218,11 @@ describe('stepSummary — collapsed-card gist (item 3)', () => {
   });
 
   it('summarizeFieldValue handles each scalar/expr shape', () => {
-    expect(summarizeFieldValue('  hi  ')).toBe('hi');
-    expect(summarizeFieldValue(false)).toBe('No');
-    expect(summarizeFieldValue(7)).toBe('7');
-    expect(summarizeFieldValue({ $expr: ' count ' })).toBe('count');
-    expect(summarizeFieldValue(null)).toBe('');
+    expect(summarizeFieldValue({ kind: 'string', value: '  hi  ' })).toBe('hi');
+    expect(summarizeFieldValue({ kind: 'bool', value: false })).toBe('No');
+    expect(summarizeFieldValue({ kind: 'number', value: 7 })).toBe('7');
+    expect(summarizeFieldValue({ kind: 'expr', value: ' count ' })).toBe('count');
+    expect(summarizeFieldValue({ kind: 'null', value: null })).toBe('');
   });
 });
 
@@ -231,7 +231,7 @@ describe('buildSteps — nesting builder (item 1)', () => {
     facetSchemaVersion: 1,
     nodes: [
       nd('p', { kind: 'process', name: 'flow', children: [{ slot: 'body', nodeIds: ['c1', 'if1'] }] }),
-      nd('c1', { kind: 'call', title: 'Show', operation: 'show_message', fields: { text: 'hi' } }),
+      nd('c1', { kind: 'call', title: 'Show', operation: 'show_message', fields: { text: { kind: 'string', value: 'hi' } } }),
       nd('if1', {
         kind: 'container',
         subkind: 'if',
@@ -318,8 +318,8 @@ describe('presentSteps — single-process flattening', () => {
         title: 'Team standup digest',
         children: [{ slot: 'body', nodeIds: ['a', 'b', 'fin'] }],
       }),
-      nd('a', { kind: 'call', operation: 'slack.recent', fields: { channel: 'x' } }),
-      nd('b', { kind: 'call', operation: 'github.recent', fields: { repo: 'y' } }),
+      nd('a', { kind: 'call', operation: 'slack.recent', fields: { channel: { kind: 'string', value: 'x' } } }),
+      nd('b', { kind: 'call', operation: 'github.recent', fields: { repo: { kind: 'string', value: 'y' } } }),
       nd('fin', { kind: 'terminal', terminalKind: 'finish', expression: 'b' }),
     ],
     roots: { processes: ['p'], main: [] },

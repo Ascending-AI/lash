@@ -6,7 +6,7 @@ const SHOW_MESSAGE = {
   label: 'Show message',
   nodeKind: 'call',
   operation: 'show_message',
-  fields: [{ name: 'text', type: 'string', default: '' }],
+  fields: [{ name: 'text', type: 'string', default: { kind: 'string', value: '' } }],
 };
 
 const SET_PROGRESS = {
@@ -14,11 +14,11 @@ const SET_PROGRESS = {
   label: 'Set progress',
   nodeKind: 'call',
   operation: 'set_progress',
-  fields: [{ name: 'pct', type: 'number', default: 0 }],
+  fields: [{ name: 'pct', type: 'number', default: { kind: 'number', value: 0 } }],
 };
 
 // A non-display catalog entry, served with its own receiver and with the
-// `$expr` defaults the mocked tools carry (FIG-3178).
+// tagged expression defaults the mocked tools carry (FIG-3178).
 const LLM_QUERY = {
   id: 'llm.query',
   label: 'Query LLM',
@@ -26,8 +26,8 @@ const LLM_QUERY = {
   operation: 'query',
   receiver: 'llm',
   fields: [
-    { name: 'task', type: 'string', default: 'Summarize the supplied input' },
-    { name: 'inputs', type: 'expression', default: { $expr: '{}' } },
+    { name: 'task', type: 'string', default: { kind: 'string', value: 'Summarize the supplied input' } },
+    { name: 'inputs', type: 'expression', default: { kind: 'expr', value: '{}' } },
   ],
 };
 
@@ -36,7 +36,7 @@ const SLEEP = {
   label: 'Sleep',
   nodeKind: 'effect',
   effect: 'sleep',
-  fields: [{ name: 'duration', type: 'expression', default: '"1s"' }],
+  fields: [{ name: 'duration', type: 'expression', default: { kind: 'expr', value: '"1s"' } }],
 };
 
 const WAIT_SIGNAL = {
@@ -44,7 +44,7 @@ const WAIT_SIGNAL = {
   label: 'Wait for signal',
   nodeKind: 'effect',
   effect: 'wait_signal',
-  fields: [{ name: 'signal', type: 'string', default: 'continue' }],
+  fields: [{ name: 'signal', type: 'string', default: { kind: 'string', value: 'continue' } }],
 };
 
 const IF = {
@@ -52,7 +52,7 @@ const IF = {
   label: 'If / branch',
   nodeKind: 'container',
   subkind: 'if',
-  fields: [{ name: 'condition', type: 'expression', default: 'true' }],
+  fields: [{ name: 'condition', type: 'expression', default: { kind: 'expr', value: 'true' } }],
 };
 
 function blankDoc() {
@@ -90,9 +90,9 @@ describe('synthesized call expressions', () => {
 
   // FIG-3178: `list_recent` belongs to `gmail` and `query` to `llm`, so a
   // synthesized `display.<operation>` names a receiver that has no such
-  // operation. An expression-valued default arrives as `{ $expr: source }` and
+  // operation. An expression-valued default arrives as `{ kind: 'expr', value: source }` and
   // used to reach the argument record as the literal `[object Object]`.
-  it("names the entry's own receiver and emits $expr defaults raw", () => {
+  it("names the entry's own receiver and emits expression defaults raw", () => {
     const doc = blankDoc();
     const id = addNodeToDoc(doc, { main: true }, LLM_QUERY);
     expect(dataOf(doc, id).expression).toBe(
@@ -104,7 +104,7 @@ describe('synthesized call expressions', () => {
     const doc = blankDoc();
     const id = addNodeToDoc(doc, { main: true }, LLM_QUERY);
     expect(dataOf(doc, id).receiver).toBe('llm');
-    expect(dataOf(doc, id).fields.inputs).toEqual({ $expr: '{}' });
+    expect(dataOf(doc, id).fields.inputs).toEqual({ kind: 'expr', value: '{}' });
   });
 
   // FIG-3179: a palette insertion is posted before any field is edited, so its

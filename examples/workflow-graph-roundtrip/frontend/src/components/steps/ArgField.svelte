@@ -1,4 +1,5 @@
 <script>
+  import { editableKind, editableText } from '../../lib/editableValue.js';
   import ExpressionField from '../ExpressionField.svelte';
   import ValueToken from './ValueToken.svelte';
   import { describeValue } from '../../lib/steps.js';
@@ -18,6 +19,7 @@
 
   let editing = $state(false);
   function open() {
+    if (kind === 'object' || kind === 'list' || kind === 'null') return;
     editing = true;
   }
   function close() {
@@ -25,22 +27,16 @@
     onCommit?.();
   }
 
-  function kindOf(v) {
-    if (typeof v === 'number') return 'number';
-    if (typeof v === 'boolean') return 'boolean';
-    if (v !== null && typeof v === 'object' && typeof v.$expr === 'string') return 'expr';
-    return 'string';
-  }
-  const kind = $derived(kindOf(value));
+  const kind = $derived(editableKind(value));
 
   // A read descriptor for the calm chip. Expression args go through
   // describeValue (token-capable); plain literals paint directly.
   const desc = $derived.by(() => {
-    if (kind === 'expr') return describeValue(value.$expr, availableVars);
-    if (kind === 'number') return { kind: 'static', literalType: 'number', display: String(value) };
-    if (kind === 'boolean')
-      return { kind: 'static', literalType: 'boolean', display: value ? 'Yes' : 'No' };
-    return { kind: 'static', literalType: 'string', display: value === '' ? '' : String(value) };
+    if (kind === 'expr') return describeValue(value.value, availableVars);
+    if (kind === 'number') return { kind: 'static', literalType: 'number', display: editableText(value) };
+    if (kind === 'bool')
+      return { kind: 'static', literalType: 'boolean', display: value.value ? 'Yes' : 'No' };
+    return { kind: 'static', literalType: 'string', display: editableText(value) };
   });
 
   function autofocus(el) {
@@ -60,14 +56,14 @@
     <span class="arg-edit" use:autofocus>
       <select
         class="arg-select"
-        value={enumMemberFromText(value, enumOpts) ?? '__custom__'}
+        value={enumMemberFromText(value.value, enumOpts) ?? '__custom__'}
         onchange={(e) => {
-          node.data.fields[fieldKey] = e.currentTarget.value;
+          node.data.fields[fieldKey] = { kind: 'string', value: e.currentTarget.value };
         }}
         onblur={close}
       >
-        {#if enumMemberFromText(value, enumOpts) === null}
-          <option value="__custom__" disabled>{value ? value : '— choose —'}</option>
+        {#if enumMemberFromText(value.value, enumOpts) === null}
+          <option value="__custom__" disabled>{value.value || '— choose —'}</option>
         {/if}
         {#each enumOpts as m (m)}<option value={m}>{m}</option>{/each}
       </select>
@@ -77,21 +73,21 @@
       <input
         class="arg-input"
         type="number"
-        value={value}
+        value={value.value}
         oninput={(e) => {
           const n = Number(e.currentTarget.value);
-          if (!Number.isNaN(n)) node.data.fields[fieldKey] = n;
+          if (!Number.isNaN(n)) node.data.fields[fieldKey] = { kind: 'number', value: n };
         }}
         onblur={close}
       />
     </span>
-  {:else if kind === 'boolean'}
+  {:else if kind === 'bool'}
     <span class="arg-edit" use:autofocus>
       <select
         class="arg-select"
-        value={value ? 'true' : 'false'}
+        value={value.value ? 'true' : 'false'}
         onchange={(e) => {
-          node.data.fields[fieldKey] = e.currentTarget.value === 'true';
+          node.data.fields[fieldKey] = { kind: 'bool', value: e.currentTarget.value === 'true' };
         }}
         onblur={close}
       >
@@ -102,13 +98,13 @@
   {:else if kind === 'expr'}
     <span class="arg-edit" use:autofocus>
       <ExpressionField
-        value={value.$expr}
+        value={value.value}
         kind="expression"
         builder="value"
         {availableVars}
         expectedType={expected}
         placeholder="value…"
-        onInput={(t) => (node.data.fields[fieldKey] = { $expr: t })}
+        onInput={(t) => (node.data.fields[fieldKey] = { kind: 'expr', value: t })}
         onCommit={close}
       />
     </span>
@@ -117,9 +113,9 @@
       <input
         class="arg-input"
         type="text"
-        value={value}
+        value={value.value}
         spellcheck="false"
-        oninput={(e) => (node.data.fields[fieldKey] = e.currentTarget.value)}
+        oninput={(e) => (node.data.fields[fieldKey] = { kind: 'string', value: e.currentTarget.value })}
         onblur={close}
       />
     </span>

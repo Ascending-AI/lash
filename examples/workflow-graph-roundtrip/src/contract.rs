@@ -4,8 +4,7 @@ use axum::http::StatusCode;
 use lash::rlm::lang::{Span, WorkflowNodeNameSource};
 use lash::typescript::workflow_graph::{GraphRenderError, WorkflowGraphBuildError};
 use schemars::JsonSchema;
-use serde::de::Error as _;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -102,7 +101,7 @@ pub struct OperationField {
     pub name: String,
     #[serde(rename = "type")]
     pub field_type: String,
-    pub default: Value,
+    pub default: EditableValue,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -355,9 +354,17 @@ pub struct ChildGroup {
     pub node_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+/// An editable field carries its authored kind at every depth. Literal keys
+/// are data, including `$expr`, `kind` and `value`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(
+    tag = "kind",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
 pub enum EditableValue {
-    Null,
+    Null(()),
     Bool(bool),
     Number(f64),
     String(String),
@@ -366,116 +373,121 @@ pub enum EditableValue {
     Object(BTreeMap<String, EditableValue>),
 }
 
-impl Serialize for EditableValue {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Null => serializer.serialize_none(),
-            Self::Bool(value) => serializer.serialize_bool(*value),
-            Self::Number(value) => serializer.serialize_f64(*value),
-            Self::String(value) => serializer.serialize_str(value),
-            Self::List(values) => values.serialize(serializer),
-            Self::Expr(source) => BTreeMap::from([("$expr", source)]).serialize(serializer),
-            Self::Object(entries) => entries.serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for EditableValue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Self::from_json(Value::deserialize(deserializer)?).map_err(D::Error::custom)
-    }
-}
-
-impl JsonSchema for EditableValue {
-    fn schema_name() -> String {
-        "EditableValue".to_string()
-    }
-
-    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
-        // The custom codec accepts every JSON value. An object with exactly
-        // one string `$expr` member becomes an expression; every other object
-        // remains a literal map.
-        schemars::schema::Schema::Object(Default::default())
-    }
-}
-
-impl EditableValue {
-    #[expect(
-        clippy::expect_used,
-        reason = "the match guard above checked that $expr is present and a string"
-    )]
-    fn from_json(value: Value) -> Result<Self, String> {
-        match value {
-            Value::Null => Ok(Self::Null),
-            Value::Bool(value) => Ok(Self::Bool(value)),
-            Value::Number(value) => value
-                .as_f64()
-                .map(Self::Number)
-                .ok_or_else(|| format!("editable number `{value}` is outside the f64 range")),
-            Value::String(value) => Ok(Self::String(value)),
-            Value::Array(values) => values
-                .into_iter()
-                .map(Self::from_json)
-                .collect::<Result<_, _>>()
-                .map(Self::List),
-            Value::Object(mut entries)
-                if entries.len() == 1 && entries.get("$expr").is_some_and(Value::is_string) =>
-            {
-                let Value::String(source) = entries.remove("$expr").expect("checked expression")
-                else {
-                    unreachable!("checked expression value is a string")
-                };
-                Ok(Self::Expr(source))
-            }
-            Value::Object(entries) => entries
-                .into_iter()
-                .map(|(key, value)| Ok((key, Self::from_json(value)?)))
-                .collect::<Result<_, String>>()
-                .map(Self::Object),
-        }
-    }
-}
-
 #[cfg(test)]
 mod editable_value_tests {
     use super::*;
 
     #[test]
-    fn expression_sentinel_round_trips_without_changing_literal_shapes() {
-        let expression = EditableValue::Expr("(state.count + 1)".to_string());
-        let encoded = serde_json::to_value(&expression).expect("serialize expression value");
-        assert_eq!(encoded, json!({ "$expr": "(state.count + 1)" }));
+    fn literal_expression_member_and_expression_have_distinct_bytes() {
+        let literal = EditableValue::Object(BTreeMap::from([(
+            "$expr".to_string(),
+            EditableValue::String("1 + 1".to_string()),
+        )]));
+        let expression = EditableValue::Expr("1 + 1".to_string());
+        let literal_bytes = serde_json::to_vec(&literal).expect("encode literal");
+        let expression_bytes = serde_json::to_vec(&expression).expect("encode expression");
+        assert_ne!(literal_bytes, expression_bytes);
         assert_eq!(
-            serde_json::from_value::<EditableValue>(encoded).expect("deserialize expression value"),
+            serde_json::from_slice::<EditableValue>(&literal_bytes).expect("decode literal"),
+            literal
+        );
+        assert_eq!(
+            serde_json::from_slice::<EditableValue>(&expression_bytes).expect("decode expression"),
             expression
         );
+    }
 
+    #[test]
+    fn nested_literal_records_keep_arbitrary_keys_and_expression_kinds() {
+        let value = EditableValue::List(vec![
+            EditableValue::Object(BTreeMap::from([
+                (
+                    "$expr".to_string(),
+                    EditableValue::String("1 + 1".to_string()),
+                ),
+                (
+                    "kind".to_string(),
+                    EditableValue::String("expr".to_string()),
+                ),
+                (
+                    "value".to_string(),
+                    EditableValue::Object(BTreeMap::from([(
+                        "$expr".to_string(),
+                        EditableValue::String("not valid code!".to_string()),
+                    )])),
+                ),
+            ])),
+            EditableValue::Expr("1 + 1".to_string()),
+        ]);
+        let bytes = serde_json::to_vec(&value).expect("encode nested values");
+        assert_eq!(
+            serde_json::from_slice::<EditableValue>(&bytes).expect("decode nested values"),
+            value
+        );
+    }
+
+    #[test]
+    fn every_variant_uses_explicit_kind_and_value() {
         for (editable, encoded) in [
-            (EditableValue::Null, json!(null)),
-            (EditableValue::Bool(true), json!(true)),
-            (EditableValue::Number(5.0), json!(5.0)),
-            (EditableValue::String("s".to_string()), json!("s")),
+            (
+                EditableValue::Null(()),
+                json!({ "kind": "null", "value": null }),
+            ),
+            (
+                EditableValue::Bool(true),
+                json!({ "kind": "bool", "value": true }),
+            ),
+            (
+                EditableValue::Number(5.0),
+                json!({ "kind": "number", "value": 5.0 }),
+            ),
+            (
+                EditableValue::String("s".to_string()),
+                json!({ "kind": "string", "value": "s" }),
+            ),
+            (
+                EditableValue::Expr("1 + 1".to_string()),
+                json!({ "kind": "expr", "value": "1 + 1" }),
+            ),
+            (
+                EditableValue::List(vec![EditableValue::Null(())]),
+                json!({ "kind": "list", "value": [{ "kind": "null", "value": null }] }),
+            ),
+            (
+                EditableValue::Object(BTreeMap::from([(
+                    "$expr".to_string(),
+                    EditableValue::String("1 + 1".to_string()),
+                )])),
+                json!({ "kind": "object", "value": { "$expr": { "kind": "string", "value": "1 + 1" } } }),
+            ),
         ] {
             assert_eq!(
-                serde_json::to_value(&editable).expect("serialize literal value"),
+                serde_json::to_value(&editable).expect("encode value"),
                 encoded
             );
+            assert_eq!(
+                serde_json::from_value::<EditableValue>(encoded).expect("decode value"),
+                editable
+            );
         }
+    }
 
-        let object = json!({ "$expr": "literal member", "other": true });
-        assert!(matches!(
-            serde_json::from_value::<EditableValue>(object).expect("deserialize object value"),
-            EditableValue::Object(entries)
-                if entries.len() == 2
-                    && entries.get("$expr")
-                        == Some(&EditableValue::String("literal member".to_string()))
-        ));
+    #[test]
+    fn untagged_or_malformed_values_are_rejected() {
+        for value in [
+            json!({ "$expr": "1 + 1" }),
+            json!("text"),
+            json!([1]),
+            json!({ "kind": "expression", "value": "1 + 1" }),
+            json!({ "kind": "expr", "value": { "$expr": "1 + 1" } }),
+            json!({ "kind": "object", "value": { "$expr": "1 + 1" } }),
+            json!({ "kind": "list", "value": [true] }),
+        ] {
+            assert!(
+                serde_json::from_value::<EditableValue>(value.clone()).is_err(),
+                "accepted {value}"
+            );
+        }
     }
 }
 

@@ -10,6 +10,7 @@
 // where `type` is string | number | boolean | expression | identifier |
 // assignment_target.
 
+import { editableKind, editableText, editableSource } from './editableValue.js';
 import { NODE_KINDS, CONTAINER_SUBKINDS, kindMeta } from './nodeKinds.js';
 
 // Palette groups, in menu order. Each entry lands in the first group whose
@@ -55,30 +56,15 @@ export function operationsForKind(catalog, nodeKind) {
   return (catalog ?? []).filter((op) => op.nodeKind === nodeKind);
 }
 
-// The raw source text of a catalog field's default.
-//
-// The catalog serves an expression-valued default as `{ "$expr": "<source>" }`
-// (see `EditableValue::Expr` on the wire), so `String(default)` on one yields
-// `[object Object]` — the literal that used to reach both the seeded arg form
-// and the synthesized receiver call (FIG-3178). Everything else is already its
-// own slot text.
+// A catalog default carries the same recursive tag as a document field.
 export function defaultSource(value) {
-  if (value && typeof value === 'object' && typeof value.$expr === 'string') return value.$expr;
-  return String(value ?? '');
+  return editableKind(value) === 'expr' ? value.value : editableText(value);
 }
 
-// A single field's default as an EditableValue for the `data.fields` map.
 export function fieldDefaultValue(field) {
-  switch (field.type) {
-    case 'number':
-      return Number(field.default ?? 0) || 0;
-    case 'boolean':
-      return !!field.default;
-    case 'expression':
-      return { $expr: defaultSource(field.default) };
-    default:
-      return defaultSource(field.default);
-  }
+  if (editableKind(field.default) !== undefined) return structuredClone(field.default);
+  const kind = { boolean: 'bool', expression: 'expr', number: 'number' }[field.type] ?? 'string';
+  return { kind, value: kind === 'number' ? 0 : kind === 'bool' ? false : '' };
 }
 
 // The seed `data.fields` map for an operation entry (used to prefill the arg
@@ -91,17 +77,7 @@ export function catalogFieldsMap(op) {
 
 // One `name: value` record argument for a synthesized receiver call.
 function recordArg(field) {
-  const value = field.default;
-  switch (field.type) {
-    case 'number':
-      return `${field.name}: ${Number(value ?? 0) || 0}`;
-    case 'boolean':
-      return `${field.name}: ${value ? 'true' : 'false'}`;
-    case 'string':
-      return `${field.name}: ${JSON.stringify(String(value ?? ''))}`;
-    default:
-      return `${field.name}: ${defaultSource(value)}`; // expression / identifier — raw
-  }
+  return `${field.name}: ${editableSource(fieldDefaultValue(field))}`;
 }
 
 // A call node's expression is the awaited receiver call the lens projects back

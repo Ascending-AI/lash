@@ -13,7 +13,7 @@ const CATALOG = [
     label: 'Display',
     nodeKind: 'call',
     operation: 'display',
-    fields: [{ name: 'message', type: 'string', default: 'hi' }],
+    fields: [{ name: 'message', type: 'string', default: { kind: 'string', value: 'hi' } }],
   },
   {
     id: 'call.record',
@@ -22,8 +22,8 @@ const CATALOG = [
     operation: 'record',
     receiver: 'ledger',
     fields: [
-      { name: 'count', type: 'number', default: 3 },
-      { name: 'value', type: 'expression', default: 'x + 1' },
+      { name: 'count', type: 'number', default: { kind: 'number', value: 3 } },
+      { name: 'value', type: 'expression', default: { kind: 'expr', value: 'x + 1' } },
     ],
   },
   {
@@ -31,23 +31,23 @@ const CATALOG = [
     label: 'Sleep',
     nodeKind: 'effect',
     effect: 'sleep',
-    fields: [{ name: 'duration', type: 'number', default: 5 }],
+    fields: [{ name: 'duration', type: 'number', default: { kind: 'number', value: 5 } }],
   },
 ];
 
 describe('fieldDefaultValue', () => {
   it('coerces each field type to an EditableValue', () => {
-    expect(fieldDefaultValue({ type: 'number', default: 3 })).toBe(3);
-    expect(fieldDefaultValue({ type: 'number' })).toBe(0);
-    expect(fieldDefaultValue({ type: 'boolean', default: true })).toBe(true);
-    expect(fieldDefaultValue({ type: 'expression', default: 'a + 1' })).toEqual({ $expr: 'a + 1' });
-    expect(fieldDefaultValue({ type: 'string', default: 'hi' })).toBe('hi');
+    expect(fieldDefaultValue({ type: 'number', default: { kind: 'number', value: 3 } })).toEqual({ kind: 'number', value: 3 });
+    expect(fieldDefaultValue({ type: 'number' })).toEqual({ kind: 'number', value: 0 });
+    expect(fieldDefaultValue({ type: 'boolean', default: { kind: 'bool', value: true } })).toEqual({ kind: 'bool', value: true });
+    expect(fieldDefaultValue({ type: 'expression', default: { kind: 'expr', value: 'a + 1' } })).toEqual({ kind: 'expr', value: 'a + 1' });
+    expect(fieldDefaultValue({ type: 'string', default: { kind: 'string', value: 'hi' } })).toEqual({ kind: 'string', value: 'hi' });
   });
 });
 
 describe('catalogFieldsMap', () => {
   it('builds a seed fields map from an operation entry', () => {
-    expect(catalogFieldsMap(CATALOG[1])).toEqual({ count: 3, value: { $expr: 'x + 1' } });
+    expect(catalogFieldsMap(CATALOG[1])).toEqual({ count: { kind: 'number', value: 3 }, value: { kind: 'expr', value: 'x + 1' } });
   });
 });
 
@@ -57,7 +57,7 @@ describe('operationSwitchPatch', () => {
     expect(patch.operation).toBe('record');
     expect(patch.effect).toBeUndefined();
     expect(patch.clearExpression).toBeUndefined();
-    expect(patch.fields).toEqual({ count: 3, value: { $expr: 'x + 1' } });
+    expect(patch.fields).toEqual({ count: { kind: 'number', value: 3 }, value: { kind: 'expr', value: 'x + 1' } });
   });
 
   // FIG-3179: the chosen operation may belong to another receiver entirely, so
@@ -82,7 +82,7 @@ describe('operationSwitchPatch', () => {
     expect(patch.effect).toBe('sleep');
     expect(patch.clearExpression).toBe(true);
     expect(patch.operation).toBeUndefined();
-    expect(patch.fields).toEqual({ duration: 5 });
+    expect(patch.fields).toEqual({ duration: { kind: 'number', value: 5 } });
   });
 });
 
@@ -102,5 +102,20 @@ describe('operationsForKind / currentOperationId', () => {
     expect(currentOperationId(CATALOG, effectNode)).toBe('effect.sleep');
     const unknown = { data: { kind: 'call', operation: 'nope' } };
     expect(currentOperationId(CATALOG, unknown)).toBeNull();
+  });
+});
+
+
+describe('tagged editable defaults', () => {
+  it('preserves nested literal expression members instead of making code', () => {
+    const literal = { kind: 'object', value: {
+      $expr: { kind: 'string', value: '1 + 1' },
+      other: { kind: 'list', value: [{ kind: 'object', value: {
+        $expr: { kind: 'string', value: 'not valid code!' },
+      } }] },
+    } };
+    expect(fieldDefaultValue({ type: 'expression', default: literal })).toEqual(literal);
+    expect(fieldDefaultValue({ type: 'expression', default: { kind: 'expr', value: '1 + 1' } }))
+      .toEqual({ kind: 'expr', value: '1 + 1' });
   });
 });

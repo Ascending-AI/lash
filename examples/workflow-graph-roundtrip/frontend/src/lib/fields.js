@@ -1,7 +1,7 @@
 // Helpers shared by the typed field forms.
 
 // The `/validate` kind for an editable text slot. Expression-valued slots
-// (conditions, iterables, computed values, `$expr` record args) validate as
+// (conditions, iterables, computed values, expression-valued record args) validate as
 // `expression`; assignment targets as `assignment_target`; simple `let`/loop
 // bindings as `identifier`.
 export function validationKind(slot) {

@@ -157,8 +157,6 @@ function mintEdgeId(taken) {
 // A field's default as canonical (unquoted) slot text.
 function slotText(field) {
   if (!field) return '';
-  if (field.type === 'number') return String(Number(field.default ?? 0) || 0);
-  if (field.type === 'boolean') return field.default ? 'true' : 'false';
   return defaultSource(field.default);
 }
 
@@ -177,7 +175,7 @@ function seedFields(fields) {
 function synthEffectExpression(op, byName) {
   if (op.effect === 'sleep') return `await sleep(${slotText(byName.duration) || '"1s"'})`;
   if (op.effect === 'wait_signal') {
-    return `await waitSignal(${JSON.stringify(String(byName.signal?.default ?? 'continue'))})`;
+    return `await waitSignal(${JSON.stringify(slotText(byName.signal) || 'continue')})`;
   }
   return slotText(byName.expression) || 'await sleep("1s")';
 }
@@ -193,7 +191,7 @@ function nodeDataFromOperation(op) {
 
   switch (kind) {
     case 'opaque':
-      data.source = String(byName.source?.default ?? '');
+      data.source = slotText(byName.source);
       break;
     case 'call':
       // The receiver rides on the node too, so a save that omits the
@@ -256,7 +254,7 @@ function seedChildFor(subkind, catalog) {
     nameSource: 'derived',
     operation: 'show_message',
     expression: 'await display.show_message({ text: "" })',
-    fields: { text: '' },
+    fields: { text: { kind: 'string', value: '' } },
   };
 }
 

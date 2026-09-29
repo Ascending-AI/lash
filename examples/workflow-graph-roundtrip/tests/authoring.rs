@@ -481,7 +481,7 @@ async fn an_authored_action_saves_only_with_the_awaited_receiver_call_the_editor
 /// FIG-3178: a call node the editor inserts from a non-display catalog entry
 /// must name that entry's receiver. Synthesizing `display.<operation>` for a
 /// `gmail` or `llm` operation hands the lowerer a receiver that has no such
-/// operation, and the `$expr` defaults those entries carry used to stringify
+/// operation, and the tagged expression defaults those entries carry used to stringify
 /// into `[object Object]` on the way into the argument record.
 #[tokio::test]
 async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defaults() {
@@ -506,9 +506,9 @@ async fn a_non_display_action_saves_against_its_own_receiver_and_expression_defa
         .json()
         .await
         .expect("operation catalog JSON");
-    // An entry whose defaults include `$expr` values: the synthesized call
+    // An entry whose defaults include tagged expression values: the synthesized call
     // names `llm`, and each expression default is its own raw source rather
-    // than a stringified `{"$expr": ...}` object.
+    // than a stringified tagged expression object.
     let expression_defaults = operations
         .iter()
         .find(|entry| entry["id"] == "llm.query")
@@ -698,9 +698,9 @@ fn synth_call_expression(entry: &Value) -> String {
             // raw slot text. Every `call` entry the display catalog serves
             // carries string and number fields only.
             let value = match field["type"].as_str().expect("catalog field type") {
-                "number" => default.as_f64().unwrap_or(0.0).to_string(),
-                "boolean" => default.as_bool().unwrap_or(false).to_string(),
-                "string" => serde_json::to_string(default.as_str().unwrap_or_default())
+                "number" => default["value"].as_f64().unwrap_or(0.0).to_string(),
+                "boolean" => default["value"].as_bool().unwrap_or(false).to_string(),
+                "string" => serde_json::to_string(default["value"].as_str().unwrap_or_default())
                     .expect("JSON string literal"),
                 _ => default_source(default),
             };
@@ -714,14 +714,10 @@ fn synth_call_expression(entry: &Value) -> String {
 }
 
 /// `defaultSource` in `frontend/src/lib/operations.js`: an expression-valued
-/// catalog default arrives as `{"$expr": "<source>"}` and is emitted as that
+/// catalog default arrives as `{"kind": "expr", "value": "<source>"}` and is emitted as that
 /// raw source, not as the JSON object stringified (FIG-3178).
 fn default_source(default: &Value) -> String {
-    default["$expr"]
-        .as_str()
-        .or_else(|| default.as_str())
-        .unwrap_or_default()
-        .to_string()
+    default["value"].as_str().unwrap_or_default().to_string()
 }
 
 #[expect(
@@ -983,8 +979,8 @@ fn slot_text(field: Option<&Value>) -> String {
     };
     let default = &field["default"];
     match field["type"].as_str().unwrap_or_default() {
-        "number" => default.as_f64().unwrap_or(0.0).to_string(),
-        "boolean" => default.as_bool().unwrap_or(false).to_string(),
+        "number" => default["value"].as_f64().unwrap_or(0.0).to_string(),
+        "boolean" => default["value"].as_bool().unwrap_or(false).to_string(),
         _ => default_source(default),
     }
 }
@@ -1037,7 +1033,7 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
                     "await waitSignal({})",
                     serde_json::to_string(
                         by_name("signal")
-                            .and_then(|field| field["default"].as_str())
+                            .and_then(|field| field["default"]["value"].as_str())
                             .unwrap_or("continue")
                     )
                     .expect("JSON string literal")
@@ -1127,4 +1123,95 @@ fn insert_palette_entry(document: &mut WorkflowDocument, entry: &Value, catalog:
     }
     node.data.fields = catalog_fields(entry);
     append_process_node(document, node);
+}
+
+#[tokio::test]
+async fn literal_expression_members_survive_projection_json_and_save() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener");
+    let addr = listener.local_addr().expect("address");
+    let server = tokio::spawn(workflow_graph_roundtrip::serve(
+        listener,
+        AppState::default(),
+    ));
+    let client = reqwest::Client::new();
+    let base = format!("http://{addr}");
+    for inputs in [
+        r#"{"$expr": "1 + 1"}"#,
+        r#"[{"$expr": "1 + 1"}, {"$expr": "not valid code!", other: true, kind: "expr", value: [{"$expr": "3 + 4"}]}]"#,
+        "1 + 1",
+    ] {
+        let source = format!(
+            r#"const workflow = async () => {{
+            await llm.query({{ task: "test", inputs: {inputs}, output: {{}} }});
+            return null;
+        }};"#
+        );
+        let response = client
+            .post(format!("{base}/project"))
+            .json(&serde_json::json!({ "source": source }))
+            .send()
+            .await
+            .expect("project source");
+        let status = response.status();
+        let body = response.text().await.expect("projection response");
+        assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+        let payload: Value = serde_json::from_str(&body).expect("projection JSON");
+        let document: WorkflowDocument =
+            serde_json::from_value(payload["document"].clone()).expect("decode projected document");
+        let field = document
+            .nodes
+            .iter()
+            .find(|node| node.data.operation.as_deref() == Some("query"))
+            .expect("query node")
+            .data
+            .fields
+            .get("inputs")
+            .expect("inputs");
+        if inputs.starts_with('{') {
+            assert!(
+                matches!(field, EditableValue::Object(_)),
+                "literal became {field:?}"
+            );
+        } else if inputs.starts_with('[') {
+            assert!(
+                matches!(field, EditableValue::List(_)),
+                "list became {field:?}"
+            );
+        } else {
+            assert!(
+                matches!(field, EditableValue::Expr(_)),
+                "expression became {field:?}"
+            );
+        }
+        let response = client
+            .post(format!("{base}/workflow"))
+            .json(&document)
+            .send()
+            .await
+            .expect("save document");
+        let status = response.status();
+        let body = response.text().await.expect("save response");
+        assert_eq!(status, reqwest::StatusCode::OK, "{body}");
+        let saved: WorkflowDocument = serde_json::from_str(&body).expect("saved document");
+        let saved_field = saved
+            .nodes
+            .iter()
+            .find(|node| node.data.operation.as_deref() == Some("query"))
+            .expect("saved query")
+            .data
+            .fields
+            .get("inputs")
+            .expect("saved inputs");
+        assert_eq!(saved_field, field);
+        if inputs.starts_with('{') || inputs.starts_with('[') {
+            assert!(
+                saved.source.contains("$expr: \"1 + 1\""),
+                "{}",
+                saved.source
+            );
+        }
+    }
+    server.abort();
 }

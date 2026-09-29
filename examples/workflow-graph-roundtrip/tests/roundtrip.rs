@@ -63,7 +63,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             // to, so the editor and the backend synthesize the same call
             // instead of both hardcoding `display`.
             "receiver": "display",
-            "fields": [{ "name": "text", "type": "string", "default": "" }]
+            "fields": [{ "name": "text", "type": "string", "default": { "kind": "string", "value": "" } }]
         })
     );
     assert!(entries.iter().any(|entry| {
@@ -74,7 +74,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
                 "nodeKind": "call",
                 "operation": "set_progress",
                 "receiver": "display",
-                "fields": [{ "name": "pct", "type": "number", "default": 0 }]
+                "fields": [{ "name": "pct", "type": "number", "default": { "kind": "number", "value": 0.0 } }]
             })
     }));
     for expected in [
@@ -83,7 +83,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "label": "Process",
             "nodeKind": "process",
             "fields": [
-                { "name": "name", "type": "identifier", "default": "my_process" }
+                { "name": "name", "type": "identifier", "default": { "kind": "string", "value": "my_process" } }
             ]
         }),
         serde_json::json!({
@@ -92,8 +92,8 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "nodeKind": "container",
             "subkind": "for",
             "fields": [
-                { "name": "binding", "type": "identifier", "default": "item" },
-                { "name": "iterable", "type": "expression", "default": "[1, 2, 3]" }
+                { "name": "binding", "type": "identifier", "default": { "kind": "string", "value": "item" } },
+                { "name": "iterable", "type": "expression", "default": { "kind": "expr", "value": "[1, 2, 3]" } }
             ]
         }),
         serde_json::json!({
@@ -103,7 +103,7 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "fields": [{
                 "name": "source",
                 "type": "expression",
-                "default": "await display.show_message({ text: \"raw\" })"
+                "default": { "kind": "expr", "value": "await display.show_message({ text: \"raw\" })" }
             }]
         }),
         serde_json::json!({
@@ -111,14 +111,14 @@ async fn operation_catalog_and_fragment_validation_match_the_editor_contract() {
             "label": "Finish",
             "nodeKind": "terminal",
             "terminalKind": "finish",
-            "fields": [{ "name": "expression", "type": "expression", "default": "0" }]
+            "fields": [{ "name": "expression", "type": "expression", "default": { "kind": "expr", "value": "0" } }]
         }),
         serde_json::json!({
             "id": "effect.sleep",
             "label": "Sleep",
             "nodeKind": "effect",
             "effect": "sleep",
-            "fields": [{ "name": "duration", "type": "expression", "default": "\"1s\"" }]
+            "fields": [{ "name": "duration", "type": "expression", "default": { "kind": "expr", "value": "\"1s\"" } }]
         }),
     ] {
         assert!(
@@ -2406,7 +2406,7 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
     node.data.terminal_kind = text("terminalKind").map(str::to_string);
     for field in entry["fields"].as_array().expect("catalog fields") {
         let name = field["name"].as_str().expect("catalog field name");
-        let default = field["default"]
+        let default = field["default"]["value"]
             .as_str()
             .unwrap_or_else(|| panic!("catalog field {name} string default"))
             .to_string();
@@ -2419,9 +2419,11 @@ fn new_flow_node_from_catalog(entry: &Value, id: &str) -> FlowNode {
             "iterable" => node.data.iterable = Some(default),
             "source" => node.data.source = Some(default),
             _ => {
-                node.data
-                    .fields
-                    .insert(name.to_string(), EditableValue::String(default));
+                node.data.fields.insert(
+                    name.to_string(),
+                    serde_json::from_value(field["default"].clone())
+                        .expect("editable catalog default"),
+                );
             }
         }
     }

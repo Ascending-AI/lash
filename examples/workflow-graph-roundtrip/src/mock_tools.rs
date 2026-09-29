@@ -37,11 +37,11 @@ pub(crate) enum MockDefault {
 }
 
 impl MockDefault {
-    pub(crate) fn json(self) -> JsonValue {
+    pub(crate) fn editable(self) -> crate::EditableValue {
         match self {
-            Self::String(value) => json!(value),
-            Self::Number(value) => json!(value),
-            Self::Expression(value) => json!({ "$expr": value }),
+            Self::String(value) => crate::EditableValue::String(value.to_string()),
+            Self::Number(value) => crate::EditableValue::Number(value),
+            Self::Expression(value) => crate::EditableValue::Expr(value.to_string()),
         }
     }
 }

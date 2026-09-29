@@ -1,3 +1,4 @@
+import { editableKind, editableText } from './editableValue.js';
 // Plain-language STEP-LIST model (FIG-391, iteration 1).
 //
 // A non-technical person reads a workflow as a linear checklist, not a node
@@ -316,15 +317,15 @@ function targetName(d) {
 }
 function effectSubject(d) {
   const f = d.fields ?? {};
-  return String(f.name ?? f.process ?? f.handle ?? d.title ?? 'task');
+  return editableText(f.name ?? f.process ?? f.handle) || d.title || 'task';
 }
 function signalName(d) {
   const f = d.fields ?? {};
-  return String(f.signal ?? d.title ?? 'a signal');
+  return editableText(f.signal) || d.title || 'a signal';
 }
 function durationName(d) {
   const f = d.fields ?? {};
-  return f.duration != null ? String(f.duration) : 'a moment';
+  return editableText(f.duration) || 'a moment';
 }
 
 // `show_message` → "Show message". A gentle touch so a derived operation id
@@ -404,11 +405,8 @@ export function stepSummary(node) {
 // shows its text, a boolean reads Yes/No, a number is itself, an empty value is
 // skipped (returns '').
 export function summarizeFieldValue(value) {
-  if (value == null) return '';
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'number') return String(value);
-  if (typeof value === 'object' && typeof value.$expr === 'string') return value.$expr.trim();
-  return String(value).trim();
+  if (editableKind(value) === 'bool') return value.value ? 'Yes' : 'No';
+  return editableText(value).trim();
 }
 
 // --- friendly diagnostics --------------------------------------------------

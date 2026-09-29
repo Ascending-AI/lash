@@ -1,3 +1,4 @@
+import { editableKind } from './editableValue.js';
 import dagre from '@dagrejs/dagre';
 import { containerSubkind } from './nodeKinds.js';
 import { parseList } from './fields.js';
@@ -44,10 +45,10 @@ export function layoutDocument(doc) {
       const fields = node.data.fields ?? {};
       const fieldCount = Object.keys(fields).length;
       h += fieldCount * 48;
-      // Expression-valued fields ({ "$expr": "…" }) render as a code input with
+      // Expression-valued fields render as a code input with
       // an "expr" affordance badge — a touch taller than a plain literal row.
       const exprCount = Object.values(fields).filter(
-        (v) => v !== null && typeof v === 'object' && typeof v.$expr === 'string',
+        (v) => editableKind(v) === 'expr',
       ).length;
       h += exprCount * 10;
       // Typed assignment / computation nodes render dedicated expression rows

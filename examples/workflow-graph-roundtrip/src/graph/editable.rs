@@ -290,7 +290,7 @@ impl EditableValue {
 
     fn literal_from_expr(expression: &Expr) -> Option<Self> {
         match expression {
-            Expr::Null => Some(Self::Null),
+            Expr::Null => Some(Self::Null(())),
             Expr::Bool(value) => Some(Self::Bool(*value)),
             Expr::Number(value) => Some(Self::Number(*value)),
             Expr::String(value) => Some(Self::String(value.to_string())),
@@ -315,7 +315,7 @@ impl EditableValue {
         scope: &FragmentScope,
     ) -> Result<Expr, RenderErrorResponse> {
         Ok(match self {
-            Self::Null => Expr::Null,
+            Self::Null(()) => Expr::Null,
             Self::Bool(value) => Expr::Bool(*value),
             Self::Number(value) => Expr::Number(*value),
             Self::String(value) => Expr::String(value.clone().into()),
