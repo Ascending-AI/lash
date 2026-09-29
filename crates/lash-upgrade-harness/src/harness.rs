@@ -12,13 +12,15 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail, ensure};
 use serde::de::DeserializeOwned;
 
-use crate::identity::{BuildIdentity, BuildLabel};
-use crate::node::{MigrateReport, ServeReady, StoreSpec, TurnReport};
+use crate::identity::BuildLabel;
+use crate::node::{ServeReady, StoreSpec, TurnReport};
 
 /// The N build's `lash-upgrade-node`.
 pub const NODE_N_ENV: &str = "LASH_UPGRADE_NODE_N";
 /// The N+1 (`synthetic-next`) build's `lash-upgrade-node`.
 pub const NODE_NEXT_ENV: &str = "LASH_UPGRADE_NODE_NEXT";
+/// The Bazel-built operator binary.
+pub const LASHCTL_ENV: &str = "LASH_UPGRADE_LASHCTL";
 /// The PostgreSQL database every PostgreSQL case migrates and serves.
 pub const POSTGRES_URL_ENV: &str = "LASH_POSTGRES_DATABASE_URL";
 
@@ -60,19 +62,12 @@ pub struct NodeBuilds {
 }
 
 impl NodeBuilds {
-    /// The binaries [`NODE_N_ENV`] and [`NODE_NEXT_ENV`] name, each checked
-    /// to report the build it is named as, and checked to be two builds.
+    /// The binaries [`NODE_N_ENV`] and [`NODE_NEXT_ENV`] name.
     pub fn from_env() -> Result<Self> {
-        let n = NodeBinary::at(PathBuf::from(required_env(NODE_N_ENV)?), BuildLabel::N)?;
+        let n = NodeBinary::at(PathBuf::from(required_env(NODE_N_ENV)?), BuildLabel::N);
         let next = NodeBinary::at(
             PathBuf::from(required_env(NODE_NEXT_ENV)?),
             BuildLabel::Next,
-        )?;
-        ensure!(
-            n.identity.generation != next.identity.generation,
-            "N and N+1 report one drain generation ({}): the synthetic-next build moved nothing \
-             that G hashes",
-            n.identity.generation
         );
         Ok(Self { n, next })
     }
@@ -82,42 +77,17 @@ impl NodeBuilds {
 #[derive(Clone, Debug)]
 pub struct NodeBinary {
     path: PathBuf,
-    identity: BuildIdentity,
+    label: BuildLabel,
 }
 
 impl NodeBinary {
-    /// The binary at `path`, which must report itself as `label`.
-    pub fn at(path: PathBuf, label: BuildLabel) -> Result<Self> {
-        let output = Command::new(&path)
-            .arg("version")
-            .output()
-            .with_context(|| format!("run {} version", path.display()))?;
-        let identity: BuildIdentity = report(&path, "version", output)?;
-        ensure!(
-            identity.build == label,
-            "{} reports build {}, expected {label}",
-            path.display(),
-            identity.build
-        );
-        Ok(Self { path, identity })
-    }
-
-    pub fn identity(&self) -> &BuildIdentity {
-        &self.identity
+    /// The binary at `path`; its ready file verifies the label after start.
+    pub fn at(path: PathBuf, label: BuildLabel) -> Self {
+        Self { path, label }
     }
 
     pub fn label(&self) -> BuildLabel {
-        self.identity.build
-    }
-
-    /// Provision or advance `case`'s store with this build's migrations.
-    pub fn migrate(&self, case: &Case) -> Result<MigrateReport> {
-        let output = Command::new(&self.path)
-            .arg("migrate")
-            .args(case.store_args())
-            .output()
-            .with_context(|| format!("run {} migrate", self.label()))?;
-        report(&self.path, "migrate", output)
+        self.label
     }
 
     /// Serve a deployment of this build over `case`'s store, registered at
@@ -147,7 +117,14 @@ impl NodeBinary {
             ready: None,
             log_path,
         };
-        node.ready = Some(node.await_ready(&ready_file)?);
+        let ready = node.await_ready(&ready_file)?;
+        ensure!(
+            ready.build == self.label,
+            "{} served as {}",
+            self.label,
+            ready.build
+        );
+        node.ready = Some(ready);
         Ok(node)
     }
 
@@ -162,6 +139,56 @@ impl NodeBinary {
             .output()
             .with_context(|| format!("run {} turn", self.label()))?;
         report(&self.path, "turn", output)
+    }
+}
+
+/// The real operator binary, whose JSON output is kept in the test log.
+pub struct Operator {
+    path: PathBuf,
+    postgres_url: String,
+}
+
+impl Operator {
+    pub fn from_env(services: &Services) -> Result<Self> {
+        Ok(Self {
+            path: PathBuf::from(required_env(LASHCTL_ENV)?),
+            postgres_url: services.postgres_url.clone(),
+        })
+    }
+
+    pub fn run(&self, verb: &str, generation: Option<&str>) -> Result<serde_json::Value> {
+        let mut command = Command::new(&self.path);
+        command
+            .arg(verb)
+            .env("LASH_POSTGRES_DATABASE_URL", &self.postgres_url);
+        if let Some(generation) = generation {
+            command.arg(generation);
+        }
+        command.arg("--json");
+        let output = command
+            .output()
+            .with_context(|| format!("run lashctl {verb}"))?;
+        let body: serde_json::Value =
+            serde_json::from_slice(&output.stdout).with_context(|| {
+                format!(
+                    "lashctl {verb} did not emit JSON: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                )
+            })?;
+        println!(
+            "lashctl {verb} {}--json: {body}",
+            generation.map_or(String::new(), |value| format!("{value} "))
+        );
+        ensure!(
+            output.status.success(),
+            "lashctl {verb} failed ({}): {body}",
+            output.status
+        );
+        ensure!(
+            body["schema_version"] == 1 && body["command"] == verb && body["error"].is_null(),
+            "invalid lashctl {verb} result: {body}"
+        );
+        Ok(body["result"].clone())
     }
 }
 

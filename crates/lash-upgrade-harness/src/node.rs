@@ -4,8 +4,6 @@
 //! the error on stderr when it fails, so the harness can tell a refusal
 //! from a success without parsing logs.
 //!
-//! - `version` prints the build's [`BuildIdentity`].
-//! - `migrate` provisions or advances a store with this build's migrations.
 //! - `serve` opens a store, serves lash's Restate services over it on a
 //!   fresh loopback port, registers that deployment and parks until it is
 //!   killed. It writes the deployment's address to its ready file.
@@ -24,7 +22,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use serde::{Deserialize, Serialize};
 
-use crate::identity::{BuildIdentity, BuildLabel};
+use crate::identity::BuildLabel;
 
 /// The node binary's command line.
 #[derive(Debug, Parser)]
@@ -39,10 +37,6 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Print this build's identity.
-    Version,
-    /// Provision or advance a store with this build's migrations.
-    Migrate(StoreArgs),
     /// Serve a Restate deployment over a store until killed.
     Serve(ServeArgs),
     /// Send one input to a session and wait for its turn to settle.
@@ -148,16 +142,6 @@ impl StoreSpec {
     }
 }
 
-/// What `migrate` reports.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct MigrateReport {
-    pub build: BuildLabel,
-    pub backend: String,
-    /// The migration steps this run committed (PostgreSQL); a SQLite store
-    /// migrates on open and reports none.
-    pub executed: Vec<String>,
-}
-
 /// What `serve` writes to its ready file.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServeReady {
@@ -186,8 +170,6 @@ pub fn served_by(build: BuildLabel, generation: &str) -> String {
 /// Run one command and print its report.
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Command::Version => print(&BuildIdentity::current()),
-        Command::Migrate(args) => print(&migrate(&args).await?),
         Command::Serve(args) => serve(args).await,
         Command::Turn(args) => print(&turn(args).await?),
     }
@@ -196,33 +178,6 @@ pub async fn run(cli: Cli) -> Result<()> {
 fn print(report: &impl Serialize) -> Result<()> {
     println!("{}", serde_json::to_string(report)?);
     Ok(())
-}
-
-async fn migrate(args: &StoreArgs) -> Result<MigrateReport> {
-    let executed = match &args.store {
-        StoreSpec::Postgres(url) => {
-            let report = lash_postgres_store::PostgresStorage::migrate(
-                url,
-                lash_postgres_store::MigrationPhase::Expand,
-            )
-            .await
-            .map_err(|error| anyhow!("migrate {}: {error}", args.store.backend()))?;
-            report
-                .executed
-                .iter()
-                .map(|step| format!("{step:?}"))
-                .collect()
-        }
-        StoreSpec::Sqlite(dir) => {
-            open_sqlite(dir).await?;
-            Vec::new()
-        }
-    };
-    Ok(MigrateReport {
-        build: BuildLabel::current(),
-        backend: args.store.backend().to_string(),
-        executed,
-    })
 }
 
 async fn open_sqlite(dir: &Path) -> Result<lash::sqlite::SqliteStoreSet> {

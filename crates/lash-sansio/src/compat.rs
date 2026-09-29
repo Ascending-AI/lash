@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 /// `{"min":1,"max":1}`, frozen: every build parses every range.
 ///
 /// The fields are private so a range can only be built through
-/// [`VersionRange::new`] or [`VersionRange::exactly`], and a decoded range is
+/// [`VersionRange::new`], [`VersionRange::between`] or
+/// [`VersionRange::exactly`], and a decoded range is
 /// validated the same way: version 0 names nothing, and `min > max` is empty.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "RawVersionRange", into = "RawVersionRange")]
@@ -55,6 +56,19 @@ impl std::fmt::Display for VersionRangeError {
 impl std::error::Error for VersionRangeError {}
 
 impl VersionRange {
+    /// The inclusive range `[min, max]` for declared version surfaces.
+    ///
+    /// Panics at compile time in a `const` if either bound is zero or the
+    /// range is empty.
+    pub const fn between(min: u32, max: u32) -> Self {
+        assert!(
+            min != 0 && max != 0,
+            "a version range cannot contain version 0"
+        );
+        assert!(min <= max, "a version range cannot be empty");
+        Self { min, max }
+    }
+
     /// The one-version range `[version, version]`.
     ///
     /// Panics at compile time (in a `const`) or at run time when `version` is
@@ -190,5 +204,19 @@ mod tests {
         );
         assert!(range(1, 2).contains(1) && range(1, 2).contains(2));
         assert!(!range(1, 2).contains(0) && !range(1, 2).contains(3));
+    }
+
+    #[test]
+    fn between_constructs_a_const_two_version_range() {
+        const TWO: VersionRange = VersionRange::between(1, 2);
+        assert_eq!(TWO, range(1, 2));
+        assert_eq!(TWO.select(VersionRange::exactly(2)), Some(2));
+    }
+
+    #[test]
+    fn between_refuses_invalid_bounds() {
+        for (min, max) in [(0, 0), (0, 2), (2, 0), (3, 2)] {
+            assert!(std::panic::catch_unwind(|| VersionRange::between(min, max)).is_err());
+        }
     }
 }

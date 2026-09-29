@@ -19,8 +19,8 @@ no provider network call and produces no judged dialect row.
 
 ## The two builds
 
-Head is built twice as the `lash-upgrade-node` binary of
-`crates/lash-upgrade-harness`:
+Bazel builds the two `lash-upgrade-node` variants and `lashctl` for the
+run. The node binaries are:
 
 - **N** is the default build.
 - **N+1** is the same tree with the `synthetic-next` Cargo feature. It moves
@@ -32,8 +32,11 @@ Head is built twice as the `lash-upgrade-node` binary of
   and the VM continuation format join as their lanes land (ADR 0115 §9, lane
   L8).
 
-`lash-upgrade-node version` prints a build's identity: its label, `G`, and
-every range it declares.
+`lashctl version --json` reports the operator build's generation and declared
+ranges. The nodes write their build labels and generations to ready files.
+The operator and scripted node builds enable different Lash features, so the
+ready-file generations drive routing and drain calls. A
+synthetic-next `lashctl` variant is being added in FIG-4062.
 
 ## What the run does
 
@@ -57,32 +60,33 @@ another build's URI (ADR 0115 §3.5). A node that stops is killed the way a
 pod dies. A node that has exited by itself before it is stopped fails the
 run, because that exit means it refused something.
 
-**Not yet run.** Drain, retire and finalize wait for `lashctl drain` (lane L6)
-and for finalize (FIG-3800 B, after 1.0). The eight `phase_a` legs in
+**Not yet run.** Finalize waits for FIG-3800 B. The eight `phase_a` legs in
 `crates/lash-upgrade-harness/tests/phase_a/` are listed there, each ignored
 with the lane it waits for. The runbook grows a phase for each one as it
 lands.
 
 ## Operator commands
 
-Each step of the roll will run as the `lashctl` verb an operator types. `lashctl` is
-lane L6 (FIG-3847) and does not exist yet. Until it lands, the steps run
-through `lash-upgrade-node`, and the verbs below are the steps they will take
-over. The operator guide (FIG-3806) names these verbs; its coverage check
-reads this table.
+The harness runs these exact command forms with `LASH_POSTGRES_DATABASE_URL`
+set to the PostgreSQL test database. Every command uses the Bazel-built
+`lashctl` binary, prints its JSON envelope in the E2E log, and must exit zero.
+`G_N` and `G_N+1` below are the generations in the nodes' ready files.
 
-| `lashctl` verb | Step | What it proves there | Runs today as |
-|---|---|---|---|
-| `lashctl version` | before migrate, once per build | each build prints its label, `G` and every declared range; N and N+1 differ | `lash-upgrade-node version` |
-| `lashctl preflight` | before migrate, and before each roll | the store admits the build that is about to serve it | not yet: waits for L6 |
-| `lashctl migrate` | migrate (N provisions), then half roll (N+1 expands) | the expand leaves N able to open the store | `lash-upgrade-node migrate` |
-| `lashctl drain` | after roll (drain `G_N`); after rollback (drain `G_N+1`, the reverse drain of ADR 0115 §3.5) | the retiring generation takes no new work | not yet: waits for L6 |
-| `lashctl drain-status` | between drain and retire | the retiring generation reads drained before its deployment is removed | not yet: waits for L6 |
-| `lashctl end-drain` | after retire | the drain closes once its generation is drained and retired | not yet: waits for L6 |
+| Command line | Place in the PostgreSQL roll | SQLite roll |
+|---|---|---|
+| `lashctl version --json` | after N starts; record the operator build's ranges | nodes identify themselves in ready files; FIG-4062 adds N+1 lashctl |
+| `lashctl migrate --json` | before N starts and again before N+1 starts | migrates on open |
+| `lashctl preflight --json` | before N and N+1 start, and before each return deployment | opens and checks stores on node start |
+| `lashctl drain G_N+1 --json` | start reverse drain before N+1 retires in rollback | no PostgreSQL generation drain |
+| `lashctl drain-status G_N+1 --json` | require drained after N+1 retires | no PostgreSQL generation drain |
+| `lashctl end-drain G_N+1 --json` | clear reverse drain after N+1 retires | no PostgreSQL generation drain |
+| `lashctl drain G_N --json` | start forward drain before N retires in roll | no PostgreSQL generation drain |
+| `lashctl drain-status G_N --json` | require drained after N retires | no PostgreSQL generation drain |
+| `lashctl end-drain G_N --json` | clear forward drain after N retires | no PostgreSQL generation drain |
 
-When L6 lands, each row that says "not yet" becomes a step of `just e2e-rolling`,
-with the verb's `--json` output kept in the artifact bundle and checked by the
-scorecard below.
+SQLite's migration-on-open follows ADR 0106 §5. `lashctl` currently accepts a
+PostgreSQL database URL, so a SQLite `lashctl` invocation would test that
+PostgreSQL database rather than the SQLite case.
 
 ## Evidence
 
@@ -97,14 +101,15 @@ The artifact directory (default
   N+1 spelled `np1` in the file name, and `ready-<build>-<k>.log` is that
   node's output. `sqlite/stores/` is the SQLite store set that every node of
   that roll opened;
-- `restate-server.log`: the server's log.
+- `restate-server.log`: the server's log;
+- the E2E log: every `lashctl` JSON envelope and turn report.
 
 ## Scorecard
 
 The judge answers each item from the bundle and cites the file:
 
-1. **Two builds.** Both `bin/*/lash-upgrade-node version` reports differ in
-   `build` and in `generation`. The run's first line prints both `G`.
+1. **Two builds.** The ready files differ in `build` and in `generation`.
+   The PostgreSQL log shows `lashctl version --json` for the operator build.
 2. **Ten answered turns.** `rolling-report.json` has ten records, five per
    case, and every `status` is `Answered`.
 3. **Routing.** In each record where `expected_driver` is set, the reply names

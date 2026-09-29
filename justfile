@@ -343,9 +343,9 @@ latency-gate:
 # Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
 # `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
-# and one live `restate-server`: migrate, half roll, rollback and roll, every
-# turn answered and each named build driving the turns it must. Drain, retire
-# and finalize join the choreography as `lashctl` (L6) and finalize land; the
+# and one live `restate-server`. Bazel builds both nodes and lashctl. The
+# operator binary runs the PostgreSQL version, migrate, preflight and drain
+# steps; SQLite migrates on open. Finalize still waits for its lane; the
 # `phase_a` legs wait for their lanes. `LASH_POSTGRES_DATABASE_URL` reuses a
 # database the caller provides; otherwise a throwaway pg16 container serves
 # the run. Evidence (the step report and every node's log) lands under the
@@ -361,22 +361,23 @@ e2e-rolling:
   esac
   rm -rf "$artifacts"
   mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
-  target="${CARGO_TARGET_DIR:-{{repo}}/target}"
-  case "$target" in
-    /*) ;;
-    *) target="{{repo}}/$target" ;;
-  esac
-
-  # Two builds of one tree share the binary's path in one target directory,
-  # so each is copied out before the next one builds.
-  cargo build --locked -p lash-upgrade-harness --bin lash-upgrade-node --features synthetic-next
-  cp "$target/debug/lash-upgrade-node" "$artifacts/bin/n+1/lash-upgrade-node"
-  cargo build --locked -p lash-upgrade-harness --bin lash-upgrade-node
-  cp "$target/debug/lash-upgrade-node" "$artifacts/bin/n/lash-upgrade-node"
+  bazel_startup=()
+  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
+    bazel_startup=(--output_user_root="$BAZEL_OUTPUT_USER_ROOT")
+  fi
+  read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
+  bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_126f2aa8 \
+    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_4165473b \
+    //crates/lashctl:lashctl
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_126f2aa8 "$artifacts/bin/n+1/lash-upgrade-node"
+  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_4165473b "$artifacts/bin/n/lash-upgrade-node"
+  cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
   cargo test --locked -p lash-upgrade-harness --test rolling --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
   export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
+  export LASH_UPGRADE_LASHCTL="$artifacts/bin/n/lashctl"
   export LASH_E2E_ROLLING_ARTIFACT_DIR="$artifacts"
   run=(
     python3 scripts/ci/restate_suite.py serve --name e2e-rolling
@@ -385,9 +386,9 @@ e2e-rolling:
       -- --ignored --exact roll_and_rollback_smoke --nocapture
   )
   if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
-    "${run[@]}"
+    "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
   else
-    scripts/ci/with-service.sh pg16 -- "${run[@]}"
+    scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
   fi
 
 agent-workbench-attachment-usage-gate port='3030':

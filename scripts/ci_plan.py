@@ -276,6 +276,7 @@ GATED_JOBS = {
     "stack-budget": "rust",
     "postgres-store": "stores",
     "pr-host-workers": "pr_host_restate",
+    "rolling-upgrade": "rolling_upgrade",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
@@ -1085,11 +1086,10 @@ def _is_restate_suite_path(
 # requires it on every change to a registered versioned surface, so the rule
 # is the registry's: a diff selects the gate when it touches a file that
 # declares a `[[surface]]` constant of `scripts/versioned-surfaces.toml`, or
-# the harness and its runbook. The ci.yml job that reads the selector lands
-# with the Phase A legs.
+# the harness, lashctl and the runbook.
 VERSIONED_SURFACES_REGISTRY = "scripts/versioned-surfaces.toml"
 ROLLING_UPGRADE_PACKAGES = frozenset(
-    {"crates/lash-upgrade-harness", "runbooks/rolling-upgrade"}
+    {"crates/lash-upgrade-harness", "crates/lashctl", "runbooks/rolling-upgrade"}
 )
 
 
