@@ -270,7 +270,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 4;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 5;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -326,6 +326,7 @@ pub enum RebindField {
     TurnContext,
     Clock,
     ProcessLineage,
+    TurnCapture,
 }
 
 impl RebindField {
@@ -359,6 +360,7 @@ impl RebindField {
             Self::TurnContext => "turn_context",
             Self::Clock => "clock",
             Self::ProcessLineage => "process_lineage",
+            Self::TurnCapture => "turn_capture",
         }
     }
 
@@ -411,6 +413,11 @@ impl RebindField {
             // start the child makes reads the enclosing process's recorded
             // lineage back from its row (FIG-3607 R2).
             Self::ProcessLineage => RebindDisposition::Lent,
+            // The turn's capture is lent with its live opener: the child's
+            // attempts write the turn they run for. A context the deployment
+            // built carries the same turn's capture over the session's store
+            // (ADR 0114, Lane G amendment).
+            Self::TurnCapture => RebindDisposition::Lent,
         }
     }
 }
@@ -448,6 +455,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::TurnContext,
     RebindField::Clock,
     RebindField::ProcessLineage,
+    RebindField::TurnCapture,
 ];
 
 impl<'run> ToolDispatchContext<'run> {
