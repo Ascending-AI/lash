@@ -429,26 +429,25 @@ impl SessionHistoryStore for PostgresStore {
             .fetch_all(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let mut headers = Vec::new();
+        let mut headers: Vec<PageHeader> = Vec::new();
         let mut bytes = 0_u64;
         let mut stopped_by_bytes = false;
         let mut found_next = false;
         for row in rows {
             let id: String = row.get("node_id");
             let generation = u64_from_sql("SessionGraph", "generation", row.get("generation"))?;
-            if headers.is_empty() {
+            if let Some(previous) = headers.last() {
+                if previous.parent.as_deref() != Some(id.as_str())
+                    || previous.generation != generation + 1
+                {
+                    return Err(corrupt("SessionGraph", format!("history gap at `{id}`")));
+                }
+            } else {
                 if id != start.as_str() || generation != start_generation {
                     return Err(corrupt(
                         "SessionGraph",
                         "history page does not begin at anchor",
                     ));
-                }
-            } else {
-                let previous: &PageHeader = headers.last().expect("nonempty headers");
-                if previous.parent.as_deref() != Some(id.as_str())
-                    || previous.generation != generation + 1
-                {
-                    return Err(corrupt("SessionGraph", format!("history gap at `{id}`")));
                 }
             }
             let size = u64_from_sql("SessionGraph", "body_bytes", row.get("body_bytes"))?;
