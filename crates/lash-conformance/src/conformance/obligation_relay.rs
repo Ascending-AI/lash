@@ -663,6 +663,152 @@ pub async fn immediate_delivery_takes_only_a_due_obligation(fixture: ObligationL
     assert_eq!(relay.attempts_for(&key), 1);
 }
 
+/// FIG-4098: the host's withdrawal of an open turn input settles its ingress
+/// obligation in the same write. Nothing admits a withdrawn row, so the
+/// withdrawal is the row's last delivery: whatever the obligation stood at
+/// (due, claimed by a relay's ask, or stalled), it is delivered, no claim on
+/// it remains, and a relay holding the old claim answers `ClaimLost`.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
+    fixture: ObligationLawFixture,
+) {
+    use lash_core::store::ingress_obligation::ingress_obligation_id;
+
+    let session_id = SessionId::from(format!("{}-ingress-withdrawal", fixture.prefix));
+    let store = crate::conformance::law_session_store(fixture.stores.as_ref(), &session_id).await;
+    let ingress = fixture.stores.obligation_ledger(ObligationKind::Ingress);
+    let now = fixture.stores.clock().timestamp_ms();
+    let enqueue = |text: &'static str| {
+        let store = Arc::clone(&store);
+        let session_id = session_id.clone();
+        async move {
+            store
+                .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+                    session_id,
+                    crate::TurnInputIngress::next_turn(),
+                    crate::TurnInput::text(text),
+                ))
+                .await
+                .expect("accept the law's input")
+                .input_id
+        }
+    };
+
+    // One open row per obligation state, each withdrawn by a different
+    // host cancel: by id, in bulk, and as a suffix.
+    let due = enqueue("due").await;
+    let claimed = enqueue("claimed").await;
+    let stalled = enqueue("stalled").await;
+    let claim = |input: &crate::InputId| {
+        let ingress = Arc::clone(&ingress);
+        let id = ingress_obligation_id(input.as_str());
+        async move {
+            ingress
+                .claim(&id, now, 3_600_000)
+                .await
+                .expect("claim the obligation")
+                .expect("the obligation is due")
+        }
+    };
+    let claimed_claim = claim(&claimed).await;
+    let stall = claim(&stalled).await;
+    assert_eq!(
+        ingress
+            .settle(
+                &ingress_obligation_id(stalled.as_str()),
+                &stall.token,
+                ObligationSettlement::Stall {
+                    reason: StallReason::Refused,
+                    error: "stalled before its withdrawal".to_string(),
+                },
+                now,
+            )
+            .await
+            .expect("stall the obligation"),
+        SettleOutcome::Applied
+    );
+    for (input, expected) in [
+        (&due, ObligationState::Due),
+        (&claimed, ObligationState::Claimed),
+        (&stalled, ObligationState::Stalled),
+    ] {
+        assert_eq!(
+            ingress
+                .state(&ingress_obligation_id(input.as_str()))
+                .await
+                .expect("read the obligation"),
+            Some(expected),
+            "{input}'s obligation before its withdrawal"
+        );
+    }
+
+    assert!(
+        store
+            .cancel_pending_turn_input(&session_id, due.as_str())
+            .await
+            .expect("withdraw the due row")
+            .is_cancelled()
+    );
+    let bulk = store
+        .cancel_pending_turn_inputs(
+            &session_id,
+            &[crate::PendingTurnInputCancelTarget::input_id(
+                claimed.as_str(),
+            )],
+        )
+        .await
+        .expect("withdraw the claimed row");
+    assert!(bulk.iter().all(|receipt| receipt.outcome.is_cancelled()));
+    match store
+        .cancel_pending_turn_input_suffix(
+            &session_id,
+            &crate::PendingTurnInputCancelTarget::input_id(stalled.as_str()),
+        )
+        .await
+        .expect("withdraw the stalled row")
+    {
+        crate::PendingTurnInputSuffixCancelOutcome::Outcomes { outcomes, .. } => {
+            assert_eq!(outcomes.len(), 1);
+            assert!(
+                outcomes
+                    .iter()
+                    .all(crate::PendingTurnInputCancelOutcome::is_cancelled)
+            );
+        }
+        other => panic!("the suffix anchor is the stalled row: {other:?}"),
+    }
+
+    for input in [&due, &claimed, &stalled] {
+        let id = ingress_obligation_id(input.as_str());
+        assert_eq!(
+            ingress.state(&id).await.expect("read the obligation"),
+            Some(ObligationState::Delivered),
+            "the withdrawal settled {input}'s obligation"
+        );
+        assert!(
+            ingress
+                .claim(&id, now, 3_600_000)
+                .await
+                .expect("claim the settled obligation")
+                .is_none(),
+            "{input}'s settled obligation is not due"
+        );
+    }
+    assert_eq!(
+        ingress
+            .settle(
+                &ingress_obligation_id(claimed.as_str()),
+                &claimed_claim.token,
+                ObligationSettlement::Delivered,
+                now,
+            )
+            .await
+            .expect("settle the relay's lapsed claim"),
+        SettleOutcome::ClaimLost,
+        "no claim on the withdrawn row remains"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The recovery leader lease
 // ---------------------------------------------------------------------------

@@ -138,13 +138,29 @@ crate::statements! {
              WHERE session_id = ?1 AND admitted_root = ?2 AND admitted_by = ?3
              ORDER BY enqueue_seq ASC";
 
-        /// Withdraw open input `?2` of session `?1` into state `?3`.
+        /// Withdraw open input `?2` of session `?1` into state `?3` at `?4`.
         ///
         /// Only an open row is withdrawn: a row a root admitted is that
         /// root's to settle or release, so the host's cancel changes nothing
         /// and answers the root instead.
+        ///
+        /// A withdrawn row owes its session no drive, and nothing admits it
+        /// after, so the withdrawal settles the row's ingress obligation in
+        /// the same write (ADR 0109 §3, FIG-4098): due, claimed by a relay
+        /// that asked for a drive, or stalled, it is delivered now, as an
+        /// admission would deliver it.
         cancel = "UPDATE pending_turn_inputs
-             SET state = ?3
+             SET state = ?3,
+                 obligation_state = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN 'delivered' ELSE obligation_state END,
+                 obligation_due_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_due_at_ms END,
+                 obligation_claim_token = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_claim_token END,
+                 obligation_stall_reason = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN NULL ELSE obligation_stall_reason END,
+                 obligation_settled_at_ms = CASE WHEN obligation_state IN ('due', 'claimed', 'stalled')
+                     THEN ?4 ELSE obligation_settled_at_ms END
              WHERE session_id = ?1 AND input_id = ?2 AND admitted_root IS NULL";
 
         /// Re-defer open input `?2` of session `?1` to state `?3` under the

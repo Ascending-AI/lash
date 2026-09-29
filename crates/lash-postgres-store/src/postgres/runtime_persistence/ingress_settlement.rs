@@ -11,11 +11,12 @@ use super::*;
 type PgTx<'c> = sqlx::Transaction<'c, sqlx::Postgres>;
 
 /// Settle `commit`'s ingress and applied commands, and, for an interrupted
-/// turn, re-defer or drop the open input addressed to it. Returns the cancel
-/// outcome the commit's cancellation records.
+/// turn, re-defer or drop the open input addressed to it, at `now`. Returns
+/// the cancel outcome the commit's cancellation records.
 pub(super) async fn settle_commit_ingress_tx(
     tx: &mut PgTx<'_>,
     commit: &RuntimeCommit,
+    now: u64,
 ) -> Result<lash_core_execution::TurnCancelInputOutcome, StoreError> {
     let session_id = &commit.session_id;
     if let Some(commands) = commit.applied_commands.as_ref() {
@@ -181,6 +182,7 @@ pub(super) async fn settle_commit_ingress_tx(
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())
                     .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+                    .bind(crate::support::clamp_epoch_ms(now))
             }
         }
         .execute(&mut **tx)

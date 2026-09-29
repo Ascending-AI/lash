@@ -126,7 +126,8 @@ pub(crate) async fn write_root_terminal_conn(
     if decide_root_terminal_write(stored.as_ref(), terminal)?
         == RootTerminalWriteDecision::AlreadyWritten
     {
-        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root).await;
+        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms)
+            .await;
     }
     let reason = match &terminal.cause {
         RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
@@ -204,7 +205,7 @@ pub(crate) async fn write_root_terminal_conn(
         columns.at_ms,
     )
     .await?;
-    release_root_rows_conn(tx, &terminal.session_id, &terminal.root).await
+    release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms).await
 }
 
 /// Release every row of either admission table `root` still holds, in the
@@ -217,8 +218,9 @@ pub(crate) async fn write_root_terminal_conn(
 /// applies to it here (FIG-3946): the undelivered disposition of the root's
 /// cancellation request if it has one, else `Defer`. `Defer` re-opens the
 /// row as next-turn input at its own position; `Drop` withdraws it. Either
-/// is recorded on the request's outcome. The terminal write is where a
-/// root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
+/// is recorded on the request's outcome, and a withdrawal settles the row's
+/// ingress obligation at the terminal instant `at_ms` (FIG-4098). The
+/// terminal write is where a root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
 /// to, or addressed to a turn of, a root with terminal evidence.
 ///
 /// An input the root's admission took as its own (`session_root_inputs`)
@@ -228,6 +230,7 @@ async fn release_root_rows_conn(
     conn: &mut PgConnection,
     session_id: &SessionId,
     root: &TurnId,
+    at_ms: u64,
 ) -> Result<(), StoreError> {
     let verbs = &session_roots_sql().verbs;
     let own: Vec<String> = sqlx::query_scalar(verbs.bound_inputs.sql())
@@ -313,6 +316,7 @@ async fn release_root_rows_conn(
                     .bind(session_id.as_str())
                     .bind(input.input_id.as_str())
                     .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+                    .bind(crate::support::clamp_epoch_ms(at_ms))
             }
         }
         .execute(&mut *conn)

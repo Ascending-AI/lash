@@ -176,12 +176,14 @@ pub(crate) async fn lock_cancel_rows_in_queue_order(
     Ok(())
 }
 
-/// Withdraw one locked row for the host (FIG-3927): an open row is
-/// cancelled; a row a root admitted is that root's to settle or release, so
-/// the cancel changes nothing and answers the root that holds it.
+/// Withdraw one locked row for the host at `now` (FIG-3927): an open row is
+/// cancelled, its ingress obligation settled in the same write (FIG-4098); a
+/// row a root admitted is that root's to settle or release, so the cancel
+/// changes nothing and answers the root that holds it.
 pub(crate) async fn cancel_pending_turn_input_row_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     row: PendingTurnInputRow,
+    now: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let admitted_root = row.admitted_root.clone();
     let mut input = pending_turn_input_from_row(row)?;
@@ -212,6 +214,7 @@ pub(crate) async fn cancel_pending_turn_input_row_tx(
             .bind(input.session_id.as_str())
             .bind(input.input_id.as_str())
             .bind(lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str())
+            .bind(crate::support::clamp_epoch_ms(now))
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?

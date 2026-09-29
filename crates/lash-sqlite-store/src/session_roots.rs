@@ -134,7 +134,7 @@ pub(crate) fn write_root_terminal_conn(
     if decide_root_terminal_write(stored.as_ref(), terminal)?
         == RootTerminalWriteDecision::AlreadyWritten
     {
-        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root);
+        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms);
     }
     let reason = match &terminal.cause {
         RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
@@ -207,7 +207,7 @@ pub(crate) fn write_root_terminal_conn(
         &scope_close_obligation_id(&terminal.session_id, &terminal.root),
         columns.at_ms,
     )?;
-    release_root_rows_conn(tx, &terminal.session_id, &terminal.root)
+    release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms)
 }
 
 /// Release every row of either admission table `root` still holds, in the
@@ -220,8 +220,9 @@ pub(crate) fn write_root_terminal_conn(
 /// applies to it here (FIG-3946): the undelivered disposition of the root's
 /// cancellation request if it has one, else `Defer`. `Defer` re-opens the
 /// row as next-turn input at its own position; `Drop` withdraws it. Either
-/// is recorded on the request's outcome. The terminal write is where a
-/// root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
+/// is recorded on the request's outcome, and a withdrawal settles the row's
+/// ingress obligation at the terminal instant `at_ms` (FIG-4098). The
+/// terminal write is where a root's orphaned input is repaired (FIG-3927 §2.6): no open row is bound
 /// to, or addressed to a turn of, a root with terminal evidence.
 ///
 /// An input the root's admission took as its own (`session_root_inputs`)
@@ -231,6 +232,7 @@ fn release_root_rows_conn(
     tx: &Connection,
     session_id: &SessionId,
     root: &TurnId,
+    at_ms: u64,
 ) -> Result<(), StoreError> {
     let verbs = &session_roots_sql().verbs;
     let own = {
@@ -319,6 +321,7 @@ fn release_root_rows_conn(
                     session_id.as_str(),
                     input_id.as_str(),
                     lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    crate::clamp_epoch_ms(at_ms),
                 ],
             ),
         }

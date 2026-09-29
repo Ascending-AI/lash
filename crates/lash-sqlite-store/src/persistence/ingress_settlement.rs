@@ -10,11 +10,12 @@
 use super::*;
 
 /// Settle `commit`'s ingress and applied commands, and, for an interrupted
-/// turn, re-defer or drop the open input addressed to it. Returns the cancel
-/// outcome the commit's cancellation records.
+/// turn, re-defer or drop the open input addressed to it, at `now`. Returns
+/// the cancel outcome the commit's cancellation records.
 pub(super) fn settle_commit_ingress_conn(
     tx: &Connection,
     commit: &RuntimeCommit,
+    now: u64,
 ) -> Result<lash_core_execution::TurnCancelInputOutcome, StoreError> {
     let session_id = &commit.session_id;
     if let Some(commands) = commit.applied_commands.as_ref() {
@@ -186,6 +187,7 @@ pub(super) fn settle_commit_ingress_conn(
                     session_id.as_str(),
                     row.input_id.as_str(),
                     lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    crate::clamp_epoch_ms(now),
                 ],
             ),
         }

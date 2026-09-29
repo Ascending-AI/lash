@@ -3,12 +3,14 @@
 
 use super::*;
 
-/// Withdraw one row for the host (FIG-3927): an open row is cancelled; a row
-/// a root admitted is that root's to settle or release, so the cancel
+/// Withdraw one row for the host at `now` (FIG-3927): an open row is
+/// cancelled, its ingress obligation settled in the same write (FIG-4098); a
+/// row a root admitted is that root's to settle or release, so the cancel
 /// changes nothing and answers the root that holds it.
 pub(super) fn cancel_pending_turn_input_row_conn(
     conn: &Connection,
     row: PendingTurnInputRow,
+    now: u64,
 ) -> Result<lash_core_execution::PendingTurnInputCancelOutcome, StoreError> {
     let admitted_root = row.admitted_root.clone();
     let mut input = pending_turn_input_from_row(row)?;
@@ -40,6 +42,7 @@ pub(super) fn cancel_pending_turn_input_row_conn(
                     input.session_id.as_str(),
                     input.input_id.as_str(),
                     lash_core_execution::runtime::TurnInputStateKind::Cancelled.as_str(),
+                    crate::clamp_epoch_ms(now),
                 ],
             )
             .map_err(sqlite_error)?;

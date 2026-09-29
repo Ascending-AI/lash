@@ -757,7 +757,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
                 match load_pending_turn_input_row_by_target_tx(&mut tx, session_id, &target, true)
                     .await?
                 {
-                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row).await?,
+                    Some(row) => cancel_pending_turn_input_row_tx(&mut tx, row, now).await?,
                     None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                 };
             results.push(lash_core_execution::PendingTurnInputCancelReceipt { target, outcome });
@@ -833,7 +833,7 @@ impl lash_core_execution::TurnInputStore for PostgresStore {
         .collect::<Result<Vec<_>, StoreError>>()?;
         let mut outcomes = Vec::with_capacity(rows.len());
         for row in rows {
-            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row).await?);
+            outcomes.push(cancel_pending_turn_input_row_tx(&mut tx, row, now).await?);
         }
         let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()

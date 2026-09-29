@@ -862,7 +862,7 @@ impl SessionCommitStore for PostgresStore {
         // Every row the commit names is settled under the root that admitted
         // it, each verdict taken under the row's lock (FIG-3927).
         let turn_cancel_input_outcome =
-            super::ingress_settlement::settle_commit_ingress_tx(&mut tx, commit).await?;
+            super::ingress_settlement::settle_commit_ingress_tx(&mut tx, commit, now).await?;
         commit_attachment_refs_tx(
             &mut tx,
             &commit.session_id,

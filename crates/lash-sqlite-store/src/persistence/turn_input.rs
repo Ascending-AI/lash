@@ -738,7 +738,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                             &session_id,
                             &target,
                         )? {
-                            Some(row) => cancel_pending_turn_input_row_conn(tx, row)?,
+                            Some(row) => cancel_pending_turn_input_row_conn(tx, row, now)?,
                             None => lash_core_execution::PendingTurnInputCancelOutcome::NotFound,
                         };
                         results.push(lash_core_execution::PendingTurnInputCancelReceipt {
@@ -820,7 +820,7 @@ impl lash_core_execution::TurnInputStore for SqliteStore {
                         };
                         let mut outcomes = Vec::with_capacity(rows.len());
                         for row in rows {
-                            outcomes.push(cancel_pending_turn_input_row_conn(tx, row)?);
+                            outcomes.push(cancel_pending_turn_input_row_conn(tx, row, now)?);
                         }
                         let released: Option<(String, i64)> = tx
                             .query_row(

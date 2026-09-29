@@ -712,7 +712,7 @@ impl SessionCommitStore for SqliteStore {
                         retire_unreachable_ancestry_conn(tx, old_leaf_node_id)?;
                     }
                     let turn_cancel_input_outcome =
-                        super::ingress_settlement::settle_commit_ingress_conn(tx, commit)?;
+                        super::ingress_settlement::settle_commit_ingress_conn(tx, commit, now)?;
                     crate::attachments::commit_attachment_refs_conn(
                         tx, &commit.session_id, &commit.committed_attachment_ids, now as i64,
                     )?;
