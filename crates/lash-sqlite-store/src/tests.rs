@@ -497,7 +497,7 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
         let loaded = store
             .load_session_window(
                 &state.session_id,
-                lash_core_execution::WindowSelector::Current,
+                lash_core_execution::store::WindowSelector::Current,
             )
             .await
             .expect("load checkpoint component bodies")
@@ -548,9 +548,6 @@ async fn real_locked_catalog_surfaces_typed_contention() {
     let store = SqliteStore::open_file_for_testing(&path)
         .await
         .expect("open store");
-    store
-        .bind_session(&SessionId::from("contended"))
-        .expect("bind store");
     let state = durable_state(&store, &SessionId::from("contended")).await;
     store
         .conn

@@ -1,5 +1,5 @@
 use super::*;
-use lash_core_execution::ModuleArtifactStore;
+use lash_core_execution::{ModuleArtifactStore, QueuedWorkStore as _};
 
 fn assert_corrupt<T>(result: Result<T, StoreError>, expected_kind: &'static str) {
     match result {

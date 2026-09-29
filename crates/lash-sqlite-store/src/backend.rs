@@ -475,7 +475,6 @@ mod tests {
         drop(reopened);
         assert_eq!(catalog_table_count(&uri), 1, "the catalog is alive");
 
-        drop(factory);
         drop(stores);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while catalog_table_count(&uri) != 0 {
