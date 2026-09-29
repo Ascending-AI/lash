@@ -164,6 +164,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let context = RuntimeExecutionContext::new(
             request.session_id,
@@ -336,6 +337,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let env_store = backend.process_env_store();
         let parent = crate::ProcessRegistration::new(
@@ -520,6 +522,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -626,6 +629,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -780,6 +784,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -1143,6 +1148,7 @@ mod tests {
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
             process_lineage: None,
+            turn_capture: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),

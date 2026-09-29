@@ -190,8 +190,10 @@ impl lash_core_execution::TurnToolCapture for TurnToolCaptureHost {
         &self,
         invocation: &str,
         call_id: &str,
-    ) -> Result<Arc<dyn lash_core_execution::ToolAttemptCapture>, crate::RuntimeEffectControllerError>
-    {
+    ) -> Result<
+        Arc<dyn lash_core_execution::ToolAttemptCaptureWriter>,
+        crate::RuntimeEffectControllerError,
+    > {
         let mut writer = CaptureWriter::open(
             Arc::clone(&self.store),
             self.turn.clone(),
@@ -262,7 +264,7 @@ impl lash_core_execution::ToolProgressReporter for ToolAttemptWriter {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ToolAttemptCapture for ToolAttemptWriter {
+impl lash_core_execution::ToolAttemptCaptureWriter for ToolAttemptWriter {
     async fn settled(
         &self,
         call_id: &str,

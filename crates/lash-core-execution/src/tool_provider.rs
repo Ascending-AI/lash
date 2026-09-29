@@ -505,7 +505,7 @@ impl std::fmt::Debug for ToolProgressSink {
 /// §4.1): the attempt's start, the chunks it reports, and its settlement,
 /// each persisted before it is published.
 #[async_trait::async_trait]
-pub trait ToolAttemptCapture: ToolProgressReporter {
+pub trait ToolAttemptCaptureWriter: ToolProgressReporter {
     /// Persist the attempt's settled output for call `call_id`.
     async fn settled(
         &self,
@@ -528,7 +528,7 @@ pub trait TurnToolCapture: Send + Sync {
         &self,
         invocation: &str,
         call_id: &str,
-    ) -> Result<Arc<dyn ToolAttemptCapture>, crate::RuntimeEffectControllerError>;
+    ) -> Result<Arc<dyn ToolAttemptCaptureWriter>, crate::RuntimeEffectControllerError>;
 }
 
 /// Why a [`ToolProgressSink::report`] was not persisted.

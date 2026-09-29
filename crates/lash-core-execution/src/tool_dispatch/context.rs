@@ -156,6 +156,10 @@ pub struct ToolDispatchContext<'run> {
     /// inside one (FIG-3607 R1): a start an intent realizes records it above
     /// its starter.
     pub process_lineage: Option<crate::ProcessLineage>,
+    /// The turn capture a tool attempt under this dispatch writes (ADR 0114
+    /// §2.2): the turn's own, lent to the group children it opens with the
+    /// rest of its live half. `None` outside a turn with a durable store.
+    pub turn_capture: Option<Arc<dyn crate::TurnToolCapture>>,
 }
 
 impl ToolDispatchContext<'_> {
@@ -482,6 +486,7 @@ impl<'run> ToolDispatchContext<'run> {
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
             process_lineage: self.process_lineage.clone(),
+            turn_capture: self.turn_capture.clone(),
         })
     }
 
@@ -535,6 +540,7 @@ impl<'run> ToolDispatchContext<'run> {
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
             process_lineage: self.process_lineage.clone(),
+            turn_capture: self.turn_capture.clone(),
         }
     }
 }

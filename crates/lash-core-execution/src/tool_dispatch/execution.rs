@@ -456,9 +456,27 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     execution_grant: Option<Box<crate::ToolExecutionGrant>>,
     attempt: u32,
     max_attempts: u32,
-    tool_context: ToolContext<'run>,
+    mut tool_context: ToolContext<'run>,
 ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
     let call_id = prepared.call_id.clone();
+    // A turn's tool attempt writes the turn capture (ADR 0114 §2.2, §4.1):
+    // its start persists before the tool runs, each progress chunk before it
+    // publishes, and its settlement before the step returns.
+    let turn_capture = match (
+        context.turn_capture.as_ref(),
+        context
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::replay_key),
+    ) {
+        (Some(capture), Some(invocation)) => {
+            Some(capture.open_attempt(invocation, &call_id).await?)
+        }
+        _ => None,
+    };
+    if let Some(capture) = turn_capture.as_ref() {
+        tool_context.progress_reporter = Some(Arc::clone(capture) as _);
+    }
     let launch = Box::pin(
         dispatch_prepared_tool_attempt_launch_with_execution_context(
             context,
@@ -473,7 +491,7 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
     let launch = match launch {
         ToolCallLaunch::Done(outcome) => {
             let mut record = outcome.record;
-            record.call_id = Some(call_id);
+            record.call_id = Some(call_id.clone());
             crate::ToolAttemptLaunch::Done {
                 record: Box::new(record),
                 intents: outcome.intents,
@@ -495,11 +513,25 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
             .map(|ledger| ledger.take())
             .unwrap_or_default(),
     };
+    let mut capture_watermark = None;
+    if let Some(turn_capture) = turn_capture {
+        if let crate::ToolAttemptLaunch::Done { record, .. } = &launch {
+            turn_capture
+                .settled(&call_id, &record.output)
+                .await
+                .map_err(|refused| {
+                    crate::RuntimeEffectControllerError::turn_capture_write_failed(format!(
+                        "tool settlement capture failed: {refused}"
+                    ))
+                })?;
+        }
+        capture_watermark = turn_capture.watermark();
+    }
     Ok(crate::ToolAttemptEffectOutcome {
         launch,
         triggers,
         capture,
-        capture_watermark: None,
+        capture_watermark,
     })
 }
 

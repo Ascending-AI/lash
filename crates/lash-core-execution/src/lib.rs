@@ -883,7 +883,7 @@ pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, ExternalLaunchAudit,
     InternalProcessAdmin, InternalProcessContext, InternalProcessToolCall, InternalProcessToolDef,
     InternalProcessToolImplementation, PreparedToolBatch, PreparedToolBatchCall, PreparedToolCall,
-    ProgressRefused, ToolAttemptCapture, ToolCall, ToolChildExecutionTraceHook,
+    ProgressRefused, ToolAttemptCaptureWriter, ToolCall, ToolChildExecutionTraceHook,
     ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
     ToolProgressReporter, ToolProgressSink, ToolProvider, TurnToolCapture,
 };

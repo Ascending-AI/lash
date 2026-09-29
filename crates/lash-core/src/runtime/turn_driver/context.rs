@@ -74,7 +74,6 @@ impl<'run> RuntimeTurnDriver<'run> {
                 Arc::clone(&self.host.core.attachment_source_policy),
             )
             .map(|context| {
-                self.register_live_opener(context.dispatch(), event_tx);
                 let turn_capture = self.session.history_store().map(|store| {
                     let capture: Arc<dyn lash_core_execution::TurnToolCapture> =
                         Arc::new(super::capture_writer::TurnToolCaptureHost::new(
@@ -88,8 +87,9 @@ impl<'run> RuntimeTurnDriver<'run> {
                         ));
                     capture
                 });
+                let context = context.with_turn_capture(turn_capture);
+                self.register_live_opener(context.dispatch(), event_tx);
                 context
-                    .with_turn_capture(turn_capture)
                     .with_recorded_turn_cancel(
                         self.turn_cancel.is_some(),
                         Arc::clone(&self.turn_control),

@@ -456,6 +456,7 @@ fn tool_context_with_provider<'run>(
         turn_context: lash_core::TurnContext::default(),
         clock: Arc::new(lash_core::facade_support::SystemClock),
         process_lineage: None,
+        turn_capture: None,
     });
     lash_core::ToolContext::from_dispatch(dispatch)
         .tool_call_id(Some(CALL_ID.to_string()))
