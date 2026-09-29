@@ -13,6 +13,10 @@
 //! Re-pinned for FIG-4037: each physical turn commit now carries its typed
 //! `outcome`. Removing that field from the masked commit reproduces each old
 //! digest; every other committed byte is unchanged.
+//!
+//! The two cancelled pins were re-pinned for ADR 0114 (FIG-433): a stopped
+//! turn's commit now names its sealed partial in `stopped_partial`. Removing
+//! that field from the masked commit reproduces each old digest.
 
 use super::*;
 use crate::runtime_support::commit_pins::assert_commit_pins;
@@ -115,7 +119,7 @@ async fn cancel_observed_after_the_model_call_commits_the_pinned_bytes() {
     assert_commit_pins(
         "cancel after the model call",
         &commits,
-        &["ac964fcad226092b76d7af568870c5fda1023ef261986320267198c49b480792"],
+        &["17d31b442f2132d26d1e2867af786af63c01cea64f152d9d8a672fef7771e0af"],
     );
 }
 
@@ -139,6 +143,6 @@ async fn after_step_cancel_at_the_step_boundary_commits_the_pinned_bytes() {
     assert_commit_pins(
         "after-step cancel",
         &commits,
-        &["e0ed12c9b9d3855b5470ef3cffcc95f7cec3f3dfd19098678a67e77218e5199a"],
+        &["a7db93b5b3ca1a6185e858ee765bb188843aef62927d6addd0fcfc12d3db97c6"],
     );
 }
