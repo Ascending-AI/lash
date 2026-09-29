@@ -1485,3 +1485,46 @@ orchestrator.
   deterministic trigger incarnations, and the `RuntimeErrorCode` rename.
   Old catalogs are refused and recreated. A journal in flight at the cutover
   deploy drains on the build that wrote it (ADR 0106).
+
+## Lane G amendment
+
+Amended 2026-09-29 (FIG-4031, lane G). §3.1 ended one frame per commit, and
+only when a turn's final commit or a compaction attached a `FrameTransition`.
+Two frames therefore kept their edges until session deletion:
+
+- a frame opened only in resident state (a direct `open_agent_frame`) and
+  switched away from by the same commit, after an earlier committed frame:
+  the transition could end only the head frame;
+- the frame left by a direct `open_agent_frame` committed by a park or a
+  session command, which attaches no transition.
+
+**Rule.** A commit ends every frame it leaves. The frames it leaves are the
+prior head's frame, then each frame whose `FrameOpen` the commit appends, in
+graph order, except the frame the new head holds
+(`lash_core_store::store::frames_left_by_commit`). The store derives this
+chain inside the session commit transaction, from the head it has locked and
+the commit's own nodes, and ends each frame in it: its fence, and its
+`Ended { carries: [] }` record. The executor names no chain, so no commit
+path can leave a frame unended, whatever its origin.
+
+**`FrameTransition` keeps its shape.** It now says only what the store
+cannot know: the carries, the frame they leave, and the gate.
+
+- `ended` names the frame whose edges hold the carries: the frame the
+  switching turn was admitted on. It must be one of the frames the commit
+  leaves (the head's frame, or one this commit opens); otherwise the commit
+  is refused. This replaces lane S's first-commit rule (c2540bbff8), which
+  is the case where the chain holds only an appended frame.
+- The carry check of §3.1 step 1 is unchanged: each carry needs an edge of
+  `ended`, or the commit fails `ArtifactCarryMissing`. A `continue_as` seed
+  naming a module its frame does not hold fails closed.
+- `gate` gates the cleanup of every frame in the chain.
+
+A commit that leaves frames with no transition (a park or a session command
+that persists a direct frame open) ends them ungated: no execution is
+running on the session, and the turns that read those frames have already
+committed. This is the reasoning session deletion uses.
+
+**Locks.** On PostgreSQL the commit takes the referrer locks of every ended
+frame and of the successor, sorted by key, then the carried artifacts' locks,
+as §2.3 orders them. SQLite serializes on its one writer.
