@@ -852,7 +852,7 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
 }
 
 #[tokio::test]
-async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_handle() {
+async fn sqlite_artifact_view_does_not_resurrect_artifact_reclaimed_by_another_handle() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("artifacts.db");
     let releasing = Arc::new(
@@ -860,14 +860,15 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
             .await
             .expect("open releasing store"),
     );
-    let cached = lashlang::LashlangArtifacts::new(Arc::new(
+    let artifacts = lashlang::LashlangArtifacts::new(Arc::new(
         SqliteStore::open_file_for_testing(&path)
             .await
-            .expect("open caching store"),
+            .expect("open reading store"),
     ));
-    // process cache_probe(root: str) -> str { finish root }
-    let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
-        .expect("build module artifact");
+    // process liveness_probe(root: str) -> str { finish root }
+    let module =
+        lashlang::ModuleArtifact::from_program(one_process_module("liveness_probe", "root"))
+            .expect("build module artifact");
     let referrer = lash_core_execution::ArtifactReferrer::HostPin(
         lash_core_execution::HostArtifactPin::mint(),
     );
@@ -883,10 +884,10 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
     .await
     .expect("publish module through first handle");
     assert!(
-        cached
+        artifacts
             .get_module_artifact(module.module_ref())
             .await
-            .expect("prime second handle cache")
+            .expect("read through second handle")
             .is_some()
     );
     lash_core_execution::ModuleArtifactStore::end_module_referrer(
@@ -900,12 +901,12 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
     .expect("end final referrer");
 
     assert!(
-        cached
+        artifacts
             .get_module_artifact(module.module_ref())
             .await
             .expect("read after cross-handle reclamation")
             .is_none(),
-        "a handle-local cache must not resurrect durably reclaimed bytes"
+        "an artifact view must not resurrect durably reclaimed bytes"
     );
 }
 

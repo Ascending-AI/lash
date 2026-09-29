@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
     ReferrerClaim,
 };
+#[cfg(test)]
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -619,23 +622,18 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
 ///
 /// The port ([`ModuleArtifactStore`]) keeps a module's verified store bytes
 /// and never decodes them; this view encodes a [`ModuleArtifact`] on publish
-/// and decodes and verifies it on read. Modules are content-addressed and
-/// immutable, so a decoded module is cached by its reference, and a read
-/// returns the cached module only once the port confirms a referrer still
-/// holds it. Cloning shares the port and the cache.
+/// and decodes and verifies it on every read, only when the port confirms a
+/// referrer still holds it. Cloning shares the port. Decoded modules belong
+/// to their callers; this view retains none.
 #[derive(Clone)]
 pub struct LashlangArtifacts {
     store: Arc<dyn ModuleArtifactStore>,
-    decoded: Arc<Mutex<BTreeMap<ModuleRef, Arc<ModuleArtifact>>>>,
 }
 
 impl LashlangArtifacts {
     /// The typed view of `store`.
     pub fn new(store: Arc<dyn ModuleArtifactStore>) -> Self {
-        Self {
-            store,
-            decoded: Arc::default(),
-        }
+        Self { store }
     }
 
     /// The typed view of `backend`'s store set's artifact port: the
@@ -671,11 +669,7 @@ impl LashlangArtifacts {
             .map_err(|err| ArtifactStoreError::Encode(err.to_string()))?;
         self.store
             .publish_module_artifact(claim, artifact.module_ref().as_str(), &bytes)
-            .await?;
-        self.decoded
-            .lock_recover()
-            .insert(artifact.module_ref().clone(), Arc::new(artifact.clone()));
-        Ok(())
+            .await
     }
 
     /// Add the claim's edge to a module already stored: refused
@@ -698,12 +692,8 @@ impl LashlangArtifacts {
         module_ref: &ModuleRef,
     ) -> Result<Option<Arc<ModuleArtifact>>, ArtifactStoreError> {
         let Some(bytes) = self.store.get_module_artifact(module_ref.as_str()).await? else {
-            self.decoded.lock_recover().remove(module_ref);
             return Ok(None);
         };
-        if let Some(artifact) = self.decoded.lock_recover().get(module_ref).cloned() {
-            return Ok(Some(artifact));
-        }
         let artifact = Arc::new(ModuleArtifact::from_store_bytes(&bytes)?);
         // The port keys bytes by the reference its caller names; the decoder
         // proves the bytes hash to the reference they carry, and this proves
@@ -714,9 +704,6 @@ impl LashlangArtifacts {
                 artifact.module_ref()
             )));
         }
-        self.decoded
-            .lock_recover()
-            .insert(module_ref.clone(), Arc::clone(&artifact));
         Ok(Some(artifact))
     }
 }

@@ -33,6 +33,132 @@ fn stored_artifact_value(artifact: &ModuleArtifact) -> serde_json::Value {
         .expect("artifact envelope is JSON")
 }
 
+fn host_pin_claim() -> ReferrerClaim {
+    ReferrerClaim::unguarded(lash_core_execution::ArtifactReferrer::HostPin(
+        lash_core_execution::HostArtifactPin::mint(),
+    ))
+    .expect("host pin claim")
+}
+
+#[tokio::test]
+async fn artifact_views_check_liveness_while_decoded_callers_remain_alive() {
+    let port = Arc::new(InMemoryLashlangArtifactStore::new());
+    let publisher = LashlangArtifacts::new(port.clone());
+    let reader = publisher.clone();
+    let artifact = process_typed_artifact("event");
+    let first = host_pin_claim();
+    let second = host_pin_claim();
+    publisher
+        .publish_module_artifact(&first, &artifact)
+        .await
+        .expect("publish module");
+    reader
+        .acquire_module_artifact(&second, artifact.module_ref())
+        .await
+        .expect("acquire second referrer");
+    let decoded = reader
+        .get_module_artifact(artifact.module_ref())
+        .await
+        .expect("read module")
+        .expect("module is live");
+    port.end_module_referrer(&lash_core_execution::ResolvedArtifactCleanup {
+        referrer: first.referrer().clone(),
+        carries: Vec::new(),
+    })
+    .await
+    .expect("end first referrer");
+    assert_eq!(
+        publisher
+            .get_module_artifact(artifact.module_ref())
+            .await
+            .expect("read with second referrer")
+            .as_deref(),
+        Some(&artifact)
+    );
+    port.end_module_referrer(&lash_core_execution::ResolvedArtifactCleanup {
+        referrer: second.referrer().clone(),
+        carries: Vec::new(),
+    })
+    .await
+    .expect("end final referrer");
+    for view in [&publisher, &reader] {
+        assert!(
+            view.get_module_artifact(artifact.module_ref())
+                .await
+                .expect("read after reclamation")
+                .is_none()
+        );
+    }
+    assert_eq!(decoded.as_ref(), &artifact);
+    assert!(matches!(
+        reader
+            .acquire_module_artifact(&host_pin_claim(), artifact.module_ref())
+            .await,
+        Err(ArtifactStoreError::ArtifactMissing { .. })
+    ));
+}
+
+#[tokio::test]
+async fn publishing_view_does_not_retain_decoded_modules() {
+    let port = Arc::new(InMemoryLashlangArtifactStore::new());
+    let publisher = LashlangArtifacts::new(port.clone());
+    let sibling = publisher.clone();
+    let artifact = process_typed_artifact("event");
+    let claim = host_pin_claim();
+    publisher
+        .publish_module_artifact(&claim, &artifact)
+        .await
+        .expect("publish module");
+    let decoded = sibling
+        .get_module_artifact(artifact.module_ref())
+        .await
+        .expect("read module")
+        .expect("module is live");
+    let weak = Arc::downgrade(&decoded);
+    drop(decoded);
+    port.end_module_referrer(&lash_core_execution::ResolvedArtifactCleanup {
+        referrer: claim.referrer().clone(),
+        carries: Vec::new(),
+    })
+    .await
+    .expect("end final referrer");
+    assert!(
+        weak.upgrade().is_none(),
+        "publication retained the decoded module"
+    );
+}
+
+#[tokio::test]
+async fn reading_view_does_not_retain_decoded_modules() {
+    let port = Arc::new(InMemoryLashlangArtifactStore::new());
+    let artifact = process_typed_artifact("event");
+    let claim = host_pin_claim();
+    port.publish_module_artifact(
+        &claim,
+        artifact.module_ref().as_str(),
+        &artifact.to_store_bytes().expect("encode module"),
+    )
+    .await
+    .expect("publish bytes directly");
+    let reader = LashlangArtifacts::new(port.clone());
+    let sibling = reader.clone();
+    let decoded = reader
+        .get_module_artifact(artifact.module_ref())
+        .await
+        .expect("read module")
+        .expect("module is live");
+    let weak = Arc::downgrade(&decoded);
+    drop(decoded);
+    port.end_module_referrer(&lash_core_execution::ResolvedArtifactCleanup {
+        referrer: claim.referrer().clone(),
+        carries: Vec::new(),
+    })
+    .await
+    .expect("end final referrer");
+    assert!(weak.upgrade().is_none(), "read retained the decoded module");
+    assert!(Arc::ptr_eq(reader.store(), sibling.store()));
+}
+
 #[test]
 fn artifact_verifies_under_its_stored_family() {
     let artifact = process_typed_artifact("event");
