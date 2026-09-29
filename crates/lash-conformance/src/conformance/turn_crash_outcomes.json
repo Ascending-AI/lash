@@ -4,24 +4,24 @@
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "unfinished_root"
+          "kind": "load_session_head_meta"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "No root is admitted yet. The successor seals the next drive, finds no unfinished root and admits the unchanged durable ingress."
+    "outcome": "The drive is sealed but its admission has not yet asked whether the head owes a follow-on, so no root is admitted. The successor seals the next drive and admits the unchanged durable ingress."
   },
   {
     "point": {
       "operation": {
         "seam": "store",
         "operation": {
-          "kind": "load_session_head_meta"
+          "kind": "unfinished_root"
         }
       },
       "placement": "boundary"
     },
-    "outcome": "The drive is sealed but no root is admitted. The successor seals the next drive and admits the unchanged durable ingress."
+    "outcome": "No root is admitted yet. The successor seals the next drive, finds no unfinished root and admits the unchanged durable ingress."
   },
   {
     "point": {

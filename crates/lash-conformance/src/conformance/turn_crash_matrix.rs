@@ -1209,9 +1209,19 @@ fn reference_admitted_scope(identity: &ReferenceIdentity) -> crate::AdmittedScop
     crate::AdmittedScope::queue_drain(&identity.session_id, identity.turn_id.as_str())
 }
 
+/// The level-one crash points of `trace`, in trace order.
+///
+/// A crash is armed on an operation and fires at its first occurrence, so an
+/// operation the trace repeats (the drive admission's pending follow-on probe
+/// and the turn's own head read are both a head-meta read) names one point:
+/// its first.
 fn generated_points(trace: &[TurnSeamOperation]) -> Vec<TurnCrashPoint> {
     let mut points = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for operation in trace {
+        if !seen.insert(operation) {
+            continue;
+        }
         let placement = match operation {
             TurnSeamOperation::Provider(
                 ProviderOperation::InitialMidStream | ProviderOperation::AfterToolMidStream,

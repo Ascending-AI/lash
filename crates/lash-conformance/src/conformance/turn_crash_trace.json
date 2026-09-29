@@ -2,6 +2,12 @@
   {
     "seam": "store",
     "operation": {
+      "kind": "load_session_head_meta"
+    }
+  },
+  {
+    "seam": "store",
+    "operation": {
       "kind": "unfinished_root"
     }
   },
