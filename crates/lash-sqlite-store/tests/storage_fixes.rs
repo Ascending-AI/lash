@@ -5,8 +5,8 @@
 //! * a contended queued-work admission has exactly one winner instead of a
 //!   false success (the rows-affected check),
 //! * a poisoned connection mutex recovers instead of bricking the store,
-//! * the unsupported-schema error reports the real expected/found versions,
-//! * concurrent first opens do not expose a schema-version-0 store,
+//! * an unsupported compatibility floor reports the recorded version and reader range,
+//! * concurrent first opens do not expose an unstamped store,
 //! * `gc_unreachable` never panics on a corrupt rooted manifest and keeps
 //!   every blob in that conservative case.
 
@@ -15,6 +15,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::future::Future;
@@ -26,9 +27,9 @@ use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestDriveExt
 use lash_core_execution::{
     AttachmentRootSet, IngressStore, LeaseOwnerIdentity, PluginState, RuntimeCommit,
     RuntimeInvocation, RuntimeSessionState, SessionCommitStore, SessionStoreFactory, StoreError,
-    ToolState,
+    StorePreflight, StoreSchemaVerdict, ToolState,
 };
-use lash_sqlite_store::{SqliteSessionStoreFactory, Store};
+use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStorePreflight, Store};
 
 fn unique_db_path(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -425,39 +426,40 @@ fn concurrent_admissions_never_double_own_a_batch() {
     );
 }
 
-// Finding 7: opening a database stamped with an unsupported schema version must
-// report the actual expected and found versions, not a stale "version 1 only".
+// Finding 7: compatibility admission reports the recorded version and this
+// build's reader range without relying on the retired user_version pragma.
 #[tokio::test]
-async fn unsupported_schema_error_reports_real_versions() {
+async fn unsupported_compatibility_floor_reports_real_versions() {
     let path = unique_db_path("schema");
-    {
-        let conn = rusqlite::Connection::open(&path).expect("open raw");
-        // Create a user object and stamp a bogus, unsupported user_version so
-        // the store's open path takes the reject branch.
-        conn.execute_batch("CREATE TABLE legacy (id INTEGER); PRAGMA user_version = 1099;")
-            .expect("seed legacy schema");
-    }
+    drop(Store::open(&path).await.expect("provision current catalog"));
+    let conn = rusqlite::Connection::open(&path).expect("open raw");
+    conn.execute(
+        "UPDATE lash_compat SET version = 1099, min_reader = 1099",
+        [],
+    )
+    .expect("raise the recorded reader floor");
+    drop(conn);
 
-    let message = match Store::open(&path).await {
-        Ok(_) => panic!("opening an unsupported schema must fail"),
-        Err(err) => err.to_string(),
-    };
-    assert!(
-        message.contains("1099"),
-        "error must report the found version 1099: {message}"
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
+        .await
+        .expect("inspect unsupported stamp");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                component: "sqlite-core".to_owned(),
+                found: 1099,
+                min_reader: 1099,
+                reads: VersionRange::exactly(1),
+            },
+        }
     );
-    assert!(
-        message.contains("schema version 100"),
-        "error must report the real expected version 100: {message}"
-    );
-    assert!(
-        !message.contains("version 1 only"),
-        "error must not carry the stale 'version 1 only' text: {message}"
-    );
+    assert!(Store::open(&path).await.is_err());
 }
 
 #[test]
-fn concurrent_first_open_never_observes_version_zero_schema() {
+fn concurrent_first_open_never_observes_an_unstamped_schema() {
     let path = unique_db_path("concurrent-schema");
     let workers = 16;
     let barrier = Arc::new(std::sync::Barrier::new(workers));
@@ -481,10 +483,14 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
             .expect("concurrent first open should succeed");
     }
     let conn = rusqlite::Connection::open(&path).expect("open initialized db");
-    let user_version: i32 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
-        .expect("read user_version");
-    assert_eq!(user_version, 100);
+    let stamp: (String, i64, i64, i64) = conn
+        .query_row(
+            "SELECT component, version, min_reader, fleet_format FROM lash_compat WHERE singleton = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .expect("read compatibility stamp");
+    assert_eq!(stamp, ("sqlite-core".to_owned(), 1, 1, 1));
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -589,7 +595,7 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
     assert!(
         error
             .to_string()
-            .contains("configured database is not a Lash process registry"),
+            .contains("configured database has no Lash process registry table"),
         "unexpected GC validation error: {error}"
     );
 }
@@ -600,22 +606,31 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
     let store = Store::open(&path).await.expect("provision current schema");
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
-    conn.execute_batch("PRAGMA user_version = 51;").unwrap();
+    conn.execute("UPDATE lash_compat SET version = 51, min_reader = 51", [])
+        .unwrap();
     let before: i64 = conn
         .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
         .unwrap();
     drop(conn);
-    let error = match Store::open(&path).await {
-        Ok(_) => panic!("snapshot predecessor must be refused"),
-        Err(error) => error.to_string(),
-    };
-    assert!(
-        error.contains("schema version 100") && error.contains("version 51"),
-        "{error}"
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
+        .await
+        .expect("inspect predecessor stamp");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                component: "sqlite-core".to_owned(),
+                found: 51,
+                min_reader: 51,
+                reads: VersionRange::exactly(1),
+            },
+        }
     );
+    assert!(Store::open(&path).await.is_err());
     let conn = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = conn
-        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
         .unwrap();
     let after: i64 = conn
         .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))

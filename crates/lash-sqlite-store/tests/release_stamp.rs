@@ -9,7 +9,10 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
-use lash_core_execution::{StoreError, StorePreflight, StoreSchemaStatus};
+use lash_core_execution::compat::{CompatRefusal, VersionRange};
+use lash_core_execution::{
+    StoreError, StorePreflight, StoreReleaseState, StoreSchemaStatus, StoreSchemaVerdict,
+};
 use lash_sqlite_store::{SqliteStorePreflight, Store};
 
 struct SqliteBackend {
@@ -64,46 +67,41 @@ async fn sqlite_release_stamp_conformance() {
     release_stamp_conformance(&backend).await;
 }
 
-/// The refusal at open names the writing release beside the schema integers.
-///
-/// This is the whole point of the stamp: before it, a host that upgraded into a
-/// refusal learned two integers and had to work backwards to a release. The
-/// pinned sentences are unchanged — the release rides after them.
+/// A refused open leaves the writing release available to preflight.
 #[tokio::test]
 async fn a_refused_open_names_the_release_that_wrote_the_store() {
     let root = tempfile::tempdir().expect("scratch directory");
     let path = root.path().join("durable-core.db");
     drop(Store::open(&path).await.expect("provision and stamp"));
 
-    // Roll the recorded schema version back to a generation this build refuses,
-    // leaving the stamp in place: exactly the shape a host upgrading across a
-    // bump presents.
     let connection = rusqlite::Connection::open(&path).expect("open the stamped database");
     connection
-        .pragma_update(None, "user_version", 41)
-        .expect("stamp an unsupported generation");
+        .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
+        .expect("raise the reader floor above this build");
     drop(connection);
 
-    let error = Store::open(&path)
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
         .await
-        .err()
-        .expect("an unsupported generation is refused")
-        .to_string();
-    assert!(
-        error.contains(&format!(
-            "This store was last written by lash release {}.",
-            env!("CARGO_PKG_VERSION")
-        )),
-        "the refusal must name the writing release: {error}"
+        .expect("inspect refused store");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                component: "sqlite-core".to_owned(),
+                found: 2,
+                min_reader: 2,
+                reads: VersionRange::exactly(1),
+            },
+        }
     );
     assert!(
-        error.contains("supports schema version")
-            && error.contains("see docs/adr/0049-session-ids-are-used-once.md."),
-        "the pinned refusal sentences must survive verbatim: {error}"
+        matches!(status.release, StoreReleaseState::Stamped(stamp) if stamp.release == env!("CARGO_PKG_VERSION"))
     );
+    assert!(Store::open(&path).await.is_err());
 }
 
-/// A store no stamping build has written is refused with the message unchanged.
+/// A missing release stamp stays missing when compatibility admission refuses.
 #[tokio::test]
 async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     let root = tempfile::tempdir().expect("scratch directory");
@@ -115,17 +113,25 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
         .execute("DROP TABLE release_stamp", [])
         .expect("remove the stamp a pre-stamp build never wrote");
     connection
-        .pragma_update(None, "user_version", 41)
-        .expect("stamp an unsupported generation");
+        .execute("UPDATE lash_compat SET version = 2, min_reader = 2", [])
+        .expect("raise the reader floor above this build");
     drop(connection);
 
-    let error = Store::open(&path)
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
         .await
-        .err()
-        .expect("an unsupported generation is refused")
-        .to_string();
-    assert!(
-        !error.contains("last written by lash release"),
-        "a store with no stamp must not have a release invented for it: {error}"
+        .expect("inspect refused store");
+    assert_eq!(
+        status.databases[0].verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                component: "sqlite-core".to_owned(),
+                found: 2,
+                min_reader: 2,
+                reads: VersionRange::exactly(1),
+            },
+        }
     );
+    assert_eq!(status.release, StoreReleaseState::Unstamped);
+    assert!(Store::open(&path).await.is_err());
 }

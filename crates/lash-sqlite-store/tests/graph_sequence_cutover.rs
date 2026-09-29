@@ -1,13 +1,9 @@
+use lash_core_execution::compat::{CompatRefusal, VersionRange};
 use lash_core_execution::{StorePreflight, StoreSchemaVerdict};
-use lash_sqlite_store::{SESSION_SCHEMA_VERSION, SqliteStorePreflight, Store};
-
-const RETAINED_PRIOR_DURABLE_CORE_GENERATION: i32 = 70;
+use lash_sqlite_store::{SqliteStorePreflight, Store};
 
 #[tokio::test]
 async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
-    // Generation 70 retains the pre-envelope-cutover witness; the current
-    // message-body cutover must continue refusing it before blob decoding.
-    assert_eq!(SESSION_SCHEMA_VERSION, 100);
     let dir = tempfile::tempdir().expect("SQLite predecessor-refusal tempdir");
     let path = dir.path().join("durable-core.db");
     drop(
@@ -41,8 +37,8 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         )
         .expect("retain an envelope with the deleted kind field");
     connection
-        .pragma_update(None, "user_version", RETAINED_PRIOR_DURABLE_CORE_GENERATION)
-        .expect("stamp retained SQLite durable-core predecessor");
+        .execute("UPDATE lash_compat SET version = 70, min_reader = 70", [])
+        .expect("stamp a predecessor whose reader floor excludes this build");
     drop(connection);
 
     let status = SqliteStorePreflight::for_durable_core(&path)
@@ -51,22 +47,17 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         .expect("inspect old catalog without decoding blobs");
     assert_eq!(
         status.databases[0].verdict,
-        StoreSchemaVerdict::Mismatch {
-            found: i64::from(RETAINED_PRIOR_DURABLE_CORE_GENERATION),
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::ReaderFloorAbove {
+                component: "sqlite-core".to_owned(),
+                found: 70,
+                min_reader: 70,
+                reads: VersionRange::exactly(1),
+            },
         }
     );
-    let error = Store::open(&path)
-        .await
-        .err()
-        .expect("the retained SQLite durable-core predecessor must be refused at open")
-        .to_string();
-    assert!(
-        error.contains(&format!("supports schema version {SESSION_SCHEMA_VERSION}"))
-            && error.contains(&format!(
-                "database reports version {RETAINED_PRIOR_DURABLE_CORE_GENERATION}"
-            )),
-        "the predecessor refusal must identify expected and found versions: {error}"
-    );
+    assert!(Store::open(&path).await.is_err());
+
     let connection = rusqlite::Connection::open(&path).expect("inspect refused catalog");
     let stored: Vec<u8> = connection
         .query_row(
@@ -76,14 +67,14 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
         )
         .expect("old envelope remains untouched");
     assert_eq!(stored, prior_envelope);
-    let version: i32 = connection
-        .pragma_query_value(None, "user_version", |row| row.get(0))
-        .expect("read refused version");
-    assert_eq!(version, RETAINED_PRIOR_DURABLE_CORE_GENERATION);
+    let version: i64 = connection
+        .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
+        .expect("read refused compatibility stamp");
+    assert_eq!(version, 70);
 }
 
 #[tokio::test]
-async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
+async fn sqlite_graph_sequence_unique_constraint_is_rejected_without_migration() {
     let dir = tempfile::tempdir().expect("SQLite graph-sequence cutover tempdir");
     let path = dir.path().join("durable-core.db");
     drop(
@@ -92,42 +83,50 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
             .expect("create current SQLite catalog"),
     );
 
-    let connection = rusqlite::Connection::open(&path).expect("open SQLite 41 fixture");
+    let connection = rusqlite::Connection::open(&path).expect("open SQLite graph fixture");
     connection
         .execute("ALTER TABLE graph_nodes ADD COLUMN seq INTEGER", [])
-        .expect("restore the version-40 graph sequence column");
+        .expect("restore the graph sequence column");
     connection
         .execute(
-            "CREATE INDEX idx_graph_nodes_session_seq ON graph_nodes(session_id, seq)",
+            "CREATE UNIQUE INDEX idx_graph_nodes_session_seq ON graph_nodes(session_id, seq)",
             [],
         )
-        .expect("restore the version-40 graph sequence index");
+        .expect("add a constraint this build cannot safely write beside");
     connection
-        .pragma_update(None, "user_version", 41)
-        .expect("stamp SQLite durable-core 41");
+        .execute("UPDATE lash_compat SET version = 2, min_reader = 1", [])
+        .expect("stamp an expanded catalog under this build's reader floor");
     drop(connection);
 
-    let error = Store::open(&path)
+    let status = SqliteStorePreflight::for_durable_core(&path)
+        .schema_status()
         .await
-        .err()
-        .expect("version-41 graph shape must be rejected")
-        .to_string();
-    // The fixture is built by opening at the current generation first, so the
-    // durable core carries this build's release stamp; the refusal names it
-    // after the pinned sentences rather than in place of any of them.
-    assert_eq!(
-        error,
-        format!(
-            "Error(\"Unsupported lash durable core schema: this binary supports schema version 100, but the database reports version 41. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md. This store was last written by lash release {}.\")",
-            env!("CARGO_PKG_VERSION")
-        )
-    );
+        .expect("inspect expanded graph catalog");
+    match &status.databases[0].verdict {
+        StoreSchemaVerdict::Refused {
+            refusal:
+                CompatRefusal::ShapeRefused {
+                    component,
+                    findings,
+                },
+        } => {
+            assert_eq!(component, "sqlite-core");
+            assert!(
+                findings
+                    .iter()
+                    .any(|finding| finding.contains("idx_graph_nodes_session_seq"))
+            );
+        }
+        verdict => panic!("unsafe graph constraint must be refused: {verdict:?}"),
+    }
+    assert!(Store::open(&path).await.is_err());
+
     let connection = rusqlite::Connection::open(&path).expect("inspect refused SQLite catalog");
+    let version: i64 = connection
+        .query_row("SELECT version FROM lash_compat", [], |row| row.get(0))
+        .expect("read refused compatibility stamp");
     assert_eq!(
-        connection
-            .query_row("PRAGMA user_version", [], |row| row.get::<_, i32>(0))
-            .expect("read refused SQLite version"),
-        41,
-        "the rejected open must not relabel the old graph shape"
+        version, 2,
+        "the rejected open must not relabel the graph shape"
     );
 }

@@ -1,45 +1,71 @@
 use super::{SqliteProcessRegistry, SqliteTriggerStore};
+use lash_core_execution::StoreSchemaVerdict;
+use lash_core_execution::compat::CompatRefusal;
+use lash_sqlite_store::{SqliteDatabase, verify_schema_at};
 
 #[tokio::test]
-async fn sqlite_process_registry_rejects_pre_unit_external_owner_schema_before_serving() {
+async fn sqlite_process_registry_refuses_an_unstamped_populated_catalog_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-unit-external-owner-processes.db");
+    let path = dir.path().join("unstamped-processes.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy process db");
-    conn.pragma_update(None, "user_version", 12)
-        .expect("stamp legacy process schema");
+    conn.execute("CREATE TABLE processes (id TEXT PRIMARY KEY)", [])
+        .expect("leave a pre-stamp process table");
     drop(conn);
 
-    let error = match SqliteProcessRegistry::open(&path, dir.path().join("sessions")).await {
-        Ok(_) => panic!("pre-unit-external-owner process stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash process registry schema"));
-    assert!(message.contains("supports schema version 44"));
-    assert!(message.contains("database reports version 12"));
-    assert!(message.contains(
-        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
-    ));
+    let status = verify_schema_at(&path, SqliteDatabase::ProcessRegistry).await;
+    assert_eq!(
+        status.verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::Unstamped {
+                component: "sqlite-registry".to_owned(),
+            },
+        }
+    );
+    assert!(
+        SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
+            .await
+            .is_err()
+    );
+    let conn = rusqlite::Connection::open(&path).expect("inspect refused registry");
+    let stamps: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'lash_compat'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect compatibility table");
+    assert_eq!(stamps, 0);
 }
 
 #[tokio::test]
-async fn sqlite_trigger_store_rejects_pre_keyed_schema_before_serving() {
+async fn sqlite_trigger_store_refuses_an_unstamped_populated_catalog_before_serving() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("pre-keyed-triggers.db");
+    let path = dir.path().join("unstamped-triggers.db");
     let conn = rusqlite::Connection::open(&path).expect("open legacy trigger db");
-    conn.pragma_update(None, "user_version", 1)
-        .expect("stamp legacy trigger schema");
+    conn.execute(
+        "CREATE TABLE trigger_subscriptions (id TEXT PRIMARY KEY)",
+        [],
+    )
+    .expect("leave a pre-stamp trigger table");
     drop(conn);
 
-    let error = match SqliteTriggerStore::open(&path).await {
-        Ok(_) => panic!("pre-keyed trigger stores must be recreated"),
-        Err(error) => error,
-    };
-    let message = error.to_string();
-    assert!(message.contains("Unsupported lash trigger store schema"));
-    assert!(message.contains("supports schema version 12"));
-    assert!(message.contains("database reports version 1"));
-    assert!(message.contains(
-        "drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones and Restate state together; see docs/adr/0049-session-ids-are-used-once.md."
-    ));
+    let status = verify_schema_at(&path, SqliteDatabase::Triggers).await;
+    assert_eq!(
+        status.verdict,
+        StoreSchemaVerdict::Refused {
+            refusal: CompatRefusal::Unstamped {
+                component: "sqlite-triggers".to_owned(),
+            },
+        }
+    );
+    assert!(SqliteTriggerStore::open(&path).await.is_err());
+    let conn = rusqlite::Connection::open(&path).expect("inspect refused trigger store");
+    let stamps: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'lash_compat'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("inspect compatibility table");
+    assert_eq!(stamps, 0);
 }
