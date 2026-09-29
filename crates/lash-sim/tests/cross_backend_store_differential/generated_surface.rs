@@ -23,12 +23,12 @@ use lash_conformance::{
 };
 use lash_core::{
     AttachmentCreateMeta, AttachmentStore, MediaType, ProcessExecutionEnvRef, ProcessIdentity,
-    ProcessInput, ProcessOriginator, RuntimePersistence, SessionScope, TriggerCommand,
+    ProcessInput, ProcessOriginator, RuntimeStore, SessionScope, TriggerCommand,
     TriggerInputBinding, TriggerOccurrenceRequest, TriggerOwnerScope, TriggerStore,
     TriggerSubscriptionDraft,
 };
 use lash_s3_store::{S3AttachmentStore, S3AttachmentStoreConfig};
-use lash_sqlite_store::{SqliteProcessRegistry, SqliteTriggerStore, Store as SqliteStore};
+use lash_sqlite_store::{SqliteProcessRegistry, SqliteStore, SqliteTriggerStore};
 
 const DEFAULT_CASES: usize = 4;
 const DEFAULT_SEED: u64 = 852;
@@ -153,7 +153,7 @@ struct SurfaceRunner {
     trigger_store: Arc<dyn TriggerStore>,
     /// The session-bound runtime store the scenario drives; the turn-park
     /// ops apply to it directly.
-    runtime: Arc<dyn RuntimePersistence>,
+    runtime: Arc<dyn RuntimeStore>,
     /// The `load_turn_park` answers this runner observed, in operation
     /// order. Compared across every backend: each lane's runtime store is a
     /// real durable one.
@@ -352,15 +352,21 @@ impl SurfaceRunner {
             }
             SurfaceOperation::TurnParkSettle { key } => {
                 let session = SessionId::from(SURFACE_RUNTIME_SESSION.to_string());
-                let state = lash_core::store::load_persisted_session_state(self.runtime.as_ref())
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .unwrap_or_else(|| RuntimeSessionState {
-                        session_id: session.clone(),
-                        ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
-                            lash_core::TurnBudget::Unbounded,
-                        ))
-                    });
+                let view = lash_core::SessionStore::new(Arc::clone(&self.runtime), session.clone())
+                    .map_err(|error| error.to_string())?;
+                let state = lash_core::store::load_session_window_state(
+                    &view,
+                    lash_core::store::WindowSelector::Current,
+                )
+                .await
+                .map_err(|error| error.to_string())?
+                .map(|loaded| loaded.state)
+                .unwrap_or_else(|| RuntimeSessionState {
+                    session_id: session.clone(),
+                    ..RuntimeSessionState::new(lash_core::SessionPolicy::new(
+                        lash_core::TurnBudget::Unbounded,
+                    ))
+                });
                 let commit = RuntimeCommit::persisted_state_with_operation_for_testing(
                     &state,
                     &[],
@@ -422,8 +428,16 @@ async fn surface_runners(
     let sqlite_runtime_path = root.join("runtime.db");
     let sqlite_process_path = root.join("process.db");
     let sqlite_trigger_path = root.join("trigger.db");
-    let sqlite_runtime: Arc<dyn RuntimePersistence> =
-        Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
+    let session_request = SessionStoreCreateRequest {
+        owning_process_id: None,
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from(SURFACE_RUNTIME_SESSION),
+        relation: SessionRelation::Root,
+        policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    };
+    let sqlite_store = Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
+    sqlite_store.admit_session(&session_request).await.unwrap();
+    let sqlite_runtime: Arc<dyn RuntimeStore> = sqlite_store;
     // The two registrars mint the same ids in the same order, so the
     // generated slots name the same process on both backends.
     let (sqlite_mint, postgres_mint) = super::paired_process_id_mints();
@@ -443,11 +457,16 @@ async fn surface_runners(
             .unwrap(),
     );
 
-    let postgres_runtime: Arc<dyn RuntimePersistence> = Arc::new(
+    let postgres_store = Arc::new(
         storage
-            .session_store("prop-runtime-session")
+            .session_store_factory()
             .with_clock(Arc::clone(&clock)),
     );
+    postgres_store
+        .admit_session(&session_request)
+        .await
+        .unwrap();
+    let postgres_runtime: Arc<dyn RuntimeStore> = postgres_store;
     let postgres_registry = Arc::new(
         storage
             .process_registry()

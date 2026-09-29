@@ -22,11 +22,7 @@ pub(super) async fn compare_plugin_state(
     for runner in &mut runners {
         let mut child = runner.create_request();
         child.session_id = SessionId::from(format!("{}-child", child.session_id));
-        let child_store = runner
-            .factory()
-            .create_conformance_store(&child)
-            .await
-            .unwrap();
+        let child_store = admit_test_session(runner.factory(), &child).await.unwrap();
         let states = lash_conformance::plugin_state_boundary_trace(
             runner.store(),
             &runner.session_id,

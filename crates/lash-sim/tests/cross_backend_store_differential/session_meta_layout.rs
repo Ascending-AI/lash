@@ -718,11 +718,15 @@ pub(super) async fn verify_independent_session_meta_layout(
 ) {
     let cases = session_meta_layout_cases();
     let sqlite_case_root = sqlite_root.join("session-meta-relational-contract");
-    let sqlite_factory =
-        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_case_root.clone());
+    std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite metadata root");
     let sqlite_path =
         sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
-    let postgres_factory = postgres.session_store_factory();
+    let sqlite_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&sqlite_path)
+            .await
+            .expect("open SQLite metadata store"),
+    );
+    let postgres_factory = Arc::new(postgres.session_store_factory());
     delete_postgres_session_meta_rows(postgres.pool(), &cases).await;
 
     let mut sqlite_stores = Vec::with_capacity(cases.len());
@@ -736,14 +740,12 @@ pub(super) async fn verify_independent_session_meta_layout(
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
         sqlite_stores.push(
-            sqlite_factory
-                .create_store(&request)
+            admit_test_session(sqlite_factory.clone(), &request)
                 .await
                 .expect("write SQLite metadata through production API"),
         );
         postgres_stores.push(
-            postgres_factory
-                .create_store(&request)
+            admit_test_session(postgres_factory.clone(), &request)
                 .await
                 .expect("write PostgreSQL metadata through production API"),
         );
@@ -758,7 +760,7 @@ pub(super) async fn verify_independent_session_meta_layout(
         cases.iter().zip(&sqlite_stores).zip(&postgres_stores)
     {
         let sqlite_meta = sqlite_store
-            .load_session_meta()
+            .load_session_meta(&case.meta.session_id)
             .await
             .expect("decode SQLite metadata inserted with raw SQL");
         assert_eq!(
@@ -769,14 +771,14 @@ pub(super) async fn verify_independent_session_meta_layout(
         );
         assert_eq!(
             sqlite_store
-                .load_session_meta_for_commit()
+                .load_session_meta_for_commit(&case.meta.session_id)
                 .await
                 .expect("preflight SQLite commit metadata"),
             sqlite_meta,
             "SQLite commit preflight must see the same materialized metadata"
         );
         let postgres_meta = postgres_store
-            .load_session_meta()
+            .load_session_meta(&case.meta.session_id)
             .await
             .expect("decode PostgreSQL metadata inserted with raw SQL");
         assert_eq!(
@@ -787,7 +789,7 @@ pub(super) async fn verify_independent_session_meta_layout(
         );
         assert_eq!(
             postgres_store
-                .load_session_meta_for_commit()
+                .load_session_meta_for_commit(&case.meta.session_id)
                 .await
                 .expect("preflight PostgreSQL commit metadata"),
             postgres_meta,

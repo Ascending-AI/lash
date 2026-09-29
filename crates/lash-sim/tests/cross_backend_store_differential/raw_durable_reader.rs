@@ -316,7 +316,7 @@ impl RawDurableReader {
                     })
                     .collect();
                 let session_meta = store
-                    .load_session_meta()
+                    .load_session_meta(session_id)
                     .await
                     .expect("read PostgreSQL session metadata")
                     .map(session_meta_observation);
@@ -411,7 +411,7 @@ impl RawDurableReader {
 pub(super) async fn read_sqlite_durable_state(
     path: &Path,
     session_id: &SessionId,
-    store: &Arc<dyn ConformancePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     now_ms: u64,
 ) -> RawDurableState {
     let connection = rusqlite::Connection::open(path).expect("open SQLite durable reader");
@@ -608,7 +608,7 @@ pub(super) async fn read_sqlite_durable_state(
             .expect("decode SQLite usage deltas")
     };
     let session_meta = store
-        .load_session_meta()
+        .load_session_meta(session_id)
         .await
         .expect("read SQLite session metadata")
         .map(session_meta_observation);

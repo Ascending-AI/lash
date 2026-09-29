@@ -12,6 +12,10 @@
 
 /// Trait sources that define the gated surface.
 const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/mod.rs");
+const SESSION_CATALOG_SOURCE: &str = include_str!("../../../lash-core-store/src/store/catalog.rs");
+const SESSION_HISTORY_SOURCE: &str = include_str!("../../../lash-core-store/src/store/history.rs");
+const DRIVE_EPOCH_SOURCE: &str = include_str!("../../../lash-core-store/src/store/drive_fence.rs");
+const ROOT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/store/root.rs");
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_MANIFEST_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/attachment_manifest.rs");
@@ -66,9 +70,18 @@ fn harness_sources() -> Vec<String> {
         .collect()
 }
 
-/// The gated store traits. `RuntimePersistence` is the blanket alias over the
-/// first five, so covering them covers the whole runtime-store surface.
-const GATED_SESSION_TRAITS: &[&str] = &["SessionCommitStore", "IngressStore", "StoreMaintenance"];
+/// Every fallible segment of `RuntimeStore`; fleet format is infallible and
+/// the attachment manifest has its own exclusions below.
+const GATED_SESSION_TRAITS: &[(&str, &str)] = &[
+    (SESSION_CATALOG_SOURCE, "SessionCatalogStore"),
+    (SESSION_STORE_SOURCE, "SessionCommitStore"),
+    (SESSION_HISTORY_SOURCE, "SessionHistoryStore"),
+    (SESSION_STORE_SOURCE, "TurnInputStore"),
+    (SESSION_STORE_SOURCE, "QueuedWorkStore"),
+    (DRIVE_EPOCH_SOURCE, "DriveEpochStore"),
+    (ROOT_STORE_SOURCE, "RootStore"),
+    (SESSION_STORE_SOURCE, "StoreMaintenance"),
+];
 
 /// Fallible session-store methods the harness deliberately does not drive.
 ///
@@ -76,6 +89,34 @@ const GATED_SESSION_TRAITS: &[&str] = &["SessionCommitStore", "IngressStore", "S
 /// builds, together with the suite that does own it. Removing a method from
 /// both this list and the harness fails `store_trait_surface_is_fully_gated`.
 const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
+    (
+        "list_sessions",
+        "catalog-wide enumeration across the shared PostgreSQL database; owned by the session_store_factory_enumeration conformance suite",
+    ),
+    (
+        "fork_points",
+        "catalog-wide retained-point enumeration; owned by the session_store_factory conformance suite",
+    ),
+    (
+        "contains_active_ancestor",
+        "bounded ancestry predicate; owned by the session_history conformance suite",
+    ),
+    (
+        "load_usage_totals",
+        "head usage summary; owned by the runtime_persistence and session_history conformance suites",
+    ),
+    (
+        "load_usage_ledger_page",
+        "bounded usage history; owned by the session_history conformance suite",
+    ),
+    (
+        "load_failure_evidence_page",
+        "bounded failure history; owned by the session_history conformance suite",
+    ),
+    (
+        "has_claimable_queued_work",
+        "claimability predicate; owned by the queued_work conformance suite",
+    ),
     (
         "validate_turn_cancellation_binding",
         "turn-cancellation surface: this fixture wires no TurnCancellationAuthority, so the \
@@ -120,12 +161,6 @@ const SESSION_STORE_EXCLUSIONS: &[(&str, &str)] = &[
          mid-run would collect blobs belonging to the other cases and report their loss as this \
          harness's own defect. Owned by the session_delete_blob_reclaim and \
          store_maintenance_outcome conformance suites, which each own their database",
-    ),
-    (
-        "load_session_at",
-        "turn-admission base-retention surface (FIG-3682): it answers only for a head a turn's \
-         admission retained, and this fixture never runs a turn admission; owned by the \
-         admission_base_retention conformance suite",
     ),
     (
         "retain_admission_base",
@@ -289,8 +324,8 @@ fn store_trait_surface_is_fully_gated() {
     let mut covered = 0usize;
     let mut excluded = 0usize;
 
-    for trait_name in GATED_SESSION_TRAITS {
-        for method in fallible_trait_methods(SESSION_STORE_SOURCE, trait_name) {
+    for &(source, trait_name) in GATED_SESSION_TRAITS {
+        for method in fallible_trait_methods(source, trait_name) {
             let exclusion = SESSION_STORE_EXCLUSIONS
                 .iter()
                 .find(|(name, _)| *name == method);

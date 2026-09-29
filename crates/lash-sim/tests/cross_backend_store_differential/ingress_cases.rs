@@ -35,17 +35,18 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     let mut out = Transcript::new();
     let ledger = stores.obligation_ledger(ObligationKind::Ingress);
     let session_id = SessionId::from(format!("{prefix}-ingress"));
-    let store = stores
-        .session_store_factory()
-        .create_store(&SessionStoreCreateRequest {
+    let store = admit_test_session(
+        stores.session_store_factory(),
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("create the ingress session");
+        },
+    )
+    .await
+    .expect("create the ingress session");
     let first = store
         .enqueue_pending_turn_input(PendingTurnInputDraft::new(
             session_id.clone(),

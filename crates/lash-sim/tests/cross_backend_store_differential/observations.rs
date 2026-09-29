@@ -84,10 +84,12 @@ pub(super) fn read_sqlite_checkpoint_observation(
     raw_checkpoint_ref: Option<BlobRef>,
 ) -> Option<CheckpointObservation> {
     let raw_checkpoint_ref = raw_checkpoint_ref?;
-    let checkpoint =
-        lash_sqlite_store::Store::raw_checkpoint_from_path_for_testing(path, &raw_checkpoint_ref)
-            .expect("decode SQLite checkpoint through raw durable reader")
-            .expect("checkpoint ref must address a SQLite checkpoint manifest");
+    let checkpoint = lash_sqlite_store::SqliteStore::raw_checkpoint_from_path_for_testing(
+        path,
+        &raw_checkpoint_ref,
+    )
+    .expect("decode SQLite checkpoint through raw durable reader")
+    .expect("checkpoint ref must address a SQLite checkpoint manifest");
     Some(checkpoint_observation(Some(raw_checkpoint_ref), checkpoint))
 }
 

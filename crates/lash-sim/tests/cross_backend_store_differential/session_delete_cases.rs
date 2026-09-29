@@ -32,16 +32,18 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     let mut sessions = Vec::new();
     for alias in ["own", "own:x"] {
         let session_id = SessionId::from(format!("{prefix}-delete-{alias}"));
-        let store = factory
-            .create_store(&SessionStoreCreateRequest {
+        let store = admit_test_session(
+            factory.clone(),
+            &SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create the session");
+            },
+        )
+        .await
+        .expect("create the session");
         store
             .bind_root_inputs(&session_id, &root, &[])
             .await

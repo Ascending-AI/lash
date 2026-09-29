@@ -994,7 +994,7 @@ impl BackendRunner {
                 let page = store
                     .load_ancestors(
                         &session_id,
-                        lash_core::store::HistoryAnchor::Node(node_id),
+                        lash_core::store::HistoryAnchor::Node(node_id.into()),
                         lash_core::store::HistoryBudget {
                             max_nodes: std::num::NonZeroU32::new(1).expect("nonzero node limit"),
                             max_bytes: std::num::NonZeroU64::new(1024 * 1024)
@@ -1140,13 +1140,19 @@ impl BackendRunner {
             }
             SurfaceMethod::CommittedTurnExists => {
                 let exists = store
-                    .committed_turn_exists(&lash_core::TurnId::from(SURFACE_COMMITTED_TURN_ID))
+                    .committed_turn_exists(
+                        &session_id,
+                        &lash_core::TurnId::from(SURFACE_COMMITTED_TURN_ID),
+                    )
                     .await?;
                 format!("exists={exists}")
             }
             SurfaceMethod::UncommittedTurnExists => {
                 let exists = store
-                    .committed_turn_exists(&lash_core::TurnId::from(UNCOMMITTED_TURN_ID))
+                    .committed_turn_exists(
+                        &session_id,
+                        &lash_core::TurnId::from(UNCOMMITTED_TURN_ID),
+                    )
                     .await?;
                 format!("exists={exists}")
             }
@@ -1186,7 +1192,9 @@ impl BackendRunner {
                 return Ok(Some(result.into()));
             }
             SurfaceMethod::DrainEndExists => {
-                let exists = store.drain_end_exists(SURFACE_DRAIN_ID).await?;
+                let exists = store
+                    .drain_end_exists(&session_id, SURFACE_DRAIN_ID)
+                    .await?;
                 format!("exists={exists}")
             }
             SurfaceMethod::RaisePendingFollowOnAttempts { owed } => {
@@ -1210,7 +1218,7 @@ impl BackendRunner {
                 // Presence, the turn the fact names, and the recovery count
                 // are all caller-supplied facts, so they compare across
                 // backends where a backend-minted id would not.
-                match store.load_pending_follow_on().await? {
+                match store.load_pending_follow_on(&session_id).await? {
                     Some(fact) => format!(
                         "owed={} attempts={}",
                         fact.follow_on_turn_id == SURFACE_FOLLOW_ON_TURN_ID,

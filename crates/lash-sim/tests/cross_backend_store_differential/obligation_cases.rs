@@ -51,7 +51,7 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
     for alias in aliases {
         let session_id = SessionId::from(format!("{prefix}-obligation-{alias}"));
         factory
-            .create_store(&SessionStoreCreateRequest {
+            .admit_session(&SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),

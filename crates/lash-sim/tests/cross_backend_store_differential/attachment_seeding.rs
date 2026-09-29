@@ -8,7 +8,7 @@
 use lash_core::store::StoreError;
 use lash_core::{AttachmentIntent, AttachmentOwner, AttachmentWriteFence, SessionId};
 
-use super::ConformancePersistence;
+use super::RuntimeStore;
 
 /// Seed the two manifest rows the differential observes.
 ///
@@ -20,7 +20,7 @@ use super::ConformancePersistence;
 /// leaves the column NULL. The fixture wires no process registry, so the row
 /// stays an immortal root everywhere.
 pub(crate) async fn seed_differential_attachment_rows(
-    store: &dyn ConformancePersistence,
+    store: &dyn RuntimeStore,
     session_id: &SessionId,
 ) -> Result<(), StoreError> {
     let operation =

@@ -20,18 +20,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::runtime::QueuedWorkBatchDraft;
-use lash_core::store::{ConformancePersistence, ConformanceSessionStoreFactory};
 use lash_core::store::{GraphAppend, RuntimeCommitReceipt};
-use lash_core::testing::RuntimePersistenceTestDriveExt as _;
+use lash_core::testing::RuntimeStoreTestDriveExt as _;
 use lash_core::{
-    AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, EffectAddress,
-    ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint, LeaseOwnerIdentity,
-    PendingTurnInputDraft, PluginNamespaceState, PluginState, ProcessEventLog as _,
-    ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority, QueuedWorkKind, RuntimeCommit,
-    RuntimeSessionState, RuntimeTurnCommitStamp, SessionHistoryRecord, SessionMeta,
-    SessionNodePayload, SessionNodeRecord, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, StoreError, TokenLedgerEntry, TokenUsage, ToolState, TurnInput,
-    TurnInputApplication, TurnInputIngress, TurnInputStateKind,
+    AttachmentId, AttachmentOwnerKind, BlobRef, Clock, DeliveryPolicy, DeploymentStore,
+    EffectAddress, ExecutionScope, ForkSessionRequest, HydratedSessionCheckpoint,
+    LeaseOwnerIdentity, PendingTurnInputDraft, PluginNamespaceState, PluginState,
+    ProcessEventLog as _, ProcessRegistrar as _, ProtocolEvent, QueuedWorkAuthority,
+    QueuedWorkKind, RuntimeCommit, RuntimeSessionState, RuntimeStore, RuntimeTurnCommitStamp,
+    SessionCatalogStore as _, SessionHistoryRecord, SessionMeta, SessionNodePayload,
+    SessionNodeRecord, SessionRelation, SessionStoreCreateRequest, StoreError, TokenLedgerEntry,
+    TokenUsage, ToolState, TurnInput, TurnInputApplication, TurnInputIngress, TurnInputStateKind,
 };
 use lash_postgres_store::PostgresStorage;
 use rusqlite::OptionalExtension;
@@ -47,6 +46,8 @@ mod checkpoint_cases;
 mod coalesced_batch_oracles;
 #[path = "cross_backend_store_differential/corrupt_input_cases.rs"]
 mod corrupt_input_cases;
+#[path = "cross_backend_store_differential/fixture_catalog.rs"]
+mod fixture_catalog;
 #[path = "cross_backend_store_differential/fork_cases.rs"]
 mod fork_cases;
 #[path = "cross_backend_store_differential/generated_surface.rs"]
@@ -78,12 +79,14 @@ mod surface_sweep;
 #[path = "cross_backend_store_differential/trait_surface_gate.rs"]
 mod trait_surface_gate;
 use corrupt_input_cases::CorruptTarget;
+use fixture_catalog::{admit_test_session, look_up_test_session};
 use observations::*;
 use residue::*;
 use session_meta_layout::verify_independent_session_meta_layout;
 use surface_sweep::{SurfaceMethod, SurfaceScratch};
 
 const SESSION_LEASE_TTL_MS: u64 = 60_000;
+
 // "LASH_PGT" encoded as a positive i64. This must match the shared-database
 // advisory lock used by lash-postgres-store's integration-test harness.
 const SHARED_DATABASE_LOCK_KEY: i64 = 0x4c41_5348_5f50_4754;
@@ -971,12 +974,12 @@ enum RawDurableReader {
     Sqlite {
         path: PathBuf,
         session_id: SessionId,
-        store: Option<Arc<dyn ConformancePersistence>>,
+        store: Option<Arc<dyn RuntimeStore>>,
     },
     Postgres {
         pool: PgPool,
         session_id: SessionId,
-        store: Option<Arc<dyn ConformancePersistence>>,
+        store: Option<Arc<dyn RuntimeStore>>,
     },
 }
 
@@ -1034,15 +1037,15 @@ enum BackendReopen {
 }
 
 struct NamedHandle {
-    store: Arc<dyn ConformancePersistence>,
+    store: Arc<dyn RuntimeStore>,
     meta: SessionMeta,
 }
 
 struct BackendRunner {
     name: &'static str,
     session_id: SessionId,
-    store: Option<Arc<dyn ConformancePersistence>>,
-    factory: Option<Arc<dyn ConformanceSessionStoreFactory>>,
+    store: Option<Arc<dyn RuntimeStore>>,
+    factory: Option<Arc<dyn DeploymentStore>>,
     raw_reader: RawDurableReader,
     reopen: BackendReopen,
     clock: Arc<dyn Clock>,
@@ -1071,7 +1074,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn store(&self) -> Arc<dyn ConformancePersistence> {
+    fn store(&self) -> Arc<dyn RuntimeStore> {
         Arc::clone(
             self.store
                 .as_ref()
@@ -1083,7 +1086,7 @@ impl BackendRunner {
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
     )]
-    fn factory(&self) -> Arc<dyn ConformanceSessionStoreFactory> {
+    fn factory(&self) -> Arc<dyn DeploymentStore> {
         Arc::clone(
             self.factory
                 .as_ref()
@@ -1365,7 +1368,10 @@ impl BackendRunner {
                 // The follow-on fact rides a turn's terminal head write
                 // (ADR 0101 §3): `owed_turn_id` set is the frame switch, and
                 // `None` is the follow-on's own terminal commit clearing it.
-                let head = self.store().load_session_head_meta().await?;
+                let head = self
+                    .store()
+                    .load_session_head_meta(&self.session_id)
+                    .await?;
                 let mut commit = runtime_commit(
                     &self.session_id,
                     *expected_head_revision,
@@ -1417,13 +1423,12 @@ impl BackendRunner {
                 Ok(None)
             }
             StoreOperation::PinLeaf => {
-                self.factory()
-                    .pin(
-                        self.current_leaf_node_id
-                            .as_deref()
-                            .expect("generated sequence committed a leaf before pin"),
-                    )
-                    .await?;
+                let node_id = lash_core::NodeId::from(
+                    self.current_leaf_node_id
+                        .as_deref()
+                        .expect("generated sequence committed a leaf before pin"),
+                );
+                self.factory().pin(&node_id).await?;
                 Ok(None)
             }
             StoreOperation::ForkAtLeaf => {
@@ -1432,7 +1437,7 @@ impl BackendRunner {
                     .clone()
                     .expect("generated sequence committed a leaf before fork");
                 self.factory()
-                    .fork_at(&ForkSessionRequest {
+                    .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:fork", self.session_id)),
                         node_id: node_id.clone().into(),
@@ -1449,13 +1454,12 @@ impl BackendRunner {
             | StoreOperation::ForkAtForeignLineage
             | StoreOperation::Rewind => self.apply_fork_operation(operation).await,
             StoreOperation::UnpinLeaf => {
-                self.factory()
-                    .unpin(
-                        self.current_leaf_node_id
-                            .as_deref()
-                            .expect("generated sequence committed a leaf before unpin"),
-                    )
-                    .await?;
+                let node_id = lash_core::NodeId::from(
+                    self.current_leaf_node_id
+                        .as_deref()
+                        .expect("generated sequence committed a leaf before unpin"),
+                );
+                self.factory().unpin(&node_id).await?;
                 Ok(None)
             }
             StoreOperation::EnqueueNextTurnInput => self
@@ -1576,7 +1580,10 @@ impl BackendRunner {
                         .flat_map(|queued| queued.batch_ids())
                         .map(lash_core::store::IngressRowId::Batch),
                 );
-                let head = self.store().load_session_head_meta().await?;
+                let head = self
+                    .store()
+                    .load_session_head_meta(&self.session_id)
+                    .await?;
                 self.end_differential_root(
                     &fence,
                     head.map_or(0, |head| head.head_revision),
@@ -1615,13 +1622,11 @@ impl BackendRunner {
                             .await
                             .expect("reopen the SQLite memory backend");
                         let concrete_factory = reopened_backend.session_store_factory();
-                        let reopened = concrete_factory
-                            .open_existing_conformance_store(&request)
-                            .await
-                            .map_err(StoreError::Backend)?
-                            .expect("SQLite memory session must survive an independent reopen");
-                        self.factory =
-                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
+                        let reopened =
+                            look_up_test_session(concrete_factory.clone(), &request.session_id)
+                                .await?
+                                .expect("SQLite memory session must survive an independent reopen");
+                        self.factory = Some(concrete_factory as Arc<dyn DeploymentStore>);
                         self.raw_reader = RawDurableReader::Sqlite {
                             path: PathBuf::from(
                                 reopened_backend
@@ -1638,18 +1643,22 @@ impl BackendRunner {
                         self.raw_reader.detach_store();
 
                         let concrete_factory = Arc::new(
-                            lash_sqlite_store::SqliteSessionStoreFactory::new(root.clone())
-                                .with_clock(Arc::clone(&self.clock)),
-                        );
-                        let reopened = concrete_factory
-                            .open_existing_conformance_store(&request)
+                            lash_sqlite_store::SqliteStore::open_with_clock(
+                                &root.join(
+                                    lash_sqlite_store::SqliteDatabase::DurableCore.file_name(),
+                                ),
+                                Arc::clone(&self.clock),
+                            )
                             .await
-                            .map_err(StoreError::Backend)?
-                            .expect("SQLite session must survive an independent reopen");
+                            .expect("reopen SQLite differential store"),
+                        );
+                        let reopened =
+                            look_up_test_session(concrete_factory.clone(), &request.session_id)
+                                .await?
+                                .expect("SQLite session must survive an independent reopen");
                         let path =
                             root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
-                        self.factory =
-                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
+                        self.factory = Some(concrete_factory as Arc<dyn DeploymentStore>);
                         self.raw_reader = RawDurableReader::Sqlite {
                             path,
                             session_id: self.session_id.clone(),
@@ -1671,13 +1680,11 @@ impl BackendRunner {
                                 .session_store_factory()
                                 .with_clock(Arc::clone(&self.clock)),
                         );
-                        let reopened = concrete_factory
-                            .open_existing_conformance_store(&request)
-                            .await
-                            .map_err(StoreError::Backend)?
-                            .expect("Postgres session must survive an independent reopen");
-                        self.factory =
-                            Some(concrete_factory as Arc<dyn ConformanceSessionStoreFactory>);
+                        let reopened =
+                            look_up_test_session(concrete_factory.clone(), &request.session_id)
+                                .await?
+                                .expect("Postgres session must survive an independent reopen");
+                        self.factory = Some(concrete_factory as Arc<dyn DeploymentStore>);
                         self.raw_reader = RawDurableReader::Postgres {
                             pool: pool.clone(),
                             session_id: self.session_id.clone(),
@@ -1797,14 +1804,11 @@ impl BackendRunner {
             }
             StoreOperation::CreateHandle { handle_alias } => {
                 let request = self.create_request();
-                let store = self
-                    .factory()
-                    .open_existing_conformance_store(&request)
-                    .await
-                    .map_err(StoreError::Backend)?
+                let store = look_up_test_session(self.factory(), &request.session_id)
+                    .await?
                     .expect("create handle requires a live materialized session");
                 let meta = store
-                    .load_session_meta()
+                    .load_session_meta(&self.session_id)
                     .await?
                     .expect("live handle must retain session metadata");
                 assert!(
@@ -1831,9 +1835,7 @@ impl BackendRunner {
                     .expect("generated sequence creates handle before admission");
                 let error = handle
                     .store
-                    .admit_and_bind_session(&lash_core::SessionBinding::from_create_request(
-                        &request,
-                    ))
+                    .admit_session(&request)
                     .await
                     .expect_err("stale handle admission must be fenced");
                 self.assert_session_deleted(&error, "stale-handle admission");
@@ -1879,10 +1881,8 @@ impl BackendRunner {
             StoreOperation::ObserveSessionAbsent => {
                 let request = self.create_request();
                 assert!(
-                    self.factory()
-                        .open_existing_conformance_store(&request)
-                        .await
-                        .map_err(StoreError::Backend)?
+                    look_up_test_session(self.factory(), &request.session_id)
+                        .await?
                         .is_none(),
                     "{} stale writes resurrected deleted session `{}`",
                     self.name,
@@ -1910,7 +1910,7 @@ impl BackendRunner {
             Ok(result) => (None, result),
             Err(error) => (Some(normalized_store_error(self.name, &error)), None),
         };
-        let freshness_head = match self.store().load_session_head_meta().await {
+        let freshness_head = match self.store().load_session_head_meta(&self.session_id).await {
             Ok(Some(head)) => FreshnessHeadObservation::Present {
                 head_revision: head.head_revision,
                 leaf_node_id: head.leaf_node_id.map(|id| id.to_string()),
@@ -1979,26 +1979,28 @@ async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &Po
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
 
-    let sqlite_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(
-        sqlite_root.join("storage-failure-mapping"),
+    let sqlite_path = sqlite_root.join("storage-failure-mapping.db");
+    let sqlite_factory = Arc::new(
+        lash_sqlite_store::SqliteStore::open(&sqlite_path)
+            .await
+            .expect("open SQLite storage-failure fixture"),
     );
-    let sqlite_store = sqlite_factory
-        .create_store(&create_request)
+    let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
         .await
         .expect("create SQLite storage-failure differential store");
-    let sqlite_connection = rusqlite::Connection::open(sqlite_factory.catalog_uri())
-        .expect("open SQLite storage-failure fixture");
+    let sqlite_connection =
+        rusqlite::Connection::open(&sqlite_path).expect("open SQLite storage-failure fixture");
     sqlite_connection
         .execute("DROP TABLE session_meta", [])
         .expect("break SQLite storage-failure fixture");
     let sqlite_error = sqlite_store
-        .load_session_meta()
+        .load_session_meta(&create_request.session_id)
         .await
         .expect_err("broken SQLite catalog must fail");
 
     let postgres_factory = postgres.session_store_factory();
     postgres.pool().close().await;
-    let postgres_error = match postgres_factory.create_store(&create_request).await {
+    let postgres_error = match postgres_factory.admit_session(&create_request).await {
         Ok(_) => panic!("closed PostgreSQL pool must fail"),
         Err(error) => error,
     };
@@ -2164,50 +2166,51 @@ async fn runners_for_case_with_clock(
             .expect("open the SQLite memory differential store set"),
     );
     let memory_factory = memory_backend.session_store_factory();
-    let memory_store = memory_factory
-        .create_conformance_store(&create_request)
+    let memory_store = admit_test_session(memory_factory.clone(), &create_request)
         .await
         .expect("create SQLite memory differential store");
     memory_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic SQLite memory session metadata");
-    let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn ConformanceSessionStoreFactory>;
+    let memory_factory_dyn = Arc::clone(&memory_factory) as Arc<dyn DeploymentStore>;
     let memory_path =
         PathBuf::from(memory_backend.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore));
 
     let sqlite_case_root = sqlite_root.join(case.as_str());
+    std::fs::create_dir_all(&sqlite_case_root).expect("create SQLite differential root");
     let sqlite_factory = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(sqlite_case_root.clone())
-            .with_clock(Arc::clone(&clock)),
+        lash_sqlite_store::SqliteStore::open_with_clock(
+            &sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+            Arc::clone(&clock),
+        )
+        .await
+        .expect("open SQLite differential store"),
     );
     let sqlite_path =
         sqlite_case_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name());
-    let sqlite_store = sqlite_factory
-        .create_conformance_store(&create_request)
+    let sqlite_store = admit_test_session(sqlite_factory.clone(), &create_request)
         .await
         .expect("create SQLite differential store");
     sqlite_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic SQLite session metadata");
-    let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn ConformanceSessionStoreFactory>;
+    let sqlite_factory_dyn = Arc::clone(&sqlite_factory) as Arc<dyn DeploymentStore>;
 
     let postgres_factory = Arc::new(
         postgres
             .session_store_factory()
             .with_clock(Arc::clone(&clock)),
     );
-    let postgres_store = postgres_factory
-        .create_conformance_store(&create_request)
+    let postgres_store = admit_test_session(postgres_factory.clone(), &create_request)
         .await
         .expect("create Postgres differential store");
     postgres_store
         .save_session_meta(expected_meta.clone())
         .await
         .expect("install deterministic Postgres session metadata");
-    let postgres_factory_dyn =
-        Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
+    let postgres_factory_dyn = Arc::clone(&postgres_factory) as Arc<dyn DeploymentStore>;
 
     let memory_lifecycle: lash::Backend = held_work_lifecycle_backend(
         lash_conformance::recording_backend_over(memory_backend.clone()),

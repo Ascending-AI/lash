@@ -178,7 +178,7 @@ const ADMISSION_GAP_ROOT: &str = "admission-gap-root";
     reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
 )]
 async fn admit_oracle_root(
-    store: &Arc<dyn ConformancePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &lash_core::store::DriveFence,
     root: &str,
     max_rows: usize,
@@ -221,7 +221,7 @@ fn admitted_row_ids(admission: &lash_core::store::RootAdmission) -> Vec<String> 
     reason = "test support: the literal oracle's store answers each call; a refusal panics the oracle by design"
 )]
 async fn end_oracle_root(
-    store: &Arc<dyn ConformancePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &lash_core::store::DriveFence,
     root: &str,
     admission: &lash_core::store::RootAdmission,
@@ -232,7 +232,7 @@ async fn end_oracle_root(
         settlement.completed_batches.push(queued.completion());
     }
     let revision = store
-        .load_session_head_meta()
+        .load_session_head_meta(fence.session())
         .await
         .expect("load literal-oracle head")
         .map_or(0, |head| head.head_revision);

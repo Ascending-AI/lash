@@ -14,11 +14,13 @@ pub(super) async fn cross_owner_attachment_adoption(
     let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory backend");
-    let factories: [Arc<dyn SessionStoreFactory>; 3] = [
+    let factories: [Arc<dyn DeploymentStore>; 3] = [
         memory.session_store_factory(),
-        Arc::new(lash_sqlite_store::SqliteSessionStoreFactory::new(
-            sqlite_root.join("cross-owner"),
-        )),
+        Arc::new(
+            lash_sqlite_store::SqliteStore::open(&sqlite_root.join("cross-owner.db"))
+                .await
+                .expect("open SQLite cross-owner store"),
+        ),
         Arc::new(postgres.session_store_factory()),
     ];
     for (index, factory) in factories.into_iter().enumerate() {
@@ -144,7 +146,7 @@ impl BackendRunner {
             StoreOperation::ForkAtExistingTarget => {
                 let error = self
                     .factory()
-                    .fork_at(&ForkSessionRequest {
+                    .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: self.session_id.clone(),
                         node_id: format!("{}:missing-fork-node", self.session_id).into(),
@@ -167,7 +169,7 @@ impl BackendRunner {
                     .expect("generated sequence committed a leaf before foreign-lineage fork");
                 let result = self
                     .factory()
-                    .fork_at(&ForkSessionRequest {
+                    .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:foreign-lineage", self.session_id)),
                         node_id: node_id.clone().into(),
@@ -202,7 +204,7 @@ impl BackendRunner {
                     SessionId::from(format!("{}:rewind-branch", self.session_id));
                 let branch = self
                     .factory()
-                    .fork_at(&ForkSessionRequest {
+                    .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: branch_session_id.clone(),
                         node_id: node_id.clone().into(),
@@ -233,7 +235,7 @@ impl BackendRunner {
                 }
                 let rewound = self
                     .factory()
-                    .fork_at(&ForkSessionRequest {
+                    .fork_session(&ForkSessionRequest {
                         pending_observer_intents: Vec::new(),
                         session_id: SessionId::from(format!("{}:rewind", self.session_id)),
                         node_id: node_id.into(),
@@ -326,13 +328,17 @@ pub(super) async fn selected_observer_intents(
         .await
         .expect("SQLite memory observer backend");
     let backends: Vec<(
-        Arc<dyn SessionStoreFactory>,
+        Arc<dyn DeploymentStore>,
         Arc<dyn lash_core::ProcessRegistry>,
     )> = vec![
         (memory.session_store_factory(), memory.process_registry()),
         (
             Arc::new(
-                lash_sqlite_store::SqliteSessionStoreFactory::new_with_process_registry(root, path),
+                lash_sqlite_store::SqliteStore::open(
+                    &root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
+                )
+                .await
+                .expect("open SQLite observer store"),
             ),
             Arc::new(sqlite),
         ),
@@ -375,8 +381,7 @@ pub(super) async fn selected_observer_intents(
             pending_observer_intents: Vec::new(),
             policy: request.policy.clone(),
         };
-        let source = factory
-            .create_store(&source_request)
+        let source = admit_test_session(factory.clone(), &source_request)
             .await
             .expect("history source");
         let mut state = RuntimeSessionState::new(request.policy.clone());
@@ -397,7 +402,7 @@ pub(super) async fn selected_observer_intents(
             .await
             .expect("delete original writer");
         let receipt = factory
-            .fork_at(&ForkSessionRequest {
+            .fork_session(&ForkSessionRequest {
                 session_id: session_id.clone(),
                 node_id,
                 relation: request.relation.clone(),
@@ -407,14 +412,13 @@ pub(super) async fn selected_observer_intents(
             .await
             .expect("fork deleted-writer history with exact intent");
         assert_eq!(receipt.source_session_id, source_id);
-        let store = factory
-            .open_existing_store(&request)
+        let store = look_up_test_session(factory.clone(), &request.session_id)
             .await
             .expect("reopen interrupted fork")
             .expect("fork retained");
         assert_eq!(
             store
-                .load_session_meta()
+                .load_session_meta(&session_id)
                 .await
                 .expect("load exact intent")
                 .expect("metadata")
@@ -470,7 +474,7 @@ pub(super) async fn selected_observer_intents(
         assert_eq!(projected.status, first.status);
         assert_eq!(historical.payload["by"]["kind"], "fork_inheritance");
         let mut meta = store
-            .load_session_meta()
+            .load_session_meta(&session_id)
             .await
             .expect("load consumed intent")
             .expect("metadata");

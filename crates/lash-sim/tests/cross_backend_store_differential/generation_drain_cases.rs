@@ -121,17 +121,18 @@ async fn drain_transcript(stores: &dyn StoreSet, nonce: &str) -> Transcript {
         ("qc", &b, true, false),
     ] {
         let session_id = SessionId::from(format!("{nonce}-drain-{name}"));
-        let store = stores
-            .session_store_factory()
-            .create_store(&SessionStoreCreateRequest {
+        let store = admit_test_session(
+            stores.session_store_factory(),
+            &SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::Root,
                 policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create the root's session");
+            },
+        )
+        .await
+        .expect("create the root's session");
         let head = if batch_head {
             lash_core::store::AdmittedHead::Batch(
                 store
