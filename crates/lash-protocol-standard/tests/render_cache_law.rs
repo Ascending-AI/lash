@@ -15,10 +15,10 @@ use lash_core::testing::TestTurnDrive as _;
 use lash_core::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentStore, AttachmentStoreError,
     AttachmentStorePersistence, CommitBudget, LlmOutputPart, LlmResponse, ModelSpec,
-    QueuedWorkBatchingConfig, RuntimePersistence, RuntimeSessionState, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, StoredAttachment, StoredBlobRef,
-    ToolAttemptOutcome, ToolCall, ToolCallOutput, ToolContract, ToolDefinition, ToolId,
-    ToolManifest, ToolOutcomeDone, ToolProvider, TurnBudget, TurnInput,
+    QueuedWorkBatchingConfig, RuntimeSessionState, SessionPolicy, SessionRelation,
+    SessionStoreCreateRequest, StoredAttachment, StoredBlobRef, ToolAttemptOutcome, ToolCall,
+    ToolCallOutput, ToolContract, ToolDefinition, ToolId, ToolManifest, ToolOutcomeDone,
+    ToolProvider, TurnBudget, TurnInput,
 };
 use lash_protocol_standard::render::{ToolOutputRendererSlot, ToolRenderParams};
 use lash_protocol_standard::{
@@ -211,7 +211,7 @@ fn render_options(max_chars: usize) -> lash_core::ProtocolTurnOptions {
 
 async fn open_runtime(
     backend: &lash_core::Backend,
-    store: Arc<dyn RuntimePersistence>,
+    store: lash_core::store::SessionStore,
     script: Arc<Script>,
     state: RuntimeSessionState,
     renderer: Arc<SwitchingRenderer>,
@@ -252,7 +252,9 @@ async fn open_runtime(
         Arc::new(lash_core::facade_support::SessionAttachmentStore::new(
             attachments.clone(),
             Arc::new(
-                lash_core::testing::conformance_support::PersistenceManifestAdapter(store.clone()),
+                lash_core::testing::conformance_support::PersistenceManifestAdapter(Arc::clone(
+                    store.store(),
+                )),
             ),
             state.session_id.clone(),
         ));
@@ -304,7 +306,7 @@ async fn drive(
 async fn drive_with_run_spec(
     runtime: &mut LashRuntime,
     double: &lash_restate_test::RestateTestBackend,
-    store: &Arc<dyn RuntimePersistence>,
+    store: &lash_core::store::SessionStore,
     session_id: &SessionId,
 ) {
     store
@@ -420,17 +422,18 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
             .expect("Restate double");
             let backend = double.lash_backend();
             let session_id = SessionId::from("standard-presentation-replay-law");
-            let store = backend
-                .session_store_factory()
-                .create_store(&SessionStoreCreateRequest {
+            let store = lash_core::runtime::admit_session_view(
+                &backend.session_store_factory(),
+                &SessionStoreCreateRequest {
                     owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     policy: policy(),
-                })
-                .await
-                .expect("create session store");
+                },
+            )
+            .await
+            .expect("create session store");
             let attachments = Arc::new(CountingAttachments {
                 inner: backend.attachment_store(),
                 puts: AtomicUsize::new(0),
@@ -439,7 +442,9 @@ fn journaled_standard_presentation_replays_without_render_or_retention_io() {
             let facade = Arc::new(lash_core::facade_support::SessionAttachmentStore::new(
                 attachments.clone(),
                 Arc::new(
-                    lash_core::testing::conformance_support::PersistenceManifestAdapter(store),
+                    lash_core::testing::conformance_support::PersistenceManifestAdapter(
+                        Arc::clone(store.store()),
+                    ),
                 ),
                 session_id.clone(),
             ));
@@ -573,17 +578,18 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
             .expect("Restate double");
             let backend = double.lash_backend();
             let session_id = SessionId::from("standard-render-cache-law");
-            let store = backend
-                .session_store_factory()
-                .create_store(&SessionStoreCreateRequest {
+            let store = lash_core::runtime::admit_session_view(
+                &backend.session_store_factory(),
+                &SessionStoreCreateRequest {
                     owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::Root,
                     policy: policy(),
-                })
-                .await
-                .expect("create session store");
+                },
+            )
+            .await
+            .expect("create session store");
             let attachments = Arc::new(CountingAttachments {
                 inner: backend.attachment_store(),
                 puts: AtomicUsize::new(0),
@@ -699,10 +705,14 @@ fn standard_runtime_keeps_recorded_history_across_params_renderer_and_reopen() {
                 assert_eq!(stable_bytes(&run_spec_request.messages[..length]), prefix);
             }
             Box::pin(runtime.park()).await.expect("park runtime");
-            let state = lash_core::store::load_persisted_session_state(store.as_ref())
-                .await
-                .expect("reload")
-                .expect("persisted state");
+            let state = lash_core::store::load_session_window_state(
+                &store,
+                lash_core::store::WindowSelector::Current,
+            )
+            .await
+            .expect("reload")
+            .expect("persisted state")
+            .state;
             let mut runtime = open_runtime(
                 &backend,
                 store,

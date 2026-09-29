@@ -529,10 +529,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         ) => text,
         outcome => panic!("unexpected turn outcome: {outcome:?}"),
     };
-    let read_view = turn
-        .state
-        .read_view()
-        .expect("accepted turn frame scope resolves");
+    let read_view = turn.state.read_view();
     let assistant_messages = read_view
         .messages()
         .iter()
@@ -851,10 +848,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
     }
 
     // The assistant history keeps the model's raw argument text verbatim.
-    let read_view = turn
-        .state
-        .read_view()
-        .expect("accepted turn frame scope resolves");
+    let read_view = turn.state.read_view();
     let tool_call_contents = read_view
         .messages()
         .iter()

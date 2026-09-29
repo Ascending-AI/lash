@@ -2,8 +2,8 @@ use lash_sansio::SessionId;
 use std::sync::Arc;
 
 use lash_core::{
-    Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
-    SessionCommitStore, SessionPolicy, TokenUsage, facade_support::LashRuntime,
+    DeploymentStore, Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimeSessionState,
+    SessionPolicy, TokenUsage, facade_support::LashRuntime,
 };
 use lash_sqlite_store::SqliteStoreSet;
 
@@ -32,7 +32,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     // Storage only (D1 F3): the test reaches the store port directly and the
     // runtime's backend is the recording double over the same store set.
     let stores = Arc::new(SqliteStoreSet::memory().await.expect("memory store set"));
-    let store = Arc::new(stores.open_store().await.expect("store"));
+    let catalog: Arc<dyn DeploymentStore> = stores.session_store_factory();
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
@@ -53,10 +53,12 @@ async fn embedded_runtime_builder_loads_state_from_store() {
         ))
     };
     state.ensure_agent_frame_initialized();
-    store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
-        .await
-        .expect("bind session to store");
+    let store = lash_core::runtime::admit_session_view(
+        &catalog,
+        &lash_core::testing::store_fixtures::root_session_request(&state.session_id),
+    )
+    .await
+    .expect("admit the session");
     state.append_active_read_delta(&[text_message("u0", MessageRole::User, "stored question")]);
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
@@ -72,7 +74,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
-        .with_store(store.clone() as Arc<dyn RuntimePersistence>)
+        .with_store(store.clone())
         .with_plugin_factories(vec![Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::new(),
         )])
@@ -82,7 +84,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     .expect("runtime");
 
     let state = runtime.export_state();
-    let read_view = state.read_view().expect("runtime frame scope resolves");
+    let read_view = state.read_view();
     assert_eq!(read_view.messages().len(), 1);
     assert_eq!(
         read_view.messages()[0].parts[0].content(),
@@ -99,7 +101,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
     // Storage only (D1 F3): the test reaches the store port directly and the
     // runtime's backend is the recording double over the same store set.
     let stores = Arc::new(SqliteStoreSet::memory().await.expect("memory store set"));
-    let store = Arc::new(stores.open_store().await.expect("store"));
+    let catalog: Arc<dyn DeploymentStore> = stores.session_store_factory();
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
@@ -111,10 +113,12 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    store
-        .admit_and_bind_session(&lash_core::SessionBinding::root(state.session_id.clone()))
-        .await
-        .expect("bind session to store");
+    let store = lash_core::runtime::admit_session_view(
+        &catalog,
+        &lash_core::testing::store_fixtures::root_session_request(&state.session_id),
+    )
+    .await
+    .expect("admit the session");
     store
         .commit_runtime_state(RuntimeCommit::persisted_state_for_test(&state, &[]))
         .await
@@ -129,7 +133,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
             ),
             lash_core::LeaseOwnerIdentity::opaque("protocol-test-worker", "protocol-test-boot"),
         )
-        .with_store(store as Arc<dyn RuntimePersistence>)
+        .with_store(store)
         .with_session_id("beta")
         .with_plugin_factories(vec![Arc::new(
             lash_protocol_standard::StandardProtocolPluginFactory::new(),

@@ -174,7 +174,7 @@ async fn persisted_provider_response(
         .await
         .expect("turn");
     handler.close().await.expect("close the turn's handler");
-    let read_view = turn.state.read_view().expect("turn read view");
+    let read_view = turn.state.read_view();
     let parts = read_view
         .messages()
         .iter()
