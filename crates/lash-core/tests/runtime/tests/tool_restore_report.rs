@@ -111,21 +111,18 @@ fn owner(label: &str) -> lash_core::LeaseOwnerIdentity {
 async fn open_runtime(
     backend: &lash_core::Backend,
     session_id: &SessionId,
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     policy: lash_core::ToolSourcePolicy,
 ) -> Result<LashRuntime, lash_core::SessionError> {
     let env = environment(backend, tools, policy);
-    // Mirror what the facade's `open()` does: admitted load first (which
-    // claims and releases the Session Execution Lease), then build the runtime
-    // on the loaded state. Passing a default state instead would restore
+    // Mirror what the facade's `open()` does: load the current window first,
+    // then build the runtime on the loaded state. Passing a default state instead would restore
     // nothing and make every assertion below vacuous.
-    let loaded = lash_core::store::load_persisted_session_admitted(
-        store.as_ref(),
-        session_id,
-        &owner(session_id.as_str()),
-        &uuid::Uuid::new_v4().to_string(),
-        env.core.control.lease_timings.ttl_ms(),
+    let view = session_view(Arc::clone(store), session_id.clone());
+    let loaded = lash_core::store::load_session_window_state(
+        &view,
+        lash_core::store::WindowSelector::Current,
     )
     .await
     .map_err(|error| lash_core::SessionError::Store {
@@ -137,26 +134,24 @@ async fn open_runtime(
         &env,
         standard_test_policy(),
         state,
-        Some(Arc::clone(store)),
+        Some(view),
         owner(session_id.as_str()),
     ))
     .await
 }
 
-/// Same admitted-open sequence as [`open_runtime`], but on an environment the
+/// Same open sequence as [`open_runtime`], but on an environment the
 /// host has already built — used to open under
 /// [`ToolSurfaceOpenMode::PreservePersisted`](lash_core::ToolSurfaceOpenMode).
 async fn open_runtime_on(
     session_id: &SessionId,
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
     env: &lash_core::facade_support::RuntimeEnvironment,
 ) -> Result<LashRuntime, lash_core::SessionError> {
-    let loaded = lash_core::store::load_persisted_session_admitted(
-        store.as_ref(),
-        session_id,
-        &owner(session_id.as_str()),
-        &uuid::Uuid::new_v4().to_string(),
-        env.core.control.lease_timings.ttl_ms(),
+    let view = session_view(Arc::clone(store), session_id.clone());
+    let loaded = lash_core::store::load_session_window_state(
+        &view,
+        lash_core::store::WindowSelector::Current,
     )
     .await
     .map_err(|error| lash_core::SessionError::Store {
@@ -168,7 +163,7 @@ async fn open_runtime_on(
         env,
         standard_test_policy(),
         state,
-        Some(Arc::clone(store)),
+        Some(view),
         owner(session_id.as_str()),
     ))
     .await
@@ -178,12 +173,11 @@ async fn open_runtime_on(
 /// durable head. An `open()` reconciles the live surface in memory and would
 /// show a tool whether or not anything was persisted.
 async fn persisted_tool_state(
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
+    session_id: &SessionId,
 ) -> lash_core::ToolState {
-    lash_core::store::load_persisted_session_state(store.as_ref())
+    durable_state(Arc::clone(store), session_id.clone())
         .await
-        .expect("load persisted state")
-        .expect("persisted session state")
         .tool_state_snapshot()
         .cloned()
         .expect("persisted tool state")
@@ -231,7 +225,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
         .await
         .expect("park the granted open");
 
-    let seeded = persisted_tool_state(&store).await;
+    let seeded = persisted_tool_state(&store, &session_id).await;
     assert_eq!(seeded.generation(), generation_before_orphaning);
     assert!(
         seeded
@@ -310,7 +304,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
         .expect("park the grantless open");
 
     // The durable trace of the orphaning, read with no runtime in the way.
-    let orphaned_snapshot = persisted_tool_state(&store).await;
+    let orphaned_snapshot = persisted_tool_state(&store, &session_id).await;
     assert_eq!(
         orphaned_snapshot.generation(),
         generation_before_orphaning + 1,
@@ -377,7 +371,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
 async fn seed_opted_out_session(
     backend: &lash_core::Backend,
     session_id: &SessionId,
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
 ) -> u64 {
     let mut granted = open_runtime(
         backend,
@@ -406,10 +400,11 @@ async fn seed_opted_out_session(
 /// the expected generation, alpha is a bound catalog member, beta a bound
 /// opt-out, and nothing is orphaned.
 async fn assert_persisted_surface_unchanged(
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
+    session_id: &SessionId,
     generation: u64,
 ) {
-    let preserved = persisted_tool_state(store).await;
+    let preserved = persisted_tool_state(store, session_id).await;
     assert_eq!(
         preserved.generation(),
         generation,
@@ -504,7 +499,7 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
 
     // The durable truth, read with no runtime in the way: the commit carried
     // the persisted surface forward — same generation, no orphan flags.
-    let preserved = persisted_tool_state(&store).await;
+    let preserved = persisted_tool_state(&store, &session_id).await;
     assert_eq!(
         preserved.generation(),
         persisted_generation,
@@ -597,7 +592,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         .expect("park the enqueue-only open");
 
     // The row is durable and undriven.
-    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
     assert_eq!(pending.len(), 1, "exactly one pending row was admitted");
@@ -607,7 +602,7 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
         "the row waits for the next turn"
     );
 
-    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+    assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 
     // The source returns: nothing was ever orphaned, so the restore is clean.
     let regranted = open_runtime(
@@ -680,7 +675,7 @@ async fn preserve_persisted_open_survives_resident_reload() {
         .await
         .expect("park the enqueue-only open");
 
-    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+    assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }
 
 /// A replayed append receipt drives `restore_protocol_session_from_state` —
@@ -737,7 +732,7 @@ async fn preserve_persisted_open_survives_append_receipt_replay() {
         .await
         .expect("park the enqueue-only open");
 
-    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+    assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }
 
 /// `PreservePersisted` is a fence, not a claim: the engine's drive of a turn
@@ -804,7 +799,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
 
     // The refused drive left both accepted rows, the queued one and the one
     // the refused turn sent, pending, and the tool surface untouched.
-    let pending = lash_core::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
         .await
         .expect("list pending turn inputs");
     assert_eq!(pending.len(), 2, "no pending row was settled");
@@ -814,7 +809,7 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
             .all(|row| row.input.state == lash_core::TurnInputState::DeferredNextTurn),
         "no pending row was claimed: {pending:?}"
     );
-    assert_persisted_surface_unchanged(&store, persisted_generation).await;
+    assert_persisted_surface_unchanged(&store, &session_id, persisted_generation).await;
 }
 
 /// A provider that replaced a tool with a new id under the same model-facing
@@ -930,10 +925,8 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
     .await
     .expect("granted open");
     Box::pin(granted.park()).await.expect("park");
-    let head_before = lash_core::store::load_persisted_session_state(store.as_ref())
+    let head_before = durable_state(store.clone(), session_id.clone())
         .await
-        .expect("load head")
-        .expect("state")
         .head_revision;
 
     let refusal = match open_runtime(
@@ -957,10 +950,8 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
 
     // The refusal's promises: nothing was committed, and the next open can
     // still take the Session Execution Lease.
-    let head_after = lash_core::store::load_persisted_session_state(store.as_ref())
+    let head_after = durable_state(store.clone(), session_id.clone())
         .await
-        .expect("load head")
-        .expect("state")
         .head_revision;
     assert_eq!(
         head_after, head_before,
@@ -1140,7 +1131,7 @@ impl lash_core::ToolProvider for MutableTools {
 async fn live_require_runtime(
     backend: &lash_core::Backend,
     session_id: &SessionId,
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
 ) -> (LashRuntime, Arc<MutableTools>, lash_core::ToolState) {
     let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
     let tools: Arc<dyn lash_core::ToolProvider> =

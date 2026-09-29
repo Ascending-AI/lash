@@ -928,9 +928,8 @@ mod tests {
             policy: policy.clone(),
         };
         let backend = crate::testing::memory_store_set().await;
-        let factory = backend.session_store_factory();
-        let store = factory
-            .create_store(&request)
+        let factory: std::sync::Arc<dyn crate::DeploymentStore> = backend.session_store_factory();
+        let store = crate::runtime::admit_session_view(&factory, &request)
             .await
             .expect("create session store before deletion");
         factory
@@ -944,7 +943,7 @@ mod tests {
             ))
         };
 
-        let error = bind_state_to_store(store.as_ref(), &mut state, crate::SessionRelation::Root)
+        let error = bind_state_to_store(&store, &mut state, crate::SessionRelation::Root)
             .await
             .expect_err("runtime binding must refuse a retired session");
 

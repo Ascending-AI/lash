@@ -108,7 +108,7 @@ async fn run_pinned_turn(
         tools,
         mock_provider(calls),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let sessions = RecordingSink::default();
@@ -572,13 +572,13 @@ async fn a_blocked_host_sink_holds_neither_the_commit_nor_its_bytes() {
         Arc::new(EchoTool),
         mock_provider(vec![parallel, text_call("all three echoed", 13)]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&runtime.host.core.control.effect_host),
         session_id.as_str(),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     );
     let address =
         lash_core::facade_support::TurnAddress::new(SessionId::from(session_id.as_str()), TURN_ID);

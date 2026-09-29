@@ -128,7 +128,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
             },
         ]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     runtime.set_turn_phase_probe(Arc::new(RecordPostCommitDelivery {
@@ -157,10 +157,7 @@ pub(super) async fn dropping_suspended_host_delivery_keeps_committed_state_adopt
         entered = entered_rx.recv() => assert!(entered.is_some(), "sink entered"),
         result = turn.as_mut() => panic!("turn must suspend in host delivery: {result:?}"),
     }
-    let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())
-        .await
-        .expect("load committed head")
-        .expect("committed session");
+    let durable = durable_window(store.clone(), "root").await;
     assert_eq!(durable.head_revision, 1);
     drop(turn);
     handler.close().await.expect("close the turn's handler");
@@ -246,7 +243,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         }),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     protocol.fail_next.store(true, Ordering::SeqCst);
@@ -278,10 +275,7 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         runtime.resident_session.validity(),
         ResidentSessionState::Invalidated { .. }
     ));
-    let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())
-        .await
-        .expect("load committed frame switch")
-        .expect("committed session");
+    let durable = durable_window(store.clone(), "root").await;
     assert_eq!(durable.head_revision, 1);
 
     let ((refusal, reload_error, exported), capture) = super::trace_capture::capturing(|| async {
@@ -389,11 +383,14 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
         "resident state reloaded"
     );
     assert_eq!(
-        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
-            .await
-            .expect("load the head")
-            .expect("head")
-            .pending_follow_on,
+        lash_core::store::SessionCommitStore::load_session_head_meta(
+            store.as_ref(),
+            &lash_core::SessionId::from("root")
+        )
+        .await
+        .expect("load the head")
+        .expect("head")
+        .pending_follow_on,
         None,
         "the follow-on's terminal commit cleared it"
     );
@@ -443,7 +440,7 @@ pub(super) async fn successful_reload_clears_invalidated_state_to_valid() {
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     assert_eq!(
@@ -550,7 +547,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     let session_id = "root";
     let live_turn_id = "fig1573-live-turn";
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let transport = TestProvider::builder()
         .kind("mock")
         .complete(|_| async {
@@ -573,7 +570,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     )
     .await;
 
-    lash_core::IngressStore::enqueue_pending_turn_input(
+    lash_core::TurnInputStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             session_id,
@@ -620,7 +617,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
     );
 
     let undelivered = || async {
-        lash_core::IngressStore::list_pending_turn_inputs(
+        lash_core::TurnInputStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from(session_id),
         )
@@ -642,7 +639,7 @@ pub(super) async fn fig1573_input_pinned_to_a_turn_that_cannot_commit_is_re_defe
         "the torn-down turn's rows stay bound to its root until the root ends"
     );
 
-    lash_core::SessionStoreFactory::end_lost_root(
+    lash_core::DeploymentStore::end_lost_root(
         lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
         &lash_core::engine::RootRef {
             session: SessionId::from(session_id),
@@ -698,7 +695,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
         Some(code_executor),
     );
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let provider_executor = Arc::clone(&executor);
     let provider_call = Arc::new(AtomicUsize::new(0));
     let transport = TestProvider::builder()
@@ -779,10 +776,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
             .message
             .contains("failed to snapshot dirty execution state")
     );
-    let durable = lash_core::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load baseline state")
-        .expect("baseline state exists");
+    let durable = durable_state(store.clone(), "root").await;
     assert_eq!(durable.head_revision, 1);
     assert_eq!(
         durable.execution_state_snapshot().as_deref(),
@@ -811,7 +805,7 @@ pub(super) async fn dirty_execution_state_capture_failure_aborts_commit_and_cold
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        runtime_store,
+        session_view(runtime_store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -853,7 +847,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         Some(code_executor),
     );
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -923,10 +917,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
         Some(initial_frame_node_id.as_str())
     );
 
-    let durable = lash_core::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load no-op switch state")
-        .expect("no-op switch state is durable");
+    let durable = durable_state(store.clone(), "root").await;
     assert_eq!(
         durable.execution_state_snapshot().as_deref(),
         Some(b"live-frame-execution-state".as_slice())
@@ -961,7 +952,7 @@ pub(super) async fn fig1123_caller_supplied_key_colliding_with_existing_frame_pr
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        runtime_store,
+        session_view(runtime_store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -1019,7 +1010,7 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
         Arc::new(EmptyTools),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
@@ -1048,10 +1039,7 @@ pub(super) async fn fig1123_materialized_frame_switch_clears_checkpoint_and_rese
         TurnOutcome::AgentFrameSwitch { .. }
     ));
 
-    let durable = lash_core::store::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load materialized switch state")
-        .expect("materialized switch state is durable");
+    let durable = durable_state(store.clone(), "root").await;
     assert!(
         durable.execution_state_ref().is_none()
             && durable.execution_state_snapshot().is_none()
@@ -1100,7 +1088,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
         Arc::new(EmptyTools),
         failing_transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     first.set_turn_phase_probe(Arc::new(FailCaptureAfterEffectLoop {
@@ -1146,7 +1134,7 @@ pub(super) async fn capture_abort_releases_lease_and_claim_for_prompt_peer_recla
             }),
         }]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
 
@@ -1235,7 +1223,7 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         }),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterFirstCommittedTurn {
@@ -1270,18 +1258,18 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
         committed.outcome,
         TurnOutcome::AgentFrameSwitch { .. }
     ));
-    let pending = lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
-        .await
-        .expect("load the head")
-        .expect("head")
-        .pending_follow_on
-        .expect("the failed follow-on remains owed");
+    let pending = lash_core::store::SessionCommitStore::load_session_head_meta(
+        store.as_ref(),
+        &lash_core::SessionId::from("root"),
+    )
+    .await
+    .expect("load the head")
+    .expect("head")
+    .pending_follow_on
+    .expect("the failed follow-on remains owed");
     assert_eq!(pending.physical_index(), 1);
     assert_eq!(pending.root_turn_id().as_str(), inbound.input_id.as_str());
-    let durable = lash_core::store::SessionCommitStore::load_session(store.as_ref())
-        .await
-        .expect("load committed frame")
-        .expect("committed frame exists");
+    let durable = durable_window(store.clone(), "root").await;
     assert_eq!(durable.head_revision, 1);
 
     executor.fail_capture.store(false, Ordering::SeqCst);
@@ -1305,10 +1293,13 @@ pub(super) async fn follow_on_capture_failure_returns_the_committed_frame_and_ha
     handler.close().await.expect("close the drain's handler");
     assert_eq!(recovered.assistant_output.safe_text, "recovered follow-on");
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("queue after recovered handoff")
-            .is_empty()
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queue after recovered handoff")
+        .is_empty()
     );
 }
 
@@ -1652,7 +1643,7 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store(
     transport: TestProvider,
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = unbound_recording_store(backend).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -1689,7 +1680,7 @@ pub(super) async fn standard_runtime_with_transport_and_double_queue_store(
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(double).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let runtime = Box::pin(runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -1726,13 +1717,7 @@ pub(super) async fn standard_runtime_with_transport_and_double_queue_store_for_s
 pub(super) async fn recording_unbound_store_on(
     backend: &lash_core::Backend,
 ) -> Arc<RecordingStore> {
-    Arc::new(RecordingStore::over(
-        lash_core::SessionStoreFactory::open_unbound_store(
-            backend.session_store_factory().as_ref(),
-        )
-        .await
-        .expect("open an unbound store on the backend's catalog"),
-    ))
+    Arc::new(RecordingStore::over(backend.session_store_factory()))
 }
 
 #[derive(Clone, Default)]
@@ -1777,14 +1762,18 @@ pub(super) struct JournalRedriveStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for JournalRedriveStore {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+impl lash_core::store::RuntimeStoreDecorator for JournalRedriveStore {
+    type Inner = RecordingStore;
+
+    fn inner(&self) -> &RecordingStore {
         self.inner.as_ref()
     }
 
-    async fn load_session(
+    async fn load_session_window(
         &self,
-    ) -> Result<Option<lash_core::store::PersistedSessionRead>, lash_core::StoreError> {
+        _session_id: &SessionId,
+        _selector: lash_core::store::WindowSelector,
+    ) -> Result<Option<lash_core::store::SessionWindowRead>, lash_core::StoreError> {
         Ok(None)
     }
 }
@@ -1796,8 +1785,10 @@ pub(super) struct WithdrawBeforeDriveStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for WithdrawBeforeDriveStore {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+impl lash_core::store::RuntimeStoreDecorator for WithdrawBeforeDriveStore {
+    type Inner = RecordingStore;
+
+    fn inner(&self) -> &RecordingStore {
         self.inner.as_ref()
     }
 
@@ -1806,7 +1797,7 @@ impl lash_core::store::RuntimePersistenceDecorator for WithdrawBeforeDriveStore 
         request: &lash_core::store::AdmitRootRequest,
     ) -> Result<Option<lash_core::store::RootAdmission>, lash_core::StoreError> {
         if let lash_core::store::AdmittedHead::Input(input_id) = &request.head {
-            lash_core::store::IngressStore::cancel_pending_turn_input(
+            lash_core::store::TurnInputStore::cancel_pending_turn_input(
                 self.inner.as_ref(),
                 request.session_id(),
                 input_id.as_str(),
@@ -1828,7 +1819,7 @@ pub(super) async fn append_process_wake_to_queue(
         .await
         .expect("append wake");
     let wake = appended.wake_delivery.expect("wake delivery");
-    lash_core::store::IngressStore::enqueue_queued_work(
+    lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::process_wake_batch_draft(wake.clone()),
     )
@@ -1879,7 +1870,7 @@ pub(super) async fn enqueue_turn_input_for_checkpoint(
         input,
     );
     draft.source_key = source_key;
-    lash_core::store::IngressStore::enqueue_pending_turn_input(store, draft)
+    lash_core::store::TurnInputStore::enqueue_pending_turn_input(store, draft)
         .await
         .expect("enqueue turn input")
 }
@@ -1889,7 +1880,7 @@ pub(super) async fn enqueue_idle_turn_input(
     session_id: &SessionId,
     text: &str,
 ) -> lash_core::PendingTurnInput {
-    lash_core::store::IngressStore::enqueue_pending_turn_input(
+    lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store,
         lash_core::PendingTurnInputDraft::new(
             session_id.to_string(),
@@ -1906,7 +1897,7 @@ pub(super) async fn enqueue_session_command(
     session_id: &SessionId,
     reason: &str,
 ) -> lash_core::testing::runtime_internals::QueuedWorkBatch {
-    lash_core::store::IngressStore::enqueue_queued_work(
+    lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
             session_id.to_string(),
@@ -1925,7 +1916,7 @@ pub(super) async fn enqueue_config_patch_command(
     session_id: &SessionId,
     patch: lash_core::runtime::ApplyConfigPatch,
 ) -> lash_core::testing::runtime_internals::QueuedWorkBatch {
-    lash_core::store::IngressStore::enqueue_queued_work(
+    lash_core::store::QueuedWorkStore::enqueue_queued_work(
         store,
         lash_core::testing::runtime_internals::QueuedWorkBatchDraft::new(
             session_id.to_string(),

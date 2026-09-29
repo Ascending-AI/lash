@@ -277,7 +277,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         Arc::clone(&plugins),
-        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store.clone(), "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -292,7 +292,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     )
     .await
     .expect("runtime");
-    let realized_meta = store
+    let realized_meta = session_view(store.clone(), "root")
         .load_session_meta()
         .await
         .expect("load realized metadata")
@@ -326,13 +326,10 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         .expect("turn");
     handler.close().await.expect("close the turn's handler");
 
-    let read_model = lash_core::store::SessionCommitStore::load_session(store.as_ref())
+    let read_model = durable_window(store.clone(), "root")
         .await
-        .expect("load session")
-        .expect("session head")
-        .graph
-        .read_model(None)
-        .unwrap();
+        .window
+        .read_model();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].role, MessageRole::User);
@@ -347,10 +344,18 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
     let policy = standard_test_policy();
-    store
-        .admit_and_bind_session(&lash_core::SessionBinding::root("preopened-session"))
-        .await
-        .expect("preopen store binding");
+    lash_core::store::SessionCatalogStore::admit_session(
+        store.as_ref(),
+        &lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
+            pending_observer_intents: Vec::new(),
+            session_id: SessionId::from("preopened-session"),
+            relation: lash_core::SessionRelation::Root,
+            policy: policy.clone(),
+        },
+    )
+    .await
+    .expect("preopen store binding");
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("preopened-session"),
         policy: policy.clone(),
@@ -366,7 +371,7 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugin_session_with_tools(&SessionId::from("preopened-session"), Arc::new(EmptyTools)),
-        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store, "preopened-session"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -416,7 +421,7 @@ async fn park_returns_error_when_final_commit_fails() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store.clone(), "park-session"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -469,7 +474,7 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -616,7 +621,7 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -743,7 +748,7 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        Arc::clone(&store) as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store.clone(), "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -817,7 +822,7 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store.clone(), session_id),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -928,7 +933,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         Arc::clone(&plugins),
-        store.clone() as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(store.clone(), "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -967,18 +972,15 @@ async fn completed_turns_are_persisted_in_session_graph() {
         .expect("turn");
     handler.close().await.expect("close the turn's handler");
 
-    let read = lash_core::store::SessionCommitStore::load_session(store.as_ref())
-        .await
-        .expect("load session")
-        .expect("session read");
-    let graph = read.graph;
-    let read_model = graph.read_model(None).unwrap();
+    let read = durable_window(store.clone(), "root").await;
+    let graph = read.window;
+    let read_model = graph.read_model();
     let messages = read_model.messages.as_slice();
     assert_eq!(messages.len(), 2);
     assert_eq!(messages[0].parts[0].content(), "where did this go?");
     assert_eq!(messages[1].parts[0].content(), "Stored answer");
     let _checkpoint = read.checkpoint.expect("checkpoint");
-    let ledger = read.token_ledger;
+    let ledger = read.usage.rows;
     assert_eq!(ledger.len(), 1);
     assert_eq!(ledger[0].source, "turn");
     assert_eq!(ledger[0].model, standard_test_policy().model.id);

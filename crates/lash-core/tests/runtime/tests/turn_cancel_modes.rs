@@ -138,11 +138,14 @@ async fn native_harness(
     let backend = double.lash_backend();
     let config = test_runtime_host_config(&backend);
     let driver_store = double_unbound_store(double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "root",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     let driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&config.control.effect_host),
         "root",
@@ -501,10 +504,10 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
             let driver = lash_core::facade_support::TurnWorkDriver::for_session(
                 Arc::clone(&runtime.host.core.control.effect_host),
                 session_id.clone(),
-                Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+                Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
             );
             let turn_id = format!("matrix-{mode:?}-{disposition:?}").to_ascii_lowercase();
-            let undelivered = lash_core::store::IngressStore::enqueue_pending_turn_input(
+            let undelivered = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
                 store.as_ref(),
                 lash_core::PendingTurnInputDraft::new(
                     &session_id,
@@ -561,7 +564,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                 vec![(undelivered.input_id.clone(), disposition)],
                 "{mode:?}/{disposition:?}: the disposition applies to the undelivered active-turn input"
             );
-            let pending: Vec<_> = lash_core::store::IngressStore::list_pending_turn_inputs(
+            let pending: Vec<_> = lash_core::store::TurnInputStore::list_pending_turn_inputs(
                 store.as_ref(),
                 &session_id,
             )
@@ -599,7 +602,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             Arc::new(AtomicBool::new(true)),
         );
         let store = double_unbound_recording_store(&double).await;
-        let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+        let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
         let config = test_runtime_host_config(&backend);
         let mut runtime = TestRuntime::new(&backend, transport)
             .plugins(Vec::new())
@@ -614,7 +617,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         let driver = lash_core::facade_support::TurnWorkDriver::for_session(
             Arc::clone(&runtime.host.core.control.effect_host),
             session_id.clone(),
-            Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+            Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
         );
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
         let turn = lash_core::task::spawn({
@@ -676,7 +679,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
             );
         }
         let pending: Vec<_> =
-            lash_core::store::IngressStore::list_pending_turn_inputs(store.as_ref(), &session_id)
+            lash_core::store::TurnInputStore::list_pending_turn_inputs(store.as_ref(), &session_id)
                 .await
                 .expect("pending inputs")
                 .into_iter()
@@ -778,11 +781,14 @@ async fn sleeping_retry_harness(
     let host_clock: Arc<dyn lash_core::Clock> = double.test_clock();
     let config = test_runtime_host_config(&backend).with_clock(host_clock);
     let driver_store = double_unbound_store(double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "root",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     let driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&config.control.effect_host),
         "root",

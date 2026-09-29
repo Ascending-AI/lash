@@ -474,7 +474,7 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
         })
         .build();
     let store = unbound_recording_store(&backend).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
@@ -623,19 +623,22 @@ pub(super) async fn retryable_mid_stream_failure_preserves_durable_charge_safety
     }
 
     drop(runtime);
-    let reopened = lash_core::store::load_persisted_session_read_view(store.as_ref())
+    let session = session_view(store.clone(), "root");
+    let reopened = lash_core::store::load_session_read_view(&session)
         .await
         .expect("reopen the failed turn's session")
         .expect("failed turn left a durable session");
+    let evidence = session
+        .load_failure_evidence_page(None, std::num::NonZeroU32::new(10).expect("a nonzero page"))
+        .await
+        .expect("page the durable failure evidence");
+    assert!(evidence.next.is_none());
     assert_eq!(
-        reopened.turn_failure_settlements().len(),
+        evidence.settlements.len(),
         1,
         "mid-stream failure evidence must survive runtime teardown and reopen"
     );
-    assert_eq!(
-        reopened.turn_failure_settlements()[0].evidence,
-        assembled.failure_evidence
-    );
+    assert_eq!(evidence.settlements[0].evidence, assembled.failure_evidence);
     assert!(
         reopened
             .messages()
@@ -679,7 +682,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::new(EmptyTools),
         single_answer_provider("journaled answer"),
         journal_replay_host(&backend, Arc::clone(&shared)),
-        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
     ))
     .await;
     let handler = double
@@ -716,7 +719,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         journal_replay_host(&backend, Arc::clone(&shared)),
-        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
     ))
     .await;
     let handler = double
@@ -747,7 +750,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         .expect("the replayed direct turn exposes its journaled acceptance");
     assert_ne!(acceptance.input_id, late_input_id);
 
-    let after_replacement = lash_core::store::IngressStore::list_turn_input_applications(
+    let after_replacement = lash_core::store::TurnInputStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -768,7 +771,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         Arc::new(EmptyTools),
         single_answer_provider("answer for the second tab"),
         journal_replay_host(&backend, Arc::clone(&shared)),
-        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
     ))
     .await;
     let handler = double
@@ -797,7 +800,7 @@ pub(super) async fn a_next_turn_input_admitted_after_the_acceptance_waits_for_th
         "the late input must be claimable by the next turn, not stranded"
     );
 
-    let settled = lash_core::store::IngressStore::list_turn_input_applications(
+    let settled = lash_core::store::TurnInputStore::list_turn_input_applications(
         store.as_ref(),
         &SessionId::from("root"),
     )

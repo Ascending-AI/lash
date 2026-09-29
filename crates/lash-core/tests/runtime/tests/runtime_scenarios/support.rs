@@ -5,10 +5,10 @@ pub(crate) use std::collections::HashMap;
 
 pub(crate) use helpers::RecordingStore;
 pub(crate) use lash_core::store::{
-    AdmittedHead, CheckpointAdmission, DriveFence, IngressStore, RootAdmission, RootStore,
-    SessionCommitStore,
+    AdmittedHead, CheckpointAdmission, DriveFence, QueuedWorkStore, RootAdmission, RootStore,
+    SessionCommitStore, TurnInputStore,
 };
-pub(crate) use lash_core::testing::RuntimePersistenceTestDriveExt;
+pub(crate) use lash_core::testing::RuntimeStoreTestDriveExt;
 pub(crate) use lash_core::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputDraft, RuntimeCommit, StoreError,
     TurnInput, TurnInputCheckpointBoundary, TurnInputIngress, TurnInputState,
@@ -201,8 +201,14 @@ impl RuntimeScenarioContext {
     }
 
     async fn execute(&mut self, phase: RuntimeScenarioPhase) {
-        self.store
-            .admit_and_bind_session(&lash_core::SessionBinding::root(&self.session_id))
+        self.store()
+            .admit_session(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
+                pending_observer_intents: Vec::new(),
+                session_id: self.session_id.clone(),
+                relation: lash_core::SessionRelation::Root,
+                policy: self.state.policy.clone(),
+            })
             .await
             .expect("bind runtime scenario session");
         match phase {
@@ -221,7 +227,9 @@ impl RuntimeScenarioContext {
         }
     }
 
-    fn store(&self) -> &RecordingStore {
+    /// The scenario's store as a runtime store, so every call resolves to
+    /// its segment trait rather than the recording decorator's forwarder.
+    fn store(&self) -> &dyn lash_core::RuntimeStore {
         self.store.as_ref()
     }
 
@@ -720,7 +728,7 @@ pub(crate) fn pending_input_text(input: &PendingTurnInput) -> Option<&str> {
 
 async fn assert_pending_turn_inputs(
     scenario_name: &str,
-    store: &RecordingStore,
+    store: &dyn lash_core::RuntimeStore,
     session_id: &SessionId,
     enqueued_turn_inputs: &HashMap<&'static str, PendingTurnInput>,
     expectations: &[RuntimePendingTurnInputExpectation],

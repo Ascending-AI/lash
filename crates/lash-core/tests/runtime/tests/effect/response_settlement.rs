@@ -187,13 +187,16 @@ async fn user_stop_mid_cell_settles_cancelled_with_recorded_evidence() {
     let executor = Arc::new(SettlementExecutor::new(false));
     let controller = RecordingEffectController::default().with_local_code_execution();
     let host = host_with_effect_recorder(&backend, controller.clone());
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+    let driver_store: Arc<dyn lash_core::RuntimeStore> =
         double_unbound_recording_store(&double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "root",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&host.core.control.effect_host),
         "root",
@@ -262,13 +265,16 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
         .with_local_code_execution()
         .with_failing_exec_handoff_once();
     let host = host_with_effect_recorder(&backend, controller.clone());
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+    let driver_store: Arc<dyn lash_core::RuntimeStore> =
         double_unbound_recording_store(&double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "root",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&host.core.control.effect_host),
         "root",

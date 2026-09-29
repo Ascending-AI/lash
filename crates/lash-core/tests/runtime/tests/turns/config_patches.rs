@@ -7,8 +7,10 @@ struct RefuseCommandEnqueue {
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for RefuseCommandEnqueue {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+impl lash_core::store::RuntimeStoreDecorator for RefuseCommandEnqueue {
+    type Inner = dyn lash_core::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -27,7 +29,7 @@ impl lash_core::store::RuntimePersistenceDecorator for RefuseCommandEnqueue {
 async fn command_enqueue_preserves_typed_session_state_version_refusal() {
     let backend = memory_store_backend().await;
     let inner = recording_unbound_store_on(&backend).await;
-    let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(RefuseCommandEnqueue { inner });
+    let store: Arc<dyn lash_core::RuntimeStore> = Arc::new(RefuseCommandEnqueue { inner });
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(EmptyTools),
@@ -113,10 +115,13 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
         "N config commands must share exactly one head commit"
     );
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("list settled config commands")
-            .is_empty(),
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list settled config commands")
+        .is_empty(),
         "every independently accepted command must settle its own batch"
     );
     assert_eq!(runtime.session_policy().model.id, "queued-model-c");
@@ -206,7 +211,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
     let double = kernel_double(SEED + 20, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let persisted_budget = lash_core::TurnBudget::bounded(7);
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![turn_budget_config_mutator(persisted_budget)],
@@ -242,11 +247,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
             .expect("park mutated session"),
     );
 
-    let reloaded_state =
-        lash_core::testing::runtime_internals::load_persisted_session_state(runtime_store.as_ref())
-            .await
-            .expect("load parked session")
-            .expect("parked session exists");
+    let reloaded_state = durable_state(runtime_store.clone(), "root").await;
     let plugin_host =
         lash_core::testing::test_plugin_host(vec![turn_budget_config_mutator(persisted_budget)]);
     let plugins = match reloaded_state.plugin_state() {
@@ -263,7 +264,7 @@ pub(super) async fn plugin_turn_budget_mutation_survives_park_and_reload() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        runtime_store,
+        session_view(runtime_store, "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );

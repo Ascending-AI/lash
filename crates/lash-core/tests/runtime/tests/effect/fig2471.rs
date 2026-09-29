@@ -105,13 +105,16 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
     config = config.with_effect_host(Arc::new(DefaultBindingHost(backend.effect_host())));
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+    let driver_store: Arc<dyn lash_core::RuntimeStore> =
         double_unbound_recording_store(&double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "root",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     let driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&config.control.effect_host),
         "root",
@@ -190,13 +193,16 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         !matches!(result, Ok(Err(ref error)) if error.code == lash_core::RuntimeErrorCode::AwaitEventUnknownOrRevoked),
         "host rejected active gate: {result:?}"
     );
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
+    let driver_store: Arc<dyn lash_core::RuntimeStore> =
         double_unbound_recording_store(&double).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("active-session"),
+    lash_core::store::SessionCatalogStore::admit_session(
+        driver_store.as_ref(),
+        &lash_core::testing::store_fixtures::root_session_request(&lash_core::SessionId::from(
+            "active-session",
+        )),
     )
-    .await;
+    .await
+    .expect("admit the driver's session");
     lash_core::facade_support::TurnWorkDriver::for_session(
         host.clone(),
         "active-session",

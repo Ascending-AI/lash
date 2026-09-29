@@ -1,5 +1,5 @@
 use super::*;
-use lash_core::store::{IngressStore as _, RuntimePersistenceDecorator};
+use lash_core::store::{QueuedWorkStore as _, RuntimeStoreDecorator, TurnInputStore as _};
 use lash_core::testing::TestTurnDrive as _;
 
 const SEED: u64 = 0x5_f460;
@@ -23,8 +23,10 @@ impl FailCancelClosureAuthorizationStore {
 }
 
 #[async_trait::async_trait]
-impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+impl RuntimeStoreDecorator for FailCancelClosureAuthorizationStore {
+    type Inner = dyn lash_core::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -42,7 +44,7 @@ impl RuntimePersistenceDecorator for FailCancelClosureAuthorizationStore {
                 message: "injected finish-time cancellation authorization failure".to_string(),
             });
         }
-        lash_core::store::IngressStore::authorize_turn_cancel_closure(
+        lash_core::store::TurnInputStore::authorize_turn_cancel_closure(
             self.inner.as_ref(),
             lease,
             authorization,
@@ -62,7 +64,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let store = Arc::new(FailCancelClosureAuthorizationStore::new(Arc::clone(
         &inner_store,
     )));
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
     let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
     let captured_provider_started_tx = Arc::clone(&provider_started_tx);
@@ -89,7 +91,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&runtime.host.core.control.effect_host),
         SESSION_ID,
-        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
     );
     let effect_loop_ended = Arc::new(AtomicBool::new(false));
     let release_effect_loop = Arc::new(AtomicBool::new(false));
@@ -128,7 +130,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     provider_started_rx
         .await
         .expect("provider should start after lease acquisition");
-    let undelivered = lash_core::store::IngressStore::enqueue_pending_turn_input(
+    let undelivered = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         inner_store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             SESSION_ID,
@@ -198,7 +200,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     // Between the refusal and the root's end nothing moves: the undelivered
     // input is still addressed to the turn that is over, the owner's own
     // input stays bound to the root, and the Drop request records no outcome.
-    let pending = lash_core::IngressStore::list_pending_turn_inputs(
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
         inner_store.as_ref(),
         &lash_core::SessionId::from(SESSION_ID),
     )
@@ -233,7 +235,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         "the owner's input stays bound to its root until the root ends"
     );
     let record =
-        lash_core::store::IngressStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+        lash_core::store::TurnInputStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
             .await
             .expect("read durable cancellation record")
             .expect("Drop request remains recorded");
@@ -245,7 +247,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     // The engine's lost-run detector ends the root; its terminal write
     // releases the bound rows and applies the request's Drop to the host
     // input addressed to the dead turn (FIG-3927 §2.4, §2.6).
-    lash_core::SessionStoreFactory::end_lost_root(
+    lash_core::DeploymentStore::end_lost_root(
         lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
         &lash_core::engine::RootRef {
             session: SessionId::from(SESSION_ID),
@@ -257,7 +259,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
     .expect("end the lost root")
     .expect("the root had no terminal");
 
-    let pending = lash_core::IngressStore::list_pending_turn_inputs(
+    let pending = lash_core::TurnInputStore::list_pending_turn_inputs(
         inner_store.as_ref(),
         &lash_core::SessionId::from(SESSION_ID),
     )
@@ -270,7 +272,7 @@ async fn drop_request_survives_owner_failure_before_finish_and_prevents_redelive
         "Drop evidence must keep the undelivered input out of every later admission"
     );
     let record =
-        lash_core::store::IngressStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
+        lash_core::store::TurnInputStore::turn_cancel_request(inner_store.as_ref(), &turn_address)
             .await
             .expect("read durable cancellation record")
             .expect("Drop request remains recorded");

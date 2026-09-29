@@ -33,19 +33,22 @@ async fn durable_turn_commit_rejects_token_usage_overflow() {
         Arc::new(EmptyTools),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     runtime.edit_resident_state_for_test(|state| {
-        state.token_ledger.push(lash_core::TokenLedgerEntry {
-            source: "turn".to_string(),
-            model: "mock-model".to_string(),
-            usage: lash_core::TokenUsage {
-                input_tokens: 1,
-                ..lash_core::TokenUsage::default()
-            },
-            usage_disposition: Default::default(),
-        });
+        state
+            .usage
+            .fold_checked(&lash_core::TokenLedgerEntry {
+                source: "turn".to_string(),
+                model: "mock-model".to_string(),
+                usage: lash_core::TokenUsage {
+                    input_tokens: 1,
+                    ..lash_core::TokenUsage::default()
+                },
+                usage_disposition: Default::default(),
+            })
+            .expect("fold the resident usage");
     });
     let handler = double
         .open_handler(AdmittedScope::turn(
@@ -140,7 +143,7 @@ async fn multi_call_turn_rejects_cumulative_usage_overflow_before_commit() {
         Arc::new(EchoTool),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let handler = double
@@ -943,28 +946,35 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
     let backend = double.lash_backend();
     struct BrokenRead {
         inner: Arc<RecordingStore>,
-        read: Mutex<Option<lash_core::testing::runtime_internals::PersistedSessionRead>>,
+        read: Mutex<Option<lash_core::store::SessionWindowRead>>,
         loads: std::sync::atomic::AtomicUsize,
     }
     #[async_trait::async_trait]
-    impl lash_core::store::RuntimePersistenceDecorator for BrokenRead {
-        fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+    impl lash_core::store::RuntimeStoreDecorator for BrokenRead {
+        type Inner = dyn lash_core::RuntimeStore;
+
+        fn inner(&self) -> &Self::Inner {
             self.inner.as_ref()
         }
-        async fn load_session(
+        async fn load_session_window(
             &self,
-        ) -> Result<
-            Option<lash_core::testing::runtime_internals::PersistedSessionRead>,
-            lash_core::StoreError,
-        > {
+            session_id: &SessionId,
+            selector: lash_core::store::WindowSelector,
+        ) -> Result<Option<lash_core::store::SessionWindowRead>, lash_core::StoreError> {
             if let Some(read) = self.read.lock_recover().clone() {
                 self.loads.fetch_add(1, Ordering::SeqCst);
                 return Ok(Some(read));
             }
-            lash_core::SessionCommitStore::load_session(self.inner.as_ref()).await
+            lash_core::store::SessionHistoryStore::load_session_window(
+                self.inner.as_ref(),
+                session_id,
+                selector,
+            )
+            .await
         }
         async fn load_session_head_meta(
             &self,
+            session_id: &SessionId,
         ) -> Result<Option<lash_core::store::SessionHeadMeta>, lash_core::StoreError> {
             if let Some(read) = self.read.lock_recover().as_ref() {
                 return Ok(Some(lash_core::store::SessionHeadMeta::assemble(
@@ -977,10 +987,11 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
                     },
                     read.head_revision,
                     read.checkpoint_ref.clone(),
-                    read.graph.leaf_node_id.clone(),
+                    read.window.leaf_node_id.clone(),
                 )?));
             }
-            lash_core::SessionCommitStore::load_session_head_meta(self.inner.as_ref()).await
+            lash_core::SessionCommitStore::load_session_head_meta(self.inner.as_ref(), session_id)
+                .await
         }
     }
     let store = Arc::new(BrokenRead {
@@ -1018,19 +1029,49 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
     let config = lash_core::RuntimeCommit::persisted_state_for_test(&replacement, &[]).config;
     let mut checkpoint = lash_core::HydratedSessionCheckpoint::default();
     checkpoint.turn_state.turn_index = usize::MAX;
-    *store.read.lock_recover() = Some(
-        lash_core::testing::runtime_internals::PersistedSessionRead {
-            session_id: replacement.session_id.clone(),
-            head_revision: runtime.state().head_revision + 1,
-            config,
-            current_frame_node_id: replacement.current_frame_node_id.clone(),
-            pending_follow_on: None,
-            graph: replacement.session_graph.clone(),
-            checkpoint_ref: Some("new-checkpoint".to_string().into()),
-            checkpoint: Some(checkpoint),
-            token_ledger: Vec::new(),
-            turn_failure_settlements: Vec::new(),
+    // The durable read a store answers for the switched head: the window
+    // of the new frame, anchored above the old one.
+    let new_frame = replacement
+        .current_frame_node_id
+        .clone()
+        .expect("the replacement has a current frame");
+    let base = replacement
+        .session_graph
+        .nodes
+        .iter()
+        .position(|node| node.node_id.as_str() == new_frame.as_str())
+        .expect("the new frame's FrameOpen is resident");
+    let window_nodes = replacement.session_graph.nodes[base..]
+        .iter()
+        .map(|node| node.as_ref().clone())
+        .collect::<Vec<_>>();
+    let window = lash_core::SessionGraph::from_window(
+        window_nodes,
+        replacement
+            .session_graph
+            .leaf_node_id
+            .clone()
+            .expect("the replacement has a leaf"),
+        lash_core::session_graph::WindowAnchor {
+            frame_node_id: new_frame,
+            generation: base as u64,
+            external_parent: replacement.session_graph.nodes[base].parent_node_id.clone(),
+            previous_frame_node_id: old_frame.clone(),
         },
+    )
+    .expect("the new frame's window is well anchored");
+    *store.read.lock_recover() = Some(
+        lash_core::store::SessionWindowRead::new(
+            replacement.session_id.clone(),
+            runtime.state().head_revision + 1,
+            config,
+            None,
+            window,
+            Some("new-checkpoint".to_string().into()),
+            Some(checkpoint),
+            Default::default(),
+        )
+        .expect("a well-formed window read"),
     );
     let old_head_revision = runtime.state().head_revision;
     // A refused adoption leaves the resident session whole at its old head,
@@ -1076,8 +1117,10 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         armed: AtomicBool,
     }
     #[async_trait::async_trait]
-    impl lash_core::store::RuntimePersistenceDecorator for LostCommitReplyStore {
-        fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+    impl lash_core::store::RuntimeStoreDecorator for LostCommitReplyStore {
+        type Inner = dyn lash_core::RuntimeStore;
+
+        fn inner(&self) -> &Self::Inner {
             self.inner.as_ref()
         }
         async fn commit_runtime_state(
@@ -1124,7 +1167,7 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         Arc::new(EmptyTools),
         mock_provider(vec![usage_call(12, 4), usage_call(5, 2)]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let handler = double
@@ -1145,15 +1188,15 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
     assert_eq!(error.code, lash_core::RuntimeErrorCode::StoreCommitFailed);
 
     // The commit landed: the durable journal already holds the turn's usage.
-    let durable = lash_core::SessionCommitStore::load_session(inner_store.as_ref())
+    let durable = session_view(inner_store.clone(), "root")
+        .load_usage_totals()
         .await
-        .expect("load the durable session")
-        .expect("the session has a committed head")
-        .token_ledger;
+        .expect("load the durable usage");
     assert_eq!(
         durable
+            .rows
             .iter()
-            .map(|entry| entry.usage.input_tokens)
+            .map(|row| row.usage.input_tokens)
             .sum::<i64>(),
         12
     );
@@ -1202,31 +1245,33 @@ async fn ambiguous_turn_commit_does_not_double_count_live_usage() {
         // reply's usage is not folded in a second time.
         let resident_input = runtime
             .state()
-            .token_ledger
+            .usage
+            .rows
             .iter()
-            .map(|entry| entry.usage.input_tokens)
+            .map(|row| row.usage.input_tokens)
             .sum::<i64>();
         assert_eq!(resident_input, 17);
         let resident_output = runtime
             .state()
-            .token_ledger
+            .usage
+            .rows
             .iter()
-            .map(|entry| entry.usage.output_tokens)
+            .map(|row| row.usage.output_tokens)
             .sum::<i64>();
         assert_eq!(resident_output, 6);
     }
     let observation = handle.observe();
     assert_eq!(observation.usage_report.usage.usage.input_tokens, 17);
     assert_eq!(observation.usage_report.usage.usage.output_tokens, 6);
-    let durable = lash_core::SessionCommitStore::load_session(inner_store.as_ref())
+    let durable = session_view(inner_store.clone(), "root")
+        .load_usage_totals()
         .await
-        .expect("load the durable session")
-        .expect("the session has a committed head")
-        .token_ledger;
+        .expect("load the durable usage");
     assert_eq!(
         durable
+            .rows
             .iter()
-            .map(|entry| entry.usage.input_tokens)
+            .map(|row| row.usage.input_tokens)
             .sum::<i64>(),
         17
     );

@@ -76,14 +76,12 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
         })
         .build();
     // The SQLite store itself, so the test reads its raw usage journal.
-    let store = Arc::new(
-        double
-            .stores()
-            .open_store()
-            .await
-            .expect("open an unbound store"),
-    );
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let store = double
+        .stores()
+        .open_store()
+        .await
+        .expect("open an unbound store");
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
@@ -109,10 +107,18 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
     // The failed attempt's billed usage and the successful retry's usage are
     // two facts: the durable journal holds one delta each, and the report
     // sums both.
-    let deltas = store
-        .load_usage_deltas()
-        .await
-        .expect("load the durable usage journal");
+    let deltas = lash_core::store::SessionHistoryStore::load_usage_ledger_page(
+        store.as_ref(),
+        &SessionId::from("root"),
+        None,
+        std::num::NonZeroU32::new(100).expect("a nonzero page"),
+    )
+    .await
+    .expect("load the durable usage journal")
+    .rows
+    .into_iter()
+    .map(|row| row.entry)
+    .collect::<Vec<_>>();
     assert_eq!(
         deltas.len(),
         2,
@@ -187,14 +193,12 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
         })
         .build();
     // The SQLite store itself, so the test reads its raw usage journal.
-    let store = Arc::new(
-        double
-            .stores()
-            .open_store()
-            .await
-            .expect("open an unbound store"),
-    );
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let store = double
+        .stores()
+        .open_store()
+        .await
+        .expect("open an unbound store");
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .store(runtime_store)
         .without_process_registry()
@@ -227,10 +231,18 @@ pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
 
     // No response was ever counted into the turn's cumulative usage, so each
     // failed attempt's reported partial usage lands as its own delta.
-    let deltas = store
-        .load_usage_deltas()
-        .await
-        .expect("load the durable usage journal");
+    let deltas = lash_core::store::SessionHistoryStore::load_usage_ledger_page(
+        store.as_ref(),
+        &SessionId::from("root"),
+        None,
+        std::num::NonZeroU32::new(100).expect("a nonzero page"),
+    )
+    .await
+    .expect("load the durable usage journal")
+    .rows
+    .into_iter()
+    .map(|row| row.entry)
+    .collect::<Vec<_>>();
     assert_eq!(
         deltas.len(),
         2,

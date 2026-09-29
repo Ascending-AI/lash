@@ -41,8 +41,10 @@ struct OneHeldClaimStore {
 }
 
 #[async_trait::async_trait]
-impl lash_core::store::RuntimePersistenceDecorator for OneHeldClaimStore {
-    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+impl lash_core::store::RuntimeStoreDecorator for OneHeldClaimStore {
+    type Inner = dyn lash_core::RuntimeStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
     }
 
@@ -62,7 +64,7 @@ pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_claim() 
     let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let backend = double.lash_backend();
     let store = double_unbound_recording_store(&double).await;
-    let wrapped: Arc<dyn lash_core::RuntimePersistence> = Arc::new(OneHeldClaimStore {
+    let wrapped: Arc<dyn lash_core::RuntimeStore> = Arc::new(OneHeldClaimStore {
         inner: Arc::clone(&store),
         held_once: AtomicBool::new(false),
     });
@@ -361,7 +363,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         "durable wake events must not be bridged as injected plugin messages"
     );
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &sid("root"))
+        lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &sid("root"))
             .await
             .expect("queued work after commit")
             .is_empty()
@@ -444,7 +446,7 @@ pub(super) async fn plugin_command_reuses_caller_scope_on_lost_response_retry() 
             }),
         });
     let store = double_unbound_recording_store(&double).await;
-    let store_trait = store.clone() as Arc<dyn lash_core::RuntimePersistence>;
+    let store_trait = store.clone() as Arc<dyn lash_core::RuntimeStore>;
     let mut first = runtime_with_plugins_and_tools_and_host_and_store(
         vec![Arc::clone(&plugin)],
         Arc::new(EmptyTools),
@@ -602,17 +604,17 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
     assert_eq!(handle.session_id, "child-store");
     let stores = factory.stores();
     assert_eq!(stores.len(), 1);
-    let meta = lash_core::store::SessionCommitStore::load_session_meta(stores[0].as_ref())
-        .await
-        .expect("load session meta")
-        .expect("session meta");
+    let meta = lash_core::store::SessionCommitStore::load_session_meta(
+        stores[0].as_ref(),
+        &SessionId::from("child-store"),
+    )
+    .await
+    .expect("load session meta")
+    .expect("session meta");
     assert_eq!(meta.session_id, "child-store");
     assert_eq!(meta.parent_session_id(), Some("root"));
-    let read = lash_core::store::SessionCommitStore::load_session(stores[0].as_ref())
-        .await
-        .expect("load session")
-        .expect("session read");
-    let graph = read.graph;
+    let read = durable_window(stores[0].clone(), "child-store").await;
+    let graph = read.window;
     let child_frame_key = lash_core::FrameKey::from_caller_material("initial-frame")
         .expect("non-empty initial frame material");
     let child_frame_node_id =
@@ -640,7 +642,7 @@ pub(super) async fn session_manager_persists_child_sessions_in_separate_store() 
         1,
         "child history must not retain the parent frame root"
     );
-    let read_model = graph.read_model(None).unwrap();
+    let read_model = graph.read_model();
     assert!(
         read_model.messages.is_empty(),
         "an empty-start child initializes with no inherited messages"
@@ -745,7 +747,7 @@ pub(super) fn queued_work_payload_cannot_encode_persisted_turn_input() {
     // This exhaustive match is the type-level ingress proof: generic queued
     // work has no model-visible TurnInput representation. Persisted user input
     // therefore has to cross the dedicated PendingTurnInputDraft/
-    // IngressStore seam used by `LashRuntime::enqueue_turn_input`.
+    // TurnInputStore seam used by `LashRuntime::enqueue_turn_input`.
     fn work_class(
         payload: &lash_core::testing::runtime_internals::QueuedWorkPayload,
     ) -> lash_core::store::QueuedWorkClass {
@@ -1368,7 +1370,7 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
 
     assert_eq!(store.load_session_count(), full_loads_before);
     assert_eq!(store.load_session_head_meta_count(), head_reads_before);
-    let pending = lash_core::store::IngressStore::list_queued_work(store.as_ref(), &sid("root"))
+    let pending = lash_core::store::QueuedWorkStore::list_queued_work(store.as_ref(), &sid("root"))
         .await
         .expect("inspect deferred durable command");
     assert_eq!(pending.len(), 1);
@@ -1497,7 +1499,7 @@ pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeat
         "the first root's claim took both inputs, so a later drain has nothing to run"
     );
     assert_eq!(
-        lash_core::store::IngressStore::list_turn_input_applications(store.as_ref(), &session)
+        lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)
             .await
             .expect("read the applied inputs")
             .len(),

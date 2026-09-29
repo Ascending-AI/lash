@@ -40,7 +40,7 @@ async fn run_pinned_controller_turn(
         tools,
         mock_provider(Vec::new()),
         host_with_effect_recorder(&backend, recorder.clone()),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let sessions = RecordingSink::default();

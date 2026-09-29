@@ -49,12 +49,7 @@ impl RuntimeScenarioContext {
                 self.name
             );
         }
-        let read = self
-            .store()
-            .load_session()
-            .await
-            .expect("load runtime scenario session")
-            .expect("runtime scenario session read");
+        let read = durable_window(self.store.clone(), self.session_id.clone()).await;
         assert_eq!(read.session_id, self.session_id);
         if let Some(expected_turn_index) = phase.checkpoint_turn_index {
             assert_eq!(

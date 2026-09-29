@@ -120,7 +120,7 @@ async fn invocation_controller_owns_session_command_admission_with_a_native_host
         },
     )
     .await;
-    let lease = lash_core::testing::RuntimePersistenceTestDriveExt::seal_drive_epoch_for_test(
+    let lease = lash_core::testing::RuntimeStoreTestDriveExt::seal_drive_epoch_for_test(
         store.as_ref(),
         &SessionId::from(session_id),
         &lease_owner(session_id),

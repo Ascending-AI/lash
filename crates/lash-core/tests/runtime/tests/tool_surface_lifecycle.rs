@@ -286,12 +286,12 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("parked-session")),
-        Some(store.clone() as Arc<dyn lash_core::RuntimePersistence>),
+        Some(session_view(store.clone(), "parked-session")),
         owner.clone(),
     )
     .await
     .expect("persistent runtime");
-    let expected = store
+    let expected = session_view(store.clone(), "parked-session")
         .load_session_meta()
         .await
         .expect("load realized metadata")
@@ -366,7 +366,7 @@ async fn park_resume_restores_tool_and_subagent_authority() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store,
+        session_view(store, "authority-child"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -436,7 +436,7 @@ async fn park_resume_uses_broader_persisted_authority_over_narrower_live_authori
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store,
+        session_view(store, "persisted-broader"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -488,7 +488,7 @@ async fn tool_access_setter_changes_the_next_model_request_in_both_directions() 
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("mutable-authority-requests")),
-        Some(store),
+        Some(session_view(store, "mutable-authority-requests")),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -590,7 +590,10 @@ async fn tool_access_setter_changes_live_plugin_discovery_in_both_directions() {
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("mutable-authority-discovery")),
-        Some(double_unbound_recording_store(&double).await),
+        Some(session_view(
+            double_unbound_recording_store(&double).await,
+            "mutable-authority-discovery",
+        )),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -647,7 +650,7 @@ async fn updated_tool_access_survives_park_and_resume() {
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("updated-authority-resume")),
-        Some(store),
+        Some(session_view(store.clone(), "updated-authority-resume")),
         owner.clone(),
     )
     .await
@@ -683,7 +686,7 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("tool-access-no-op")),
-        Some(store.clone()),
+        Some(session_view(store.clone(), "tool-access-no-op")),
         lash_core::testing::runtime_lease_owner(),
     )
     .await
@@ -742,16 +745,18 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let session_id = "filter-session";
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
-    let target_store = factory
-        .create_store(&lash_core::SessionStoreCreateRequest {
+    let target_store = lash_core::runtime::admit_session_view(
+        &factory,
+        &lash_core::SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
             policy: standard_test_policy(),
-        })
-        .await
-        .expect("create filter target store");
+        },
+    )
+    .await
+    .expect("create filter target store");
     let core = test_host_config(&backend)
         .core
         .with_process_tool_visibility_filter(Arc::new(AllowNamedProcess {
@@ -992,7 +997,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     assert_eq!(report.enqueued, 1);
     assert_eq!(
         target_store
-            .list_queued_work(&SessionId::from(session_id))
+            .list_queued_work()
             .await
             .expect("read internally delivered wake")
             .len(),
@@ -1334,17 +1339,11 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         observer_events, 1,
         "session creation must use the standard replay-keyed observer-event path"
     );
-    let child_store = factory
-        .open_existing_store(&lash_core::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from("observer-child"),
-            relation: lash_core::SessionRelation::Root,
-            policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
-        })
-        .await
-        .expect("open child store")
-        .expect("child store exists");
+    let child_store =
+        lash_core::runtime::live_session_view(&factory, &SessionId::from("observer-child"))
+            .await
+            .expect("open child store")
+            .expect("child store exists");
     let child_meta = child_store
         .load_session_meta()
         .await
@@ -1444,14 +1443,14 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
     let plugin_host = dynamic_plugin_host(provider);
     let env = runtime_environment(&backend, plugin_host);
     let store = double_unbound_recording_store(&double).await;
-    let store_dyn: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let store_dyn: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let owner = lash_core::LeaseOwnerIdentity::opaque("surface-test-worker", "surface-test-boot");
 
     let mut runtime = LashRuntime::from_environment(
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("persisted-live-surface")),
-        Some(store_dyn),
+        Some(session_view(store_dyn, "persisted-live-surface")),
         owner.clone(),
     )
     .await
@@ -1517,11 +1516,7 @@ async fn cold_resume_discovers_curated_live_surface_and_persists_it_without_flap
         .expect("commit after live rebuild");
     handler.close().await.expect("close the scope's handler");
 
-    let persisted =
-        lash_core::testing::runtime_internals::load_persisted_session_state(store.as_ref())
-            .await
-            .expect("load committed state")
-            .expect("persisted session");
+    let persisted = durable_state(store.clone(), "persisted-live-surface").await;
     let persisted_tools = persisted
         .tool_state_snapshot()
         .expect("changed generation re-exported on next commit");
@@ -1857,7 +1852,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store.clone(),
+        session_view(store.clone(), "cold-hidden-child"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -1888,10 +1883,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     );
 
     surface.replace(vec![visible, discovered.clone(), hidden.clone()]);
-    let state = lash_core::testing::runtime_internals::load_persisted_session_state(store.as_ref())
-        .await
-        .expect("load hidden child state")
-        .expect("persisted hidden child");
+    let state = durable_state(store.clone(), "cold-hidden-child").await;
     let plugins = build_hidden_session(
         plugin_host.as_ref(),
         &SessionId::from("cold-hidden-child"),
@@ -1901,7 +1893,7 @@ async fn hidden_tool_stays_denied_across_cold_store_rebuild() {
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugins,
-        store,
+        session_view(store, "cold-hidden-child"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -1950,7 +1942,7 @@ async fn orphan_lifecycle_rebinds_by_id_and_supersedes_same_name_without_duplica
         &env,
         standard_test_policy(),
         root_state(&SessionId::from("orphan-lifecycle")),
-        Some(store),
+        Some(session_view(store, "orphan-lifecycle")),
         owner.clone(),
     )
     .await

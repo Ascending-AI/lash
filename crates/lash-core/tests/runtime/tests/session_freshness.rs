@@ -14,7 +14,7 @@ async fn freshness_runtime(
         Arc::new(EmptyTools),
         mock_provider(Vec::new()),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     (runtime, store)
@@ -82,7 +82,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
     let resident_policy_before_refusal = runtime.state().effective_policy().clone();
     let resident_protocol_options_before_refusal = runtime.state().protocol_turn_options.clone();
     let resident_frame_before_refusal = runtime.state().current_frame_node_id.clone();
-    let durable_head_before_refusal = store
+    let durable_head_before_refusal = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("load durable head before historical-frame refusal");
@@ -114,7 +114,7 @@ async fn historical_frame_switch_refuses_and_keeps_resident_config() {
         runtime.state().current_frame_node_id,
         resident_frame_before_refusal
     );
-    let durable_head_after_refusal = store
+    let durable_head_after_refusal = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("load durable head after historical-frame refusal");
@@ -444,7 +444,7 @@ async fn freshness_hydrates_when_leaf_changed() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     let frame_node_id = runtime.state().session_graph.nodes[0].node_id.clone();
-    let mut head = store
+    let mut head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read head")
@@ -471,7 +471,7 @@ async fn freshness_hydrates_when_only_checkpoint_ref_changed() {
     let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    let mut head = store
+    let mut head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read head")
@@ -554,7 +554,7 @@ async fn protocol_turn_options_settle_through_the_commanded_write() {
         &options,
         "resident state must publish the settled value"
     );
-    let head = store
+    let head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read durable head")
@@ -595,7 +595,7 @@ async fn protocol_turn_options_set_before_invalidation_reload_survive_via_the_he
         &options,
         "an invalidation reload must restore the settled options from the head"
     );
-    let head = store
+    let head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read durable head")
@@ -626,7 +626,7 @@ async fn protocol_turn_options_all_frames_setter_settles_durably() {
     .await;
 
     assert_eq!(runtime.protocol_turn_options(), &options);
-    let head = store
+    let head = session_view(store.clone(), "root")
         .load_session_head_meta()
         .await
         .expect("read durable head")
@@ -733,7 +733,7 @@ async fn successful_invalidation_reload_issues_no_extra_head_meta_probe() {
             }),
         }]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     Box::pin(append_history(&mut runtime, 2)).await;
@@ -792,7 +792,11 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
     let double = kernel_double(SEED + 16, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    let base = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt("seed"));
     let retry = runtime.state().clone();
     runtime
@@ -811,7 +815,11 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
         "newer-reopen-prompt",
     )
     .await;
-    let newer = store.load_session_head_meta().await.unwrap().unwrap();
+    let newer = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     runtime.edit_resident_state_for_test(|state| *state = retry);
     runtime
         .settle_reopen_seeded_config(&base.config)
@@ -819,7 +827,11 @@ async fn reopen_seed_delayed_retry_adopts_advanced_head() {
         .unwrap();
     assert_eq!(runtime.state().policy.prompt, reopen_prompt("newer"));
     assert_eq!(runtime.state().head_revision, newer.head_revision);
-    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    let after = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(after.head_revision, newer.head_revision);
     assert_eq!(after.config, newer.config);
 }
@@ -829,14 +841,22 @@ async fn reopen_seed_same_base_replay_is_idempotent() {
     let double = kernel_double(SEED + 17, lash_restate_test::ServerConfig::default()).await;
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
-    let base = store.load_session_head_meta().await.unwrap().unwrap();
+    let base = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt("seed"));
     let retry = runtime.state().clone();
     runtime
         .settle_reopen_seeded_config(&base.config)
         .await
         .unwrap();
-    let committed = store.load_session_head_meta().await.unwrap().unwrap();
+    let committed = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     runtime.edit_resident_state_for_test(|state| *state = retry);
     runtime
         .settle_reopen_seeded_config(&base.config)
@@ -844,7 +864,11 @@ async fn reopen_seed_same_base_replay_is_idempotent() {
         .unwrap();
     assert_eq!(runtime.state().policy.prompt, reopen_prompt("seed"));
     assert_eq!(runtime.state().head_revision, committed.head_revision);
-    let after = store.load_session_head_meta().await.unwrap().unwrap();
+    let after = session_view(store.clone(), "root")
+        .load_session_head_meta()
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(after.head_revision, committed.head_revision);
     assert_eq!(after.config, committed.config);
 }
@@ -855,13 +879,21 @@ async fn reopen_seed_alternating_seeds_advance_without_panicking() {
     let (mut runtime, store) = freshness_runtime(&double).await;
     Box::pin(append_history(&mut runtime, 2)).await;
     for label in ["a", "b", "a", "b"] {
-        let base = store.load_session_head_meta().await.unwrap().unwrap();
+        let base = session_view(store.clone(), "root")
+            .load_session_head_meta()
+            .await
+            .unwrap()
+            .unwrap();
         runtime.edit_resident_state_for_test(|state| state.policy.prompt = reopen_prompt(label));
         runtime
             .settle_reopen_seeded_config(&base.config)
             .await
             .unwrap();
-        let head = store.load_session_head_meta().await.unwrap().unwrap();
+        let head = session_view(store.clone(), "root")
+            .load_session_head_meta()
+            .await
+            .unwrap()
+            .unwrap();
         assert!(head.head_revision > base.head_revision);
         assert_eq!(head.config.prompt, Some(reopen_prompt(label)));
         assert_eq!(runtime.state().head_revision, head.head_revision);

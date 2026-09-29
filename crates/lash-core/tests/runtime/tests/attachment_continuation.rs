@@ -402,7 +402,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         })
         .build();
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, provider)
         .plugins(Vec::new())
         .attachment_acceptance(
@@ -441,7 +441,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             .map(|issue| (&issue.code, &issue.message))
             .collect::<Vec<_>>()
     );
-    let committed = runtime.read_view().expect("read view").messages().to_vec();
+    let committed = runtime.read_view().messages().to_vec();
     assert!(
         lash_sansio::messages_are_prompt_resume_safe(&committed),
         "an attachment-bearing tool value commits a resume-safe transcript"
@@ -450,7 +450,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
         Arc::clone(&runtime.host.core.control.effect_host),
         SESSION_ID,
-        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimeStore>,
     );
     let turn_id = "cancelled-turn";
     let persisted_state = runtime.export_persistence_state();
@@ -507,10 +507,11 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
         turn_two.outcome
     );
 
-    let reopened = lash_core::store::load_persisted_session_read_view(store.as_ref())
-        .await
-        .expect("reopen the cancelled session")
-        .expect("durable session");
+    let reopened =
+        lash_core::store::load_session_read_view(&session_view(store.clone(), SESSION_ID))
+            .await
+            .expect("reopen the cancelled session")
+            .expect("durable session");
     let parts: Vec<_> = reopened
         .messages()
         .iter()

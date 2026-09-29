@@ -65,7 +65,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
             }
         })
         .build();
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(TerminalControlTool {
@@ -110,7 +110,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         first_result.assistant_output.safe_text,
         "follow-on complete"
     );
-    let pending_after_follow = lash_core::store::IngressStore::list_pending_turn_inputs(
+    let pending_after_follow = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -168,7 +168,7 @@ pub(super) async fn fig1123_queued_frame_switch_finishes_follow_on_before_next_q
         "second queued complete"
     );
     assert!(
-        lash_core::store::IngressStore::list_pending_turn_inputs(
+        lash_core::store::TurnInputStore::list_pending_turn_inputs(
             store.as_ref(),
             &SessionId::from("root")
         )
@@ -215,7 +215,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
             })
         })
         .build();
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = TestRuntime::new(&backend, transport)
         .tools(Arc::new(TerminalControlTool {
             controls: vec![lash_core::ToolControl::SwitchAgentFrame {
@@ -256,7 +256,7 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         TurnOutcome::Stopped(TurnStop::Cancelled { .. })
     ));
     assert!(
-        lash_core::store::IngressStore::list_queued_work(
+        lash_core::store::QueuedWorkStore::list_queued_work(
             store.as_ref(),
             &SessionId::from(SESSION_ID)
         )
@@ -265,12 +265,15 @@ pub(super) async fn mid_chain_cancellation_commits_one_cancelled_terminal_and_se
         .is_empty()
     );
     assert!(
-        lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
-            .await
-            .expect("load the head")
-            .expect("head")
-            .pending_follow_on
-            .is_none(),
+        lash_core::store::SessionCommitStore::load_session_head_meta(
+            store.as_ref(),
+            &lash_core::SessionId::from("root")
+        )
+        .await
+        .expect("load the head")
+        .expect("head")
+        .pending_follow_on
+        .is_none(),
         "a cancelled follow-on is its own terminal and clears the fact"
     );
 }
@@ -298,7 +301,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         standard_runtime_with_transport_and_double_queue_store(&double, mock_provider(Vec::new()))
             .await;
     runtime.host.core.attachment_source_policy = Arc::new(DenyClaimedAttachments);
-    let inbound = lash_core::store::IngressStore::enqueue_pending_turn_input(
+    let inbound = lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             "root",
@@ -334,7 +337,7 @@ pub(super) async fn claimed_normalization_failure_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::InvalidInput)
     ));
-    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -374,7 +377,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
         }),
     });
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         vec![plugin],
         Arc::new(EmptyTools),
@@ -406,7 +409,7 @@ pub(super) async fn claimed_plugin_abort_commits_and_settles_input() {
         terminal.outcome,
         TurnOutcome::Stopped(TurnStop::PluginAbort)
     ));
-    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -425,7 +428,7 @@ pub(super) async fn stream_turn_tool_put_is_bound_to_the_turn_id() {
     let backend = double.lash_backend();
     const TURN_ID: &str = "attachment-owner-stream-turn";
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(AttachmentPutTool),
@@ -498,7 +501,7 @@ pub(super) async fn admitted_drive_reuses_graph_across_follow_on_and_rechecks_ne
         })
         .build();
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(TerminalControlTool {
@@ -626,7 +629,7 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
         })
         .collect();
     let store = double_unbound_recording_store(&double).await;
-    let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
+    let runtime_store: Arc<dyn lash_core::store::RuntimeStore> = store.clone();
     let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         Arc::new(TerminalControlTool { controls }),
@@ -670,12 +673,15 @@ pub(super) async fn frame_switch_limit_commits_terminal_error_and_settles_claim(
     );
     assert_eq!(call_index.load(Ordering::SeqCst), switch_count);
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("queue after bounded chain")
-            .is_empty()
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queue after bounded chain")
+        .is_empty()
     );
-    let inputs = lash_core::store::IngressStore::list_pending_turn_inputs(
+    let inputs = lash_core::store::TurnInputStore::list_pending_turn_inputs(
         store.as_ref(),
         &SessionId::from("root"),
     )
@@ -747,7 +753,7 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         Arc::new(TerminalControlTool { controls }),
         transport,
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     runtime.set_turn_phase_probe(Arc::new(FailCaptureAfterCommittedTurns {
@@ -782,18 +788,24 @@ pub(super) async fn frame_switch_limit_capture_abort_abandons_prompt_claim_befor
         committed.outcome,
         TurnOutcome::AgentFrameSwitch { .. }
     ));
-    let pending = lash_core::store::SessionCommitStore::load_session_head_meta(store.as_ref())
-        .await
-        .expect("load the head")
-        .expect("head")
-        .pending_follow_on
-        .expect("the failed follow-on remains owed");
+    let pending = lash_core::store::SessionCommitStore::load_session_head_meta(
+        store.as_ref(),
+        &lash_core::SessionId::from("root"),
+    )
+    .await
+    .expect("load the head")
+    .expect("head")
+    .pending_follow_on
+    .expect("the failed follow-on remains owed");
     assert_eq!(pending.physical_index(), switch_count as u64);
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"),)
-            .await
-            .expect("list queued work")
-            .is_empty(),
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root"),
+        )
+        .await
+        .expect("list queued work")
+        .is_empty(),
         "a frame handoff is never a queue row"
     );
     assert_eq!(
@@ -853,10 +865,13 @@ pub(super) async fn leading_session_command_drains_before_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "queued answer");
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("list queue after command plus turn")
-            .is_empty(),
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list queue after command plus turn")
+        .is_empty(),
         "command `{}` and turn input `{}` should both be completed",
         command.batch_id,
         turn.input_id
@@ -980,10 +995,13 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("list queue after first turn")
-            .is_empty(),
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list queue after first turn")
+        .is_empty(),
         "later command `{}` must drain before turn `{}` runs",
         command.batch_id,
         turn.input_id
@@ -1006,10 +1024,13 @@ pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
     handler.close().await.expect("close the scope's handler");
     assert!(command_only.is_none());
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("list queue after later command")
-            .is_empty()
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("list queue after later command")
+        .is_empty()
     );
 }
 
@@ -1202,10 +1223,13 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         "empty wake turns must not synthesize blank user history"
     );
     assert!(
-        lash_core::store::IngressStore::list_queued_work(store.as_ref(), &SessionId::from("root"))
-            .await
-            .expect("queued work after commit")
-            .is_empty()
+        lash_core::store::QueuedWorkStore::list_queued_work(
+            store.as_ref(),
+            &SessionId::from("root")
+        )
+        .await
+        .expect("queued work after commit")
+        .is_empty()
     );
 }
 

@@ -127,32 +127,24 @@ pub(crate) async fn memory_store_backend() -> lash_core::Backend {
     lash_conformance::recording_backend_over(memory_store_set().await)
 }
 
-/// A fresh, unbound session store on `backend`'s catalog: the first session
-/// admitted binds it. `backend` is one [`memory_backend`] opened.
+/// `backend`'s session catalog as a runtime store: every session a test
+/// admits on it is a [`lash_core::store::SessionStore`] view of this one
+/// store. `backend` is one [`memory_backend`] opened.
 pub(crate) async fn unbound_store(
     backend: &lash_core::Backend,
-) -> std::sync::Arc<dyn lash_core::RuntimePersistence> {
-    backend
-        .session_store_factory()
-        .open_unbound_store()
-        .await
-        .expect("open an unbound store")
+) -> std::sync::Arc<dyn lash_core::RuntimeStore> {
+    backend.session_store_factory()
 }
 
-/// The twin of [`unbound_store`] on the Restate server double: a fresh,
-/// unbound session store on the double's engine store set, storage only,
-/// whose first admitted session binds it. The open reads through
+/// The twin of [`unbound_store`] on the Restate server double: the catalog
+/// of the double's engine store set, storage only. It reads through
 /// [`lash_restate_test::RestateTestBackend::engine_stores`] — the decorated
 /// set — so a `backend_with` layer on its session-store factory applies
 /// here too.
 pub(crate) async fn double_unbound_store(
     double: &lash_restate_test::RestateTestBackend,
-) -> std::sync::Arc<dyn lash_core::RuntimePersistence> {
-    lash_core::SessionStoreFactory::open_unbound_store(
-        lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
-    )
-    .await
-    .expect("open an unbound store on the double's engine store set")
+) -> std::sync::Arc<dyn lash_core::RuntimeStore> {
+    lash_core::StoreSet::session_store_factory(double.engine_stores().as_ref())
 }
 
 /// [`double_unbound_store`] under a recording decorator: the twin of
@@ -185,11 +177,7 @@ pub(crate) async fn recording_unbound_store_on(
     backend: &lash_core::Backend,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
-        lash_core::SessionStoreFactory::open_unbound_store(
-            backend.session_store_factory().as_ref(),
-        )
-        .await
-        .expect("open an unbound store on the backend's catalog"),
+        backend.session_store_factory(),
     ))
 }
 
@@ -215,7 +203,7 @@ pub(crate) async fn unbound_recording_store_with_clock(
         .expect("reopen the memory backend on the test clock");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(clocked.clone()));
     std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
-        std::sync::Arc::new(clocked.open_store().await.expect("open an unbound store")),
+        clocked.open_store().await.expect("open an unbound store"),
     ))
 }
 
@@ -234,4 +222,42 @@ pub(crate) async fn reopened_backend(backend: &lash_core::Backend) -> lash_core:
     let reopened = sqlite.reopen().await.expect("reopen the memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(reopened.clone()));
     lash_conformance::recording_backend_over(std::sync::Arc::new(reopened))
+}
+
+/// The view of `session_id` on `store`, a catalog store the test admitted
+/// the session on.
+pub(crate) fn session_view(
+    store: std::sync::Arc<dyn lash_core::RuntimeStore>,
+    session_id: impl Into<lash_core::SessionId>,
+) -> lash_core::store::SessionStore {
+    lash_core::store::SessionStore::new(store, session_id.into()).expect("a valid session id")
+}
+
+/// The current window of `session_id` on `store`: its committed head, which
+/// exists.
+pub(crate) async fn durable_window(
+    store: std::sync::Arc<dyn lash_core::RuntimeStore>,
+    session_id: impl Into<lash_core::SessionId>,
+) -> lash_core::store::SessionWindowRead {
+    session_view(store, session_id)
+        .load_session_window(lash_core::store::WindowSelector::Current)
+        .await
+        .expect("load the session window")
+        .expect("the session has a committed head")
+}
+
+/// The durable state of `session_id` on `store` at its current window, as a
+/// reopen adopts it.
+pub(crate) async fn durable_state(
+    store: std::sync::Arc<dyn lash_core::RuntimeStore>,
+    session_id: impl Into<lash_core::SessionId>,
+) -> lash_core::RuntimeSessionState {
+    lash_core::store::load_session_window_state(
+        &session_view(store, session_id),
+        lash_core::store::WindowSelector::Current,
+    )
+    .await
+    .expect("load the durable session state")
+    .expect("the session has a committed head")
+    .state
 }

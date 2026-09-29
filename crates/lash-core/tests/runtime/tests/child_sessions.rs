@@ -353,7 +353,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
     let runtime_host = host;
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
         plugin_session_with_tools(&SessionId::from("root"), Arc::new(AttachmentWritingTool)),
-        Arc::clone(&root_store) as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(root_store.clone(), "root"),
         std::sync::Arc::clone(&runtime_host.core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.core.durability.process_env_store),
     );
@@ -493,7 +493,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
             &SessionId::from("root"),
             FirstTurnProcessTool::orchestrating(),
         ),
-        root_store as Arc<dyn lash_core::store::RuntimePersistence>,
+        session_view(root_store, "root"),
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.attachment_store),
         std::sync::Arc::clone(&runtime_host.embedded().core.durability.process_env_store),
     );
@@ -535,10 +535,12 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         .await
         .expect("durable child session");
     let child_is_bound = match child_factory.store_for(&child.session_id) {
-        Some(store) => lash_core::SessionCommitStore::load_session_meta(store.as_ref())
-            .await
-            .expect("load child session meta")
-            .is_some_and(|meta| meta.session_id == child.session_id),
+        Some(store) => {
+            lash_core::SessionCommitStore::load_session_meta(store.as_ref(), &child.session_id)
+                .await
+                .expect("load child session meta")
+                .is_some_and(|meta| meta.session_id == child.session_id)
+        }
         None => false,
     };
     assert!(child_is_bound, "initialized child must bind its store");
@@ -932,20 +934,29 @@ async fn durable_token_ledger(
     runtime: &LashRuntime,
     session_id: &str,
 ) -> Vec<lash_core::TokenLedgerEntry> {
-    let store = runtime
-        .host
-        .core
-        .session_store_factory()
-        .open_existing_store_by_id(&SessionId::from(session_id))
-        .await
-        .expect("open child store")
-        .expect("child store exists");
-    store
-        .load_session()
-        .await
-        .expect("load child session")
-        .expect("persisted child session")
-        .token_ledger
+    let store = lash_core::runtime::live_session_view(
+        &runtime.host.core.session_store_factory(),
+        &SessionId::from(session_id),
+    )
+    .await
+    .expect("open child store")
+    .expect("child store exists");
+    let mut entries = Vec::new();
+    let mut after = None;
+    loop {
+        let page = store
+            .load_usage_ledger_page(
+                after.as_ref(),
+                std::num::NonZeroU32::new(100).expect("a nonzero page"),
+            )
+            .await
+            .expect("load child usage ledger");
+        entries.extend(page.rows.into_iter().map(|row| row.entry));
+        match page.next {
+            Some(next) => after = Some(next),
+            None => return entries,
+        }
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]

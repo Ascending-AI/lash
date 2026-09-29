@@ -88,11 +88,11 @@ async fn a_queued_input_drains_in_an_open_handler_on_the_double() {
             }),
         }]),
         test_host_config(&backend),
-        store.clone() as Arc<dyn lash_core::RuntimePersistence>,
+        store.clone() as Arc<dyn lash_core::RuntimeStore>,
     )
     .await;
     let session_id = SessionId::from(runtime.session_id().to_string());
-    lash_core::store::IngressStore::enqueue_pending_turn_input(
+    lash_core::store::TurnInputStore::enqueue_pending_turn_input(
         store.as_ref(),
         lash_core::PendingTurnInputDraft::new(
             session_id.to_string(),

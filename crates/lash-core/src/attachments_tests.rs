@@ -233,7 +233,7 @@ async fn committed_factory_attachment() -> (
     AttachmentId,
 ) {
     let substrate = crate::testing::memory_store_set().await;
-    let factory = substrate.session_store_factory();
+    let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -1200,7 +1200,7 @@ struct FencedFixture {
 
 async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
     let substrate = crate::testing::memory_store_set().await;
-    let factory = substrate.session_store_factory();
+    let factory: Arc<dyn crate::DeploymentStore> = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
