@@ -185,11 +185,7 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
             _ => None,
         })
         .collect::<Vec<_>>();
-    let read_view = output
-        .result
-        .state
-        .read_view()
-        .expect("test runtime frame scope resolves");
+    let read_view = output.result.state.read_view();
     let durable = read_view
         .messages()
         .iter()

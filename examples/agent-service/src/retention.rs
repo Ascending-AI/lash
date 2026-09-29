@@ -3,11 +3,11 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash::persistence::{
-    AttachmentReclamationPolicy, AttachmentReclamationReport, DeploymentStore, EmptyRootSetPolicy,
-    GcReport, SessionRelation, SessionStoreCreateRequest, VacuumReport,
+    AttachmentReclamationPolicy, AttachmentReclamationReport, EmptyRootSetPolicy, GcReport,
+    SessionCatalogStore, SessionLookup, VacuumReport,
 };
-use lash::{TurnBudget, process::Processes, runtime::SessionPolicy};
-use lash_sqlite_store::SqliteSessionStoreFactory;
+use lash::process::Processes;
+use lash_sqlite_store::SqliteStore;
 
 use crate::state::AppStateData;
 
@@ -16,7 +16,7 @@ const MAINTENANCE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Clone)]
 pub(crate) struct StoreRetentionTargets {
-    pub(crate) factory: Arc<SqliteSessionStoreFactory>,
+    pub(crate) factory: Arc<SqliteStore>,
     pub(crate) gc_store: Arc<dyn lash::persistence::StoreMaintenance>,
     pub(crate) attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
@@ -64,16 +64,14 @@ pub(crate) async fn run_store_retention_pass(
     }
 
     for session_id in session_ids {
-        let request = SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: SessionRelation::Root,
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
-        };
-        match targets.factory.open_existing_store(&request).await {
-            Ok(Some(store)) => {
-                match lash::persistence::StoreMaintenance::vacuum(store.as_ref()).await {
+        match SessionCatalogStore::lookup_session(targets.factory.as_ref(), session_id).await {
+            Ok(SessionLookup::Live(_)) => {
+                match lash::persistence::StoreMaintenance::vacuum(
+                    targets.factory.as_ref(),
+                    session_id,
+                )
+                .await
+                {
                     Ok(vacuum) => report.vacuumed.push(SessionVacuumReport {
                         session_id: session_id.clone(),
                         report: vacuum,
@@ -84,9 +82,9 @@ pub(crate) async fn run_store_retention_pass(
                     )),
                 }
             }
-            Ok(None) => report
+            Ok(SessionLookup::Deleted | SessionLookup::Absent) => report
                 .failures
-                .push(format!("vacuum session `{session_id}`: store not found")),
+                .push(format!("vacuum session `{session_id}`: session not found")),
             Err(error) => report
                 .failures
                 .push(format!("vacuum session `{session_id}`: {error}")),

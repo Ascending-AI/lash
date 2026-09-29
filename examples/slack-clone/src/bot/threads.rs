@@ -451,9 +451,9 @@ async fn committed_turn_boundary(
             .history(
                 anchor,
                 HistoryBudget {
-                    max_nodes: NonZeroU32::new(128).expect("positive history node limit"),
+                    max_nodes: NonZeroU32::new(128).context("positive history node limit")?,
                     max_bytes: NonZeroU64::new(32 * 1024 * 1024)
-                        .expect("positive history byte limit"),
+                        .context("positive history byte limit")?,
                 },
             )
             .await
@@ -466,9 +466,11 @@ async fn committed_turn_boundary(
                 continue;
             };
             if target_message_ids.contains(message_id) {
-                return Ok(Some(next_turn_boundary.unwrap_or_else(|| {
-                    leaf.expect("committed ancestry node implies a leaf")
-                })));
+                let boundary = match next_turn_boundary {
+                    Some(boundary) => boundary,
+                    None => leaf.context("committed ancestry node implies a leaf")?,
+                };
+                return Ok(Some(boundary));
             }
             if later_application_ids.contains(message_id) {
                 next_turn_boundary = Some(

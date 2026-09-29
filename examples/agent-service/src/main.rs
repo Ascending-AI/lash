@@ -265,11 +265,9 @@ async fn async_main() -> anyhow_like::Result<()> {
     // deliberately uses separately opened, session-bound handles in the
     // retention pass below.
     let maintenance_store = Arc::new(
-        lash_sqlite_store::Store::open(
-            &session_store_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()),
-        )
-        .await
-        .map_err(|err| err.to_string())?,
+        lash_sqlite_store::SqliteStore::open(&session_store_root)
+            .await
+            .map_err(|err| err.to_string())?,
     );
     let app_db = AppDb::open(&data_dir.join("app.db")).map_err(|err| err.to_string())?;
     let shared_db = Arc::new(Mutex::new(app_db));

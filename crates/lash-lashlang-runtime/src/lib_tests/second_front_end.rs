@@ -448,7 +448,7 @@ async fn stored_reload(
     path: &std::path::Path,
     artifact: &lashlang::ModuleArtifact,
 ) -> LashlangArtifacts {
-    let publisher = lash_sqlite_store::Store::open(path)
+    let publisher = lash_sqlite_store::SqliteStore::open(path)
         .await
         .expect("open the publishing store");
     LashlangArtifacts::new(Arc::new(publisher))
@@ -456,7 +456,7 @@ async fn stored_reload(
         .await
         .expect("the mini artifact publishes");
     LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::Store::open(path)
+        lash_sqlite_store::SqliteStore::open(path)
             .await
             .expect("reopen the store"),
     ))
@@ -622,7 +622,7 @@ async fn a_second_front_end_lifted_process_is_observed_and_redrives_identically(
     // The redrive is a fresh engine over a freshly opened store: the module
     // comes back through the decoder, not from the first run's cache.
     let reopened = LashlangArtifacts::new(Arc::new(
-        lash_sqlite_store::Store::open(&path)
+        lash_sqlite_store::SqliteStore::open(&path)
             .await
             .expect("reopen the store"),
     ));

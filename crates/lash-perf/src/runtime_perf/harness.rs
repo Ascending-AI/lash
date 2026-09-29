@@ -620,10 +620,6 @@ fn rlm_trajectory_errors(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
         .collect()
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "a TurnReport always commits into one active runtime frame scope, so its read view resolves; also stated by the message"
-)]
 fn rlm_trajectory_entries(turn: &lash::TurnReport) -> Vec<RlmTrajectoryEntry> {
     turn.state
         .read_view()

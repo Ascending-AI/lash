@@ -9,7 +9,7 @@ use lash::persistence::{
     TurnInputStateKind,
 };
 use lash::{TurnBudget, TurnInput, runtime::SessionPolicy};
-use lash_sqlite_store::{BlobArtifactDescriptor, SqliteSessionStoreFactory, Store};
+use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStoreSet};
 
 use crate::retention::{
     StoreRetentionTargets, run_store_retention_pass, scheduled_attachment_policy,
@@ -19,15 +19,10 @@ use crate::retention::{
 async fn production_retention_pass_reclaims_each_store_residue_class() {
     let data_dir = tempfile::tempdir().expect("retention data dir");
     let session_root = data_dir.path().join("lash-sessions");
-    let process_registry_path = data_dir.path().join("processes.db");
-    let _process_registry =
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, &session_root)
-            .await
-            .expect("process registry");
-    let factory = Arc::new(SqliteSessionStoreFactory::new_with_process_registry(
-        &session_root,
-        &process_registry_path,
-    ));
+    let stores = SqliteStoreSet::open(&session_root)
+        .await
+        .expect("open the session store set");
+    let factory = stores.session_store_factory();
     let request = SessionStoreCreateRequest {
         owning_process_id: None,
         pending_observer_intents: Vec::new(),
@@ -35,7 +30,15 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         relation: SessionRelation::Root,
         policy: SessionPolicy::new(TurnBudget::Unbounded),
     };
-    let session_store = factory.create_store(&request).await.expect("session store");
+    let catalog: Arc<dyn DeploymentStore> = factory.clone();
+    let session_store = {
+        lash::persistence::SessionCatalogStore::admit_session(catalog.as_ref(), &request)
+            .await
+            .expect("admit the retention session");
+        let runtime: Arc<dyn lash::persistence::RuntimeStore> = catalog;
+        lash::persistence::SessionStore::new(runtime, request.session_id.clone())
+            .expect("a valid session id")
+    };
     let cancelled = session_store
         .enqueue_pending_turn_input(
             PendingTurnInputDraft::new(
@@ -48,15 +51,11 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         .await
         .expect("enqueue retention evidence");
     session_store
-        .cancel_pending_turn_input(&request.session_id, &cancelled.input_id)
+        .cancel_pending_turn_input(&cancelled.input_id)
         .await
         .expect("settle retention evidence");
 
-    let gc_store = Arc::new(
-        Store::open(&session_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
-            .await
-            .expect("maintenance store"),
-    );
+    let gc_store = Arc::clone(&factory);
     let orphan_blob = gc_store
         .put_unrooted_artifact_blob_for_testing(
             BlobArtifactDescriptor::checkpoint_component(),
@@ -136,20 +135,11 @@ async fn scheduled_retention_refuses_a_witnessed_empty_attachment_root_set() {
     let data_dir = tempfile::tempdir().expect("retention data dir");
     let session_root = data_dir.path().join("lash-sessions");
     std::fs::create_dir_all(&session_root).expect("session store root");
-    let process_registry_path = data_dir.path().join("processes.db");
-    let _process_registry =
-        lash_sqlite_store::SqliteProcessRegistry::open(&process_registry_path, &session_root)
-            .await
-            .expect("process registry");
-    let factory = Arc::new(SqliteSessionStoreFactory::new_with_process_registry(
-        &session_root,
-        &process_registry_path,
-    ));
-    let gc_store = Arc::new(
-        Store::open(&session_root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
-            .await
-            .expect("maintenance store"),
-    );
+    let stores = SqliteStoreSet::open(&session_root)
+        .await
+        .expect("open the session store set");
+    let factory = stores.session_store_factory();
+    let gc_store = Arc::clone(&factory);
     let attachment_store = Arc::new(lash::persistence::FileAttachmentStore::new(
         data_dir.path().join("attachments"),
     ));

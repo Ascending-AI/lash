@@ -3,9 +3,22 @@
 use lash::SessionId;
 
 use lash::persistence::{
-    LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest,
+    DeploymentStore, LeaseOwnerIdentity, RuntimeCommit, RuntimeSessionState, RuntimeStore,
+    SessionCatalogStore, SessionRelation, SessionStore, SessionStoreCreateRequest,
 };
+use std::sync::Arc;
+
+/// Admit `request`'s session on the catalog and hold its view.
+async fn admitted_view(
+    stores: &Arc<dyn DeploymentStore>,
+    request: &SessionStoreCreateRequest,
+) -> SessionStore {
+    SessionCatalogStore::admit_session(stores.as_ref(), request)
+        .await
+        .expect("admit the session");
+    let runtime: Arc<dyn RuntimeStore> = stores.clone();
+    SessionStore::new(runtime, request.session_id.clone()).expect("a valid session id")
+}
 use lash::process::{ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRegistration};
 use lash::provider::LlmResponse;
 use lash::runtime::SessionPolicy;
@@ -51,18 +64,20 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         session_id: Some(SessionId::from(SOURCE_SESSION.to_string())),
         ..SessionPolicy::new(TurnBudget::Unbounded)
     };
-    let source = stores
-        .create_store(&SessionStoreCreateRequest {
+    let source = admitted_view(
+        &stores,
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
             policy: source_policy.clone(),
-        })
-        .await
-        .expect("create source session");
-    stores
-        .create_store(&SessionStoreCreateRequest {
+        },
+    )
+    .await;
+    admitted_view(
+        &stores,
+        &SessionStoreCreateRequest {
             owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(FOREIGN_TARGET.to_string()),
@@ -71,9 +86,9 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
                 session_id: Some(SessionId::from(FOREIGN_TARGET.to_string())),
                 ..source_policy.clone()
             },
-        })
-        .await
-        .expect("create unrelated target session");
+        },
+    )
+    .await;
     let mut source_state = RuntimeSessionState::new(source_policy);
     source_state.session_id = SessionId::from(SOURCE_SESSION.to_string());
     source_state.ensure_agent_frame_initialized();
@@ -312,17 +327,18 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         "rewind must preserve explicitly selected live branch observers"
     );
     assert_eq!(observed[0].id, selected[0]);
-    let rewind_store = stores
-        .open_existing_store(&SessionStoreCreateRequest {
-            owning_process_id: None,
-            session_id: REWOUND_BRANCH.into(),
-            relation: SessionRelation::Root,
-            pending_observer_intents: Vec::new(),
-            policy: SessionPolicy::new(TurnBudget::Unbounded),
-        })
-        .await
-        .expect("read rewound lineage")
-        .expect("rewound store");
+    assert!(
+        matches!(
+            SessionCatalogStore::lookup_session(stores.as_ref(), &REWOUND_BRANCH.into())
+                .await
+                .expect("read rewound lineage"),
+            lash::persistence::SessionLookup::Live(_)
+        ),
+        "the rewound branch is live"
+    );
+    let runtime: Arc<dyn RuntimeStore> = stores.clone();
+    let rewind_store =
+        SessionStore::new(runtime, REWOUND_BRANCH.into()).expect("a valid session id");
     assert!(
         matches!(rewind_store.load_session_meta().await.expect("metadata").expect("metadata exists").relation,
         SessionRelation::Fork { source_session_id, .. } if source_session_id == EXPLICIT_BRANCH)
