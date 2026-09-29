@@ -2,7 +2,7 @@
 //! turn; the conflict never reaches the model as the tool's result.
 //!
 //! A tool call's presentation is a journaled `PresentToolResult` effect whose
-//! recorded envelope a redrive must reproduce (ADR 0100). When it does not —
+//! recorded envelope a redrive must reproduce (ADR 0120). When it does not —
 //! here, a tool whose preparation refusal names the pass it ran on, so the
 //! settled output the redrive presents differs from the recorded one — the
 //! recorded presentation answers a different request. Like any recorded

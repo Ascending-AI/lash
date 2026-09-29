@@ -1,4 +1,4 @@
-# 0100: Tool presentation is a recorded, composable step
+# 0120: Tool presentation is a recorded, composable step
 
 ## Status
 
@@ -112,3 +112,11 @@ converges on the same content-addressed blob, so the store holds one blob,
 the journal one presentation, and every later replay serves that record
 without running a step. `crates/lash-restate-test/tests/crash_windows.rs`
 crashes in that window on the server double and on a live `restate-server`.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 4: The pre-1.0 freeze changes shapes in place;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+1.0 cut. Item 25 was already corrected by the FIG-4095 amendment above: a
+content-addressed put may repeat while the recorded presentation replays
+unchanged.

@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended 2026-09-29 (FIG-4125, item 13): SQL effect-engine, lease and claim
+passages are historical under
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md).
+The non-SQL decision and host-policy rules here survive.
+
 Accepted. Ratified on FIG-1661; the four sections of the decision are the four
 rulings recorded there. Implemented separately by FIG-1671, which added
 section 5 — how an accepted input is settled by the turn that drove it.
@@ -62,7 +67,7 @@ settlement is keyed by the root and the turn.
 Lash has two ways to start a turn, and they disagree about what durably exists.
 
 `DurableSession::enqueue(input).send()` (reached as `session.durable()` or
-`core.session(id).durable()`; ADR 0097) writes a Pending Turn Input row and returns
+`core.session(id).durable()`; ADR 0119) writes a Pending Turn Input row and returns
 a `TurnInputAcceptanceReceipt`. The input is durable admission evidence before
 anything executes ([ADR 0010](0010-pending-turn-input-is-admission-evidence.md)),
 so any drain holding the session-execution lease can claim it and drive it, and

@@ -388,7 +388,7 @@ old decision as historical.
 | [0080](0080-substrate-attestation-is-not-a-lease-short-circuit.md) | failover that waits out the session-execution lease TTL |
 | [0082](0082-process-registry-is-composed-from-narrow-concern-traits.md) | the `ProcessWakeOutbox` registry concern and bounded non-terminal pages |
 | [0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md) | the SQL tiers' parent-end ledger write and its crash window |
-| [0097](0097-durable-session-and-live-session-are-two-authorities.md) (durable session) | the live session's Session Execution Lease |
+| [0119](0119-durable-session-and-live-session-are-two-authorities.md) (durable session) | the live session's Session Execution Lease |
 | [0098](0098-one-owner-per-sql-table-across-both-stores.md) | table modules for engine tables such as `runtime_effect_replay` |
 | [0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md) | `EffectReplayRowStore` group operations, SQL finalization, the store drain and SQL crash windows |
 | [0100](0100-the-run-observation-contract.md) (run observation) | SQL replay rows keyed by scope and replay key |

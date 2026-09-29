@@ -38,7 +38,7 @@ fn now_epoch_ms() -> u64 {
 
 /// Create a session's durable metadata without building a runtime.
 ///
-/// A Durable Session never creates (ADR 0097), so a test that enqueues to a
+/// A Durable Session never creates (ADR 0119), so a test that enqueues to a
 /// session it has not opened creates it first through the facade's third
 /// terminal verb — the same move an in-repo host that relied on
 /// enqueue-materialisation now makes.

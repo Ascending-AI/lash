@@ -1,7 +1,7 @@
 //! A `SessionStoreFactory` that never states its by-id answer must not compile.
 //!
 //! `open_existing_store_by_id` is the non-creating seam a Durable Session
-//! acquires through (ADR 0097), and its two negative answers mean opposite
+//! acquires through (ADR 0119), and its two negative answers mean opposite
 //! things: `Ok(None)` is "no such session", `Err` is "this catalog cannot
 //! resolve a session by id". An inherited `Ok(None)` would report every
 //! existing session as missing, so the method is required.

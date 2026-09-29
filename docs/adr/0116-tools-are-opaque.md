@@ -948,7 +948,7 @@ print nothing:
 ```sh
 grep -L 'Amendment (FIG-3562, ' docs/adr/0042-*.md docs/adr/0051-*.md \
   docs/adr/0059-*.md docs/adr/0065-*.md docs/adr/0074-*.md docs/adr/0099-*.md \
-  docs/adr/0100-tool-presentation-*.md docs/adr/0103-*.md docs/adr/0105-*.md \
+  docs/adr/0120-tool-presentation-*.md docs/adr/0103-*.md docs/adr/0105-*.md \
   docs/adr/0107-*.md docs/adr/0108-*.md docs/adr/0114-*.md
 ```
 
@@ -1067,7 +1067,7 @@ This commit adds a dated "Amendment (FIG-3562, 2026-09-29)" note to
 Four more ADRs describe the replaced system in passing and get the same note:
 [ADR 0059](0059-before-tool-call-directives-compose-monotonically.md),
 [ADR 0074](0074-generation-intent-is-session-policy-and-its-fate-is-reported.md),
-[ADR 0100](0100-tool-presentation-is-a-recorded-composable-step.md) and
+[ADR 0120](0120-tool-presentation-is-a-recorded-composable-step.md) and
 [ADR 0103](0103-code-cells-replay-by-re-execution-on-every-host.md).
 
 ### 9. What is not changed

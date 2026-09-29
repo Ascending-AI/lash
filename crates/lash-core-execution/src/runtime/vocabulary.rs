@@ -615,7 +615,7 @@ pub trait SessionStoreFactory:
     /// known, without creating one.
     ///
     /// Required, with no default. This is the non-creating acquisition seam a
-    /// **Durable Session** resolves through (ADR 0097), and its negative
+    /// **Durable Session** resolves through (ADR 0119), and its negative
     /// answers mean opposite things: `Ok(None)` is "this catalog has no such
     /// session", while `Err` is "this catalog cannot answer". An inherited
     /// `Ok(None)` collapses the second into the first, so every durable

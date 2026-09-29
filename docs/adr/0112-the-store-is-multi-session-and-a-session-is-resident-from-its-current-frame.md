@@ -249,7 +249,7 @@ pub enum SessionLookup {
   `open_existing_store_by_id` and `session_was_deleted`. `Absent` and
   `Deleted` are answers. Failing to answer is `Err`, never `Absent`, which
   keeps the negative-answer rule of
-  [ADR 0097](0097-durable-session-and-live-session-are-two-authorities.md).
+  [ADR 0119](0119-durable-session-and-live-session-are-two-authorities.md).
 - `list_sessions`, `pin`, `unpin`, `fork_points` and `delete_session` keep
   today's factory semantics (`crates/lash-core-execution/src/runtime/vocabulary.rs:478`,
   `:691`, `:732-750`). `fork_session` is today's `fork_at` (`:753`). None of
@@ -1504,3 +1504,12 @@ Offload (FIG-1643) and pressure reporting (FIG-1644) stay deferred.
 - Deploying the cutover changes stored shapes in place and changes the
   standard-compaction identity inputs. In-flight journals drain on the
   build that wrote them (§11).
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 19: The `fig-1628-int-merge` target composes ten operational store
+segments plus `FleetFormatStore` in `RuntimeStore`. It has no
+`bind_artifact_stores` method. `DriveEpochStore` carries the drive fence,
+and the drive owns turn authority. This integration branch has not landed on
+main; the earlier §1 and §2 sketches describe the old baseline, not current
+implementation.

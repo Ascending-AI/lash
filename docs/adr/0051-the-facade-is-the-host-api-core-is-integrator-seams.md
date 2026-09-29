@@ -187,7 +187,7 @@ therefore a facade gap the next such module discovers, not a carve-out.
 ### Read-only handles
 
 Inspection hosts read settled session history, tree, and usage through
-`DurableSession::read` (ADR 0097; formerly `LashCore::read_session`), which returns the same `SessionReadView` a live
+`DurableSession::read` (ADR 0119; formerly `LashCore::read_session`), which returns the same `SessionReadView` a live
 session exposes without opening a runtime or acquiring its lease. Store
 implementors provide that capability through `SessionStoreFactory::read_session`;
 SQLite's `SqliteSessionStoreFactory::open_read_only` opens the catalog with
@@ -370,3 +370,8 @@ longer exported, and nor are the body capability clients `ToolDispatchClient`,
 `lash::tools` exports nothing that reaches dispatch, process administration
 or an effect controller. `ToolActivation` and the manifest's `activation`
 field are deleted.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 23: [ADR 0079](0079-one-promised-package-facade-owns-the-api.md) governs
+the promised package API; the host/core ownership distinction here survives.

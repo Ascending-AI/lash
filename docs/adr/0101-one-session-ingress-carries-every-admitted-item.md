@@ -16,10 +16,9 @@ Amends [ADR 0029](0029-claims-are-generation-fenced-under-the-session-lease.md),
 [ADR 0039](0039-turn-cancellation-is-a-first-party-work-driver-primitive.md),
 [ADR 0046](0046-process-transitions-are-events-record-is-a-fold.md),
 [ADR 0067](0067-durable-rows-name-one-owner-and-one-reclaim-trigger.md),
-[ADR 0077](0077-session-state-migrates-totally-at-admission.md), both ADR 0097s
-([commit
-identity](0097-commit-identity-families-mint-frozen-unframed-preimages.md),
-[durable session](0097-durable-session-and-live-session-are-two-authorities.md)),
+[ADR 0077](0077-session-state-migrates-totally-at-admission.md),
+[ADR 0097](0097-commit-identity-families-mint-frozen-unframed-preimages.md)
+and [ADR 0119](0119-durable-session-and-live-session-are-two-authorities.md),
 [ADR 0098](0098-one-owner-per-sql-table-across-both-stores.md) and the
 `CONTEXT.md` glossary; each carries a short note pointing here. ADR 0016,
 ADR 0023, ADR 0081 and ADR 0099 are unchanged.
@@ -1130,3 +1129,10 @@ writes nothing". Law 3's "locked head row" becomes "an admitted head row".
   horizon.
 * [ADR 0081](0081-destructive-schema-changes-are-currently-reject-and-recreate.md)
   — the cutover posture.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Items 4 and 12: The pre-1.0 version freeze changes durable shapes in place;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+cut. There is no command barrier at a checkpoint. Commands apply before fresh
+turn-lane roots at boundaries, while a running turn keeps its start snapshot.
