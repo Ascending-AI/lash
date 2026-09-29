@@ -198,6 +198,7 @@ fn activity_entry(event: &lash_core::TurnEvent, session_id: &SessionId) -> Optio
         // event must not duplicate that semantic line.
         lash_core::TurnEvent::TurnStarted { .. }
         | lash_core::TurnEvent::QueuedWorkStarted { .. }
+        | lash_core::TurnEvent::CheckpointRecorded { .. }
         | lash_core::TurnEvent::AssistantProseDelta { .. }
         | lash_core::TurnEvent::ReasoningDelta { .. }
         | lash_core::TurnEvent::StreamBlockStarted { .. }

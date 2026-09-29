@@ -382,6 +382,41 @@ impl PluginSession {
         Ok(current)
     }
 
+    /// Ask each registered context-pressure hook, in priority order, what the
+    /// turn being prepared needs. The first hook that opens a frame is the
+    /// last one asked: a turn opens at most one frame. `Continue` decisions
+    /// are dropped.
+    pub async fn decide_context_pressure(
+        &self,
+        ctx: &ContextPressureContext<'_>,
+        phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
+    ) -> Result<Vec<DecidedContextPressure>, ContextError> {
+        let mut decided = Vec::new();
+        for (_, registered) in &self.contributions.context_pressure_hooks {
+            let phase_name =
+                plugin_hook_phase_name("context_pressure", registered.plugin_id.as_str());
+            if let Some(probe) = phase_probe.as_ref() {
+                probe.begin_named(&phase_name);
+            }
+            let result = registered.hook.decide(ctx).await;
+            if let Some(probe) = phase_probe.as_ref() {
+                probe.end_named(&phase_name);
+            }
+            let decision = result?;
+            let opens_frame = matches!(decision, ContextPressureDecision::OpenFrame { .. });
+            if !matches!(decision, ContextPressureDecision::Continue) {
+                decided.push(DecidedContextPressure {
+                    hook_id: registered.hook.id(),
+                    decision,
+                });
+            }
+            if opens_frame {
+                break;
+            }
+        }
+        Ok(decided)
+    }
+
     /// Ask registered compactors for seed nodes for a new compaction frame.
     pub async fn compact_context(
         &self,

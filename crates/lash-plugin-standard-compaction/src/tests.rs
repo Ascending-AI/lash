@@ -6,7 +6,7 @@ use crate::recovery::*;
 use lash_sansio::sync::MutexExt;
 use std::sync::Mutex;
 
-use lash_core::plugin::{SessionGraphService, SessionLifecycleService, SessionStateService};
+use lash_core::plugin::{PluginTraceEmitter, SessionStateService};
 use lash_core::{SessionGraph, SessionPolicy};
 use serde_json::json;
 
@@ -17,7 +17,8 @@ fn prompt_usage(used_tokens: usize) -> TokenUsage {
     }
 }
 
-/// Mirrors what the turn transform asks of the pressure: no pressure, no decisions.
+/// Mirrors what the transform and the pressure hook ask of the pressure: no
+/// pressure, no decisions.
 fn standard_compaction_decisions(
     usage: Option<&TokenUsage>,
     max_context_tokens: Option<usize>,
@@ -118,173 +119,88 @@ fn mock_manager() -> MockSessionManager {
         ))
 }
 
+/// Captures what a context hook emits through its trace-only emitter.
 #[derive(Default)]
-struct RecordingSessionGraph {
+struct RecordingTraces {
     events: Mutex<Vec<(lash_core::TraceContext, lash_core::TraceEvent)>>,
-    appends: Mutex<Vec<(String, lash_core::AppendSessionNodesRequest)>>,
-    switches: Mutex<Vec<(String, lash_core::SwitchAgentFrameRequest)>>,
 }
 
-impl RecordingSessionGraph {
+impl RecordingTraces {
+    fn emitter(self: &Arc<Self>) -> PluginTraceEmitter {
+        let traces = Arc::clone(self);
+        PluginTraceEmitter::new(move |context, event| {
+            traces.events.lock_recover().push((context, event));
+        })
+    }
+
     fn events(&self) -> Vec<(lash_core::TraceContext, lash_core::TraceEvent)> {
         self.events.lock_recover().clone()
     }
-
-    fn appends(&self) -> Vec<(String, lash_core::AppendSessionNodesRequest)> {
-        self.appends.lock_recover().clone()
-    }
-
-    fn switches(&self) -> Vec<(String, lash_core::SwitchAgentFrameRequest)> {
-        self.switches.lock_recover().clone()
-    }
 }
 
-#[async_trait]
-impl SessionGraphService for RecordingSessionGraph {
-    async fn emit_trace_event(
-        &self,
-        context: lash_core::TraceContext,
-        event: lash_core::TraceEvent,
-    ) -> Result<(), PluginError> {
-        self.events.lock_recover().push((context, event));
-        Ok(())
-    }
+fn unavailable_direct_completions() -> lash_core::facade_support::DirectCompletionClient<'static> {
+    lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
+        Err(lash_core::PluginError::Session(
+            "direct completions are unavailable in standard compaction tests".to_string(),
+        ))
+    })
+}
 
-    async fn switch_agent_frame(
-        &self,
-        session_id: &SessionId,
-        request: lash_core::SwitchAgentFrameRequest,
-    ) -> Result<lash_core::OpenAgentFrameResult, PluginError> {
-        self.switches
-            .lock_recover()
-            .push((session_id.to_string(), request));
-        Ok(lash_core::OpenAgentFrameResult {
-            frame_node_id: "frame".to_string(),
-            opened: true,
-            initial_node_ids: Vec::new(),
-        })
-    }
-
-    async fn append_session_nodes(
-        &self,
-        session_id: &SessionId,
-        request: lash_core::AppendSessionNodesRequest,
-    ) -> Result<lash_core::AppendSessionNodesOutcome, PluginError> {
-        self.appends
-            .lock_recover()
-            .push((session_id.to_string(), request));
-        Ok(lash_core::AppendSessionNodesOutcome::Appended {
-            node_ids: Vec::new(),
-            leaf_node_id: lash_core::NodeId::from("appended"),
-        })
-    }
+fn test_turn_controller() -> lash_core::ScopedEffectController<'static> {
+    lash_core::ScopedEffectController::shared(
+        Arc::new(lash_core::testing::UnavailableEffectController),
+        lash_core::AdmittedScope::turn(SessionId::from("root"), "standard-compaction-test-turn"),
+    )
+    .expect("test scoped effect controller")
 }
 
 fn build_turn_ctx(
-    session_id: &SessionId,
     state: SessionSnapshot,
     prompt_usage: Option<TokenUsage>,
     max_context_tokens: Option<usize>,
-    manager: Arc<MockSessionManager>,
-) -> TurnTransformContext<'static> {
-    let session_graph = manager.clone();
-    build_turn_ctx_with_graph(
-        session_id,
-        state,
-        prompt_usage,
-        max_context_tokens,
-        manager,
-        session_graph,
-    )
-}
-
-fn build_turn_ctx_with_graph(
-    session_id: &SessionId,
-    state: SessionSnapshot,
-    prompt_usage: Option<TokenUsage>,
-    max_context_tokens: Option<usize>,
-    manager: Arc<MockSessionManager>,
-    session_graph: Arc<dyn SessionGraphService>,
-) -> TurnTransformContext<'static> {
-    build_turn_ctx_with_direct(
-        session_id,
-        state,
-        prompt_usage,
-        max_context_tokens,
-        manager,
-        session_graph,
-        lash_core::facade_support::DirectCompletionClient::from_fn(|_, _| {
-            Err(lash_core::PluginError::Session(
-                "direct completions are unavailable in standard compaction tests".to_string(),
-            ))
-        }),
-    )
-}
-
-fn build_turn_ctx_with_direct(
-    session_id: &SessionId,
-    state: SessionSnapshot,
-    prompt_usage: Option<TokenUsage>,
-    max_context_tokens: Option<usize>,
-    manager: Arc<MockSessionManager>,
-    session_graph: Arc<dyn SessionGraphService>,
-    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
+    traces: &Arc<RecordingTraces>,
 ) -> TurnTransformContext<'static> {
     TurnTransformContext {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::from("root"),
         state: state.read_view(),
         prompt_usage,
         max_context_tokens,
-        sessions: manager.clone(),
-        session_lifecycle: manager.clone(),
-        session_graph,
-        scoped_effect_controller: lash_core::ScopedEffectController::shared(
-            Arc::new(lash_core::testing::UnavailableEffectController),
-            lash_core::AdmittedScope::turn(session_id, "standard-compaction-test-turn"),
-        )
-        .expect("test scoped effect controller"),
+        traces: traces.emitter(),
+        scoped_effect_controller: test_turn_controller(),
+        direct_completions: unavailable_direct_completions(),
+    }
+}
+
+fn build_pressure_ctx(
+    state: SessionSnapshot,
+    prompt_usage: Option<TokenUsage>,
+    max_context_tokens: Option<usize>,
+    traces: &Arc<RecordingTraces>,
+    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
+) -> ContextPressureContext<'static> {
+    ContextPressureContext {
+        session_id: SessionId::from("root"),
+        state: state.read_view(),
+        prompt_usage,
+        max_context_tokens,
+        traces: traces.emitter(),
+        scoped_effect_controller: test_turn_controller(),
         direct_completions,
         system_prompt: None,
     }
 }
 
-fn build_compaction_ctx_with_graph(
-    session_id: &SessionId,
+fn build_compaction_ctx(
     state: SessionSnapshot,
     instructions: Option<String>,
-    manager: Arc<MockSessionManager>,
-    session_graph: Arc<dyn SessionGraphService>,
-    direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
-) -> CompactionContext<'static> {
-    let sessions = manager.clone();
-    build_compaction_ctx_with_services(
-        session_id,
-        state,
-        instructions,
-        sessions,
-        manager,
-        session_graph,
-        direct_completions,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn build_compaction_ctx_with_services(
-    session_id: &SessionId,
-    state: SessionSnapshot,
-    instructions: Option<String>,
-    sessions: Arc<dyn SessionStateService>,
-    session_lifecycle: Arc<dyn SessionLifecycleService>,
-    session_graph: Arc<dyn SessionGraphService>,
+    traces: &Arc<RecordingTraces>,
     direct_completions: lash_core::facade_support::DirectCompletionClient<'static>,
 ) -> CompactionContext<'static> {
     CompactionContext {
-        session_id: SessionId::from(session_id.to_string()),
+        session_id: SessionId::from("root"),
         instructions,
         state: state.read_view(),
-        sessions,
-        session_lifecycle,
-        session_graph,
+        traces: traces.emitter(),
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::testing::UnavailableEffectController),
             lash_core::AdmittedScope::runtime_operation("standard-compaction-compact-test"),
@@ -375,15 +291,9 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
     let state = SessionSnapshot::new(lash_core::SessionPolicy::new(
         lash_core::TurnBudget::Unbounded,
     ));
-    let manager = Arc::new(mock_manager());
+    let traces = Arc::new(RecordingTraces::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let ctx = build_turn_ctx(
-        &SessionId::from("root"),
-        state,
-        Some(prompt_usage(130_000)),
-        Some(200_000),
-        manager,
-    );
+    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
         messages: messages.into(),
         ..Default::default()
@@ -400,94 +310,67 @@ async fn standard_compaction_turn_transform_strips_old_image_attachments() {
     assert_eq!(image_part.content(), PRUNED_ATTACHMENT_PLACEHOLDER);
 }
 
-/// FIG-4029: at the compaction threshold the transform summarizes the
-/// committed frame, switches to a fresh compaction frame seeded with the
-/// summary, and hands the turn that frame's window: the seed, then the turn's
-/// own request.
+/// FIG-4110: at the compaction threshold the pressure hook summarizes the
+/// committed frame in one direct completion and decides a compaction frame
+/// seeded with the summary. It writes nothing: core opens the frame.
 #[tokio::test]
-async fn pressure_compaction_switches_to_a_summary_frame_and_projects_its_window() {
-    let manager = Arc::new(mock_manager());
-    let graph = Arc::new(RecordingSessionGraph::default());
+async fn pressure_hook_decides_a_summary_frame_at_the_threshold() {
+    let traces = Arc::new(RecordingTraces::default());
     let direct = Arc::new(RecordingLlmCompletions {
         summary: "Compacted work summary".to_string(),
         ..Default::default()
     });
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let history = vec![
         text_message("u1", MessageRole::User, "old work"),
         text_message("a1", MessageRole::Assistant, "assistant old"),
     ];
-    let ctx = build_turn_ctx_with_direct(
-        &SessionId::from("root"),
-        compactable_state(history.clone()),
+    let ctx = build_pressure_ctx(
+        compactable_state(history),
         Some(prompt_usage(30_000)),
         Some(40_000),
-        manager.clone(),
-        graph.clone(),
+        &traces,
         RecordingLlmCompletions::client(&direct),
     );
-    let mut messages = history;
-    messages.push(text_message("u2", MessageRole::User, "latest request"));
-    let built = transform
-        .transform(
-            &ctx,
-            PreparedContext {
-                messages: messages.into(),
-                ..Default::default()
-            },
-        )
+    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig)
+        .decide(&ctx)
         .await
-        .expect("transform")
-        .messages;
+        .expect("the pressure hook decides");
 
     // One summarizer call over the committed frame.
     let requests = direct.requests();
     assert_eq!(requests.len(), 1, "exactly one direct summarizer call");
     let request_text = RecordingLlmCompletions::request_text(&requests[0]);
     assert!(request_text.contains("old work") && request_text.contains("assistant old"));
-    assert!(!request_text.contains("latest request"));
-    assert!(
-        manager.created_snapshot().is_empty(),
-        "compaction must not create a child session"
-    );
 
-    // One compaction frame switch, seeded with the summary.
-    let switches = graph.switches();
-    assert_eq!(switches.len(), 1);
-    let switch = &switches[0].1;
-    assert_eq!(switch.reason.as_str(), "compaction");
-    assert_eq!(switch.task.as_deref(), Some("context-pressure compaction"));
-    assert!(
-        switch
-            .operation_id
-            .starts_with("standard-compaction-pressure/switch/")
-    );
-    let [lash_core::SessionAppendNode::Message { message: seed }] = switch.initial_nodes.as_slice()
+    // One compaction frame, seeded with the summary, and no record in the
+    // frame it leaves.
+    let ContextPressureDecision::OpenFrame {
+        records,
+        task,
+        seed,
+    } = decision
     else {
-        panic!("the switch is seeded with one summary message: {switch:?}");
+        panic!("the threshold opens a frame: {decision:?}");
+    };
+    assert!(
+        records.is_empty(),
+        "pressure records nothing in the old frame"
+    );
+    assert_eq!(task, "context-pressure compaction");
+    let [lash_core::SessionAppendNode::Message { message: seed }] = seed.as_slice() else {
+        panic!("the frame is seeded with one summary message: {seed:?}");
     };
     assert_eq!(
         seed.parts.first().map(Part::content).as_deref(),
         Some("Compaction summary:\nCompacted work summary")
     );
-    assert!(
-        graph.appends().is_empty(),
-        "pressure appends nothing to the old frame"
-    );
-
-    // The turn's window is the new frame's: the seed under the id the frame
-    // mints for it, then the current request, and nothing the summary covers.
-    assert_eq!(built.len(), 2, "{built:?}");
-    assert_eq!(Some(&built[0].id), seed.id.as_ref());
-    assert!(is_compaction_summary_message(&built[0]));
-    assert_eq!(
-        built[0].parts[0].content(),
-        "Compaction summary:\nCompacted work summary"
-    );
-    assert_eq!(built[1].id, "u2");
+    assert!(matches!(
+        seed.origin.as_ref(),
+        Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
+    ));
 
     assert_eq!(
-        graph
+        traces
             .events()
             .into_iter()
             .map(|(context, event)| {
@@ -507,26 +390,78 @@ async fn pressure_compaction_switches_to_a_summary_frame_and_projects_its_window
     );
 }
 
-/// Pressure over a frame with no committed conversation records the need and
-/// has nothing to summarize: no summarizer call and no frame switch.
+/// Below the threshold the pressure hook continues without a summarizer call
+/// or a trace.
 #[tokio::test]
-async fn pressure_without_committed_history_records_the_need_and_switches_nothing() {
-    let manager = Arc::new(mock_manager());
-    let graph = Arc::new(RecordingSessionGraph::default());
+async fn pressure_hook_continues_below_the_threshold() {
+    let traces = Arc::new(RecordingTraces::default());
     let direct = Arc::new(RecordingLlmCompletions::default());
-    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
-    let ctx = build_turn_ctx_with_direct(
-        &SessionId::from("root"),
+    for usage in [None, Some(prompt_usage(10_000)), Some(prompt_usage(19_999))] {
+        let ctx = build_pressure_ctx(
+            compactable_state(compactable_messages()),
+            usage,
+            Some(40_000),
+            &traces,
+            RecordingLlmCompletions::client(&direct),
+        );
+        assert_eq!(
+            StandardCompactionPressureHook::new(StandardCompactionConfig)
+                .decide(&ctx)
+                .await
+                .expect("the pressure hook decides"),
+            ContextPressureDecision::Continue
+        );
+    }
+    assert!(direct.requests().is_empty());
+    assert!(traces.events().is_empty());
+}
+
+/// Pressure over a frame with no committed conversation records the need and
+/// has nothing to summarize: no summarizer call and no frame.
+#[tokio::test]
+async fn pressure_without_committed_history_records_the_need_and_opens_nothing() {
+    let traces = Arc::new(RecordingTraces::default());
+    let direct = Arc::new(RecordingLlmCompletions::default());
+    let ctx = build_pressure_ctx(
         compactable_state(vec![text_message("s1", MessageRole::System, "policy")]),
         Some(prompt_usage(30_000)),
         Some(40_000),
-        manager,
-        graph.clone(),
+        &traces,
         RecordingLlmCompletions::client(&direct),
     );
+    let decision = StandardCompactionPressureHook::new(StandardCompactionConfig)
+        .decide(&ctx)
+        .await
+        .expect("a frame with nothing to summarize still runs its turn");
+
+    assert_eq!(decision, ContextPressureDecision::Continue);
+    assert!(direct.requests().is_empty());
+    let events = traces.events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        events[0].1,
+        lash_core::TraceEvent::CompactionNeeded { .. }
+    ));
+}
+
+/// The transform is a Prompt View transform only (ADR 0001): at compaction
+/// pressure it prunes the view and neither summarizes nor records the need,
+/// which is the pressure hook's decision.
+#[tokio::test]
+async fn standard_compaction_transform_at_compaction_pressure_only_prunes() {
+    let traces = Arc::new(RecordingTraces::default());
+    let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
+    let ctx = build_turn_ctx(
+        compactable_state(compactable_messages()),
+        Some(prompt_usage(30_000)),
+        Some(40_000),
+        &traces,
+    );
     let messages = vec![
-        text_message("s1", MessageRole::System, "policy"),
-        text_message("u1", MessageRole::User, "first request"),
+        image_message("u1", MessageRole::User, b"old screenshot"),
+        text_message("a1", MessageRole::Assistant, "assistant old"),
+        text_message("u2", MessageRole::User, "recent"),
+        text_message("u3", MessageRole::User, "latest request"),
     ];
     let built = transform
         .transform(
@@ -537,7 +472,7 @@ async fn pressure_without_committed_history_records_the_need_and_switches_nothin
             },
         )
         .await
-        .expect("a frame with nothing to summarize still runs its turn")
+        .expect("transform")
         .messages;
 
     assert_eq!(
@@ -545,16 +480,22 @@ async fn pressure_without_committed_history_records_the_need_and_switches_nothin
             .iter()
             .map(|message| message.id.as_str())
             .collect::<Vec<_>>(),
-        ["s1", "u1"]
+        ["u1", "a1", "u2", "u3"],
+        "the view keeps every message"
     );
-    assert!(direct.requests().is_empty());
-    assert!(graph.switches().is_empty());
-    let events = graph.events();
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        events[0].1,
-        lash_core::TraceEvent::CompactionNeeded { .. }
-    ));
+    assert_eq!(built[0].parts[0].content(), PRUNED_ATTACHMENT_PLACEHOLDER);
+    assert_eq!(
+        traces
+            .events()
+            .into_iter()
+            .map(|(_, event)| event)
+            .collect::<Vec<_>>(),
+        [lash_core::TraceEvent::PromptViewAttachmentsPruned {
+            used_tokens: 30_000,
+            max_context_tokens: 40_000,
+            pruned_attachments: 1,
+        }]
+    );
 }
 
 #[tokio::test]
@@ -562,22 +503,14 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
     // 130_000 / 200_000 trips the 0.6 pruning threshold but stays under the
     // compaction watermark: a prune-only turn still reports the prompt-view
     // change so hosts can observe why old attachments became placeholders.
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let traces = Arc::new(RecordingTraces::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
-    let ctx = build_turn_ctx_with_graph(
-        &SessionId::from("root"),
-        state,
-        Some(prompt_usage(130_000)),
-        Some(200_000),
-        manager,
-        trace.clone(),
-    );
+    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
         // The tail since the second-most-recent user turn (a2, u3) keeps its
         // attachments; u2 and everything older is replaced by placeholders.
@@ -596,35 +529,20 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
         .await
         .expect("transform should trace the attachment prune");
 
-    let events = trace.events();
-    let attachment_events: Vec<_> = events
-        .iter()
-        .filter(|(_, event)| {
-            matches!(
-                event,
-                lash_core::TraceEvent::PromptViewAttachmentsPruned { .. }
-            )
-        })
-        .collect();
-    assert_eq!(attachment_events.len(), 1, "{events:?}");
+    let events = traces.events();
+    assert_eq!(events.len(), 1, "{events:?}");
     assert_eq!(
-        attachment_events[0].1,
+        events[0].1,
         lash_core::TraceEvent::PromptViewAttachmentsPruned {
             used_tokens: 130_000,
             max_context_tokens: 200_000,
             pruned_attachments: 2,
         }
     );
-    assert_eq!(attachment_events[0].0.session_id.as_deref(), Some("root"));
+    assert_eq!(events[0].0.session_id.as_deref(), Some("root"));
     assert_eq!(
-        attachment_events[0].0.turn_id.as_deref(),
+        events[0].0.turn_id.as_deref(),
         Some("standard-compaction-test-turn")
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|(_, event)| matches!(event, lash_core::TraceEvent::CompactionNeeded { .. })),
-        "no compaction decision runs on a prune-only turn: {events:?}"
     );
 }
 
@@ -632,22 +550,14 @@ async fn standard_compaction_turn_transform_traces_attachment_pruning_without_co
 async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_pruned() {
     // Same prune-only pressure, but text-only messages: pruning finds nothing
     // to replace and must emit no event.
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let traces = Arc::new(RecordingTraces::default());
     let transform = StandardCompactionTurnTransform::new(StandardCompactionConfig);
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
-    let ctx = build_turn_ctx_with_graph(
-        &SessionId::from("root"),
-        state,
-        Some(prompt_usage(130_000)),
-        Some(200_000),
-        manager,
-        trace.clone(),
-    );
+    let ctx = build_turn_ctx(state, Some(prompt_usage(130_000)), Some(200_000), &traces);
     let prepared = PreparedContext {
         messages: vec![
             text_message("u1", MessageRole::User, "old work"),
@@ -664,16 +574,15 @@ async fn standard_compaction_turn_transform_traces_nothing_when_no_attachments_p
         .expect("transform");
 
     assert!(
-        trace.events().is_empty(),
-        "nothing was pruned and no compaction ran: {:?}",
-        trace.events()
+        traces.events().is_empty(),
+        "nothing was pruned: {:?}",
+        traces.events()
     );
 }
 
 #[tokio::test]
 async fn standard_compactor_returns_summary_seed_for_new_frame() {
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let trace = Arc::new(RecordingTraces::default());
     let messages = vec![
         text_message("u1", MessageRole::User, "old work"),
         text_message("a1", MessageRole::Assistant, "assistant old"),
@@ -757,12 +666,10 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
         summary: "Compacted work summary".to_string(),
         ..Default::default()
     });
-    let ctx = build_compaction_ctx_with_graph(
-        &SessionId::from("root"),
+    let ctx = build_compaction_ctx(
         state,
         Some(instructions.to_string()),
-        manager.clone(),
-        trace.clone(),
+        &trace,
         RecordingLlmCompletions::client(&captured),
     );
     let compactor = StandardContextCompactor::new(StandardCompactionConfig);
@@ -791,12 +698,8 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
         Some(MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == STANDARD_COMPACTION_PLUGIN_ID
     ));
 
-    // FIG-3374: compaction is one direct completion on the calling session.
-    // No session-creation attempt may exist — not merely a net-zero catalog.
-    assert!(
-        manager.created.lock_recover().is_empty(),
-        "compaction must not create a child session"
-    );
+    // FIG-3374: compaction is one direct completion on the calling session;
+    // its context holds no lifecycle service to create one with.
     let requests = captured.requests();
     assert_eq!(requests.len(), 1, "exactly one direct provider call");
     let request = &requests[0];
@@ -867,20 +770,17 @@ fn compaction_request_identity_is_stable_across_reconstructed_nested_maps() {
 
 #[tokio::test]
 async fn standard_compactor_records_zero_node_completion_for_none() {
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let trace = Arc::new(RecordingTraces::default());
     let state = SessionSnapshot {
         session_id: SessionId::from("root"),
         policy: SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
     let captured = Arc::new(RecordingLlmCompletions::default());
-    let ctx = build_compaction_ctx_with_graph(
-        &SessionId::from("root"),
+    let ctx = build_compaction_ctx(
         state,
         None,
-        manager,
-        trace.clone(),
+        &trace,
         RecordingLlmCompletions::client(&captured),
     );
 
@@ -898,8 +798,7 @@ async fn standard_compactor_records_zero_node_completion_for_none() {
 
 #[tokio::test]
 async fn standard_compactor_records_zero_node_completion_before_error() {
-    let manager = Arc::new(mock_manager());
-    let trace = Arc::new(RecordingSessionGraph::default());
+    let trace = Arc::new(RecordingTraces::default());
     let messages = vec![
         text_message("u1", MessageRole::User, "old work"),
         text_message("a1", MessageRole::Assistant, "assistant old"),
@@ -911,19 +810,14 @@ async fn standard_compactor_records_zero_node_completion_before_error() {
         session_graph: SessionGraph::from_active_read_state(&messages),
         ..SessionSnapshot::new(SessionPolicy::new(lash_core::TurnBudget::Unbounded))
     };
-    let sessions = manager as Arc<dyn SessionStateService>;
-    let lifecycle: Arc<dyn SessionLifecycleService> = Arc::new(MockSessionManager::default());
     let captured = Arc::new(RecordingLlmCompletions {
         error: Some("scripted compaction-session failure".to_string()),
         ..Default::default()
     });
-    let ctx = build_compaction_ctx_with_services(
-        &SessionId::from("root"),
+    let ctx = build_compaction_ctx(
         state,
         None,
-        sessions,
-        lifecycle,
-        trace.clone(),
+        &trace,
         RecordingLlmCompletions::client(&captured),
     );
 
@@ -953,28 +847,53 @@ fn overflow_turn_report(
     Arc::new(lash_core::plugin::TurnHookReport::from_assembled(&turn))
 }
 
-fn transform_state_ctx_with_services(
+fn recovery_ctx(
     state: SessionSnapshot,
-    direct: Arc<RecordingLlmCompletions>,
-    graph: Arc<dyn SessionGraphService>,
+    direct: &Arc<RecordingLlmCompletions>,
+    traces: &Arc<RecordingTraces>,
     max_context_tokens: usize,
-) -> TurnTransformContext<'static> {
-    TurnTransformContext {
+) -> ContextPressureContext<'static> {
+    ContextPressureContext {
         session_id: SessionId::from("root"),
         state: state.read_view(),
         prompt_usage: None,
         max_context_tokens: Some(max_context_tokens),
-        sessions: Arc::new(MockSessionManager::default()),
-        session_lifecycle: Arc::new(MockSessionManager::default()),
-        session_graph: graph,
+        traces: traces.emitter(),
         scoped_effect_controller: lash_core::ScopedEffectController::shared(
             Arc::new(lash_core::testing::UnavailableEffectController),
             lash_core::AdmittedScope::runtime_operation("standard-compaction-recovery-test"),
         )
         .expect("test scoped effect controller"),
-        direct_completions: RecordingLlmCompletions::client(&direct),
+        direct_completions: RecordingLlmCompletions::client(direct),
         system_prompt: None,
     }
+}
+
+async fn decide_recovery(ctx: &ContextPressureContext<'_>) -> ContextPressureDecision {
+    StandardCompactionPressureHook::new(StandardCompactionConfig)
+        .decide(ctx)
+        .await
+        .expect("a recovery decision never fails the turn")
+}
+
+/// The recovery record kinds a decision's nodes carry, in order.
+fn decided_record_kinds(nodes: &[lash_core::SessionAppendNode]) -> Vec<OverflowRecoveryRecord> {
+    nodes
+        .iter()
+        .map(|node| {
+            let lash_core::SessionAppendNode::Message { message } = node else {
+                panic!("a recovery record is a message node: {node:?}");
+            };
+            recovery_record_kind(&Message {
+                id: "probe".to_string(),
+                role: message.role,
+                parts: message.parts.clone().into(),
+                origin: message.origin.clone(),
+            })
+            .expect("a decided recovery record parses")
+            .expect("the node is a recovery record")
+        })
+        .collect()
 }
 
 fn test_llm_call_record() -> lash_core::LlmCallRecord {
@@ -1191,55 +1110,18 @@ fn recovery_record_reads_its_serde_payload_only() {
     );
 }
 
+/// FIG-4110: a pending overflow recovery summarizes the committed history
+/// (the oversized part elided) in one direct completion and decides the
+/// recovery frame: the `Completed` record in the frame it leaves, the summary
+/// as the new frame's seed.
 #[tokio::test]
-async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window() {
-    let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
-    let (history_before, state) = recovery_history(true);
-    let history_before: Vec<Message> = history_before;
-
+async fn recovery_runs_unasked_elides_oversized_result_and_decides_a_recovery_frame() {
+    let traces = Arc::new(RecordingTraces::default());
+    let (_, state) = recovery_history(true);
     let direct = recovered_direct();
-    let ctx = transform_state_ctx_with_services(state, direct.clone(), trace.clone(), 200_000);
+    let ctx = recovery_ctx(state, &direct, &traces, 200_000);
 
-    let prepared = PreparedContext {
-        messages: vec![text_message(
-            "u2",
-            MessageRole::User,
-            "now give me the verdict",
-        )]
-        .into(),
-        ..Default::default()
-    };
-    let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
-        .transform(&ctx, prepared)
-        .await
-        .expect("recovery transform runs")
-        .messages;
-
-    let contents: Vec<_> = built
-        .iter()
-        .flat_map(|message| message.parts.iter().map(|part| part.content()))
-        .collect();
-    assert!(
-        contents
-            .iter()
-            .any(
-                |text| text.contains("Compaction summary:") && text.contains("Recovered")
-                    || text.contains("Compacted work summary")
-            ),
-        "the fresh window does not carry the recovered summary: {contents:?}"
-    );
-    assert!(
-        !contents
-            .iter()
-            .any(|text| text.contains("xxxxxxxxxxxxxxxxxxxxxxxxxx")),
-        "the oversized body must never re-enter the recovered prompt window"
-    );
-    assert!(
-        contents
-            .iter()
-            .any(|text| text.contains("now give me the verdict")),
-        "the current request must survive the recovery: {contents:?}"
-    );
+    let decision = decide_recovery(&ctx).await;
 
     // One direct completion ran as the summarizer: the provider-visible
     // request carries the rendered history plus the standard compaction ask
@@ -1273,79 +1155,32 @@ async fn recovery_runs_unasked_elides_oversized_result_and_projects_fresh_window
         "the oversized part was elided before the summarizer saw the history"
     );
 
-    // The durable terminal record was appended; the summary rides the
-    // plugin-visible frame switch instead of the exhausted frame.
-    let appends = trace.appends();
-    assert_eq!(appends.len(), 1);
-    assert_eq!(appends[0].1.nodes.len(), 1);
-    let completed_kind = match &appends[0].1.nodes[0] {
-        lash_core::SessionAppendNode::Message { message } => {
-            message.parts.first().map(Part::content).and_then(|text| {
-                recovery_record_kind(&Message {
-                    id: "probe".to_string(),
-                    role: MessageRole::System,
-                    parts: vec![Part::text("probe.p0".to_string(), text.to_string(), None)].into(),
-                    origin: Some(MessageOrigin::Plugin {
-                        plugin_id: STANDARD_COMPACTION_PLUGIN_ID.to_string(),
-                        transient: false,
-                    }),
-                })
-                .expect("committed recovery record parses")
-            })
-        }
-        _ => None,
+    let ContextPressureDecision::OpenFrame {
+        records,
+        task,
+        seed,
+    } = decision
+    else {
+        panic!("a completed recovery opens its frame: {decision:?}");
     };
     assert_eq!(
-        completed_kind,
-        Some(OverflowRecoveryRecord::Completed),
-        "the terminal completed record is durable in the committed history"
+        decided_record_kinds(&records),
+        [OverflowRecoveryRecord::Completed],
+        "the completed record closes the recovery in the frame it leaves"
     );
-    let switches = trace.switches();
-    assert_eq!(switches.len(), 1);
-    assert_eq!(
-        switches[0].1.task.as_deref(),
-        Some("context-overflow recovery"),
-        "the switch records its task like the in-turn control: {:?}",
-        switches[0].1
-    );
-    assert_eq!(
-        switches[0].1.reason.as_str(),
-        "compaction",
-        "the recovery frame is an ordinary compaction frame: {:?}",
-        switches[0].1
-    );
-    assert_eq!(switches[0].1.initial_nodes.len(), 1);
-    let seed_summary = match &switches[0].1.initial_nodes[0] {
-        lash_core::SessionAppendNode::Message { message } => {
-            message.parts.first().map(Part::content)
-        }
-        _ => None,
+    assert_eq!(task, "context-overflow recovery");
+    let [lash_core::SessionAppendNode::Message { message: seed }] = seed.as_slice() else {
+        panic!("the recovery frame is seeded with one summary: {seed:?}");
     };
+    let seed_text = seed.parts.first().map(Part::content).unwrap_or_default();
     assert!(
-        seed_summary
-            .as_ref()
-            .is_some_and(|text| text.contains("Compaction summary:")),
-        "the recovery frame is seeded with the recovered summary: {seed_summary:?}"
+        seed_text.starts_with("Compaction summary:") && seed_text.contains("Recovered"),
+        "the recovery frame is seeded with the recovered summary: {seed_text:?}"
     );
-
-    // History stays intact and inspectable: recovery rewrites nothing.
-    assert_eq!(trace.appends()[0].1.nodes.len(), 1);
-
-    // The current-turn projection is prompt-view only: no durable history
-    // changed beyond the compaction summary seed itself (already checked).
-    let _ = history_before;
-}
-
-fn recovery_test_input() -> PreparedContext {
-    PreparedContext {
-        messages: vec![text_message(
-            "u2",
-            MessageRole::User,
-            "now give me the verdict",
-        )]
-        .into(),
-        ..Default::default()
-    }
+    assert!(
+        !seed_text.contains("xxxxxxxxxxxxxxxxxxxxxxxxxx"),
+        "the oversized body never enters the recovery frame"
+    );
 }
 
 fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
@@ -1365,15 +1200,10 @@ fn snapshot_with_messages(messages: &[Message]) -> SessionSnapshot {
 /// completion the same guarantee is pinned on the provider-visible request.
 #[tokio::test]
 async fn recovery_summarizer_request_does_not_carry_the_pending_marker() {
-    let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
+    let traces = Arc::new(RecordingTraces::default());
     let (_history, state) = recovery_history(true);
     let direct = recovered_direct();
-    let ctx = transform_state_ctx_with_services(state, direct.clone(), trace.clone(), 200_000);
-
-    StandardCompactionTurnTransform::new(StandardCompactionConfig)
-        .transform(&ctx, recovery_test_input())
-        .await
-        .expect("recovery transform runs");
+    decide_recovery(&recovery_ctx(state, &direct, &traces, 200_000)).await;
 
     let requests = direct.requests();
     assert_eq!(requests.len(), 1, "exactly one summarizer call ran");
@@ -1384,48 +1214,33 @@ async fn recovery_summarizer_request_does_not_carry_the_pending_marker() {
     );
 }
 
+/// Every failed attempt records `Failed`; the attempt that hits the cap also
+/// records `Exhausted`; none opens a frame. At the cap the recovery stops by
+/// itself: no summarizer call, no record, no loop.
 #[tokio::test]
 async fn recovery_failure_is_bounded_and_explicit() {
     let empty = empty_direct();
-    let (_messages1, _) = recovery_history(true);
-    let mut history: Vec<Message> = _messages1;
+    let (mut history, _) = recovery_history(true);
 
-    let mut total_appends = 0;
     for attempt in 1..=OVERFLOW_RECOVERY_MAX_ATTEMPTS {
-        let trace = Arc::new(RecordingSessionGraph::default());
-        let ctx = transform_state_ctx_with_services(
+        let traces = Arc::new(RecordingTraces::default());
+        let decision = decide_recovery(&recovery_ctx(
             snapshot_with_messages(&history),
-            empty.clone(),
-            trace.clone(),
+            &empty,
+            &traces,
             200_000,
-        );
-        let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
-            .transform(&ctx, recovery_test_input())
-            .await
-            .expect("a failed recovery must not fail the turn");
-
-        let contents: Vec<_> = built
-            .messages
-            .iter()
-            .flat_map(|message| message.parts.iter().map(|part| part.content()))
-            .collect();
-        assert!(
-            !contents
-                .iter()
-                .any(
-                    |text| text.contains("Compaction summary:") && text.contains("Recovered")
-                        || text.contains("Compacted work summary")
-                ),
-            "attempt {attempt} must not project a recovered summary"
-        );
-
-        let appends = trace.appends();
-        assert_eq!(
-            appends.len(),
-            1,
-            "attempt {attempt} records exactly one append"
-        );
-        total_appends += appends.len();
+        ))
+        .await;
+        let ContextPressureDecision::Record { nodes } = decision else {
+            panic!("attempt {attempt} records its failure and opens no frame: {decision:?}");
+        };
+        let mut expected = vec![OverflowRecoveryRecord::Failed {
+            attempt: attempt as u32,
+        }];
+        if attempt == OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+            expected.push(OverflowRecoveryRecord::Exhausted);
+        }
+        assert_eq!(decided_record_kinds(&nodes), expected, "attempt {attempt}");
 
         history_with_record(
             &mut history,
@@ -1434,41 +1249,74 @@ async fn recovery_failure_is_bounded_and_explicit() {
             },
         );
     }
-    assert_eq!(total_appends, OVERFLOW_RECOVERY_MAX_ATTEMPTS);
+    assert_eq!(empty.requests().len(), OVERFLOW_RECOVERY_MAX_ATTEMPTS);
 
-    // At the cap the recovery stops by itself: no summarizer call, no
-    // append, no loop.
     let captured = Arc::new(RecordingLlmCompletions::default());
-    let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
-    let ctx = transform_state_ctx_with_services(
-        snapshot_with_messages(&history),
-        captured.clone(),
-        trace.clone(),
-        200_000,
-    );
-    StandardCompactionTurnTransform::new(StandardCompactionConfig)
-        .transform(&ctx, recovery_test_input())
-        .await
-        .expect("capped recovery must not fail the turn");
-    assert!(
-        trace.appends().is_empty(),
+    let traces = Arc::new(RecordingTraces::default());
+    assert_eq!(
+        decide_recovery(&recovery_ctx(
+            snapshot_with_messages(&history),
+            &captured,
+            &traces,
+            200_000,
+        ))
+        .await,
+        ContextPressureDecision::Continue,
         "the cap spends no further attempt"
     );
     assert!(captured.requests().is_empty());
 
-    let traces = trace.events();
-    let outcomes: Vec<&str> = traces
-        .iter()
+    let outcomes: Vec<String> = traces
+        .events()
+        .into_iter()
         .filter_map(|(_, event)| match event {
             lash_core::TraceEvent::Custom { name, payload }
                 if name == TRACE_OVERFLOW_RECOVERY_OUTCOME =>
             {
-                payload.get("outcome").and_then(|value| value.as_str())
+                payload
+                    .get("outcome")
+                    .and_then(|value| value.as_str())
+                    .map(str::to_string)
             }
             _ => None,
         })
         .collect();
     assert_eq!(outcomes, ["exhausted:recoverable_failure"]);
+}
+
+/// A summarizer that fails outright records the attempt as `Failed`, names
+/// the failure in its trace, and opens no frame.
+#[tokio::test]
+async fn recovery_summarizer_failure_records_failed_without_a_frame() {
+    let failing = Arc::new(RecordingLlmCompletions {
+        error: Some("scripted summarizer failure".to_string()),
+        ..Default::default()
+    });
+    let traces = Arc::new(RecordingTraces::default());
+    let (_, state) = recovery_history(true);
+    let decision = decide_recovery(&recovery_ctx(state, &failing, &traces, 200_000)).await;
+
+    let ContextPressureDecision::Record { nodes } = decision else {
+        panic!("a failed summarizer records its attempt and opens no frame: {decision:?}");
+    };
+    assert_eq!(
+        decided_record_kinds(&nodes),
+        [OverflowRecoveryRecord::Failed { attempt: 1 }]
+    );
+    assert_eq!(failing.requests().len(), 1);
+    assert!(
+        traces.events().iter().any(|(_, event)| matches!(
+            event,
+            lash_core::TraceEvent::Custom { name, payload }
+                if name == TRACE_OVERFLOW_RECOVERY_OUTCOME
+                    && payload.get("outcome").and_then(|value| value.as_str()).is_some_and(
+                        |outcome| outcome.starts_with("failed:summarizer_failed")
+                            && outcome.contains("scripted summarizer failure")
+                    )
+        )),
+        "{:?}",
+        traces.events()
+    );
 }
 
 #[tokio::test]
@@ -1477,7 +1325,7 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
         OverflowRecoveryRecord::Completed,
         OverflowRecoveryRecord::Exhausted,
     ] {
-        let trace: Arc<RecordingSessionGraph> = Arc::new(RecordingSessionGraph::default());
+        let traces = Arc::new(RecordingTraces::default());
         let captured = Arc::new(RecordingLlmCompletions::default());
         let (mut messages, _) = recovery_history(false);
         messages.push(recovery_record_node_message(
@@ -1485,45 +1333,18 @@ async fn recovery_does_not_restart_after_completion_or_exhaustion() {
         ));
         messages.push(recovery_record_node_message(terminal));
 
-        let ctx = transform_state_ctx_with_services(
-            snapshot_with_messages(&messages),
-            captured.clone(),
-            trace.clone(),
-            200_000,
-        );
-        let prepared = PreparedContext {
-            messages: vec![text_message(
-                "u2",
-                MessageRole::User,
-                "now give me the verdict",
-            )]
-            .into(),
-            ..Default::default()
-        };
-        let built = StandardCompactionTurnTransform::new(StandardCompactionConfig)
-            .transform(&ctx, prepared)
-            .await
-            .expect("transform runs");
-
-        assert!(
-            trace.appends().is_empty(),
+        assert_eq!(
+            decide_recovery(&recovery_ctx(
+                snapshot_with_messages(&messages),
+                &captured,
+                &traces,
+                200_000,
+            ))
+            .await,
+            ContextPressureDecision::Continue,
             "a settled recovery must not reopen: {terminal:?}"
         );
         assert!(captured.requests().is_empty());
-        let contents: Vec<_> = built
-            .messages
-            .iter()
-            .flat_map(|message| message.parts.iter().map(|part| part.content()))
-            .collect();
-        assert!(
-            !contents
-                .iter()
-                .any(
-                    |text| text.contains("Compaction summary:") && text.contains("Recovered")
-                        || text.contains("Compacted work summary")
-                ),
-            "the prompt keeps its ordinary rolling projection once recovery settled"
-        );
     }
 }
 
@@ -1550,12 +1371,10 @@ async fn compaction_request_carries_the_core_resolved_system_prompt() {
         summary: "summary".to_string(),
         ..Default::default()
     });
-    let mut ctx = build_compaction_ctx_with_graph(
-        &SessionId::from("root"),
+    let mut ctx = build_compaction_ctx(
         compactable_state(compactable_messages()),
         None,
-        Arc::new(mock_manager()),
-        Arc::new(RecordingSessionGraph::default()),
+        &Arc::new(RecordingTraces::default()),
         RecordingLlmCompletions::client(&captured),
     );
     ctx.system_prompt = Some(Arc::from("resolved capability+core+session stack"));
@@ -1586,12 +1405,10 @@ async fn standard_compactor_refuses_incomplete_terminal_reasons_as_frame_seed() 
             terminal_reason: reason,
             ..Default::default()
         });
-        let ctx = build_compaction_ctx_with_graph(
-            &SessionId::from("root"),
+        let ctx = build_compaction_ctx(
             compactable_state(compactable_messages()),
             None,
-            Arc::new(mock_manager()),
-            Arc::new(RecordingSessionGraph::default()),
+            &Arc::new(RecordingTraces::default()),
             RecordingLlmCompletions::client(&captured),
         );
         let err = StandardContextCompactor::new(StandardCompactionConfig)

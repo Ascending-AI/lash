@@ -1,7 +1,0 @@
-error[E0046]: not all trait items implemented, missing: `lookup_session`
-  --> tests/ui/session_catalog_requires_lookup_answer.rs:22:1
-   |
-22 | impl SessionCatalogStore for SilentCatalog {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ missing `lookup_session` in implementation
-   |
-   = help: implement the missing item: `fn lookup_session<'life0: 'async_trait, 'life1: 'async_trait, 'async_trait>(&'life0 self, _: &'life1 SessionId) -> Pin<Box<(dyn Future<Output = Result<SessionLookup, StoreError>> + Send + 'async_trait)>> { todo!() }`

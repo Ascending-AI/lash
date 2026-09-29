@@ -152,6 +152,56 @@ fn sqlite_leaf_frame(stores: &lash_sqlite_store::SqliteStoreSet, session_id: &st
         .expect("read the durable leaf's frame")
 }
 
+/// A Prompt View transform that runs after standard compaction's and
+/// records the window and the committed read view it was handed.
+#[derive(Default)]
+struct WindowProbe {
+    observed: StdMutex<Option<(Vec<String>, Vec<String>)>>,
+}
+
+impl WindowProbe {
+    fn plugin(self: &Arc<Self>) -> Arc<dyn lash_core::facade_support::PluginFactory> {
+        Arc::new(crate::plugins::StaticPluginFactory::new(
+            "standard-compaction-window-probe",
+            lash_core::facade_support::PluginSpec::new()
+                .with_turn_context_transform(0, Arc::clone(self) as _),
+        ))
+    }
+
+    fn clear(&self) {
+        *self.observed.lock_recover() = None;
+    }
+
+    fn observed(&self) -> (Vec<String>, Vec<String>) {
+        self.observed
+            .lock_recover()
+            .clone()
+            .expect("the probe transform ran")
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::TurnContextTransform for WindowProbe {
+    fn id(&self) -> &'static str {
+        "standard-compaction-window-probe"
+    }
+
+    async fn transform(
+        &self,
+        ctx: &lash_core::facade_support::TurnTransformContext<'_>,
+        input: lash_core::facade_support::PreparedContext,
+    ) -> std::result::Result<
+        lash_core::facade_support::PreparedContext,
+        lash_core::facade_support::ContextError,
+    > {
+        *self.observed.lock_recover() = Some((
+            input.messages.iter().map(message_text).collect(),
+            ctx.state.messages().iter().map(message_text).collect(),
+        ));
+        Ok(input)
+    }
+}
+
 /// FIG-4029: crossing the pressure threshold starts a frame the way an
 /// explicit compaction does — the summary seeds it — and the turn that
 /// crossed the threshold continues inside it, on the same resident session.
@@ -171,6 +221,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         response_with_usage("threshold response", 1),
         response_with_usage("after response", 1),
     ]);
+    let window_probe = Arc::new(WindowProbe::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone(),
         crate::TurnBudget::Unbounded,
@@ -180,6 +231,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
     .plugin(Arc::new(
         lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
     ))
+    .plugin(window_probe.plugin())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
@@ -188,6 +240,7 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
         .output()
         .await?;
     let before = session.read_view();
+    window_probe.clear();
 
     let threshold = session
         .send(TurnInput::text("threshold request"))
@@ -206,6 +259,23 @@ async fn pressure_compaction_opens_a_summary_frame_the_turn_continues_in() -> Re
             .map(message_text)
             .collect::<Vec<_>>()[1..],
         ["threshold request", "threshold response"]
+    );
+    // FIG-4110: core opened the frame before the Prompt View transforms ran,
+    // so pruning and every transform see the new frame's window and read
+    // view, never the frame it left.
+    let (window, committed) = window_probe.observed();
+    assert_eq!(
+        window,
+        [
+            "Compaction summary:\npressure summary".to_string(),
+            "threshold request".to_string()
+        ],
+        "the transforms see the seed and the turn's own request"
+    );
+    assert_eq!(
+        committed,
+        ["Compaction summary:\npressure summary".to_string()],
+        "the transforms' read view is the new frame"
     );
     let requests = requests.lock_recover().clone();
     assert_eq!(requests.len(), 3, "turn one, the summarizer, turn two");
@@ -309,6 +379,11 @@ async fn explicit_compaction_opens_a_summary_frame_the_next_turn_continues_in() 
 async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in() -> Result<()> {
     let session_id = "standard-compaction-recovery-frame";
     let backend = double_backend().await;
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
     let (provider, requests) = standard_compaction_provider_recorded(vec![
         LlmResponse {
             terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
@@ -368,6 +443,173 @@ async fn overflow_recovery_opens_a_summary_frame_the_recovered_turn_continues_in
         !requests[2].contains("summarize the report"),
         "{}",
         requests[2]
+    );
+    // FIG-4110: the marker, then the recovering turn's Completed record in
+    // the frame it left, and exactly one recovery frame.
+    let records = sqlite_recovery_records(store_factory.as_ref(), session_id);
+    assert_eq!(
+        records
+            .iter()
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["pending", "completed"]
+    );
+    let frames = sqlite_frame_opens(store_factory.as_ref(), session_id);
+    assert_eq!(frames.len(), 2, "the first frame and one recovery frame");
+    assert_eq!(
+        records[1].1, frames[0],
+        "the completed record stays in the frame the recovery left"
+    );
+    Ok(())
+}
+
+/// The recovery records the store holds, in commit order: each record's kind
+/// and the frame it belongs to.
+fn sqlite_recovery_records(
+    store_factory: &lash_sqlite_store::SqliteStoreSet,
+    session_id: &str,
+) -> Vec<(String, String)> {
+    let conn = rusqlite::Connection::open(
+        store_factory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
+    )
+    .expect("open SQLite session catalog");
+    let mut stmt = conn
+        .prepare(
+            "SELECT node_id, parent_node_id, node_json, frame_node_id FROM graph_nodes
+             WHERE session_id = ?1 ORDER BY generation ASC",
+        )
+        .expect("prepare graph-node read");
+    stmt.query_map([session_id], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })
+    .expect("read graph nodes")
+    .filter_map(|row| {
+        let (node_id, parent_node_id, node_json, frame) = row.expect("decode graph-node row");
+        let node =
+            lash_core::SessionNodeRecord::decode_storage_body(node_id, parent_node_id, &node_json)
+                .expect("decode stored graph node");
+        let text = message_text(&node.message()?);
+        let payload = text
+            .strip_prefix("Standard-compaction context-overflow recovery")?
+            .split_once('\n')?
+            .1;
+        let kind = serde_json::from_str::<serde_json::Value>(payload)
+            .expect("a recovery record carries its serde payload")["kind"]
+            .as_str()
+            .expect("a recovery record names its kind")
+            .to_string();
+        Some((kind, frame))
+    })
+    .collect()
+}
+
+/// The `FrameOpen` node ids the store holds, in commit order.
+fn sqlite_frame_opens(
+    store_factory: &lash_sqlite_store::SqliteStoreSet,
+    session_id: &str,
+) -> Vec<String> {
+    sqlite_nodes(store_factory, &SessionId::from(session_id))
+        .into_iter()
+        .filter(|node| {
+            matches!(
+                node.payload,
+                lash_core::SessionNodePayload::FrameOpen { .. }
+            )
+        })
+        .map(|node| node.node_id.to_string())
+        .collect()
+}
+
+/// FIG-4110: a recovery whose summarizer fails records `Failed` for each
+/// attempt, the attempt at the cap also records `Exhausted`, no attempt opens
+/// a frame, and after the cap no turn asks the summarizer again.
+#[tokio::test]
+async fn overflow_recovery_failures_record_failed_then_exhausted_without_a_frame() -> Result<()> {
+    let session_id = "standard-compaction-recovery-exhausted";
+    let backend = double_backend().await;
+    let store_factory = Arc::clone(
+        latest_double()
+            .expect("the backend runs on its held double")
+            .stores(),
+    );
+    let mut responses = vec![LlmResponse {
+        terminal_reason: lash_core::LlmTerminalReason::ContextOverflow,
+        terminal_diagnostic: Some("prompt is too long".to_string()),
+        response_metadata: Default::default(),
+        ..LlmResponse::default()
+    }];
+    // Each recovering turn: an empty summary (insufficient reduction), then
+    // the turn's own answer on the frame it stayed in.
+    for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+        responses.push(response_with_usage("", 1));
+        responses.push(response_with_usage(&format!("answer {attempt}"), 1));
+    }
+    responses.push(response_with_usage("answer after the cap", 1));
+    let (provider, calls) = standard_compaction_provider_counted(responses);
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.clone(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(provider)
+    .model(model_spec("standard-compaction-model", None, 200_000))
+    .plugin(Arc::new(
+        lash_plugin_standard_compaction::StandardCompactionPluginFactory::default(),
+    ))
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session(session_id).open().await?;
+    let overflow = session
+        .send(TurnInput::text("summarize the report"))
+        .id("standard-compaction-exhausted-overflow")
+        .output()
+        .await?;
+    assert!(
+        overflow.result.is_context_overflow(),
+        "{:?}",
+        overflow.result
+    );
+    let first_frame = session.read_view().to_snapshot().current_frame_node_id;
+
+    for attempt in 1..=lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+        let turn = session
+            .send(TurnInput::text(format!("try again {attempt}")))
+            .id(format!("standard-compaction-exhausted-{attempt}"))
+            .output()
+            .await?;
+        assert!(turn.result.is_success(), "{:?}", turn.result);
+        assert_eq!(
+            session.read_view().to_snapshot().current_frame_node_id,
+            first_frame,
+            "a failed attempt opens no frame"
+        );
+    }
+    session
+        .send(TurnInput::text("after the cap"))
+        .id("standard-compaction-exhausted-after")
+        .output()
+        .await?;
+
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2 + 2 * lash_plugin_standard_compaction::OVERFLOW_RECOVERY_MAX_ATTEMPTS,
+        "the overflow, a summarizer call and an answer per attempt, and one answer after the cap"
+    );
+    let records = sqlite_recovery_records(store_factory.as_ref(), session_id);
+    assert_eq!(
+        records
+            .iter()
+            .map(|(kind, _)| kind.as_str())
+            .collect::<Vec<_>>(),
+        ["pending", "failed", "failed", "failed", "exhausted"]
+    );
+    assert_eq!(
+        sqlite_frame_opens(store_factory.as_ref(), session_id).len(),
+        1,
+        "no recovery frame opened"
     );
     Ok(())
 }

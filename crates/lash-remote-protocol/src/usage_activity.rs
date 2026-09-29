@@ -141,6 +141,9 @@ pub enum RemoteTurnEvent {
     ModelRequestStarted {
         protocol_iteration: usize,
     },
+    CheckpointRecorded {
+        protocol_iteration: usize,
+    },
     AssistantProseDelta {
         text: String,
         block: StreamBlockIdentity,

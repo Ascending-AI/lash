@@ -356,14 +356,6 @@ impl crate::plugin::SessionGraphService for RefusingSessionServices {
     ) -> Result<(), crate::PluginError> {
         self.traces.emit_trace_event(context, event).await
     }
-
-    async fn switch_agent_frame(
-        &self,
-        _session_id: &crate::SessionId,
-        _request: crate::SwitchAgentFrameRequest,
-    ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
-        self.refuse().await
-    }
 }
 
 /// Fires `stop` when the turn named by `scope` is asked to stop now, watched

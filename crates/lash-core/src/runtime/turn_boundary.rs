@@ -3,7 +3,6 @@ use super::{
     RuntimeError, RuntimeErrorCode, RuntimeSessionState, TurnCommitDraft, TurnGraphAppendDraft,
 };
 use crate::TurnId;
-use crate::facade_support::AgentFrameReasonFacadeOps;
 use crate::facade_support::SessionGraphFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionNodeProjection;
@@ -505,16 +504,13 @@ impl TurnBoundary {
     }
 
     /// Records a protocol `AgentFrameSwitch` outcome into the turn's one
-    /// agent-frame switch slot (FIG-3303).
+    /// frame-transition slot (FIG-3303).
     ///
-    /// The outcome is one author of the turn's switch, not a second place the
-    /// switch lives: it reconciles with a plugin-recorded switch through the
-    /// slot's own conflict rule (see
-    /// [`TurnGraphAppendDraft::record_frame_switch`]), so two authors naming
-    /// different frames refuse the commit instead of opening two frames, and
-    /// two authors naming the same frame commit one open carrying one set of
-    /// seed nodes. Recording the same outcome twice is a replay and answers
-    /// the first record.
+    /// The outcome is one author of the turn's one switch: a second author
+    /// naming another frame, a context-pressure frame opened before the turn
+    /// ran included, refuses the commit instead of opening two frames (see
+    /// [`TurnGraphAppendDraft::record_outcome_frame_switch`]). Recording the
+    /// same outcome twice is a replay and answers the first record.
     fn record_outcome_frame_switch(&mut self, outcome: &TurnOutcome) -> Result<(), StoreError> {
         let TurnOutcome::AgentFrameSwitch {
             frame_key,
@@ -524,23 +520,19 @@ impl TurnBoundary {
         else {
             return Ok(());
         };
-        let request = crate::SwitchAgentFrameRequest::new(
-            format!("{}:turn-outcome-frame-switch", self.operation_scope.id()),
-            frame_key.clone(),
-            crate::AgentFrameReason::continue_as(),
-        )
-        .with_task(task.clone())
-        .with_initial_nodes(initial_nodes.clone());
+        let request = super::turn_commit_draft::OutcomeFrameSwitch {
+            operation_id: format!("{}:turn-outcome-frame-switch", self.operation_scope.id()),
+            frame_key: frame_key.clone(),
+            task: task.clone(),
+            initial_nodes: initial_nodes.clone(),
+        };
         let session_id = self.state().session_id.clone();
         let current_frame_node_id = self.state().current_frame_node_id.clone();
         self.graph_appends
-            .record_frame_switch(&session_id, current_frame_node_id.as_deref(), &request)
+            .record_outcome_frame_switch(&session_id, current_frame_node_id.as_deref(), &request)
             .map(|_| ())
             .map_err(|error| StoreError::TurnOutcomeMaterializationRefused {
-                error: Box::new(RuntimeError::new(
-                    RuntimeErrorCode::AgentFrameSwitchAuthorConflict,
-                    error.to_string(),
-                )),
+                error: Box::new(error),
             })
     }
 

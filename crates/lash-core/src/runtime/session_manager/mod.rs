@@ -314,6 +314,16 @@ impl RuntimeSessionServices {
         })
     }
 
+    /// The trace-only emitter context hooks hold in place of a session
+    /// service: transforms, compactors and context-pressure hooks write
+    /// nothing durable.
+    pub(in crate::runtime) fn trace_emitter(self: &Arc<Self>) -> crate::plugin::PluginTraceEmitter {
+        let services = Arc::clone(self);
+        crate::plugin::PluginTraceEmitter::new(move |context, event| {
+            services.current.emit_trace(context, event);
+        })
+    }
+
     pub(in crate::runtime) fn process_service(self: &Arc<Self>) -> Arc<dyn crate::ProcessService> {
         Arc::new(RuntimeSessionProcessService {
             services: Arc::clone(self),

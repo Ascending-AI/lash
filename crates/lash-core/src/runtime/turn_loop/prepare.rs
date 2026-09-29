@@ -209,9 +209,6 @@ impl LashRuntime {
             );
         }
 
-        let base_read_model = self.state.read_model();
-        let base_messages = base_read_model.messages;
-        let base_render_cache = base_read_model.prompt_render_cache;
         let mut turn_delta = Vec::new();
         let initial_turn_causes: Vec<_> = admissions
             .queued
@@ -312,11 +309,10 @@ impl LashRuntime {
         })?;
         let plugin_session = Arc::clone(session.plugins());
         let prepare_phase_turn_id = turn_phase_id(&trace_turn_id, "prepare-turn");
-        let prepare_phase_controller = scoped_effect_controller.clone();
         let prepare_read_view = self.read_view();
-        // Lazy: resolved only if overflow recovery actually runs — an eager
-        // build would fire plugin prompt hooks on every turn for a prompt
-        // that is almost never sent.
+        // Lazy: resolved only if a context-pressure hook actually summarizes —
+        // an eager build would fire plugin prompt hooks on every turn for a
+        // prompt that is almost never sent.
         let system_prompt: Option<crate::plugin::CompactionSystemPrompt> = {
             let context_contributions = session.context_prompt_contributions().to_vec();
             let plugin_session = Arc::clone(&plugin_session);
@@ -351,20 +347,67 @@ impl LashRuntime {
                 })
             }))
         };
+        let max_context_tokens = LashRuntime::max_context_tokens(self);
+        // Context pressure (ADR 0001, ADR 0105 §6): each plugin hook decides
+        // from recorded facts, before any Prompt View transform runs, and core
+        // writes what it decided. A frame it opens is the frame this turn runs
+        // in: it opens now, on the resident state, and rides the turn's commit
+        // (ADR 0112 §9).
+        let pressure_ctx = crate::plugin::ContextPressureContext {
+            session_id: self.state.session_id.clone(),
+            state: prepare_read_view.clone(),
+            prompt_usage: previous_prompt_usage.clone(),
+            max_context_tokens: Some(max_context_tokens),
+            traces: manager.trace_emitter(),
+            scoped_effect_controller: scoped_effect_controller.clone(),
+            direct_completions: manager.direct_completion_client(
+                RuntimeEffectControllerHandle::borrowed(scoped_effect_controller.clone()),
+                Some(prepare_phase_turn_id.clone()),
+            ),
+            system_prompt,
+        };
+        let decided = plugin_session
+            .decide_context_pressure(&pressure_ctx, self.turn_phase_probe.clone())
+            .await
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
+        drop(pressure_ctx);
+        let opened_frame_before_turn =
+            match self.apply_context_pressure(decided, &turn_graph_appends, &trace_turn_id) {
+                Ok(opened) => opened,
+                Err(error) => {
+                    self.invalidate_resident_session_state();
+                    return Err(error);
+                }
+            };
+        // The opened frame and its records live only in resident state until
+        // the turn's commit lands; a turn that fails before it must not leave
+        // them there.
+        let undo_pressure_frame = |runtime: &mut Self, error: RuntimeError| {
+            if opened_frame_before_turn {
+                runtime.invalidate_resident_session_state();
+            }
+            error
+        };
+        // The base window is read after the decision is applied, so the
+        // transforms and pruning see the frame the turn runs in.
+        let (base_read_model, prepare_read_view) = if opened_frame_before_turn {
+            (self.state.read_model(), self.read_view())
+        } else {
+            (self.state.read_model(), prepare_read_view)
+        };
+        let base_messages = base_read_model.messages;
+        let base_render_cache = base_read_model.prompt_render_cache;
         let turn_ctx = crate::TurnTransformContext {
             session_id: self.state.session_id.clone(),
             state: prepare_read_view,
             prompt_usage: previous_prompt_usage.clone(),
-            max_context_tokens: Some(LashRuntime::max_context_tokens(self)),
-            sessions: manager.state_service(),
-            session_lifecycle: manager.lifecycle_service(),
-            session_graph: manager.graph_service(),
+            max_context_tokens: Some(max_context_tokens),
+            traces: manager.trace_emitter(),
             scoped_effect_controller: scoped_effect_controller.clone(),
             direct_completions: manager.direct_completion_client(
-                RuntimeEffectControllerHandle::borrowed(prepare_phase_controller),
+                RuntimeEffectControllerHandle::borrowed(scoped_effect_controller.clone()),
                 Some(prepare_phase_turn_id),
             ),
-            system_prompt,
         };
         self.mark_phase_begin(RuntimeTurnPhase::ContextTransform);
         let prepared_context = plugin_session
@@ -381,28 +424,28 @@ impl LashRuntime {
                 self.turn_phase_probe.clone(),
             )
             .await
-            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn))?;
+            .map_err(|err| err.into_turn_failure(RuntimeErrorCode::ContextPrepareTurn));
+        let prepared_context = match prepared_context {
+            Ok(prepared_context) => prepared_context,
+            Err(error) => return Err(undo_pressure_frame(self, error)),
+        };
         self.mark_phase_end(RuntimeTurnPhase::ContextTransform);
         // Release the read-view's graph clone before the rest of the turn
         // runs. Keeping it alive into the execute phase forces the
         // post-turn `append_active_read_delta` to deep-clone the session
         // graph (Arc::make_mut with refcount > 1).
         drop(turn_ctx);
-        // A frame a context transform switched to is the frame this turn
-        // runs in (FIG-4029): it opens now, on the resident state, and rides
-        // the turn's commit.
-        let opened_frame_before_turn =
-            turn_graph_appends.open_recorded_frame_switch_before_turn(&mut self.state)?;
         let messages = prepared_context.messages;
-        if let Some(session) = self.session.as_mut() {
-            session
-                .set_context_overlay(
-                    prepared_context.tool_providers,
-                    prepared_context.prompt_contributions,
-                )
-                .map_err(|err| {
-                    RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string())
-                })?;
+        if let Some(session) = self.session.as_mut()
+            && let Err(err) = session.set_context_overlay(
+                prepared_context.tool_providers,
+                prepared_context.prompt_contributions,
+            )
+        {
+            return Err(undo_pressure_frame(
+                self,
+                RuntimeError::new(RuntimeErrorCode::SessionToolRegistry, err.to_string()),
+            ));
         }
 
         self.state.last_prompt_usage = None;
@@ -432,6 +475,49 @@ impl LashRuntime {
             self.invalidate_resident_session_state();
         }
         execution
+    }
+
+    /// Applies the context-pressure decisions of one turn, in the order the
+    /// hooks ran, as the folded outcome of the prepare step: records join the
+    /// turn's graph-append draft, and an `OpenFrame` opens its frame on the
+    /// resident state. Answers whether a frame opened.
+    fn apply_context_pressure(
+        &mut self,
+        decided: Vec<crate::plugin::DecidedContextPressure>,
+        graph_appends: &TurnGraphAppendDraft,
+        trace_turn_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let session_id = self.state.session_id.clone();
+        let mut opened = false;
+        for crate::plugin::DecidedContextPressure { hook_id, decision } in decided {
+            let write = ContextPressureWrite {
+                session_id: &session_id,
+                turn_scope_id: trace_turn_id,
+                hook_id,
+            };
+            match decision {
+                crate::plugin::ContextPressureDecision::Continue => {}
+                crate::plugin::ContextPressureDecision::Record { nodes } => {
+                    graph_appends.record_context_pressure_records(&write, nodes)?;
+                }
+                crate::plugin::ContextPressureDecision::OpenFrame {
+                    records,
+                    task,
+                    seed,
+                } => {
+                    opened |= graph_appends
+                        .open_context_pressure_frame_before_turn(
+                            &mut self.state,
+                            &write,
+                            records,
+                            task,
+                            seed,
+                        )?
+                        .opened;
+                }
+            }
+        }
+        Ok(opened)
     }
 
     pub async fn normalize_input_items(

@@ -1,4 +1,5 @@
 use crate::SessionId;
+use crate::facade_support::AgentFrameReasonFacadeOps;
 #[cfg(test)]
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_sansio::core_support::*;
@@ -28,26 +29,84 @@ pub(in crate::runtime) struct RecordedTurnGraphAppend {
     outcome: crate::AppendSessionNodesOutcome,
 }
 
-/// The one agent-frame switch a running turn carries: recorded by whichever
-/// author reached the slot first (a FIG-3107 plugin switch or the turn's own
-/// `AgentFrameSwitch` outcome), consumed by the turn's final commit, never at
-/// an intermediate boundary.
+/// Which author put the turn's one frame transition in its slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FrameSwitchAuthor {
+    /// A context-pressure hook's `OpenFrame` decision. Core opened it on the
+    /// resident state before the turn ran, so the final commit carries it
+    /// without opening it again.
+    ContextPressure,
+    /// The turn's own protocol `AgentFrameSwitch` outcome (`continue_as`),
+    /// opened by the turn's final commit.
+    TurnOutcome,
+}
+
+/// The switch a turn's protocol `AgentFrameSwitch` outcome asks for.
+#[derive(Clone, Debug)]
+pub(in crate::runtime) struct OutcomeFrameSwitch {
+    /// Stable identity of this switch within the turn.
+    pub(in crate::runtime) operation_id: String,
+    pub(in crate::runtime) frame_key: crate::FrameKey,
+    pub(in crate::runtime) task: String,
+    /// Nodes the fresh frame starts with.
+    pub(in crate::runtime) initial_nodes: Vec<crate::SessionAppendNode>,
+}
+
+/// The one frame transition a running turn carries: a context-pressure frame
+/// core opened before the turn ran, or the turn's own `AgentFrameSwitch`
+/// outcome. Consumed by the turn's final commit, never at an intermediate
+/// boundary.
 #[derive(Clone, Debug)]
 pub(in crate::runtime) struct RecordedFrameSwitch {
     pub(in crate::runtime) identity: String,
     pub(in crate::runtime) frame_key: crate::FrameKey,
-    request: crate::SwitchAgentFrameRequest,
+    author: FrameSwitchAuthor,
+    reason: crate::AgentFrameReason,
+    task: String,
+    initial_nodes: Vec<crate::SessionAppendNode>,
     outcome: crate::OpenAgentFrameResult,
-    /// Opened on the resident state before the turn ran (a context
-    /// transform's switch), so the final commit carries it without opening it
-    /// again.
-    opened_before_turn: bool,
 }
 
 impl RecordedFrameSwitch {
     /// The nodes the switch's fresh frame starts with.
     pub(in crate::runtime) fn initial_nodes(&self) -> &[crate::SessionAppendNode] {
-        &self.request.initial_nodes
+        &self.initial_nodes
+    }
+}
+
+/// A context-pressure decision core applies before the turn runs: the hook
+/// that made it, and the turn scope that names its writes.
+pub(in crate::runtime) struct ContextPressureWrite<'a> {
+    pub(in crate::runtime) session_id: &'a SessionId,
+    pub(in crate::runtime) turn_scope_id: &'a str,
+    pub(in crate::runtime) hook_id: &'a str,
+}
+
+impl ContextPressureWrite<'_> {
+    /// The append a decision's records ride. Named by the turn and the hook,
+    /// so a redriven prepare re-records the same append.
+    fn records_request(
+        &self,
+        nodes: Vec<crate::SessionAppendNode>,
+    ) -> crate::AppendSessionNodesRequest {
+        crate::AppendSessionNodesRequest {
+            operation_id: format!(
+                "{}/context-pressure/{}/records",
+                self.turn_scope_id, self.hook_id
+            ),
+            nodes,
+            requires_ancestor_node_id: None,
+        }
+    }
+
+    /// The frame an `OpenFrame` decision opens, derived by core from the
+    /// turn's scope and the frame the turn is leaving.
+    fn frame_key(&self, current_frame_node_id: Option<&str>) -> crate::FrameKey {
+        crate::FrameKey::from_compaction_material(
+            self.session_id,
+            &format!("{}/context-pressure/{}", self.turn_scope_id, self.hook_id),
+            current_frame_node_id.unwrap_or_default(),
+        )
     }
 }
 
@@ -59,14 +118,14 @@ struct TurnGraphAppendDraftInner {
     active_node_ids: HashSet<crate::NodeId>,
     leaf_node_id: Option<crate::NodeId>,
     recorded: Vec<RecordedTurnGraphAppend>,
-    /// The turn's one agent-frame switch (FIG-3107, FIG-3303): recorded under
-    /// the running turn's id, materialized by the turn's final commit.
+    /// The turn's one frame transition (FIG-3303): a context-pressure frame
+    /// opened before the turn ran, or the turn's own switch outcome.
     frame_switch: Option<RecordedFrameSwitch>,
     /// Prefix of `recorded` already folded into the turn's final state.
     applied: usize,
     /// Prefix of `recorded` folded into the resident state itself when a
-    /// context transform's switch opened before the turn ran; read overlays
-    /// built from that state must not apply it twice.
+    /// context-pressure frame opened before the turn ran; read overlays built
+    /// from that state must not apply it twice.
     resident: usize,
 }
 
@@ -188,52 +247,70 @@ impl TurnGraphAppendDraft {
         apply_recorded_appends(state, &recorded, self.clock.as_ref());
     }
 
-    /// Opens the switch a context transform recorded, on the resident state,
-    /// before the turn runs (FIG-4029).
+    /// Records a context-pressure hook's `Record` decision: its nodes join
+    /// the current frame at the turn's first boundary, after the turn's own
+    /// input.
+    pub(in crate::runtime) fn record_context_pressure_records(
+        &self,
+        write: &ContextPressureWrite<'_>,
+        nodes: Vec<crate::SessionAppendNode>,
+    ) -> Result<(), crate::RuntimeError> {
+        self.record(write.session_id, &write.records_request(nodes))
+            .map(|_| ())
+            .map_err(context_pressure_write_error)
+    }
+
+    /// Applies a context-pressure hook's `OpenFrame` decision on the resident
+    /// state, before the turn runs (ADR 0001, ADR 0112 §9).
     ///
-    /// A frame is the context window. A switch recorded while the turn's
-    /// context was prepared (context-pressure compaction, overflow recovery)
-    /// starts the frame the turn then runs in, exactly as an explicit
-    /// `open_agent_frame` does between turns: the appends recorded before the
-    /// switch fold into the frame it leaves, the frame opens with its seed
-    /// nodes, and the turn's own messages follow them. Nothing commits here
-    /// and nothing reloads: the turn's commit carries the frame. The slot
-    /// keeps the switch, so a second author is still refused and a replay is
-    /// still answered, and the final commit does not open it again.
-    ///
-    /// Answers whether a frame opened.
-    pub(in crate::runtime) fn open_recorded_frame_switch_before_turn(
+    /// A frame is the context window. The decision's records are appended to
+    /// the frame being left, then core opens the frame with its seed nodes
+    /// under a key it derives from the turn's scope and the current frame,
+    /// exactly as an explicit `open_agent_frame` does between turns. The turn
+    /// then runs in the new frame and its own messages follow the seed.
+    /// Nothing commits here and nothing reloads: the turn's commit carries the
+    /// records and the frame. The slot keeps the transition under the slot's
+    /// one-switch rule, and the final commit does not open the frame again.
+    pub(in crate::runtime) fn open_context_pressure_frame_before_turn(
         &self,
         state: &mut RuntimeSessionState,
-    ) -> Result<bool, crate::RuntimeError> {
-        let mut inner = self.inner.lock_recover();
-        let Some(recorded) = inner.frame_switch.as_ref() else {
-            return Ok(false);
-        };
-        if recorded.opened_before_turn || !recorded.outcome.opened {
-            return Ok(false);
+        write: &ContextPressureWrite<'_>,
+        records: Vec<crate::SessionAppendNode>,
+        task: String,
+        seed: Vec<crate::SessionAppendNode>,
+    ) -> Result<crate::OpenAgentFrameResult, crate::RuntimeError> {
+        if !records.is_empty() {
+            self.record(write.session_id, &write.records_request(records))
+                .map_err(context_pressure_write_error)?;
         }
-        let request = crate::OpenAgentFrameRequest::new(
-            recorded.request.frame_key.clone(),
-            recorded.request.reason.clone(),
-        )
-        .with_initial_nodes(recorded.request.initial_nodes.clone());
-        let expected = recorded.outcome.clone();
+        let mut inner = self.inner.lock_recover();
+        if let Some(recorded) = inner.frame_switch.as_ref() {
+            return Err(crate::RuntimeError::new(
+                crate::RuntimeErrorCode::AgentFrameSwitchAuthorConflict,
+                format!(
+                    "turn `{session_id}` already carries frame transition `{recorded_id}`; refusing the context-pressure frame of `{hook_id}` — a turn opens at most one frame",
+                    session_id = write.session_id,
+                    recorded_id = recorded.identity,
+                    hook_id = write.hook_id,
+                ),
+            ));
+        }
         debug_assert_eq!(
             inner.applied, 0,
-            "a context transform's switch opens before the turn's first boundary"
+            "a context-pressure frame opens before the turn's first boundary"
         );
+        let frame_key = write.frame_key(state.current_frame_node_id.as_deref());
+        let reason = crate::AgentFrameReason::compaction();
         let pending = inner.recorded.clone();
         apply_recorded_appends(state, &pending, self.clock.as_ref());
         inner.applied = pending.len();
         inner.resident = pending.len();
         let result = crate::runtime::state::open_agent_frame_in_state_with_clock(
             state,
-            request,
+            crate::OpenAgentFrameRequest::new(frame_key.clone(), reason.clone())
+                .with_initial_nodes(seed.clone()),
             self.clock.as_ref(),
         )?;
-        debug_assert_eq!(result.frame_node_id, expected.frame_node_id);
-        debug_assert_eq!(result.initial_node_ids, expected.initial_node_ids);
         inner
             .active_node_ids
             .insert(crate::NodeId::from(result.frame_node_id.as_str()));
@@ -241,63 +318,64 @@ impl TurnGraphAppendDraft {
             .active_node_ids
             .extend(result.initial_node_ids.iter().cloned());
         inner.leaf_node_id = state.session_graph.leaf_node_id.clone();
-        if let Some(recorded) = inner.frame_switch.as_mut() {
-            recorded.opened_before_turn = true;
-        }
-        Ok(result.opened)
+        inner.frame_switch = Some(RecordedFrameSwitch {
+            identity: format!(
+                "{}/context-pressure/{}/frame",
+                write.turn_scope_id, write.hook_id
+            ),
+            frame_key,
+            author: FrameSwitchAuthor::ContextPressure,
+            reason,
+            task,
+            initial_nodes: seed,
+            outcome: result.clone(),
+        });
+        Ok(result)
     }
 
-    /// Records a FIG-3107 frame switch under the running turn's scope and
-    /// answers it the way the turn's materialization would.
+    /// Records the turn's protocol `AgentFrameSwitch` outcome and answers it
+    /// the way the turn's materialization will.
     ///
     /// This slot is the turn's single owning source of truth for "this commit
-    /// opens this frame" (FIG-3303). Every author records here: a plugin
-    /// through `SessionGraphService::switch_agent_frame`, and the turn's own
-    /// protocol `AgentFrameSwitch` outcome once the outcome is known. One turn
-    /// therefore carries at most one switch and the final commit has exactly
-    /// one application site for it.
+    /// opens this frame" (FIG-3303), so a turn carries at most one switch and
+    /// the final commit has exactly one application site:
     ///
-    /// The conflict rule is stated on the switch, not on its author - there is
-    /// no precedence order between a plugin and the protocol outcome:
-    ///
-    /// - a second record naming a **different** frame key is refused, because
-    ///   one turn materializes at most one switch;
-    /// - a second record naming the **same** frame key with different
-    ///   `initial_nodes` is refused as well: the first author was already
-    ///   answered with draft ids for its seed nodes, so merging or dropping
-    ///   either author's seeds would silently lose committed content;
-    /// - otherwise the second record is a replay and answers the first
-    ///   outcome unchanged. The first record's reason and task are the ones
-    ///   the commit journals.
+    /// - recording the same switch again (same frame key, same seed nodes) is
+    ///   a replay and answers the first outcome unchanged;
+    /// - a second record naming another frame key, a context-pressure frame
+    ///   included, or the same key with other seed nodes, is refused.
     ///
     /// A switch naming the already-current frame answers `opened = false` with
-    /// no seed ids and no fold work.
-    pub(in crate::runtime) fn record_frame_switch(
+    /// no seed ids and no fold work. Every refusal is
+    /// [`crate::RuntimeErrorCode::AgentFrameSwitchAuthorConflict`].
+    pub(in crate::runtime) fn record_outcome_frame_switch(
         &self,
         session_id: &SessionId,
         current_frame_node_id: Option<&str>,
-        request: &crate::SwitchAgentFrameRequest,
-    ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
-        if request.operation_id.trim().is_empty() {
-            return Err(crate::PluginError::Session(
-                "an agent-frame switch requires a non-empty stable operation id".to_string(),
-            ));
-        }
+        request: &OutcomeFrameSwitch,
+    ) -> Result<crate::OpenAgentFrameResult, crate::RuntimeError> {
+        let conflict = |message: String| {
+            crate::RuntimeError::new(
+                crate::RuntimeErrorCode::AgentFrameSwitchAuthorConflict,
+                message,
+            )
+        };
         let frame_node_id =
             crate::session_graph::frame_node_id(session_id, request.frame_key.as_str());
         let mut inner = self.inner.lock_recover();
         if let Some(recorded) = &inner.frame_switch {
             if recorded.frame_key != request.frame_key {
-                return Err(crate::PluginError::Session(format!(
-                    "turn `{session_id}` already carries agent-frame switch `{recorded_id}` to `{target:?}`; refusing `{operation_id}` to `{key:?}` — one turn materializes at most one switch",
+                return Err(conflict(format!(
+                    "turn `{session_id}` already carries agent-frame switch `{recorded_id}` ({task}) to `{target:?}`; refusing `{operation_id}` to `{key:?}` — one turn materializes at most one switch",
                     recorded_id = recorded.identity,
+                    task = recorded.task,
                     target = recorded.frame_key,
                     operation_id = request.operation_id,
                     key = request.frame_key
                 )));
             }
-            if recorded.request.initial_nodes != request.initial_nodes {
-                return Err(crate::PluginError::Session(format!(
+            if recorded.initial_nodes != request.initial_nodes {
+                return Err(conflict(format!(
                     "turn `{session_id}` already carries agent-frame switch `{recorded_id}` to `{target:?}` with different initial nodes; refusing `{operation_id}` — a second record of one switch must name the same seed nodes",
                     recorded_id = recorded.identity,
                     target = recorded.frame_key,
@@ -326,22 +404,24 @@ impl TurnGraphAppendDraft {
         inner.frame_switch = Some(RecordedFrameSwitch {
             identity: request.operation_id.clone(),
             frame_key: request.frame_key.clone(),
-            request: request.clone(),
+            author: FrameSwitchAuthor::TurnOutcome,
+            reason: crate::AgentFrameReason::continue_as(),
+            task: request.task.clone(),
+            initial_nodes: request.initial_nodes.clone(),
             outcome: outcome.clone(),
-            opened_before_turn: false,
         });
         Ok(outcome)
     }
 
     /// Folds the appends recorded since the previous fold into `state`, after
-    /// whatever nodes `state` already holds, then materializes the turn's one
-    /// recorded agent-frame switch.
+    /// whatever nodes `state` already holds, then materializes the turn's
+    /// switch outcome, if it recorded one.
     ///
     /// This is the only place a turn's final commit opens the frame it
-    /// switches to (FIG-3303). The protocol outcome records into the same slot
-    /// as a plugin switch, so the frame is opened once, with the seed nodes
-    /// its author was already answered with, and the typed refusal a switch
-    /// raises reaches the caller with its own code.
+    /// switches to (FIG-3303): the frame is opened once, with the seed nodes
+    /// the outcome was already answered with, and the typed refusal a switch
+    /// raises reaches the caller with its own code. A context-pressure frame
+    /// already opened before the turn ran and is not opened again.
     pub(in crate::runtime) fn fold_into_final_state(
         &self,
         state: &mut RuntimeSessionState,
@@ -354,20 +434,20 @@ impl TurnGraphAppendDraft {
             (pending, frame_switch)
         };
         apply_recorded_appends(state, &pending, self.clock.as_ref());
-        let Some(recorded) = frame_switch.filter(|recorded| !recorded.opened_before_turn) else {
+        let Some(recorded) =
+            frame_switch.filter(|recorded| recorded.author == FrameSwitchAuthor::TurnOutcome)
+        else {
             return Ok(());
         };
-        let request = crate::OpenAgentFrameRequest::new(
-            recorded.request.frame_key.clone(),
-            recorded.request.reason.clone(),
-        )
-        .with_initial_nodes(recorded.request.initial_nodes.clone());
+        let request =
+            crate::OpenAgentFrameRequest::new(recorded.frame_key.clone(), recorded.reason.clone())
+                .with_initial_nodes(recorded.initial_nodes.clone());
         let result = crate::runtime::state::open_agent_frame_in_state_with_clock(
             state,
             request,
             self.clock.as_ref(),
         )?;
-        // The answer the switch's author already holds and the commit it rides
+        // The answer the outcome was already given and the commit it rides
         // must name the same frame node and the same seed nodes; anything else
         // means seed nodes were dropped on the way into the commit.
         debug_assert_eq!(result.frame_node_id, recorded.outcome.frame_node_id);
@@ -389,6 +469,13 @@ impl TurnGraphAppendDraft {
         inner.applied = inner.recorded.len();
         pending
     }
+}
+
+fn context_pressure_write_error(error: crate::PluginError) -> crate::RuntimeError {
+    crate::RuntimeError::new(
+        crate::RuntimeErrorCode::ContextPrepareTurn,
+        format!("context-pressure decision could not be recorded: {error}"),
+    )
 }
 
 fn apply_recorded_appends(
@@ -832,91 +919,83 @@ mod tests {
         );
     }
 
-    /// FIG-4029: a switch recorded while the turn's context is prepared
-    /// opens before the turn runs. The append recorded ahead of it stays in
-    /// the frame it leaves, the turn's messages follow the seed in the new
-    /// frame, read overlays do not apply the folded append twice, and the
-    /// final commit neither reopens the frame nor accepts another one.
+    /// FIG-4110: a context-pressure `OpenFrame` decision opens before the
+    /// turn runs. Its records stay in the frame it leaves, the turn's
+    /// messages follow the seed in the new frame, read overlays do not apply
+    /// the folded records twice, and the final commit neither reopens the
+    /// frame nor opens another one.
     #[test]
-    fn a_prepare_phase_switch_opens_before_the_turn_and_is_carried_once() {
-        let session_id = SessionId::from("draft-early-switch");
+    fn a_context_pressure_frame_opens_before_the_turn_and_is_carried_once() {
+        let session_id = SessionId::from("draft-pressure-frame");
         let mut state = seeded_state(&session_id);
         let old_frame = state.current_frame_node_id.clone();
         let clock: Arc<dyn crate::Clock> = Arc::new(crate::SystemClock);
         let appends = TurnGraphAppendDraft::from_resident_state(&state, Arc::clone(&clock));
-        let record = appended_ids(
-            &appends
-                .record(&session_id, &plugin_append("before-switch", &["record"]))
-                .expect("append before the switch"),
-        );
-        let switch = crate::SwitchAgentFrameRequest::new(
-            "early-switch",
-            crate::FrameKey::from_caller_material("early").expect("non-empty frame material"),
-            AgentFrameReason::compaction(),
-        )
-        .with_initial_nodes(vec![SessionAppendNode::message(
-            crate::PluginMessage::text(MessageRole::Assistant, "summary").with_id("seed"),
-        )]);
-        let answered = appends
-            .record_frame_switch(
-                &session_id,
-                old_frame.as_ref().map(|frame| frame.as_str()),
-                &switch,
+        let write = ContextPressureWrite {
+            session_id: &session_id,
+            turn_scope_id: "turn-pressure",
+            hook_id: "test.pressure",
+        };
+        let opened = appends
+            .open_context_pressure_frame_before_turn(
+                &mut state,
+                &write,
+                vec![SessionAppendNode::plugin(
+                    "test.record",
+                    serde_json::json!("record"),
+                )],
+                "context-pressure compaction".to_string(),
+                vec![SessionAppendNode::message(
+                    crate::PluginMessage::text(MessageRole::Assistant, "summary").with_id("seed"),
+                )],
             )
-            .expect("record the switch");
-
-        assert!(
-            appends
-                .open_recorded_frame_switch_before_turn(&mut state)
-                .expect("open the switch before the turn")
-        );
+            .expect("open the pressure frame before the turn");
+        assert!(opened.opened);
         assert_eq!(
             state
                 .current_frame_node_id
                 .as_ref()
                 .map(|frame| frame.as_str()),
-            Some(answered.frame_node_id.as_str())
+            Some(opened.frame_node_id.as_str())
         );
+        let record = state
+            .session_graph
+            .nodes
+            .iter()
+            .find(|node| matches!(node.payload, SessionNodePayload::Plugin { .. }))
+            .expect("the record is on the resident graph")
+            .node_id
+            .clone();
         assert_eq!(
             state
                 .session_graph
-                .nearest_frame_node_id(Some(record[0].as_str()))
+                .nearest_frame_node_id(Some(record.as_str()))
                 .map(crate::NodeId::as_str),
             old_frame.as_ref().map(|frame| frame.as_str()),
-            "the append recorded before the switch stays in the frame it leaves"
+            "the record stays in the frame it leaves"
         );
-        assert!(
-            !appends
-                .open_recorded_frame_switch_before_turn(&mut state)
-                .expect("a second open is a no-op"),
+        // Re-deriving the frame from the same turn scope names the same key.
+        assert_eq!(
+            crate::session_graph::frame_node_id(
+                &session_id,
+                write
+                    .frame_key(old_frame.as_ref().map(|frame| frame.as_str()))
+                    .as_str()
+            )
+            .as_str(),
+            opened.frame_node_id.as_str()
         );
         let mut read_state = state.clone();
         appends.overlay_on_read_state(&mut read_state);
         assert_eq!(
             read_state.session_graph.nodes.len(),
             state.session_graph.nodes.len(),
-            "a read overlay does not apply the folded append again"
+            "a read overlay does not apply the folded record again"
         );
-        assert!(
-            appends
-                .record_frame_switch(
-                    &session_id,
-                    old_frame.as_ref().map(|frame| frame.as_str()),
-                    &crate::SwitchAgentFrameRequest::new(
-                        "other-switch",
-                        crate::FrameKey::from_caller_material("other")
-                            .expect("non-empty frame material"),
-                        AgentFrameReason::compaction(),
-                    ),
-                )
-                .is_err(),
-            "the turn still carries one switch"
-        );
-
         let mut draft = TurnCommitDraft::from_state_with_graph_appends(
             state,
             clock,
-            "turn-early",
+            "turn-pressure",
             appends.clone(),
         );
         let request = text_message("request", "turn request");
@@ -925,7 +1004,7 @@ mod tests {
         let mut state = draft.into_final_state();
         appends
             .fold_into_final_state(&mut state)
-            .expect("the final fold carries the opened switch");
+            .expect("the final fold carries the opened frame");
         let frames = state
             .session_graph
             .nodes

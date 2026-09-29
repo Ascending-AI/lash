@@ -91,6 +91,8 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/session_catalog_requires_lookup.rs");
+    // FIG-4110: context hooks hold no write service.
+    t.compile_fail("tests/ui/context_hooks_hold_no_write_service.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/declared_start_is_sealed.rs");
@@ -119,10 +121,10 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
 }
 
 /// The class-1 store seams carry no silent defaults: an implementor that never
-/// states its delete-time freshness answer or its catalog lookup answer does
-/// not compile.
+/// states its delete-time freshness answer does not compile. The catalog's
+/// lookup answer is pinned beside the facade's other compile laws.
 ///
-/// Both fixtures assert an `E0046` whose `help:` line renders the async-trait
+/// The fixture asserts an `E0046` whose `help:` line renders the async-trait
 /// desugared signature. The `testing` feature changes rustc's choice of a
 /// qualified `Pin` path, so this diagnostic law is pinned to the isolated RLM
 /// feature-boundary graph; the workspace graph exercises the testing facade
@@ -132,7 +134,6 @@ fn register_store_seam_contracts(t: &trybuild::TestCases) {
         return;
     }
     t.compile_fail("tests/ui/attachment_store_head_has_no_default.rs");
-    t.compile_fail("tests/ui/session_catalog_requires_lookup_answer.rs");
 }
 
 /// The RLM config builder has no silent defaults: `build()` is absent until

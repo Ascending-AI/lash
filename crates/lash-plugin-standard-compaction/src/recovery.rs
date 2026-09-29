@@ -10,15 +10,17 @@ use super::*;
 //
 // 1. The `after_turn` hook sees the persisted outcome and appends one durable
 //    plugin-origin marker that rides the overflow turn's own commit.
-// 2. The next turn (on restore included) re-derives the pending recovery from
-//    that durable marker plus the terminal records; hooks are best-effort and
-//    are never trusted across drives.
+// 2. The next turn's context-pressure hook (on restore included) re-derives
+//    the pending recovery from that durable marker plus the terminal records;
+//    hooks are best-effort and are never trusted across drives.
 // 3. Recovery summarizes the whole committed history through one direct LLM
 //    completion on the session's own journal lane, with the oversized parts
 //    elided first so the summarizer request itself fits the window.
-// 4. One terminal record is appended through the pinning graph seam under a
-//    stable operation id, and the summary seeds a fresh compaction frame the
-//    continuing turn runs in (FIG-4029).
+// 4. The hook returns its decision and core writes it (FIG-4110): a failed
+//    attempt records its terminal record, and a completed one records the
+//    completed record in the frame it leaves and opens a fresh compaction
+//    frame seeded with the summary, which the continuing turn runs in
+//    (FIG-4029).
 //
 // Attempt count, the cap, and the recoverable-failure record are all
 // plugin-owned durable facts; the terminal exhausted record is what keeps a
@@ -197,13 +199,13 @@ pub(crate) struct RecoveryTraceTrigger {
     oversized_elided_parts: usize,
 }
 
-pub(crate) async fn emit_recovery_trace(
-    session_graph: &dyn lash_core::plugin::SessionGraphService,
+pub(crate) fn emit_recovery_trace(
+    traces: &lash_core::plugin::PluginTraceEmitter,
     trace_context: lash_core::TraceContext,
     event_name: &str,
     trigger: Option<&RecoveryTraceTrigger>,
     outcome: Option<&str>,
-) -> Result<(), ContextError> {
+) {
     let mut payload = serde_json::json!({});
     if let Some(trigger) = trigger {
         payload["trigger"] = serde_json::json!("persisted_context_overflow");
@@ -214,133 +216,79 @@ pub(crate) async fn emit_recovery_trace(
     if let Some(outcome) = outcome {
         payload["outcome"] = serde_json::json!(outcome);
     }
-    session_graph
-        .emit_trace_event(
-            trace_context,
-            lash_core::TraceEvent::Custom {
-                name: event_name.to_string(),
-                payload,
-            },
-        )
-        .await
-        .map_err(ContextError::from)?;
-    Ok(())
-}
-
-/// Plugin-origin record for the summarization attempt that just settled.
-/// Stable within its attempt: the operation id materializes from the same
-/// compaction request identity the summarizer completion used, so a retry
-/// that re-derives the same attempt id's first, durable receipt idempotently.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn append_recovery_record(
-    session_id: &SessionId,
-    history_snapshot: &SessionSnapshot,
-    request_snapshot: &SessionSnapshot,
-    prompt_text: &str,
-    session_graph: &dyn lash_core::plugin::SessionGraphService,
-    execution_scope: &lash_core::ExecutionScope,
-    suffix: String,
-    nodes: Vec<lash_core::SessionAppendNode>,
-) -> Result<(), ContextError> {
-    let discriminator = compaction_discriminator(
-        session_id,
-        history_snapshot,
-        request_snapshot,
-        prompt_text,
-        execution_scope,
-    )?;
-    let request = lash_core::AppendSessionNodesRequest {
-        operation_id: format!("standard-compaction-overflow-recovery/{suffix}/{discriminator}"),
-        nodes,
-        requires_ancestor_node_id: None,
-    };
-    session_graph
-        .append_session_nodes(session_id, request)
-        .await
-        .map_err(ContextError::from)?;
-    Ok(())
+    traces.emit(
+        trace_context,
+        lash_core::TraceEvent::Custom {
+            name: event_name.to_string(),
+            payload,
+        },
+    );
 }
 
 pub(crate) fn recovery_pending_marker() -> lash_core::PluginMessage {
     recovery_record_message(OverflowRecoveryRecord::Pending)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn record_and_project_failure(
-    session_id: &SessionId,
-    history_snapshot: &SessionSnapshot,
-    request_snapshot: &SessionSnapshot,
-    prompt_text: &str,
-    session_graph: &dyn lash_core::plugin::SessionGraphService,
-    execution_scope: &lash_core::ExecutionScope,
+fn recovery_record_node(record: OverflowRecoveryRecord) -> lash_core::SessionAppendNode {
+    lash_core::SessionAppendNode::message(recovery_record_message(record))
+}
+
+/// A settled failed attempt: its `Failed` record and, at the cap, the
+/// `Exhausted` record that closes the recovery with no frame.
+fn recovery_failure_decision(
+    traces: &lash_core::plugin::PluginTraceEmitter,
     trace_context: lash_core::TraceContext,
     attempt_no: usize,
     reason: &str,
-) -> Result<Option<Vec<Message>>, ContextError> {
-    let outcome: String = if attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS {
+) -> ContextPressureDecision {
+    let exhausted = attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS;
+    let outcome = if exhausted {
         "exhausted:recoverable_failure".to_string()
     } else {
         format!("failed:{reason}")
     };
     emit_recovery_trace(
-        session_graph,
-        trace_context.clone(),
+        traces,
+        trace_context,
         TRACE_OVERFLOW_RECOVERY_OUTCOME,
         None,
         Some(outcome.as_str()),
-    )
-    .await?;
-    let mut nodes = vec![lash_core::SessionAppendNode::message(
-        recovery_record_message(OverflowRecoveryRecord::Failed {
-            attempt: attempt_no as u32,
-        }),
-    )];
-    if attempt_no >= OVERFLOW_RECOVERY_MAX_ATTEMPTS {
-        nodes.push(lash_core::SessionAppendNode::message(
-            recovery_record_message(OverflowRecoveryRecord::Exhausted),
-        ));
+    );
+    let mut nodes = vec![recovery_record_node(OverflowRecoveryRecord::Failed {
+        attempt: attempt_no as u32,
+    })];
+    if exhausted {
+        nodes.push(recovery_record_node(OverflowRecoveryRecord::Exhausted));
     }
-    append_recovery_record(
-        session_id,
-        history_snapshot,
-        request_snapshot,
-        prompt_text,
-        session_graph,
-        execution_scope,
-        format!("failed/attempt-{attempt_no}"),
-        nodes,
-    )
-    .await?;
-    Ok(None)
+    ContextPressureDecision::Record { nodes }
 }
 
-/// One bounded recovery attempt. Success returns the fresh prompt window; failure
-/// records the attempt (and, at the cap, the exhausted record) and returns `None`, leaving
-/// the turn on the ordinary rolling projection.
+/// One bounded recovery attempt, decided from committed history.
 ///
 /// FIG-3374: the summarizer is one direct LLM completion over the committed
-/// history on the session's own journal lane, and the summary seeds a
-/// durable recovery frame through
-/// [`SessionGraphService::switch_agent_frame`], the same durable semantics as
-/// the in-turn frame-switch control. The frame opens before the recovering
-/// turn runs (FIG-4029), so the returned window is the recovery frame's own:
-/// the turn continues inside it.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn run_overflow_recovery(
-    session_id: &SessionId,
-    history_messages: &[Message],
-    history_snapshot: &SessionSnapshot,
-    direct_completions: &lash_core::facade_support::DirectCompletionClient<'_>,
-    session_graph: &dyn lash_core::plugin::SessionGraphService,
-    scoped_effect_controller: &lash_core::ScopedEffectController<'_>,
-    current_frame_node_id: Option<&str>,
-    trace_context: lash_core::TraceContext,
+/// history on the session's own journal lane. Success decides `OpenFrame`:
+/// the `Completed` record joins the frame the recovery leaves, and the
+/// summary seeds a compaction frame the recovering turn runs in (FIG-4029).
+/// Failure decides `Record`: the attempt's `Failed` record and, at the cap,
+/// the `Exhausted` record, with no frame. Core writes either (FIG-4110).
+pub(crate) async fn overflow_recovery_decision(
+    ctx: &ContextPressureContext<'_>,
     state: OverflowRecoveryState,
-    max_context_tokens: usize,
-    current_request: &[Message],
-    system_prompt: Option<lash_core::plugin::CompactionSystemPrompt>,
-) -> Result<Option<Vec<Message>>, ContextError> {
+) -> Result<ContextPressureDecision, ContextError> {
+    let trace_context = lash_core::TraceContext::default().for_session(ctx.session_id.clone());
+    if state.exhausted() {
+        emit_recovery_trace(
+            &ctx.traces,
+            trace_context,
+            TRACE_OVERFLOW_RECOVERY_OUTCOME,
+            None,
+            Some("exhausted:recoverable_failure"),
+        );
+        return Ok(ContextPressureDecision::Continue);
+    }
     let attempt_no = state.attempts() + 1;
+    let history_messages = ctx.state.messages();
+    let history_snapshot = ctx.state.to_snapshot();
 
     let prefix_len = leading_system_prefix_len(history_messages);
     let summary_prefix: Vec<Message> =
@@ -352,36 +300,29 @@ pub(crate) async fn run_overflow_recovery(
         oversized_elided_parts: 0,
     };
     emit_recovery_trace(
-        session_graph,
+        &ctx.traces,
         trace_context.clone(),
         TRACE_OVERFLOW_RECOVERY_TRIGGER,
         Some(&trigger),
         None,
-    )
-    .await?;
+    );
 
     if summary_prefix.is_empty() {
-        return record_and_project_failure(
-            session_id,
-            history_snapshot,
-            history_snapshot,
-            "",
-            session_graph,
-            scoped_effect_controller.execution_scope(),
+        return Ok(recovery_failure_decision(
+            &ctx.traces,
             trace_context,
             attempt_no,
             "insufficient_reduction",
-        )
-        .await;
+        ));
     }
 
     // Elide first: the summarizer request itself must fit its window, and it
     // must never be the rejected oversized request with an instruction
     // appended.
-    let mut summarizer_prefix = summary_prefix.clone();
+    let mut summarizer_prefix = summary_prefix;
     let elided_parts = elide_oversized_parts(&mut summarizer_prefix);
 
-    let summarizer_budget_tokens = compaction_threshold(max_context_tokens);
+    let summarizer_budget_tokens = compaction_threshold(ctx.max_context_tokens.unwrap_or(0));
     let projected_tokens: usize = summarizer_prefix
         .iter()
         .map(|message| {
@@ -396,125 +337,74 @@ pub(crate) async fn run_overflow_recovery(
         .sum::<usize>()
         + approx_token_count(OVERFLOW_RECOVERY_INSTRUCTIONS)
         + 512;
-    let (request_snapshot, prompt_text) = prepare_compaction_request(
-        history_snapshot,
+    let (_, prompt_text) = prepare_compaction_request(
+        &history_snapshot,
         summarizer_prefix.clone(),
         Some(&recovery_instructions(elided_parts)),
     )?;
     let request_tokens = projected_tokens + approx_token_count(&prompt_text);
     if request_tokens > summarizer_budget_tokens {
-        return record_and_project_failure(
-            session_id,
-            history_snapshot,
-            &request_snapshot,
-            &prompt_text,
-            session_graph,
-            scoped_effect_controller.execution_scope(),
+        return Ok(recovery_failure_decision(
+            &ctx.traces,
             trace_context,
             attempt_no,
             "summarizer_request_exceeds_window",
-        )
-        .await;
+        ));
     }
 
     // The summarizer is one direct completion on the same seam the ordinary
     // compaction policy uses (FIG-3374). The system prompt resolves here, at
     // the point of use, so its plugin hooks never fire on turns that recover
     // without summarizing.
-    let resolved_system_prompt = match &system_prompt {
+    let resolved_system_prompt = match &ctx.system_prompt {
         Some(provider) => provider().await.map_err(ContextError::from)?,
         None => None,
     };
-    let summary = {
-        let summarized = summarize_compaction_prefix(
-            session_id,
-            history_snapshot,
-            summarizer_prefix.clone(),
-            Some(&recovery_instructions(elided_parts)),
-            direct_completions,
-            scoped_effect_controller,
-            resolved_system_prompt.clone(),
-        )
-        .await;
-        match summarized {
-            Ok(Some(summary)) => summary,
-            Ok(None) => {
-                return record_and_project_failure(
-                    session_id,
-                    history_snapshot,
-                    &request_snapshot,
-                    &prompt_text,
-                    session_graph,
-                    scoped_effect_controller.execution_scope(),
-                    trace_context,
-                    attempt_no,
-                    "insufficient_reduction",
-                )
-                .await;
-            }
-            Err(error) => {
-                return record_and_project_failure(
-                    session_id,
-                    history_snapshot,
-                    &request_snapshot,
-                    &prompt_text,
-                    session_graph,
-                    scoped_effect_controller.execution_scope(),
-                    trace_context,
-                    attempt_no,
-                    Box::leak(format!("summarizer_failed: {error}").into_boxed_str()),
-                )
-                .await;
-            }
+    let summary = match summarize_compaction_prefix(
+        &ctx.session_id,
+        &history_snapshot,
+        summarizer_prefix,
+        Some(&recovery_instructions(elided_parts)),
+        &ctx.direct_completions,
+        &ctx.scoped_effect_controller,
+        resolved_system_prompt,
+    )
+    .await
+    {
+        Ok(Some(summary)) => summary,
+        Ok(None) => {
+            return Ok(recovery_failure_decision(
+                &ctx.traces,
+                trace_context,
+                attempt_no,
+                "insufficient_reduction",
+            ));
+        }
+        Err(error) => {
+            return Ok(recovery_failure_decision(
+                &ctx.traces,
+                trace_context,
+                attempt_no,
+                &format!("summarizer_failed: {error}"),
+            ));
         }
     };
 
     emit_recovery_trace(
-        session_graph,
-        trace_context.clone(),
+        &ctx.traces,
+        trace_context,
         TRACE_OVERFLOW_RECOVERY_OUTCOME,
         None,
         Some("completed"),
-    )
-    .await?;
-    // The terminal record is durable in the old frame; the summary itself is
-    // the switched frame's seed, journaled with the continuing turn's commit.
-    append_recovery_record(
-        session_id,
-        history_snapshot,
-        &request_snapshot,
-        &prompt_text,
-        session_graph,
-        scoped_effect_controller.execution_scope(),
-        "completed".to_string(),
-        vec![lash_core::SessionAppendNode::message(
-            recovery_record_message(OverflowRecoveryRecord::Completed),
-        )],
-    )
-    .await?;
-
-    // Switch to the recovery frame: a compaction-derived durable frame whose
-    // seed is the recovered summary, opened before this turn runs and
-    // committed with it. The terminal record above folds into the frame the
-    // recovery leaves.
-    let seed = switch_to_summary_frame(
-        SummaryFrame::OverflowRecovery,
-        session_id,
-        history_snapshot,
-        &request_snapshot,
-        &prompt_text,
-        session_graph,
-        scoped_effect_controller.execution_scope(),
-        current_frame_node_id,
-        &summary,
-    )
-    .await?;
-
-    Ok(Some(summary_frame_window(
-        seed,
-        history_messages,
-        current_request,
-    )))
+    );
+    // The completed record closes the recovery in the frame it leaves; the
+    // summary seeds the recovery frame, a compaction frame core opens before
+    // this turn runs and commits with it.
+    Ok(ContextPressureDecision::OpenFrame {
+        records: vec![recovery_record_node(OverflowRecoveryRecord::Completed)],
+        task: OVERFLOW_RECOVERY_TASK.to_string(),
+        seed: vec![compaction_summary_seed(&summary)],
+    })
 }
 
 /// Marker directive the `after_turn` hook queues for a persisted overflow.

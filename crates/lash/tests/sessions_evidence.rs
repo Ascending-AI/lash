@@ -174,14 +174,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::plugins::TurnTransformContext| {
         let _ = &value.scoped_effect_controller;
     });
-    // W0061: lash::plugins::TurnTransformContext::session_lifecycle [field]
-    field_witness(|value: &lash::plugins::TurnTransformContext| {
-        let _ = &value.session_lifecycle;
-    });
-    // W0062: lash::plugins::TurnTransformContext::sessions [field]
-    field_witness(|value: &lash::plugins::TurnTransformContext| {
-        let _ = &value.sessions;
-    });
     // W0063: lash::runtime::AssembledTurn [struct]
     type_witness::<lash::runtime::AssembledTurn>();
     // W0064: lash::runtime::AssembledTurn::assistant_output [field]

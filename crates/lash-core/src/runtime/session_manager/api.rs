@@ -136,17 +136,6 @@ impl crate::plugin::SessionGraphService for RuntimeSessionGraphService {
     ) -> Result<(), crate::PluginError> {
         self.services.current.emit_trace_event(context, event).await
     }
-
-    async fn switch_agent_frame(
-        &self,
-        session_id: &SessionId,
-        request: crate::SwitchAgentFrameRequest,
-    ) -> Result<crate::OpenAgentFrameResult, crate::PluginError> {
-        self.services
-            .current
-            .switch_agent_frame(session_id, &request)
-            .await
-    }
 }
 
 #[async_trait::async_trait]
