@@ -16,14 +16,29 @@ async fn pending_tool_completion_on_the_restate_server_double(
     let engine = crate::backend::SimEngine::new(seed)
         .await
         .expect("Restate test backend");
-    let proof = super::runtime_proofs::prove_pending_tool_completion_on(&engine, seed)
+    let recorder = crate::invariants::HistoryRecorder::default();
+    let proof = super::runtime_proofs::prove_pending_tool_completion_on(&engine, seed, &recorder)
         .await
         .unwrap_or_else(|error| panic!("seed {seed:#x}: pending tool proof: {error}"));
     let server = engine.restate().server();
+    let schedule_trace = server.schedule_trace();
+    let stall_preemptions = server.stats().stall_preemptions;
+    // The global invariants read the finished run after its grant order is
+    // taken: reading the store touches no server.
+    let report = crate::invariants::check_engine(
+        "restate-double/pending-tool-completion",
+        seed,
+        &recorder,
+        &engine,
+    )
+    .await
+    .unwrap_or_else(|error| panic!("seed {seed:#x}: capture the history: {error}"));
+    report.print_quarantined();
+    assert!(report.passed(), "{}", report.failure());
     (
         proof,
-        server.schedule_trace(),
-        server.stats().stall_preemptions,
+        schedule_trace,
+        stall_preemptions,
         server.drop_watch(),
     )
 }
@@ -82,9 +97,13 @@ async fn the_server_double_runs_no_wall_clock_reconcile() {
     let engine = crate::backend::SimEngine::new(0x5eed_70f1)
         .await
         .expect("Restate test backend");
-    super::runtime_proofs::prove_pending_tool_completion_on(&engine, 0x5eed_70f1)
-        .await
-        .expect("pending tool proof");
+    super::runtime_proofs::prove_pending_tool_completion_on(
+        &engine,
+        0x5eed_70f1,
+        &crate::invariants::HistoryRecorder::default(),
+    )
+    .await
+    .expect("pending tool proof");
     let server = engine.restate().server();
     for invocation in server.invocations() {
         let Some(journal) = server.journal(&invocation.id) else {

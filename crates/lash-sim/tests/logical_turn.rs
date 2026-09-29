@@ -189,6 +189,25 @@ async fn sim_engine() -> lash_sim::backend::SimEngine {
         .expect("sim engine")
 }
 
+/// The global invariants (FIG-4086) over what a scenario left on `engine`:
+/// its final store, judged at the scenario's end.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a store the checkers cannot read panics the harness with its case name by design"
+)]
+async fn assert_global_invariants(engine: &lash_sim::backend::SimEngine, scenario: &str) {
+    let report = lash_sim::invariants::check_engine(
+        format!("logical-turn/{scenario}"),
+        0x5eed_7010,
+        &lash_sim::invariants::HistoryRecorder::default(),
+        engine,
+    )
+    .await
+    .expect("capture the history");
+    report.print_quarantined();
+    assert!(report.passed(), "{}", report.failure());
+}
+
 async fn standard_core(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
@@ -489,6 +508,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .expect("final queue")
             .is_empty()
     );
+    assert_global_invariants(&engine, "claimed-switch").await;
 }
 
 struct BoundedSwitchTools {
@@ -568,6 +588,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .output()
         .await
         .expect("finish input runs");
+    assert_global_invariants(&finish_engine, "claims-settle-finish").await;
     drop(finish_engine);
     let finish_verdict = logical_turn_claims_settle_exactly_once(&finish_trace.snapshot());
     assert!(finish_verdict.is_passed(), "{finish_verdict:?}");
@@ -618,6 +639,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("cancel the running input's root");
     let cancelled = cancelled.output().await.expect("cancel input runs");
+    assert_global_invariants(&cancel_engine, "claims-settle-cancel").await;
     drop(cancel_engine);
     assert!(matches!(
         cancelled.result.outcome,
@@ -656,6 +678,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .output()
         .await
         .expect("invalid input terminalizes");
+    assert_global_invariants(&error_engine, "claims-settle-error").await;
     drop(error_engine);
     assert!(matches!(
         invalid.result.outcome,
@@ -708,6 +731,7 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .output()
         .await
         .expect("bounded chain terminalizes");
+    assert_global_invariants(&bound_engine, "claims-settle-bound").await;
     drop(bound_engine);
     assert!(matches!(
         bounded.result.outcome,
@@ -844,6 +868,7 @@ finish({ baton: baton });
     let claim_verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
     assert!(claim_verdict.is_passed(), "{claim_verdict:?}");
     assert_eq!(call_index.load(Ordering::SeqCst), 2);
+    assert_global_invariants(&engine, "rlm-continue-as").await;
 }
 
 /// FIG-3085: a top-level binding that shadows the `control` module disarms
@@ -962,6 +987,7 @@ await control.continue_as({
         12,
         "the stopped turn must spend exactly the default no-progress budget"
     );
+    assert_global_invariants(&engine, "shadowed-control-module").await;
 }
 
 /// Queued turn work a terminal checkpoint withholds: one process wake.
@@ -1053,4 +1079,5 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
     );
     let verdict = logical_turn_claims_settle_exactly_once(&trace.snapshot());
     assert!(verdict.is_passed(), "{verdict:?}");
+    assert_global_invariants(&engine, "withheld-claim").await;
 }

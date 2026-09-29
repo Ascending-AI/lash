@@ -360,6 +360,9 @@ async fn finish(driver: &mut driver::Driver, report: &mut EpochReport) {
         report
             .violations
             .extend(invariants::probe_live_sessions(&driver.world, &probed, 6).await);
+        report
+            .violations
+            .extend(crate::invariants::check_crash_world(&driver.world, "chaos-soak").await);
     } else {
         report.violations.push(format!(
             "the end state never held within {FINAL_TICKS} recovery ticks"

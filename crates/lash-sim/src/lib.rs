@@ -23,6 +23,7 @@ mod tool_call_replay;
 pub mod artifacts;
 pub mod backend_contention;
 pub mod generator;
+pub mod invariants;
 pub mod minimize;
 pub mod oracles;
 mod postgres_test_isolation;

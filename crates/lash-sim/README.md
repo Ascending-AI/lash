@@ -218,6 +218,38 @@ The deferred cross-backend suites run in their named service gates.
   generated lanes still run the same `sim.oracle.serial-engine-determinism.v1`
   oracle on every seed they execute.
 
+## Global invariants
+
+`src/invariants/` (FIG-4086) checks what every history must keep, whatever
+the scenario, seed or fault schedule. A `History` is a finished run: its
+ordered trace records and the final durable rows of every store it wrote,
+read after every session's drive has settled. One trait, `HistoryChecker`,
+and one registry, `CHECKERS`, hold six checkers, one file each:
+
+| Invariant | Reads |
+|---|---|
+| `completion-ownership` | completion keys the sim's deferring tools registered and the host resolved; committed tool results |
+| `effect-at-least-once-window` | tool-body runs against the engine's failed attempts; counted executions of harness effects |
+| `obligations-settled-or-stalled` | every ADR 0109 obligation column family in every store database |
+| `artifact-reachable-or-collected` | artifact refs, referrer edges, fences and cleanup obligations |
+| `tool-call-identity` | tool-body runs and committed tool calls; keyed on today's call id, with the `ToolCallId` extension point on `CallIdentity` for FIG-4080 |
+| `input-settles-exactly-once` | `pending_turn_inputs`, `queued_work_batches`, `session_roots`, `session_root_inputs` |
+
+Store rows are read raw through `lash_sqlite_store::testing::read_rows_for_testing`
+(the store's `testing` feature). Tool facts come from lash-sim's own tools
+through a `HistoryRecorder`.
+
+The checkers run on every generated seed, as the run-only oracle
+`sim.oracle.global-invariants.v1`; on every crash-matrix cell and chaos-soak
+epoch once its end state holds, after one more recovery pass; on the
+pending-tool scenario on the Restate server double; and on the
+`logical_turn` scenarios. A violation fails the run and prints its seed,
+invariant, a minimal trace excerpt and the store rows it names. A violation a
+known runtime defect causes is an entry in `invariants::quarantine::QUARANTINE`:
+it still prints, under the entry's name, and no longer fails the run; the fix
+deletes the entry. `invariants/tests.rs` breaks a real history once per
+checker and proves each checker fails it.
+
 ## Crash-point matrix
 
 `tests/crash_point_matrix.rs` is the 1.0 durability gate (FIG-3849): one
