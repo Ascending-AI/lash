@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS lash_usage_delta_holes (
     seq BIGINT NOT NULL REFERENCES lash_usage_deltas(seq) ON DELETE CASCADE,
     call_id TEXT NOT NULL,
     attempt_ordinal BIGINT NOT NULL,
-    generation_id TEXT NOT NULL,
+    generation_id TEXT,
     PRIMARY KEY (session_id, seq, call_id, attempt_ordinal)
 );
 CREATE INDEX IF NOT EXISTS idx_lash_usage_delta_holes_identity

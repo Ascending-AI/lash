@@ -536,30 +536,57 @@ impl SessionCommitStore for PostgresStore {
                     "usage delta ordinal does not fit PostgreSQL BIGINT".to_string(),
                 )
             })?;
-            sqlx::query(session_sql().usage_postgres.insert.sql())
-                .bind(commit.session_id.as_str())
-                .bind(&entry.identity.operation_storage_key)
-                .bind(entry_ordinal)
-                .bind(
-                    i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
-                        StoreError::Backend(
-                            "usage payload encoding version does not fit PostgreSQL INTEGER"
-                                .to_string(),
-                        )
-                    })?,
-                )
-                .bind(&entry.identity.payload_hash)
-                .bind(&entry.entry.source)
-                .bind(&entry.entry.model)
-                .bind(entry.entry.usage.input_tokens)
-                .bind(entry.entry.usage.output_tokens)
-                .bind(entry.entry.usage.cache_read_input_tokens)
-                .bind(entry.entry.usage.cache_write_input_tokens)
-                .bind(entry.entry.usage.reasoning_output_tokens)
-                .bind(encode_usage_disposition(&entry.entry.usage_disposition)?)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
+            let (reconciled_call_id, reconciled_attempt_ordinal) =
+                match &entry.entry.usage_disposition {
+                    lash_core_execution::LedgerUsageDisposition::Reconciled {
+                        call_id,
+                        attempt_ordinal,
+                    } => (Some(call_id.as_str()), Some(i64::from(*attempt_ordinal))),
+                    _ => (None, None),
+                };
+            let inserted_seq: Option<i64> =
+                sqlx::query_scalar(session_sql().usage_postgres.insert.sql())
+                    .bind(commit.session_id.as_str())
+                    .bind(&entry.identity.operation_storage_key)
+                    .bind(entry_ordinal)
+                    .bind(
+                        i32::try_from(entry.identity.payload_encoding_version).map_err(|_| {
+                            StoreError::Backend(
+                                "usage payload encoding version does not fit PostgreSQL INTEGER"
+                                    .to_string(),
+                            )
+                        })?,
+                    )
+                    .bind(&entry.identity.payload_hash)
+                    .bind(&entry.entry.source)
+                    .bind(&entry.entry.model)
+                    .bind(entry.entry.usage.input_tokens)
+                    .bind(entry.entry.usage.output_tokens)
+                    .bind(entry.entry.usage.cache_read_input_tokens)
+                    .bind(entry.entry.usage.cache_write_input_tokens)
+                    .bind(entry.entry.usage.reasoning_output_tokens)
+                    .bind(reconciled_call_id)
+                    .bind(reconciled_attempt_ordinal)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .map_err(store_sqlx_error)?;
+            if let (
+                Some(seq),
+                lash_core_execution::LedgerUsageDisposition::Unreported { attempts },
+            ) = (inserted_seq, &entry.entry.usage_disposition)
+            {
+                for attempt in attempts {
+                    sqlx::query(session_sql().usage_holes.insert.sql())
+                        .bind(commit.session_id.as_str())
+                        .bind(seq)
+                        .bind(&attempt.call_id)
+                        .bind(i64::from(attempt.attempt_ordinal))
+                        .bind(attempt.generation_id.as_deref())
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(store_sqlx_error)?;
+                }
+            }
         }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
             let node_json = node.encode_storage_body(self.fleet_format).map_err(|err| {
@@ -575,6 +602,9 @@ impl SessionCommitStore for PostgresStore {
                     )
                 })?)
                 .bind(&*facts.frame_node_id)
+                .bind(i64::try_from(node_json.len()).map_err(|_| {
+                    StoreError::Backend("graph node body exceeds PostgreSQL BIGINT".to_string())
+                })?)
                 .bind(node_json)
                 .execute(&mut *tx)
                 .await
@@ -706,6 +736,7 @@ impl SessionCommitStore for PostgresStore {
                 .bind(columns.0)
                 .bind(columns.1)
                 .bind(columns.2)
+                .bind(!receipt.result.failure_evidence.is_empty())
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -725,6 +756,7 @@ impl SessionCommitStore for PostgresStore {
                     .bind(receipt.turn_commit_hash)
                     .bind(&result_json)
                     .bind(now as i64)
+                    .bind(false)
                     .execute(&mut *tx)
                     .await
                     .map_err(store_sqlx_error)?;

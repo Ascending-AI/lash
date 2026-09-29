@@ -371,6 +371,7 @@ pub(crate) use admission::{
     admit_at_checkpoint_postgres, admit_root_postgres, open_session_command_run_postgres,
 };
 pub(crate) mod drive_epoch;
+mod history;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;

@@ -22,7 +22,7 @@ use lash_store_sql::session::{
     fork_lineage::ForkLineageStatements, graph_nodes::GraphNodeStatements,
     meta::SessionMetaStatements, meta_pending_observer_intents::ObserverIntentStatements,
     node_anchors::NodeAnchorStatements, turn_commits::TurnCommitStatements,
-    usage_deltas::UsageDeltaStatements,
+    usage_delta_holes::UsageDeltaHoleStatements, usage_deltas::UsageDeltaStatements,
 };
 
 lash_store_sql::statements! {
@@ -652,10 +652,10 @@ lash_store_sql::statements! {
     /// `usage_deltas` statements only PostgreSQL issues.
     pub(crate) struct UsageDeltaPostgresStatements @ "usage_delta" {
         insert = "INSERT INTO usage_deltas (
-                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, usage_disposition_json
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                    session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash, source, model, input_tokens, output_tokens, cache_read_input_tokens, cache_write_input_tokens, reasoning_output_tokens, reconciled_call_id, reconciled_attempt_ordinal
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT (session_id, operation_storage_key, entry_ordinal, payload_encoding_version, payload_hash)
-                 DO NOTHING";
+                 DO NOTHING RETURNING seq";
     }
 }
 
@@ -1009,6 +1009,7 @@ pub(crate) struct SessionSql {
     pub(crate) turn_commits_postgres: TurnCommitPostgresStatements,
     /// `usage_deltas` statements both backends issue verbatim.
     pub(crate) usage: UsageDeltaStatements,
+    pub(crate) usage_holes: UsageDeltaHoleStatements,
     /// `usage_deltas` statements only PostgreSQL issues.
     pub(crate) usage_postgres: UsageDeltaPostgresStatements,
     /// `deleted_sessions` statements only PostgreSQL issues.
@@ -1037,6 +1038,7 @@ static SESSION_SQL: LazyLock<SessionSql> = LazyLock::new(|| {
         turn_commits: TurnCommitStatements::render(dialect),
         turn_commits_postgres: TurnCommitPostgresStatements::render(dialect),
         usage: UsageDeltaStatements::render(dialect),
+        usage_holes: UsageDeltaHoleStatements::render(dialect),
         usage_postgres: UsageDeltaPostgresStatements::render(dialect),
         deleted_postgres: DeletedSessionPostgresStatements::render(dialect),
         checkpoint_edges: CheckpointBlobRefPostgresStatements::render(dialect),

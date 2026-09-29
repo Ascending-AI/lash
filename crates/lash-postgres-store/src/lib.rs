@@ -666,6 +666,14 @@ pub struct PostgresStore {
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_graph_node_bodies: Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_usage_rows: Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_usage_holes: Arc<std::sync::atomic::AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_turn_receipts: Arc<std::sync::atomic::AtomicU64>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -1179,6 +1187,14 @@ impl PostgresStorage {
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
@@ -1202,6 +1218,14 @@ impl PostgresStorage {
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_graph_node_bodies: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_rows: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_holes: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_turn_receipts: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
