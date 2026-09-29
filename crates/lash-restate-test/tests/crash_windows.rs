@@ -239,6 +239,31 @@ impl Engine {
             .collect()
     }
 
+    async fn state_keys(&self, service: &str, key: &str) -> Vec<String> {
+        match self {
+            Self::Double(backend) => backend
+                .server()
+                .object_state(service, key)
+                .into_keys()
+                .collect(),
+            Self::Live { .. } => {
+                #[derive(serde::Deserialize)]
+                struct Row {
+                    key: String,
+                }
+                let literal = |value: &str| format!("'{}'", value.replace('\'', "''"));
+                let admin = lash_restate::RestateAdminClient::new(
+                    lash_restate::RestateConnection::new(live_env("RESTATE_ADMIN_URL")),
+                );
+                let rows: Vec<Row> = admin.query_json(&format!(
+                    "SELECT key FROM state WHERE service_name = {} AND service_key = {} ORDER BY key",
+                    literal(service), literal(key),
+                )).await.expect("read retained object state");
+                rows.into_iter().map(|row| row.key).collect()
+            }
+        }
+    }
+
     /// The names of `invocation`'s journaled `ctx.run` commands, in order,
     /// where the server keeps the journal of a completed invocation: the
     /// double does, a live server's default retention does not.
@@ -1127,4 +1152,280 @@ async fn created_session(
         Err(error) => panic!("create session `{session_id}`: {error:?}"),
     }
     core.session(session_id)
+}
+
+// ADR 0099 W9-W11: the deployment dies at the group close and at each
+// boundary of the retirement saga. The workload uses the same counted tool
+// and retained presentation fixture as the presentation crash law above.
+async fn group_close_and_retirement_crash_matrix(engine: Engine) {
+    let ingress = match &engine {
+        Engine::Double(backend) => backend.ingress(),
+        Engine::Live { backend, .. } => backend.ingress(),
+    };
+    let index = match &engine {
+        Engine::Double(backend) => backend.service_name("EffectGroupIndex"),
+        Engine::Live { backend, .. } => backend.service_name("EffectGroupIndex"),
+    };
+    for (service, handler, ty) in [
+        ("EffectGroupIndex", "close", MessageType::SetStateCommand),
+        ("EffectGroupIndex", "close", MessageType::OutputCommand),
+        ("EffectGroupIndex", "retire", MessageType::SetStateCommand),
+        ("EffectGroupIndex", "retire", MessageType::OutputCommand),
+        (
+            "EffectGroupIndex",
+            "finish_retirement",
+            MessageType::SetStateCommand,
+        ),
+        (
+            "EffectGroupIndex",
+            "finish_retirement",
+            MessageType::OutputCommand,
+        ),
+        (
+            "EffectGroupIndex",
+            "retirement_cancel",
+            MessageType::OutputCommand,
+        ),
+        (
+            "EffectGroupDispatch",
+            "retire",
+            MessageType::SendSignalCommand,
+        ),
+        ("EffectGroupPayload", "retire", MessageType::SetStateCommand),
+        ("EffectGroupPayload", "retire", MessageType::OutputCommand),
+        (
+            "EffectGroupPayload",
+            "delete_bytes",
+            MessageType::ClearStateCommand,
+        ),
+        (
+            "EffectGroupPayload",
+            "delete_bytes",
+            MessageType::OutputCommand,
+        ),
+        (
+            "LashDurableWaitIndex",
+            "retain_resolution",
+            MessageType::OutputCommand,
+        ),
+    ] {
+        let witness = Arc::new(StepWitness::default());
+        let executions = Arc::new(AtomicUsize::new(0));
+        let requests: Requests = Arc::default();
+        let core = presentation_core(&engine, &witness, &executions, &requests);
+        let session_id = run_tag("group-close-retirement");
+        let turn_id = run_tag("group-close-retirement-turn");
+        let session = created_session(&core, session_id.as_str())
+            .await
+            .open()
+            .await
+            .unwrap();
+        let before = engine.crashes();
+        let prior_payloads = engine
+            .invocations("EffectGroupPayload")
+            .await
+            .into_iter()
+            .map(|invocation| invocation.id)
+            .collect::<std::collections::HashSet<_>>();
+        if handler == "close" {
+            engine.crash_on(
+                CrashRule::new(CrashPoint::BeforeFrame { ty })
+                    .service(&index)
+                    .handler(handler),
+            );
+        }
+        let answer = tokio::time::timeout(
+            BOUND,
+            session
+                .send(lash::TurnInput::text("close the counted group"))
+                .id(turn_id.as_str())
+                .output(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(answer.assistant_message(), Some("done"));
+        engine.settle().await;
+        let dispatches = engine.invocations("EffectGroupDispatch").await;
+        let dispatch = dispatches
+            .iter()
+            .find(|invocation| {
+                invocation.target.ends_with("/run") && invocation.target.contains(&session_id)
+            })
+            .expect("the production turn dispatched its tool group");
+        let (route, tail) = dispatch.target.split_once('/').expect("dispatch target");
+        let group_key = tail.strip_suffix("/run").expect("dispatch workflow key");
+        if handler != "close" {
+            engine.crash_on(
+                CrashRule::new(CrashPoint::BeforeFrame { ty })
+                    .service(if service == "EffectGroupIndex" {
+                        &index
+                    } else if service == "EffectGroupDispatch" {
+                        route
+                    } else {
+                        service
+                    })
+                    .handler(handler),
+            );
+        }
+        tokio::time::timeout(
+            BOUND,
+            ingress.call_workflow_json::<_, lash_restate::Reply<()>>(
+                route,
+                group_key,
+                "retire",
+                &lash_restate::Call::new(group_key),
+            ),
+        )
+        .await
+        .expect("retirement recovers from the cut")
+        .expect("retirement finishes");
+        assert_eq!(
+            engine.crashes(),
+            before + 1,
+            "the {service}/{handler}/{ty:?} cut actually fired"
+        );
+        let retired: lash_restate::Reply<lash_restate::EffectGroupRetireResponse> = ingress
+            .call_object_json(&index, group_key, "retire", &lash_restate::Call::new(()))
+            .await
+            .expect("read the surviving retirement fence");
+        assert!(
+            matches!(
+                retired.body,
+                lash_restate::EffectGroupRetireResponse::Tombstone
+            ),
+            "{retired:?}"
+        );
+        ingress
+            .call_workflow_json::<_, lash_restate::Reply<()>>(
+                route,
+                group_key,
+                "retire",
+                &lash_restate::Call::new(group_key),
+            )
+            .await
+            .expect("the retirement saga is idempotent after the crash");
+        let payloads = engine.invocations("EffectGroupPayload").await;
+        let payload_put = payloads
+            .iter()
+            .find(|invocation| {
+                !prior_payloads.contains(&invocation.id) && invocation.target.ends_with("/put")
+            })
+            .expect("the child retained its settlement payload");
+        let (payload_service, tail) = payload_put.target.split_once('/').expect("payload target");
+        let payload_key = tail.strip_suffix("/put").expect("payload key");
+        let payload: lash_restate::Reply<lash_restate::EffectGroupPayloadGetResponse> = ingress
+            .call_object_json(
+                payload_service,
+                payload_key,
+                "get",
+                &lash_restate::Call::new(()),
+            )
+            .await
+            .expect("read retired payload");
+        assert!(
+            matches!(
+                payload.body,
+                lash_restate::EffectGroupPayloadGetResponse::Retired
+            ),
+            "{payload:?}"
+        );
+        let keys = engine.state_keys(payload_service, payload_key).await;
+        assert!(
+            !keys.iter().any(|key| key == "effect-group/v1/payload"),
+            "retirement deleted the payload bytes: {keys:?}"
+        );
+        assert!(
+            keys.iter().any(|key| key == "effect-group/v1/retired"),
+            "retirement retains the payload fence"
+        );
+        assert!(
+            !engine
+                .state_keys(&index, group_key)
+                .await
+                .iter()
+                .any(|key| key == "effect-group/v1/membership"),
+            "the finished saga released retained membership"
+        );
+        let late: lash_restate::Reply<lash_restate::EffectGroupRecordSettlementResponse> = ingress
+            .call_object_json(
+                &index,
+                group_key,
+                "record_settlement",
+                &lash_restate::Call::new(lash_restate::EffectGroupRecordSettlementRequest {
+                    position: 0,
+                    terminal: lash_restate::EffectGroupSettlementTerminal::Cancelled,
+                }),
+            )
+            .await
+            .expect("a late child receives the retained refusal");
+        assert_eq!(
+            late.body,
+            lash_restate::EffectGroupRecordSettlementResponse::Retired
+        );
+        let late_payload: lash_restate::Reply<lash_restate::EffectGroupPayloadPutResponse> =
+            ingress
+                .call_object_json(
+                    payload_service,
+                    payload_key,
+                    "put",
+                    &lash_restate::Call::new(lash_restate::EffectGroupPayloadPutRequest {
+                        bytes: b"late-write".to_vec(),
+                    }),
+                )
+                .await
+                .expect("a late payload receives the retained refusal");
+        assert_eq!(
+            late_payload.body,
+            lash_restate::EffectGroupPayloadPutResponse::Retired
+        );
+        assert_eq!(
+            engine.state_keys(payload_service, payload_key).await,
+            keys,
+            "late writes do not resurrect bytes"
+        );
+        assert_eq!(
+            executions.load(Ordering::SeqCst),
+            1,
+            "a recorded effect never re-executes at {service}/{handler}/{ty:?}"
+        );
+        assert_eq!(
+            witness.runs.load(Ordering::SeqCst),
+            1,
+            "the recorded presentation never re-executes"
+        );
+        let terminal = lash_core::store::RootStore::root_terminal(
+            engine.stores().session_store_factory().as_ref(),
+            &lash_core::SessionId::from(session_id),
+            &lash_core::TurnId::from(turn_id),
+        )
+        .await
+        .expect("read root accounting after retirement")
+        .expect("the root committed");
+        assert!(matches!(
+            terminal.cause,
+            lash_core::store::RootTerminalCause::Committed { .. }
+        ));
+    }
+    engine.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tool_group_close_and_retirement_crash_matrix() {
+    let config = ServerConfig::default().always_replay(
+        std::env::var("LASH_RESTATE_TEST_ALWAYS_REPLAY").is_ok_and(|value| value == "1"),
+    );
+    group_close_and_retirement_crash_matrix(Engine::Double(
+        lash_restate_test::backend(4146, config)
+            .await
+            .expect("build the matrix backend"),
+    ))
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by the crash-windows suite"]
+async fn live_restate_tool_group_close_and_retirement_crash_matrix() {
+    group_close_and_retirement_crash_matrix(Engine::live("group-close-retirement", None).await)
+        .await;
 }

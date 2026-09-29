@@ -107,37 +107,51 @@ fn spawn_turn(
     parts: TurnParts,
     turn_id: &TurnId,
     text: &str,
+    redrive_after_commit: bool,
 ) -> tokio::task::JoinHandle<Result<crate::AssembledTurn, crate::RuntimeError>> {
     let admitted = admit(ExecutionScope::turn(&parts.session_id, turn_id));
     let mut input = crate::TurnInput::text(text);
     input.trace_turn_id = Some(turn_id.clone());
     crate::task::spawn(async move {
         let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
-        runner
-            .run_turn(
-                admitted,
-                Arc::new(move |scope| {
-                    let parts = parts.clone();
-                    let input = input.clone();
-                    let turn_tx = turn_tx.clone();
-                    Box::pin(async move {
-                        let turn = build_runtime(parts)
-                            .await
-                            .drive_turn(
-                                input,
-                                crate::TurnOptions::new(
-                                    tokio_util::sync::CancellationToken::new(),
-                                    scope,
-                                ),
-                            )
-                            .await;
-                        let end = crate::ConformanceTurnEnd::of(&turn);
-                        let _ = turn_tx.send(turn);
-                        end
-                    })
-                }),
-            )
-            .await;
+        let attempt = |crash: bool| -> crate::ConformanceTurnAttempt {
+            let parts = parts.clone();
+            let input = input.clone();
+            let turn_tx = turn_tx.clone();
+            Arc::new(move |scope| {
+                let parts = parts.clone();
+                let input = input.clone();
+                let turn_tx = turn_tx.clone();
+                Box::pin(async move {
+                    let turn = build_runtime(parts)
+                        .await
+                        .drive_turn(
+                            input,
+                            crate::TurnOptions::new(
+                                tokio_util::sync::CancellationToken::new(),
+                                scope,
+                            ),
+                        )
+                        .await;
+                    if crash {
+                        assert!(turn.is_ok(), "the first execution committed: {turn:?}");
+                        panic!(
+                            "injected owner loss after cancellation committed and its group closed"
+                        );
+                    }
+                    let end = crate::ConformanceTurnEnd::of(&turn);
+                    let _ = turn_tx.send(turn);
+                    end
+                })
+            })
+        };
+        if redrive_after_commit {
+            runner
+                .run_crashed_then_redriven_turn(admitted, attempt(true), attempt(false))
+                .await;
+        } else {
+            runner.run_turn(admitted, attempt(false)).await;
+        }
         turn_rx
             .recv()
             .await
@@ -292,13 +306,14 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
         plugin,
         model,
     };
-    let turn = spawn_turn(runner, parts, &turn_id, "retry once");
+    let turn = spawn_turn(runner, parts, &turn_id, "retry once", false);
 
     wait_until("the first attempt fails retryably", || {
         attempts.load(Ordering::SeqCst) == 1
     })
     .await;
-    let driver = TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), store);
+    let driver =
+        TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), Arc::clone(&store));
     let receipt = driver
         .request_cancel(
             TurnCancelRequest::new(
@@ -485,7 +500,7 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         plugin,
         model,
     };
-    let mut turn = spawn_turn(runner, parts, &root_turn_id, "switch and wait");
+    let mut turn = spawn_turn(runner, parts, &root_turn_id, "switch and wait", false);
 
     let completion_key = tokio::select! {
         key = completion_key_rx => match key {
@@ -605,7 +620,7 @@ impl crate::ToolProvider for IgnoresCancellationTool {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
+pub async fn cancel_dispositions_survive_group_child_teardown_and_redrive(
     prefix: &str,
     host: Arc<dyn EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
@@ -614,69 +629,155 @@ pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let session_id = SessionId::from(format!("{prefix}-ignores-cancel-session"));
-    let turn_id = TurnId::from(format!("{prefix}-ignores-cancel-turn"));
-    let started = Arc::new(AtomicUsize::new(0));
-    let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let tool = IgnoresCancellationTool {
-        started: Arc::clone(&started),
-        dropped: Arc::clone(&dropped),
-    };
-    let plugin: Arc<dyn crate::facade_support::PluginFactory> =
-        Arc::new(crate::plugin::StaticPluginFactory::new(
-            "conformance-ignores-cancellation",
-            crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(tool)),
-        ));
-    // The native binding honours an immediate cancel found at the step
-    // boundary by firing the cooperative token, so the next model call may
-    // start before it observes the token; the law does not pin that call.
-    let (model, _model_calls) = scripted_model(vec![
-        tool_call("ignores-cancel-call", "conformance_ignores_cancellation"),
-        text("unreachable after the cancel"),
-    ]);
-    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
-    let parts = TurnParts {
-        host: Arc::clone(&host),
-        store: Arc::clone(&store),
-        stores: Arc::clone(&stores),
-        session_id: session_id.clone(),
-        plugin,
-        model,
-    };
-    let turn = spawn_turn(runner, parts, &turn_id, "park and cancel");
+    for disposition in [
+        crate::TurnCancelUndeliveredInputPolicy::Defer,
+        crate::TurnCancelUndeliveredInputPolicy::Drop,
+    ] {
+        let prefix = format!("{prefix}-{disposition:?}");
+        let session_id = SessionId::from(format!("{prefix}-ignores-cancel-session"));
+        let turn_id = TurnId::from(format!("{prefix}-ignores-cancel-turn"));
+        let started = Arc::new(AtomicUsize::new(0));
+        let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let tool = IgnoresCancellationTool {
+            started: Arc::clone(&started),
+            dropped: Arc::clone(&dropped),
+        };
+        let plugin: Arc<dyn crate::facade_support::PluginFactory> =
+            Arc::new(crate::plugin::StaticPluginFactory::new(
+                "conformance-ignores-cancellation",
+                crate::facade_support::PluginSpec::new().with_tool_provider(Arc::new(tool)),
+            ));
+        // The native binding honours an immediate cancel found at the step
+        // boundary by firing the cooperative token, so the next model call may
+        // start before it observes the token; the law does not pin that call.
+        let (model, _model_calls) = scripted_model(vec![
+            tool_call("ignores-cancel-call", "conformance_ignores_cancellation"),
+            text("unreachable after the cancel"),
+        ]);
+        let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+        let parts = TurnParts {
+            host: Arc::clone(&host),
+            store: Arc::clone(&store),
+            stores: Arc::clone(&stores),
+            session_id: session_id.clone(),
+            plugin,
+            model,
+        };
+        let turn = spawn_turn(
+            Arc::clone(&runner),
+            parts,
+            &turn_id,
+            "park and cancel",
+            true,
+        );
 
-    wait_until("the tool child starts", || {
-        started.load(Ordering::SeqCst) == 1
-    })
-    .await;
-    let driver = TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), store);
-    let receipt = driver
-        .request_cancel(TurnCancelRequest::new(
-            TurnAddress::new(session_id.clone(), turn_id.clone()),
-            "cancel-ignoring-child",
-            None,
-        ))
-        .await
-        .expect("request an immediate turn cancel");
-    assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
+        wait_until("the tool child starts", || {
+            started.load(Ordering::SeqCst) == 1
+        })
+        .await;
+        let undelivered = store
+            .enqueue_pending_turn_input(crate::PendingTurnInputDraft::new(
+                &session_id,
+                crate::TurnInputIngress::active_turn(
+                    &turn_id,
+                    crate::TurnInputCheckpointBoundary::BeforeCompletion,
+                ),
+                crate::TurnInput::text("undelivered steering while the child is parked"),
+            ))
+            .await
+            .expect("accept a host input addressed to the cancelling turn");
+        let driver =
+            TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), Arc::clone(&store));
+        let receipt = driver
+            .request_cancel(
+                TurnCancelRequest::new(
+                    TurnAddress::new(session_id.clone(), turn_id.clone()),
+                    "cancel-ignoring-child",
+                    Some("group-teardown-host".to_string()),
+                )
+                .undelivered(disposition),
+            )
+            .await
+            .expect("request an immediate turn cancel");
+        assert!(matches!(receipt.outcome, TurnCancelOutcome::Requested(_)));
 
-    let turn = tokio::time::timeout(Duration::from_secs(30), turn)
-        .await
-        .expect("the cancelled turn stops although its tool ignores cancellation")
-        .expect("join the turn task")
-        .expect("the turn assembles");
-    let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &turn.outcome else {
-        panic!("turn did not stop on cancellation: {:?}", turn.outcome);
-    };
-    assert_eq!(evidence.request_id, "cancel-ignoring-child");
-    assert_eq!(evidence.mode, TurnCancelMode::Immediate);
-    wait_until("the cancel-ignoring tool child is dropped", || {
-        dropped.load(Ordering::SeqCst)
-    })
-    .await;
-    assert_eq!(
-        started.load(Ordering::SeqCst),
-        1,
-        "the cancelled child is not re-run"
-    );
+        let turn = tokio::time::timeout(Duration::from_secs(30), turn)
+            .await
+            .expect("the cancelled turn stops although its tool ignores cancellation")
+            .expect("join the turn task")
+            .expect("the turn assembles");
+        let TurnOutcome::Stopped(TurnStop::Cancelled { evidence }) = &turn.outcome else {
+            panic!("turn did not stop on cancellation: {:?}", turn.outcome);
+        };
+        assert_eq!(evidence.request_id, "cancel-ignoring-child");
+        assert_eq!(evidence.mode, TurnCancelMode::Immediate);
+        assert_eq!(evidence.undelivered, disposition);
+        assert_eq!(evidence.origin.as_deref(), Some("group-teardown-host"));
+        assert_eq!(
+            turn.turn_cancel_input_outcome
+                .affected_inputs
+                .iter()
+                .map(|input| (input.input_id.clone(), input.disposition))
+                .collect::<Vec<_>>(),
+            vec![(undelivered.input_id.clone(), disposition)],
+            "redrive preserves the input disposition the first cancellation commit applied",
+        );
+        let pending = store
+            .list_pending_turn_inputs(&session_id)
+            .await
+            .expect("read inputs after redrive");
+        assert_eq!(
+            pending
+                .iter()
+                .any(|input| input.input.input_id == undelivered.input_id),
+            disposition == crate::TurnCancelUndeliveredInputPolicy::Defer,
+            "Defer keeps the addressed input queued; Drop removes it",
+        );
+        assert!(
+            store
+                .list_turn_input_applications(&session_id)
+                .await
+                .expect("read delivered inputs")
+                .iter()
+                .all(|application| application.input_id != undelivered.input_id),
+            "the cancelled turn never delivers or completes the steering input"
+        );
+        let retained = store
+            .turn_cancel_request(&TurnAddress::new(session_id.clone(), turn_id.clone()))
+            .await
+            .expect("read retained cancellation")
+            .expect("the accepted request survives teardown");
+        assert_eq!(retained.request.request_id, evidence.request_id);
+        assert_eq!(retained.request.undelivered, disposition);
+        let recovered =
+            TurnWorkDriver::for_session(Arc::clone(&host), session_id.clone(), Arc::clone(&store));
+        let terminal = recovered
+            .await_terminal(&TurnAddress::new(session_id.clone(), turn_id.clone()))
+            .await
+            .expect("a fresh driver attaches to the terminal after child teardown");
+        assert!(
+            matches!(terminal, crate::TurnTerminal::Committed {
+        outcome: TurnOutcome::Stopped(TurnStop::Cancelled { evidence: ref recorded }), ..
+    } if recorded == evidence),
+            "the recorded TurnStop survives control reattachment: {terminal:?}"
+        );
+        let root = store
+            .root_terminal(&session_id, &turn_id)
+            .await
+            .expect("read root terminal")
+            .expect("cancellation committed root terminal evidence");
+        assert!(
+            matches!(root.cause, crate::RootTerminalCause::Committed { stop: Some(TurnStop::Cancelled { evidence: ref recorded }), .. } if recorded == evidence)
+        );
+
+        wait_until("the cancel-ignoring tool child is dropped", || {
+            dropped.load(Ordering::SeqCst)
+        })
+        .await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "the cancelled child is not re-run"
+        );
+    }
 }

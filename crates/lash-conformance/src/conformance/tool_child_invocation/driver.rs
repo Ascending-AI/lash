@@ -3,7 +3,7 @@ use pretty_assertions::assert_eq;
 use super::*;
 use crate::ProcessEventLogTestSupport as _;
 
-/// The full-lane group: six children, one per driver lane.
+/// The driver lanes, including every pending resolver declaration.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -62,6 +62,12 @@ fn lane_group(
         granted,
         leaf(4, LEAF_INTENTS, ToolChildCompletionRouting::Inline),
         leaf(5, LEAF_USAGE, ToolChildCompletionRouting::Inline),
+        leaf(6, LEAF_PROCESS_PENDING, ToolChildCompletionRouting::Durable),
+        leaf(
+            7,
+            LEAF_DECLARED_PENDING,
+            ToolChildCompletionRouting::Durable,
+        ),
     ];
     crate::RuntimeEffectGroup::try_new(
         crate::RuntimeEffectInvocation::new(
@@ -84,7 +90,7 @@ fn lane_group(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn tool_children_run_through_the_invocation_driver(
+pub async fn declared_intent_replay_preserves_manifest_order_and_capabilities(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
@@ -94,7 +100,61 @@ pub async fn tool_children_run_through_the_invocation_driver(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-lane-group");
-    let scenario = scenario(fixture, &session_id, serde_json::json!({"lane": "intents"})).await;
+    let mut scenario = scenario(fixture, &session_id, serde_json::json!({"lane": "intents"})).await;
+    // The fixture deliberately lends no definition or trigger registry. Those
+    // declarations must retain typed refusals beside the executable vocabulary.
+    // Trigger registration also offers an actor without the recorded child frame.
+    Arc::get_mut(&mut scenario.provider)
+        .expect("the provider has not been lent yet")
+        .additional_intents = vec![
+        crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
+            session_id: session_id.clone(),
+            process_id: scenario.intent_target.clone(),
+            signal_name: "law_intent_signal".to_string(),
+            payload: serde_json::json!({"signal": true}),
+        }),
+        crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
+            session_id: session_id.clone(),
+            process_id: scenario.intent_target.clone(),
+        }),
+        crate::ToolIntent::EmitTrigger(crate::EmitTriggerIntent {
+            session_id: session_id.clone(),
+            request: crate::TriggerOccurrenceRequest::new(
+                "law",
+                "key",
+                serde_json::Value::Null,
+                "caller-key",
+            ),
+        }),
+        crate::ToolIntent::RegisterProcessDefinition(Box::new(
+            crate::RegisterProcessDefinitionIntent {
+                session_id: session_id.clone(),
+                engine_kind: "law".to_string(),
+                definition: serde_json::Value::Null,
+                env_spec: None,
+                label: None,
+                name: Some("law".to_string()),
+                expected_revision: None,
+                module: None,
+            },
+        )),
+        crate::ToolIntent::RegisterTrigger(Box::new(crate::RegisterTriggerIntent {
+            session_id: session_id.clone(),
+            owner_scope: crate::TriggerOwnerScope::session(session_id.clone()),
+            actor: crate::ProcessOriginator::session(crate::SessionScope::new(session_id.clone())),
+            env_spec: None,
+            draft: crate::TriggerSubscriptionDraft::for_process(
+                "law",
+                scenario.env_ref.clone(),
+                "law",
+                "key",
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::ProcessIdentity::new("law"),
+            ),
+        })),
+    ];
     let host = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
     })
@@ -145,7 +205,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
     });
 
     let mut settlements: Vec<crate::GroupSettlement> = Vec::new();
-    for rank in 0..6 {
+    for rank in 0..8 {
         settlements.push(next_settlement(&scoped, &mut handle, rank).await);
     }
     resolve.await.expect("the resolver task joins");
@@ -161,7 +221,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
             .iter()
             .map(|settlement| settlement.position)
             .collect::<Vec<_>>(),
-        (0..6).collect::<Vec<_>>(),
+        (0..8).collect::<Vec<_>>(),
         "every child settles exactly once, at every rank"
     );
 
@@ -251,10 +311,56 @@ pub async fn tool_children_run_through_the_invocation_driver(
         kinds,
         vec![
             crate::ToolIntentKind::StartProcess,
-            crate::ToolIntentKind::EmitProcessEvent
+            crate::ToolIntentKind::EmitProcessEvent,
+            crate::ToolIntentKind::SignalProcess,
+            crate::ToolIntentKind::CancelProcess,
+            crate::ToolIntentKind::EmitTrigger,
+            crate::ToolIntentKind::RegisterProcessDefinition,
+            crate::ToolIntentKind::RegisterTrigger,
         ],
-        "the child realized both declared intents after commit"
+        "the child records every vocabulary result in declaration order after commit"
     );
+    assert_eq!(kinds.len(), crate::ToolIntentKind::ALL.len());
+    for (index, receipt) in intents.1.intent_outcomes.iter().enumerate() {
+        let identity = match receipt {
+            crate::ToolIntentExecutionOutcome::Executed { identity, .. } if index < 4 => identity,
+            crate::ToolIntentExecutionOutcome::Refused {
+                identity: Some(identity),
+                refusal: crate::ToolIntentRefusalReason::CommandFailed { .. },
+                ..
+            } if (4..6).contains(&index) => identity,
+            crate::ToolIntentExecutionOutcome::Refused {
+                identity: Some(identity),
+                refusal: crate::ToolIntentRefusalReason::ForeignTriggerActor { .. },
+                ..
+            } if index == 6 => identity,
+            other => panic!("unexpected vocabulary result at index {index}: {other:?}"),
+        };
+        assert_eq!(identity.intent_index as usize, index);
+        assert_eq!(identity.session_id, session_id);
+        assert_eq!(
+            identity.tool_call_id,
+            leaf_call_id(&format!("{group_key}-call-4"))
+        );
+    }
+    for (name, expected_id) in [
+        ("law_plain", LEAF_PLAIN),
+        ("law_retry", LEAF_RETRY),
+        ("law_deferred", LEAF_DEFERRED),
+        ("law_granted", LEAF_GRANTED),
+        ("law_intents", LEAF_INTENTS),
+        ("law_usage", LEAF_USAGE),
+        ("law_process_pending", LEAF_PROCESS_PENDING),
+        ("law_declared_pending", LEAF_DECLARED_PENDING),
+    ] {
+        for execution in scenario.observation.executions_of(name) {
+            assert_eq!(
+                execution.tool_id,
+                crate::ToolId::from(expected_id),
+                "one manifest couples the recorded id and provider name"
+            );
+        }
+    }
     assert_eq!(
         intents.1.possession.len(),
         1,
@@ -287,6 +393,35 @@ pub async fn tool_children_run_through_the_invocation_driver(
         "the captured delta is the attempt's own spend"
     );
 
+    // Neither runtime-owned resolver can park on a service that cannot attach
+    // a terminal. The declared start still retains the admitted launch receipt.
+    for position in [6, 7] {
+        let crate::ToolCallOutcome::Failure(failure) = &outcomes[position].0.record.output.outcome
+        else {
+            panic!(
+                "a resolver without terminal attachment must settle a refusal: {:?}",
+                outcomes[position].0.record.output
+            );
+        };
+        assert_eq!(failure.code, "pending_tool_resolver_unarmed");
+    }
+    assert!(outcomes[6].1.intent_outcomes.is_empty());
+    let [crate::ToolIntentExecutionOutcome::Executed { identity, kind, .. }] =
+        outcomes[7].1.intent_outcomes.as_slice()
+    else {
+        panic!(
+            "the declared pending call retains one launch receipt: {:?}",
+            outcomes[7].1.intent_outcomes
+        );
+    };
+    assert_eq!(*kind, crate::ToolIntentKind::StartProcess);
+    assert_eq!(identity.session_id, session_id);
+    assert_eq!(
+        identity.tool_call_id,
+        leaf_call_id(&format!("{group_key}-call-7"))
+    );
+    assert_eq!(identity.intent_index, 0);
+
     // Replay: a second open of the same group serves the journaled
     // settlements — the receipts and the possession are the recorded ones,
     // not re-executions.
@@ -296,8 +431,25 @@ pub async fn tool_children_run_through_the_invocation_driver(
         .await
         .expect("a recorded group reopens to serve its journaled settlements");
     let mut replayed_intents = None;
-    for rank in 0..6 {
+    for rank in 0..8 {
         let settlement = next_settlement(&scoped, &mut replay_handle, rank).await;
+        let Ok(crate::RuntimeEffectOutcome::ToolInvocation {
+            outcome,
+            settlement: child,
+        }) = &settlement.outcome
+        else {
+            panic!("the retained rank carries a tool settlement");
+        };
+        assert_eq!(
+            serde_json::to_value(outcome).expect("encode replay outcome"),
+            serde_json::to_value(&outcomes[settlement.position].0)
+                .expect("encode recorded outcome")
+        );
+        assert_eq!(
+            serde_json::to_value(child).expect("encode replay settlement"),
+            serde_json::to_value(&outcomes[settlement.position].1)
+                .expect("encode recorded settlement")
+        );
         if settlement.position == 4 {
             replayed_intents = Some(settlement.outcome);
         }
@@ -314,6 +466,38 @@ pub async fn tool_children_run_through_the_invocation_driver(
     else {
         panic!("rank 4 replayed to something that is not a tool invocation")
     };
+    assert_eq!(
+        replayed.intent_outcomes, outcomes[4].1.intent_outcomes,
+        "replay preserves the complete ordered intent receipts and identities"
+    );
+    assert_eq!(scenario.observation.executions_of("law_intents").len(), 1);
+    assert_eq!(scenario.observation.executions_of("law_granted").len(), 1);
+    assert_eq!(
+        scenario
+            .observation
+            .executions_of("law_process_pending")
+            .len(),
+        1
+    );
+    assert_eq!(
+        scenario
+            .observation
+            .executions_of("law_declared_pending")
+            .len(),
+        1
+    );
+    let replay_events = scenario
+        .registry
+        .full_event_window(&scenario.intent_target, 0)
+        .await
+        .expect("the replayed event log reads");
+    assert_eq!(
+        replay_events
+            .iter()
+            .filter(|event| event.event_type == "law.intent-event")
+            .count(),
+        1
+    );
     assert_eq!(
         replayed.possession, outcomes[4].1.possession,
         "the settlement's possession is the recorded one after replay"

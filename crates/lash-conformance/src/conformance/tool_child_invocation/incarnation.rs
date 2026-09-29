@@ -189,6 +189,7 @@ pub async fn another_process_is_not_the_recorded_opener(
             session_id: session_id.clone(),
             intent_target: crate::ProcessId::fixture("unused-in-incarnation"),
             start_metadata: serde_json::Value::Null,
+            additional_intents: Vec::new(),
         })
     };
     // Derived through the same projection the store writes, never a

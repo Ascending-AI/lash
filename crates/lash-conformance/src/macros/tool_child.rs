@@ -34,7 +34,7 @@ macro_rules! turn_runner_tests {
 macro_rules! tool_child_turn_cancel_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::__turn_runner_register!([$(#[$attr])*] $fixture;
-            (a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation, "tool-child-turn-cancel-drops-child"));
+            (cancel_dispositions_survive_group_child_teardown_and_redrive, "tool-child-turn-cancel-drops-child"));
     };
 }
 
@@ -434,7 +434,7 @@ macro_rules! tool_child_invocation_tests {
     (@catalogue [$($attr:tt)*] $fixture:block) => {
         $crate::tool_child_invocation_tests!(@expand [$($attr)*] $fixture; [
             (
-                tool_children_run_through_the_invocation_driver,
+                declared_intent_replay_preserves_manifest_order_and_capabilities,
                 "tool-child-invocation-driver"
             ),
             (
@@ -474,7 +474,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-deferred-commit-point"
             ),
             (
-                a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks,
+                group_accounting_conserves_each_incorporated_rank,
                 "tool-child-group-prefix-incorporation"
             ),
             (

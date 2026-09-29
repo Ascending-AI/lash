@@ -1288,6 +1288,75 @@ impl LiveConformanceHarness {
         RestateIngressClient::new(self.connection.clone())
     }
 
+    pub(super) async fn rank_allocator_exhaustion(&self) {
+        use crate::effect_group::{
+            EffectGroupChildCommitState, EffectGroupLifecycle, EffectGroupStateLiveRecord,
+            EffectGroupStateRecord,
+        };
+        use std::collections::BTreeMap;
+        let key = witness_key("rank-exhaustion");
+        let child = witness_child(&key, 0);
+        let shape = witness_shape(&key, std::slice::from_ref(&child));
+        let membership = witness_membership(std::slice::from_ref(&child));
+        let record = EffectGroupStateRecord {
+            shape_digest: shape.digest(&membership).expect("shape digest"),
+            dispatch_route: "EffectGroupDispatch".to_string(),
+            lifecycle: EffectGroupLifecycle::Ready {
+                addresses: BTreeMap::new(),
+                live: EffectGroupStateLiveRecord {
+                    shape,
+                    next_rank: u64::MAX,
+                    next_commit_seq: 2,
+                    commit_states: BTreeMap::from([(
+                        0,
+                        EffectGroupChildCommitState::Committed { commit_seq: 1 },
+                    )]),
+                    settlements: BTreeMap::new(),
+                    settled_positions: BTreeMap::new(),
+                },
+            },
+        };
+        let state = serde_json::json!({"format": 1, "body": record});
+        overwrite_index_state(&self.admin, &key, &state).await;
+        for _ in 0..2 {
+            let result = self
+                .ingress()
+                .call_lash_object::<_, EffectGroupRecordSettlementResponse>(
+                    "EffectGroupIndex",
+                    &key,
+                    "record_settlement",
+                    &EffectGroupRecordSettlementRequest {
+                        position: 0,
+                        terminal: EffectGroupSettlementTerminal::Cancelled,
+                    },
+                )
+                .await;
+            let error = result.expect_err("rank exhaustion is terminal, never a wrapped seat");
+            assert!(
+                error.to_string().contains("exhausted settlement ranks"),
+                "{error}"
+            );
+            let read: EffectGroupReadRankResponse = self
+                .ingress()
+                .call_lash_object(
+                    "EffectGroupIndex",
+                    &key,
+                    "read_rank",
+                    &EffectGroupReadRankRequest {
+                        rank: u64::MAX,
+                        for_caller: false,
+                        run: false,
+                    },
+                )
+                .await
+                .expect("the refused allocation leaves the index readable");
+            assert!(
+                matches!(read, EffectGroupReadRankResponse::NotSettled),
+                "{read:?}"
+            );
+        }
+    }
+
     pub(super) async fn run_design_witnesses(&self) {
         run_design_witnesses(&self.connection, &self.admin, &self.executors).await;
     }
@@ -2169,7 +2238,7 @@ async fn overwrite_index_state(admin: &HarnessAdmin, group_key: &str, state: &se
     let bytes = serde_json::to_vec(state).expect("encode the index state");
     let body = serde_json::json!({
         "object_key": group_key,
-        "new_state": { "effect-group/v1/state": bytes },
+        "new_state": { "effect-group/v1/state": bytes, "_compat": serde_json::to_vec(&crate::compat::ObjectCompat::fresh(1)).expect("compat record") },
     });
     let (status, body) = match admin {
         HarnessAdmin::Live { admin_url } => {

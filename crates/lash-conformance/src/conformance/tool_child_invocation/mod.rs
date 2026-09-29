@@ -97,6 +97,8 @@ const LEAF_DEFERRED: &str = "tool:law_deferred";
 const LEAF_GRANTED: &str = "tool:law_granted";
 const LEAF_INTENTS: &str = "tool:law_intents";
 const LEAF_USAGE: &str = "tool:law_usage";
+const LEAF_PROCESS_PENDING: &str = "tool:law_process_pending";
+const LEAF_DECLARED_PENDING: &str = "tool:law_declared_pending";
 /// The leaf the incarnation law runs to read its start context: its output
 /// names the durable parent a start it declared would take.
 const LEAF_PARENT: &str = "tool:law_parent";
@@ -206,6 +208,7 @@ const POLL: Duration = Duration::from_millis(25);
 struct LeafExecution {
     /// The tool name the leaf was invoked under.
     tool: String,
+    tool_id: crate::ToolId,
     /// The session the attempt's context was bound to — the child's recorded
     /// one when the driver honoured the retained request, the lending
     /// opener's when it did not.
@@ -242,6 +245,7 @@ impl LawObservation {
     fn record(
         &self,
         tool: &str,
+        tool_id: &crate::ToolId,
         session_id: &str,
         attempt: u32,
         execution_binding: serde_json::Value,
@@ -249,6 +253,7 @@ impl LawObservation {
     ) {
         self.executions.lock_recover().push(LeafExecution {
             tool: tool.to_string(),
+            tool_id: tool_id.clone(),
             session_id: session_id.to_string(),
             attempt,
             execution_binding,
@@ -331,6 +336,8 @@ fn leaf_definitions() -> Vec<crate::ToolDefinition> {
         LEAF_GRANTED,
         LEAF_INTENTS,
         LEAF_USAGE,
+        LEAF_PROCESS_PENDING,
+        LEAF_DECLARED_PENDING,
         LEAF_PARENT,
         LEAF_RECOVERY,
         LEAF_SPEND_DEFERRED,
@@ -382,6 +389,7 @@ struct LawLeafProvider {
     /// What the intents leaf declares as its started process's metadata, so the
     /// law can find the derived process id in the settlement's possession.
     start_metadata: serde_json::Value,
+    additional_intents: Vec<crate::ToolIntent>,
 }
 
 #[async_trait::async_trait]
@@ -404,6 +412,8 @@ impl crate::ToolProvider for LawLeafProvider {
         *tool_id == crate::ToolId::from(LEAF_DEFERRED)
             || *tool_id == crate::ToolId::from(LEAF_RECOVERY)
             || *tool_id == crate::ToolId::from(LEAF_SPEND_DEFERRED)
+            || *tool_id == crate::ToolId::from(LEAF_PROCESS_PENDING)
+            || *tool_id == crate::ToolId::from(LEAF_DECLARED_PENDING)
     }
 
     async fn execute(&self, call: crate::ToolCall<'_>) -> crate::ToolAttemptOutcome {
@@ -411,6 +421,7 @@ impl crate::ToolProvider for LawLeafProvider {
         let name = call.name().to_string();
         self.observation.record(
             &name,
+            call.tool_id(),
             context.session_id(),
             context.attempt_number(),
             context.tool_execution_binding().clone(),
@@ -471,6 +482,36 @@ impl crate::ToolProvider for LawLeafProvider {
                     .into(),
                 }
             }
+            name if name == LEAF_PROCESS_PENDING.trim_start_matches("tool:")
+                || name == LEAF_DECLARED_PENDING.trim_start_matches("tool:") =>
+            {
+                let key = match context.completion_key() {
+                    Ok(key) => key,
+                    Err(error) => return crate::ToolOutcome::err_fmt(error).into(),
+                };
+                self.observation.park(&leaf_label(context.call_id()), key);
+                let pending = crate::PendingCompletion::new();
+                let pending = if name == LEAF_PROCESS_PENDING.trim_start_matches("tool:") {
+                    pending.resolved_by_process_terminal(self.intent_target.clone())
+                } else {
+                    let start = match crate::DeclaredStart::new(
+                        context,
+                        crate::StartProcessIntent {
+                            session_id: self.session_id.clone(),
+                            declaration: crate::ProcessStartDeclaration::external(
+                                crate::ProcessOriginator::host(),
+                                serde_json::json!({"lane": "declared-pending"}),
+                                crate::Lifetime::Detached,
+                            ),
+                        },
+                    ) {
+                        Ok(start) => start,
+                        Err(error) => return crate::ToolOutcome::err_fmt(error).into(),
+                    };
+                    pending.resolved_by_declared_start(start)
+                };
+                crate::ToolAttemptOutcome::pending(pending)
+            }
             name if name == LEAF_BIG.trim_start_matches("tool:") => {
                 crate::ToolAttemptOutcome::done_without_intents(crate::ToolOutcomeDone::ok(
                     serde_json::json!("x".repeat(BIG_OUTPUT_BYTES)),
@@ -497,24 +538,26 @@ impl crate::ToolProvider for LawLeafProvider {
                 .into(),
             },
             name if name == LEAF_INTENTS.trim_start_matches("tool:") => {
+                let mut intents = vec![
+                    crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
+                        session_id: self.session_id.clone(),
+                        declaration: crate::ProcessStartDeclaration::external(
+                            crate::ProcessOriginator::host(),
+                            self.start_metadata.clone(),
+                            crate::Lifetime::Detached,
+                        ),
+                    })),
+                    crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
+                        session_id: self.session_id.clone(),
+                        process_id: self.intent_target.clone(),
+                        event_type: "law.intent-event".to_string(),
+                        payload: serde_json::json!({ "leaf": "intents" }),
+                    }),
+                ];
+                intents.extend(self.additional_intents.clone());
                 crate::ToolAttemptOutcome::done(
                     crate::ToolOutcomeDone::ok(serde_json::json!({ "leaf": "intents" })),
-                    crate::ToolIntents::v3(vec![
-                        crate::ToolIntent::StartProcess(Box::new(crate::StartProcessIntent {
-                            session_id: self.session_id.clone(),
-                            declaration: crate::ProcessStartDeclaration::external(
-                                crate::ProcessOriginator::host(),
-                                self.start_metadata.clone(),
-                                crate::Lifetime::Detached,
-                            ),
-                        })),
-                        crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
-                            session_id: self.session_id.clone(),
-                            process_id: self.intent_target.clone(),
-                            event_type: "law.intent-event".to_string(),
-                            payload: serde_json::json!({ "leaf": "intents" }),
-                        }),
-                    ]),
+                    crate::ToolIntents::v3(intents),
                 )
             }
             name if name == LEAF_COMMIT.trim_start_matches("tool:") => {
@@ -1638,6 +1681,7 @@ async fn scenario_on(
             session_id: session_id.clone(),
             intent_target: intent_target.clone(),
             start_metadata,
+            additional_intents: Vec::new(),
         }),
         observation,
         registry,
@@ -1667,11 +1711,15 @@ async fn register_intent_target(
                 crate::ProcessProvenance::host(),
                 crate::Lifetime::Detached,
             )
-            .with_extra_event_types([crate::ProcessEventType {
-                name: "law.intent-event".to_string(),
-                payload_schema: crate::LashSchema::any(),
-                semantics: crate::ProcessEventSemanticsSpec::default(),
-            }]),
+            .with_extra_event_types(
+                ["law.intent-event", "signal.law_intent_signal"].map(|name| {
+                    crate::ProcessEventType {
+                        name: name.to_string(),
+                        payload_schema: crate::LashSchema::any(),
+                        semantics: crate::ProcessEventSemanticsSpec::default(),
+                    }
+                }),
+            ),
             std::slice::from_ref(session_id),
         )
         .await

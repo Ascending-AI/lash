@@ -82,6 +82,10 @@ impl crate::session::UsageChargeSink for RecordingCharge {
 }
 
 impl RecordingCharge {
+    fn snapshot(&self) -> Vec<(String, String, crate::TokenUsage)> {
+        self.charges.lock_recover().clone()
+    }
+
     pub(super) fn count(&self) -> usize {
         self.charges
             .lock()
@@ -135,6 +139,7 @@ struct RedrivenOpener {
     extended: Vec<crate::runtime::effect::IncorporatedGroupRank>,
     /// Charges once the extension landed.
     final_charged: usize,
+    final_usage: Vec<(String, String, crate::TokenUsage)>,
 }
 
 /// The opener's side of the law, as one handler's work: open the group,
@@ -196,7 +201,7 @@ async fn open_and_incorporate_first_rank<'run>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ranks(
+pub async fn group_accounting_conserves_each_incorporated_rank(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
@@ -338,6 +343,7 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
                     late_position: late.position,
                     extended,
                     final_charged,
+                    final_usage: charge.snapshot(),
                 });
                 crate::ConformanceTurnEnd::Settled
             })
@@ -395,6 +401,30 @@ pub async fn a_group_prefix_incorporation_reincorporates_exactly_the_recorded_ra
     assert_eq!(
         redriven.final_charged, 2,
         "rank 2's spend is charged by its own record, once"
+    );
+    assert_eq!(
+        redriven.final_usage,
+        vec![
+            (
+                "law-usage-leaf".to_string(),
+                "law-model".to_string(),
+                law_direct_completion().usage
+            ),
+            (
+                "law-spend-deferred".to_string(),
+                "law-model".to_string(),
+                law_direct_completion().usage
+            ),
+        ],
+        "each incorporated rank conserves its own source, model and complete token usage"
+    );
+    assert_eq!(scenario.observation.executions_of("law_usage").len(), 1);
+    assert_eq!(
+        scenario
+            .observation
+            .executions_of("law_spend_deferred")
+            .len(),
+        1
     );
 }
 

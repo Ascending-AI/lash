@@ -90,17 +90,16 @@ endpoints = ["NS_A", "NS_B"]
 shards = 1
 timeout_seconds = 180
 
-# Two crash windows a clean run never opens (FIG-4095): the deployment dies
-# inside a process segment's handover, and between a tool presentation's
-# content-addressed put and its journaled outcome. One endpoint bind per
-# shard: each law brings its backends up one after another on it.
+# Deployment loss during process handover, presentation persistence, and the
+# 13-cut group close/retirement matrix. One endpoint bind per shard: each law
+# brings its backends up one after another on it.
 [suites.crash-windows]
 label = "//crates/lash-restate-test:crash_windows__test"
 cwd = "crates/lash-restate-test"
 filters = ["live_restate_"]
 endpoints = ["CW"]
 shards = 1
-timeout_seconds = 240
+timeout_seconds = 600
 
 [suites.root-control]
 label = "//crates/lash-restate:lash-restate__unit_test"

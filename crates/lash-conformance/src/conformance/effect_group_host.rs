@@ -21,6 +21,9 @@
 //! Each law takes its own host from the factory and namespaces its own group
 //! keys, so the suite is safe against a shared substrate.
 
+mod reopen;
+pub use reopen::group_reopen_retention_and_rank_exhaustion_contract;
+
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
@@ -2105,86 +2108,6 @@ pub async fn closing_twice_under_one_disposition_succeeds<F: Fn() -> Host>(make:
     close(&scoped, replayed, LoserPolicy::Cancel)
         .await
         .expect("a replayed close under the same disposition must succeed");
-}
-
-/// A reopen is fenced on the group's shape, and reopening a group this host is
-/// already running dispatches nothing.
-///
-/// Both halves matter for the same reason: a shrunk child vec under one key
-/// renumbers every rank above the truncation, and a second dispatch doubles
-/// every side effect the first is still producing.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub async fn a_reopen_is_fenced_on_shape_and_runs_no_child_twice<F: Fn() -> Host>(
-    make: &F,
-    prefix: &str,
-) {
-    let host = make();
-    let scoped = host
-        .scoped(admit(scope(prefix, "reopen")))
-        .expect("a scope binds");
-    let key = group_key(prefix, "reopen");
-    let runs = Arc::new(AtomicUsize::new(0));
-    let counted = |runs: &Arc<AtomicUsize>, position: usize| {
-        let runs = Arc::clone(runs);
-        RuntimeEffectLocalExecutor::testing(move |_| async move {
-            runs.fetch_add(1, Ordering::SeqCst);
-            Ok(outcome_of(position))
-        })
-    };
-
-    let mut handle = open(
-        &scoped,
-        &key,
-        2,
-        GroupWakePolicy::All,
-        RUN,
-        vec![counted(&runs, 0), counted(&runs, 1)],
-    )
-    .await;
-    next(&scoped, &mut handle).await.expect("rank 1 is served");
-    next(&scoped, &mut handle).await.expect("rank 2 is served");
-    assert_eq!(runs.load(Ordering::SeqCst), 2, "each child ran once");
-
-    // A reopen of the same shape is legal and must not run anything again.
-    let reopened = scoped
-        .controller()
-        .open_effect_group(staged(
-            group(scoped.execution_scope(), &key, 2, GroupWakePolicy::All, RUN),
-            vec![counted(&runs, 0), counted(&runs, 1)],
-        ))
-        .await
-        .expect("a reopen of the same shape is legal");
-    assert_eq!(reopened.consumed(), 0, "a reopened handle starts at zero");
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(
-        runs.load(Ordering::SeqCst),
-        2,
-        "a reopen must not run a child a second time"
-    );
-
-    // A reopen under a different child count is refused: the fence is on shape.
-    let error = scoped
-        .controller()
-        .open_effect_group(staged(
-            group(scoped.execution_scope(), &key, 1, GroupWakePolicy::All, RUN),
-            vec![counted(&runs, 0)],
-        ))
-        .await
-        .expect_err("a reopen with a different child count must be refused");
-    assert_eq!(
-        error.code,
-        crate::RuntimeErrorCode::RuntimeEffectGroupShape,
-        "a changed child count renumbers every rank above the change"
-    );
-    close(&scoped, reopened, RUN)
-        .await
-        .expect("the group closes");
-    close(&scoped, handle, RUN)
-        .await
-        .expect("closing an already-closed group is idempotent");
 }
 
 /// A rank recorded by one host instance is readable by another over the same

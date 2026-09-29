@@ -253,6 +253,35 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
     )
 }
 
+lash_conformance::tool_child_turn_cancel_tests!(
+    #[ignore = "requires an isolated Restate server; run by the effect-group suite"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let host = harness.endpoint_host();
+        let runner = harness.turn_runner();
+        let stores = harness.law_stores();
+        let (work, _transport) = conformance_restate_process_work(
+            stores.process_registry(),
+            ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::json!({}),
+            )),
+        );
+        let prefix: &'static str = Box::leak(
+            format!("restate-tool-child-cancel-{}", harness.run_nonce()).into_boxed_str(),
+        );
+        (
+            harness,
+            prefix,
+            host,
+            stores,
+            work,
+            runner,
+            |_law: &'static str| async {},
+        )
+    }
+);
+
 // The turn runs inside a live handler: its tool call opens a real Restate
 // effect group whose child runs in the endpoint's dispatch invocation, which
 // the recording contexts cannot serve (FIG-3397).
@@ -2137,4 +2166,22 @@ pub(super) static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<dyn ProcessExecutionE
 /// [`RECOVERY_ARTIFACT_BACKEND`]'s Lashlang artifact store.
 pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
     lashlang::LashlangArtifacts::of_backend(&RECOVERY_ARTIFACT_BACKEND)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start_on(
+        effect_group_conformance::HarnessServer::in_process(),
+    )
+    .await;
+    harness.rank_allocator_exhaustion().await;
+    harness.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires an isolated Restate server; run by the effect-group suite"]
+async fn live_group_rank_allocator_refuses_exhaustion_without_a_partial_seat() {
+    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
+    harness.rank_allocator_exhaustion().await;
+    harness.finish().await;
 }
