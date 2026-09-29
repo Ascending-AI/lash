@@ -6,7 +6,8 @@
 //! staged byte exists without a durable record that will end it. Nothing
 //! here severs or moves an edge. The cleanup executor resolves the guard:
 //! onto the key's retained record once one is registered, or to nothing once
-//! the starter's journal is settled with no record.
+//! the starter's journal is settled with no record. A terminal refusal before
+//! any process holds the key ends `Start(key)` at once.
 //!
 //! Every engine runs this one sequence. The local executor runs it inline; the
 //! Restate controller runs it inside one journaled step, so a replay of the
@@ -24,14 +25,193 @@ use super::{
     SessionId, StoreRealization, artifact_referrer_ended,
 };
 use crate::{
-    ArtifactCleanupPlan, ArtifactReferrer, ArtifactStoreId, ReferrerClaim,
-    RuntimeEffectControllerError, TurnFailureCause,
+    ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer, ArtifactStoreId,
+    ModuleArtifactStore, ReferrerClaim, RuntimeEffectControllerError, StartKey, TurnFailureCause,
+    runtime::Clock, store::ArtifactCleanupLedger,
 };
+
+/// The artifact stores a referrer acquires through, and the cleanup ledger
+/// its guards arm in (ADR 0113 §2.1, §2.4): what a process start, a trigger
+/// revision and a definition revision need to hold every artifact a
+/// [`ProcessEngine::start_artifacts`](super::ProcessEngine::start_artifacts)
+/// name points at, whichever store holds it.
+#[derive(Clone)]
+pub struct ArtifactReferrerPorts {
+    modules: Arc<dyn ModuleArtifactStore>,
+    env: Arc<dyn ProcessExecutionEnvStore>,
+    cleanup: Arc<dyn ArtifactCleanupLedger>,
+    clock: Arc<dyn Clock>,
+}
+
+/// Whether an acquisition added the claim's edges or met its fence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReferrerAcquisition {
+    /// The claim's referrer holds every name.
+    Held,
+    /// The claim's referrer has a fence: it ended before this acquisition,
+    /// and holds nothing it did not already hold.
+    Ended,
+}
+
+impl ArtifactReferrerPorts {
+    pub fn new(
+        modules: Arc<dyn ModuleArtifactStore>,
+        env: Arc<dyn ProcessExecutionEnvStore>,
+        cleanup: Arc<dyn ArtifactCleanupLedger>,
+        clock: Arc<dyn Clock>,
+    ) -> Self {
+        Self {
+            modules,
+            env,
+            cleanup,
+            clock,
+        }
+    }
+
+    /// The ports of `backend`'s store set.
+    pub fn of_backend(backend: &crate::Backend) -> Self {
+        Self::new(
+            backend.module_artifacts(),
+            backend.process_env_store(),
+            backend.artifact_cleanup(),
+            backend.clock(),
+        )
+    }
+
+    pub fn modules(&self) -> &Arc<dyn ModuleArtifactStore> {
+        &self.modules
+    }
+
+    pub fn env(&self) -> &Arc<dyn ProcessExecutionEnvStore> {
+        &self.env
+    }
+
+    pub fn cleanup(&self) -> &Arc<dyn ArtifactCleanupLedger> {
+        &self.cleanup
+    }
+
+    /// Add the claim's edge to every name, each in the store that holds it.
+    ///
+    /// Store-set names go first: their own transaction arms the claim's
+    /// guard. Before the first engine-store name, the guard is armed in the
+    /// ledger, since an engine store cannot write it (ADR 0113 §2.2). A fence
+    /// on the claim's referrer stops the acquisition and answers
+    /// [`ReferrerAcquisition::Ended`].
+    ///
+    /// # Errors
+    ///
+    /// A name under an engine `engines` does not have, `ArtifactMissing`, and
+    /// every store failure.
+    pub async fn acquire(
+        &self,
+        engines: &ProcessEngineRegistry,
+        claim: &ReferrerClaim,
+        names: &[ArtifactName],
+    ) -> Result<ReferrerAcquisition, crate::PluginError> {
+        let (engine_names, store_names): (Vec<&ArtifactName>, Vec<&ArtifactName>) = names
+            .iter()
+            .partition(|name| matches!(name.store, ArtifactStoreId::Engine(_)));
+        for name in store_names {
+            let acquired = match &name.store {
+                ArtifactStoreId::LashlangModule => {
+                    self.modules
+                        .acquire_module_artifact(claim, &name.artifact_ref)
+                        .await
+                }
+                ArtifactStoreId::ProcessEnv => {
+                    self.env
+                        .acquire_process_execution_env(
+                            claim,
+                            &ProcessExecutionEnvRef::new(name.artifact_ref.clone()),
+                        )
+                        .await
+                }
+                ArtifactStoreId::Engine(_) => continue,
+            };
+            if let Some(ended) = held_or_ended(claim, acquired.map_err(crate::PluginError::from))? {
+                return Ok(ended);
+            }
+        }
+        if engine_names.is_empty() {
+            return Ok(ReferrerAcquisition::Held);
+        }
+        if let Some(guard) = claim.guard_cleanup() {
+            self.arm(&guard).await?;
+        }
+        for name in engine_names {
+            let ArtifactStoreId::Engine(kind) = &name.store else {
+                continue;
+            };
+            let acquired = engines
+                .require(kind)?
+                .acquire_engine_artifact(claim, &name.artifact_ref)
+                .await;
+            if let Some(ended) = held_or_ended(claim, acquired)? {
+                return Ok(ended);
+            }
+        }
+        Ok(ReferrerAcquisition::Held)
+    }
+
+    /// Upsert `cleanup` under ADR 0113 §2.4's rule, due now.
+    ///
+    /// # Errors
+    ///
+    /// The ledger's failure.
+    pub async fn arm(&self, cleanup: &ArtifactCleanup) -> Result<(), crate::PluginError> {
+        self.cleanup
+            .arm_cleanup(cleanup, self.clock.timestamp_ms())
+            .await
+            .map(|_| ())
+            .map_err(|error| crate::PluginError::Session(error.to_string()))
+    }
+
+    /// End `referrer` now: its `Ended` record with no carries and no gate.
+    ///
+    /// # Errors
+    ///
+    /// The ledger's failure.
+    pub async fn end(&self, referrer: ArtifactReferrer) -> Result<(), crate::PluginError> {
+        self.arm(&ArtifactCleanup::ended(referrer, Vec::new(), None))
+            .await
+    }
+
+    /// Make `referrer`'s cleanup due now, after the fact that ends it
+    /// committed elsewhere. A nudge only shortens a guard's wait and decides
+    /// nothing, so a failed one is logged and dropped: the guard still
+    /// resolves on its own cadence.
+    pub async fn nudge(&self, referrer: &ArtifactReferrer) {
+        if let Err(error) = self
+            .cleanup
+            .nudge(referrer, self.clock.timestamp_ms())
+            .await
+        {
+            tracing::warn!(%referrer, %error, "artifact cleanup nudge failed");
+        }
+    }
+}
+
+/// `Some(Ended)` when `acquired` failed on the claim's own fence, `None` when
+/// it held, and the error otherwise.
+fn held_or_ended(
+    claim: &ReferrerClaim,
+    acquired: Result<(), crate::PluginError>,
+) -> Result<Option<ReferrerAcquisition>, crate::PluginError> {
+    match acquired {
+        Ok(()) => Ok(None),
+        Err(error) if artifact_referrer_ended(&error) == Some(claim.referrer()) => {
+            Ok(Some(ReferrerAcquisition::Ended))
+        }
+        Err(error) => Err(error),
+    }
+}
 
 /// The stores one process start writes through.
 pub struct ProcessStartStores<'a> {
     pub registry: &'a dyn ProcessRegistry,
     pub env_store: Option<&'a Arc<dyn ProcessExecutionEnvStore>>,
+    /// The engines a start names artifacts through, and the
+    /// [`ArtifactReferrerPorts`] that hold them.
     pub engines: Option<&'a ProcessEngineRegistry>,
     /// Whether an engine start with no engine registry is refused (a durable
     /// controller) or registered without staging engine artifacts (the local
@@ -42,6 +222,12 @@ pub struct ProcessStartStores<'a> {
     /// The journal of the scope running the start: the authority of the
     /// start's `AwaitStart` guard (ADR 0113 §3.3).
     pub starter: &'a lash_sansio::EffectJournalIdentity,
+}
+
+impl ProcessStartStores<'_> {
+    fn ports(&self) -> Option<&ArtifactReferrerPorts> {
+        self.engines.and_then(ProcessEngineRegistry::artifact_ports)
+    }
 }
 
 /// What one process start registered: the result a durable controller
@@ -76,13 +262,18 @@ impl RegisteredProcessStart {
 /// nothing there and, once the registrar returns the row, acquires its own
 /// content directly under `ProcessRecord(id)` where the row adopts it.
 ///
+/// Once the row commits, the start nudges `Start(key)`'s guard, which then
+/// carries the retained row's content onto `ProcessRecord(id)`. A terminal
+/// refusal while no process holds the key upserts `Start(key)`'s `Ended`
+/// record instead: the authoritative abandonment (ADR 0113 §3.3).
+///
 /// # Errors
 ///
 /// A refusal for a start with no key or an executor missing a store the
 /// start needs, and any store failure.
 pub async fn register_process_start(
     stores: &ProcessStartStores<'_>,
-    mut registration: ProcessRegistration,
+    registration: ProcessRegistration,
     observers: &[SessionId],
     env_spec: Option<&ProcessExecutionEnvSpec>,
 ) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
@@ -93,15 +284,60 @@ pub async fn register_process_start(
             "a journaled process start must carry its start key",
         ));
     };
+    match stage_and_register(stores, &start_key, registration, observers, env_spec).await {
+        Ok(registered) => {
+            if let Some(ports) = stores.ports() {
+                ports.nudge(&ArtifactReferrer::Start(start_key)).await;
+            }
+            Ok(registered)
+        }
+        Err(error) => {
+            if error.is_terminal() {
+                abandon_start(stores, start_key).await?;
+            }
+            Err(error)
+        }
+    }
+}
+
+/// End `Start(key)` after a terminal refusal, unless a process already holds
+/// the key: then the registered row is the start's outcome, and its guard
+/// carries onto it.
+async fn abandon_start(
+    stores: &ProcessStartStores<'_>,
+    start_key: StartKey,
+) -> Result<(), RuntimeEffectControllerError> {
+    let Some(ports) = stores.ports() else {
+        return Ok(());
+    };
+    if stores
+        .registry
+        .get_process_by_start_key(&start_key)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    ports.end(ArtifactReferrer::Start(start_key)).await?;
+    Ok(())
+}
+
+async fn stage_and_register(
+    stores: &ProcessStartStores<'_>,
+    start_key: &StartKey,
+    mut registration: ProcessRegistration,
+    observers: &[SessionId],
+    env_spec: Option<&ProcessExecutionEnvSpec>,
+) -> Result<RegisteredProcessStart, RuntimeEffectControllerError> {
     let claim = ReferrerClaim::guarded(
-        ArtifactReferrer::Start(start_key),
+        ArtifactReferrer::Start(start_key.clone()),
         ArtifactCleanupPlan::AwaitStart {
             starter: stores.starter.clone(),
         },
     )
     .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     let env = stage_env(stores, &claim, &mut registration, env_spec).await?;
-    let engine = stage_engine(stores, &claim, &registration).await?;
+    let engine = stage_engine(stores, &claim, &registration, env.as_ref()).await?;
     let submitted_env_ref = registration.env_ref.clone();
     let submitted_input = Arc::clone(&registration.input);
     let registered = stores
@@ -124,7 +360,10 @@ pub async fn register_process_start(
         && !engine.staged
         && (created || record.input == submitted_input)
     {
-        acquire_engine_names(engine, &process_claim).await?;
+        engine
+            .ports
+            .acquire(engine.engines, &process_claim, &engine.names)
+            .await?;
     }
     Ok(RegisteredProcessStart {
         record,
@@ -150,31 +389,7 @@ async fn acquire_env(
                 .await
         }
     };
-    match acquired.map_err(crate::PluginError::from) {
-        Ok(()) => Ok(true),
-        Err(error) if artifact_referrer_ended(&error) == Some(claim.referrer()) => Ok(false),
-        Err(error) => Err(error.into()),
-    }
-}
-
-async fn acquire_engine_names(
-    engine: &StagedEngine,
-    claim: &ReferrerClaim,
-) -> Result<bool, RuntimeEffectControllerError> {
-    for artifact_ref in &engine.engine_refs {
-        match engine
-            .engine
-            .acquire_engine_artifact(claim, artifact_ref)
-            .await
-        {
-            Ok(()) => {}
-            Err(error) if artifact_referrer_ended(&error) == Some(claim.referrer()) => {
-                return Ok(false);
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-    Ok(true)
+    Ok(held_or_ended(claim, acquired.map_err(crate::PluginError::from))?.is_none())
 }
 
 async fn stage_env(
@@ -231,11 +446,12 @@ async fn stage_env(
     Ok(Some(env))
 }
 
-async fn stage_engine(
-    stores: &ProcessStartStores<'_>,
+async fn stage_engine<'a>(
+    stores: &ProcessStartStores<'a>,
     claim: &ReferrerClaim,
     registration: &ProcessRegistration,
-) -> Result<Option<StagedEngine>, RuntimeEffectControllerError> {
+    env: Option<&StagedEnv>,
+) -> Result<Option<StagedEngine<'a>>, RuntimeEffectControllerError> {
     let ProcessInput::Engine { kind, payload } = registration.input.as_ref() else {
         return Ok(None);
     };
@@ -252,21 +468,32 @@ async fn stage_engine(
         }
         return Ok(None);
     };
-    let engine = engines.require(kind)?;
-    let own_store = ArtifactStoreId::Engine(kind.clone());
-    let engine_refs = engine
-        .start_artifacts(payload)?
-        .into_iter()
-        .filter(|name| name.store == own_store)
-        .map(|name| name.artifact_ref)
-        .collect();
-    let mut staged = StagedEngine {
-        engine,
-        engine_refs,
-        staged: false,
+    let names = engines.require(kind)?.start_artifacts(payload)?;
+    if names.is_empty() {
+        return Ok(None);
+    }
+    let Some(ports) = engines.artifact_ports() else {
+        return Err(RuntimeEffectControllerError::foreign(
+            "process_artifact_ports_unavailable",
+            TurnFailureCause::Outcome,
+            format!(
+                "admitted {} names `{kind}` artifacts but the executor's engine registry has no artifact stores to hold them",
+                stores.executor
+            ),
+        ));
     };
-    staged.staged = acquire_engine_names(&staged, claim).await?;
-    Ok(Some(staged))
+    // A start whose environment met `Start(key)`'s fence stages nothing more
+    // under it: the key settled before this attempt.
+    let staged = match env {
+        Some(env) if !env.staged => false,
+        _ => ports.acquire(engines, claim, &names).await? == ReferrerAcquisition::Held,
+    };
+    Ok(Some(StagedEngine {
+        engines,
+        ports,
+        names,
+        staged,
+    }))
 }
 
 struct StagedEnv {
@@ -279,9 +506,10 @@ struct StagedEnv {
     staged: bool,
 }
 
-struct StagedEngine {
-    engine: Arc<dyn super::ProcessEngine>,
-    /// The start's names in the engine's own store.
-    engine_refs: Vec<String>,
+struct StagedEngine<'a> {
+    engines: &'a ProcessEngineRegistry,
+    ports: &'a ArtifactReferrerPorts,
+    /// Every artifact the start payload names, in any store.
+    names: Vec<ArtifactName>,
     staged: bool,
 }

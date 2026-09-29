@@ -8,12 +8,14 @@ use serde::{Deserialize, Serialize};
 use crate::plugin::PluginError;
 
 mod mutation;
+mod revision_referrer;
 mod router;
 #[cfg(test)]
 mod tests;
 
 use crate::runtime::process::identity_projection::project_process_payload_leaf;
 pub use mutation::{evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation};
+pub use revision_referrer::RevisionReferrerTriggerStore;
 use router::default_enabled;
 pub use router::*;
 use router::{project_trigger_actor, project_trigger_draft, project_trigger_owner};
@@ -1456,7 +1458,10 @@ pub fn evaluate_trigger_prune(
             subscription_key: record.subscription_key.clone(),
             expected_revision: record.revision,
         };
-        match evaluate_trigger_mutation(Some(record), command, now)?? {
+        // A delete keeps the row's incarnation and writes none.
+        let incarnation = record.incarnation.clone();
+        match evaluate_trigger_mutation_with_incarnation(Some(record), command, now, incarnation)??
+        {
             TriggerCommandOutcome::Mutation { receipt } => receipts.push(*receipt),
             TriggerCommandOutcome::List { .. } | TriggerCommandOutcome::Prune { .. } => {
                 unreachable!("delete mutation always returns one receipt")

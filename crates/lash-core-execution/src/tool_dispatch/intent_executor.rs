@@ -518,6 +518,19 @@ async fn realize_register_process_definition(
     // this call — owns the durable write, so a redrive replays the recorded
     // registration and a group child admits it under its own binding.
     let scoped = context.effect_controller.scoped();
+    // The CAS holds the revision it writes before it writes, under the
+    // intent's journal (ADR 0113 §3.6).
+    let creator = scoped
+        .execution_scope()
+        .journal_identity()
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let registry: Arc<dyn crate::ProcessDefinitionRegistry> = Arc::new(
+        crate::process_registry::RevisionReferrerDefinitionRegistry::new(
+            registry,
+            context.process_engines.clone(),
+            creator,
+        ),
+    );
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
@@ -582,6 +595,18 @@ async fn register_recorded_trigger(
         identity.clone(),
     ));
     let session_scope = crate::SessionScope::new(context.session_id.clone());
+    // The registration holds the revision it commits before it commits,
+    // under the intent's journal (ADR 0113 §3.4).
+    let creator = scoped
+        .execution_scope()
+        .journal_identity()
+        .map_err(|error| crate::PluginError::Session(error.to_string()))?;
+    let store: Arc<dyn crate::TriggerStore> =
+        Arc::new(crate::triggers::RevisionReferrerTriggerStore::new(
+            router.store(),
+            context.process_engines.clone(),
+            creator,
+        ));
     let outcome = scoped
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
@@ -594,7 +619,7 @@ async fn register_recorded_trigger(
                     }),
                 },
             ),
-            crate::RuntimeEffectLocalExecutor::triggers(router.store()),
+            crate::RuntimeEffectLocalExecutor::triggers(store),
         )
         .await
         .map_err(crate::PluginError::RuntimeEffectController)?

@@ -452,7 +452,7 @@ async fn stored_reload(
         .await
         .expect("open the publishing store");
     LashlangArtifacts::new(Arc::new(publisher))
-        .publish_module_artifact(&lash_core::ArtifactOwner::host("mini"), artifact)
+        .publish_module_artifact(&crate::lib_tests::host_claim(), artifact)
         .await
         .expect("the mini artifact publishes");
     LashlangArtifacts::new(Arc::new(

@@ -3,24 +3,25 @@ use super::*;
 /// Evaluate one mutation against the current logical row. Durable stores use
 /// this shared oracle inside their own transaction, then persist the receipt
 /// and returned record snapshot atomically.
+///
+/// A `Register` or `Revive` writes the incarnation
+/// [`trigger_incarnation`](super::trigger_incarnation) derives from the
+/// command's owner scope and `operation_id` (ADR 0113 §1), so the journaled
+/// effect that runs the command knows the subscription revision it commits
+/// before it commits. Every other mutation keeps the row's incarnation.
 pub fn evaluate_trigger_mutation(
     current: Option<TriggerSubscriptionRecord>,
     command: TriggerCommand,
+    operation_id: &str,
     now: u64,
 ) -> Result<TriggerEffectResult, PluginError> {
-    if !command.is_mutation() {
-        return Err(PluginError::Session(
-            "trigger mutation evaluator received a list command".to_string(),
-        ));
-    }
-    let mut subscriptions = BTreeMap::new();
-    if let Some(record) = current {
-        subscriptions.insert(record.subscription_id.clone(), record);
-    }
-    Ok(apply_trigger_command(&mut subscriptions, command, now))
+    let incarnation = super::trigger_incarnation(command.owner_scope(), operation_id);
+    evaluate_trigger_mutation_with_incarnation(current, command, now, incarnation)
 }
 
-/// Testing seam for fixture generators that must pin otherwise-random trigger identity.
+/// [`evaluate_trigger_mutation`] with the incarnation a `Register` or
+/// `Revive` writes given explicitly: the testing seam fixture generators use
+/// to pin trigger identity, and the delete step of a prune, which writes none.
 pub fn evaluate_trigger_mutation_with_incarnation(
     current: Option<TriggerSubscriptionRecord>,
     command: TriggerCommand,
@@ -40,28 +41,15 @@ pub fn evaluate_trigger_mutation_with_incarnation(
         &mut subscriptions,
         command,
         now,
-        &mut || incarnation.clone(),
+        &incarnation,
     ))
-}
-
-/// Apply one trigger mutation to a subscription map keyed by subscription id.
-/// This is the shared command semantics: durable stores reach it through
-/// [`evaluate_trigger_mutation`] with the one current row as the map.
-fn apply_trigger_command(
-    subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
-    command: TriggerCommand,
-    now: u64,
-) -> TriggerEffectResult {
-    apply_trigger_command_with_incarnation(subscriptions, command, now, &mut || {
-        uuid::Uuid::new_v4().to_string()
-    })
 }
 
 fn apply_trigger_command_with_incarnation(
     subscriptions: &mut BTreeMap<String, TriggerSubscriptionRecord>,
     command: TriggerCommand,
     now: u64,
-    new_incarnation: &mut dyn FnMut() -> String,
+    new_incarnation: &str,
 ) -> TriggerEffectResult {
     match command {
         // The evaluators refuse a list before it gets here: a list reads the
@@ -124,7 +112,7 @@ fn apply_trigger_command_with_incarnation(
                 actor,
                 draft,
                 subscription_id.clone(),
-                new_incarnation(),
+                new_incarnation.to_owned(),
                 1,
                 definition_fingerprint,
                 true,
@@ -269,7 +257,7 @@ fn apply_trigger_command_with_incarnation(
                 actor,
                 draft,
                 subscription_id.clone(),
-                new_incarnation(),
+                new_incarnation.to_owned(),
                 next_revision,
                 requested_hash,
                 true,

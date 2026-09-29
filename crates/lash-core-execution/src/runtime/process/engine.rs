@@ -756,6 +756,7 @@ impl ProcessEngineRegistration {
 pub struct ProcessEngineRegistry {
     engines: Arc<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
+    artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
 /// A [`ProcessEngineRegistry`] held weakly: it keeps no engine alive.
@@ -763,6 +764,7 @@ pub struct ProcessEngineRegistry {
 pub struct WeakProcessEngineRegistry {
     engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
     admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
+    artifact_ports: Option<Arc<super::ArtifactReferrerPorts>>,
 }
 
 impl WeakProcessEngineRegistry {
@@ -772,6 +774,7 @@ impl WeakProcessEngineRegistry {
         Some(ProcessEngineRegistry {
             engines: self.engines.upgrade()?,
             admissions: self.admissions.upgrade()?,
+            artifact_ports: self.artifact_ports.clone(),
         })
     }
 }
@@ -787,7 +790,18 @@ impl ProcessEngineRegistry {
         WeakProcessEngineRegistry {
             engines: Arc::downgrade(&self.engines),
             admissions: Arc::downgrade(&self.admissions),
+            artifact_ports: self.artifact_ports.clone(),
         }
+    }
+
+    #[must_use]
+    pub fn with_artifact_ports(mut self, ports: super::ArtifactReferrerPorts) -> Self {
+        self.artifact_ports = Some(Arc::new(ports));
+        self
+    }
+
+    pub fn artifact_ports(&self) -> Option<&super::ArtifactReferrerPorts> {
+        self.artifact_ports.as_deref()
     }
 
     pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {
@@ -799,6 +813,7 @@ impl ProcessEngineRegistry {
         Self {
             engines: Arc::new(engines),
             admissions: Arc::new(admissions),
+            artifact_ports: self.artifact_ports,
         }
     }
 

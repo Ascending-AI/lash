@@ -29,10 +29,7 @@ pub(crate) async fn run_sleep_process()
     })
     .expect("sleep process compiles");
     store
-        .publish_module_artifact(
-            &lash_core::ArtifactOwner::host("sleep-fixture"),
-            &output.artifact,
-        )
+        .publish_module_artifact(&crate::lib_tests::host_claim(), &output.artifact)
         .await
         .expect("sleep process artifact publishes");
     let input = LashlangProcessInput {

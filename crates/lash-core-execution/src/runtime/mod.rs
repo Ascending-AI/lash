@@ -143,6 +143,10 @@ pub use process::{
     terminal_event_type_name, validate_generic_process_event_append, validate_process_signal_name,
     watch_process_registry, watch_process_registry_with_sink,
 };
+pub use process::{
+    ArtifactReferrerPorts, ProcessStartStores, ReferrerAcquisition, RegisteredProcessStart,
+    register_process_start,
+};
 #[cfg(any(test, feature = "testing"))]
 pub use process::{
     ConformanceProcessRegistry, EffectSummaryAppendFaults, PROCESS_REFUSAL_FIXTURE_START_KEY,
@@ -150,7 +154,6 @@ pub use process::{
     TestProcessRegistryWriteExt, accepted_process_registration, fail_parent_end_once,
     refused_process_registrations,
 };
-pub use process::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 pub use queued_drain_policy::default_queued_drain_policy;
 pub(crate) use queued_drain_policy::shared_drain_mode_policy;
 pub use queued_drain_policy::{

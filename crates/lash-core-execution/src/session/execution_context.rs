@@ -3,7 +3,9 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
+mod referrers;
 mod trigger_scope;
+pub(crate) use referrers::execution_claim_of;
 use trigger_scope::{missing_process_execution_error, resolve_trigger_owner_scope};
 
 use tokio_util::sync::CancellationToken;
@@ -632,27 +634,6 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
         let correlation = correlation::process_invocation_of(&self.turn_context)?;
         correlation.authority.attempt_for(&correlation.process_id)
-    }
-
-    /// The execution referrer of this replayable execution (ADR 0113 §3.7):
-    /// the journal of the scope that runs it, which holds what it publishes
-    /// until the engine settles that journal.
-    ///
-    /// # Errors
-    ///
-    /// A scope with no journal identity.
-    pub fn execution_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
-        execution_referrer_of(self.dispatch.effect_controller.scoped().execution_scope())
-    }
-
-    /// The claim of [`Self::execution_referrer`], armed with its journal
-    /// guard.
-    ///
-    /// # Errors
-    ///
-    /// A scope with no journal identity.
-    pub fn execution_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
-        execution_claim_of(self.dispatch.effect_controller.scoped().execution_scope())
     }
 
     pub fn session_scope(&self) -> crate::SessionScope {
@@ -1731,6 +1712,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 "trigger store is unavailable in this runtime",
             )
         })?;
+        let store = self.revision_referrer_trigger_store(store)?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the caller's own live effect controller, which is admitted by construction"
@@ -1871,24 +1853,3 @@ pub(crate) use correlation::{
 
 #[cfg(test)]
 mod tests;
-
-/// The execution referrer of `scope`: its journal (ADR 0113 §3.7).
-pub(crate) fn execution_referrer_of(
-    scope: &crate::ExecutionScope,
-) -> Result<crate::ArtifactReferrer, crate::PluginError> {
-    scope
-        .journal_identity()
-        .map(crate::ArtifactReferrer::Execution)
-        .map_err(|error| crate::PluginError::Session(error.to_string()))
-}
-
-/// The claim of `scope`'s execution referrer, armed with its journal guard.
-pub(crate) fn execution_claim_of(
-    scope: &crate::ExecutionScope,
-) -> Result<crate::ReferrerClaim, crate::PluginError> {
-    crate::ReferrerClaim::guarded(
-        execution_referrer_of(scope)?,
-        crate::ArtifactCleanupPlan::AwaitJournal,
-    )
-    .map_err(|error| crate::PluginError::Session(error.to_string()))
-}

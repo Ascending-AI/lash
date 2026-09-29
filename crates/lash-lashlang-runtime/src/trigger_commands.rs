@@ -142,8 +142,14 @@ async fn prepare_trigger_draft(
         .into_iter()
         .chain(lashlang_process_signal_event_types(process))
         .collect::<Vec<_>>();
+    // An environment this execution captures is published under its own
+    // execution referrer; the command's journaled effect then holds it, with
+    // the target module, under the revision it commits (ADR 0113 §3.4).
+    let claim = ctx
+        .execution_claim()
+        .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let env_ref = ctx
-        .captured_process_execution_env_ref(&ctx.artifact_owner())
+        .captured_process_execution_env_ref(&claim)
         .await
         .map_err(|err| ExecutionHostError::new(err.to_string()))?;
     let draft = lash_core::TriggerSubscriptionDraft {
