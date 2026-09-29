@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use lash_sansio::TurnId;
 
-use lash_restate_test::{RestateTestServer, ServerConfig};
+use lash_restate_test::{CrashPoint, CrashRule, RestateTestServer, ServerConfig};
 
 use super::bindings::{backend_and_process_worker, bindings_generation, discovery_document};
 use super::session_drive_roll_on_the_double::{
@@ -19,7 +19,10 @@ use super::session_drive_roll_on_the_double::{
 };
 use super::test_restate_authority_id;
 use crate::compat::{COMPAT_KEY, Call, ObjectCompat, RESTATE_WIRE, Reply, VersionRange};
-use crate::durable_wait::{LashDurableWaitRegistry as _, RestateDurableWaitEffectRequest};
+use crate::durable_wait::{
+    LashDurableWaitRegistry as _, RestateDurableWaitEffectRequest, RestateDurableWaitIndexRequest,
+    RestateDurableWaitRegistration, RestateTurnGatePeek,
+};
 use crate::effect_group::{
     EffectGroupAdmissionResponse, EffectGroupPayload as _, EffectGroupPayloadGetResponse,
     EffectGroupPayloadImpl, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
@@ -647,5 +650,99 @@ async fn registration_refuses_an_endpoint_serving_another_namespace() {
         roll.server.registration_requests(),
         [serde_json::json!({ "uri": own, "force": false })],
         "a URI of beta's own is registered unforced"
+    );
+}
+
+/// ADR 0115 §3.2 under a concurrent writer: a shared handler admits an
+/// object `Unstamped` only when one read shows state and no `_compat`
+/// record. Two reads are two views: an eager read is journaled with its
+/// value, so an attempt that replays the shared `peek_turn_gate` answers its
+/// first read from the attempt that recorded it and its later reads from its
+/// own, newer snapshot. Here every attempt of the peek crashes just before
+/// its second state read is stored while an exclusive `register` stamps the
+/// fresh session index and writes its first rows, and only then may an
+/// attempt go past it. The peek must read the stamped index, never refuse it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_shared_read_never_refuses_an_index_its_writer_stamps_concurrently() {
+    let (server, ingress) = object_families().await;
+    let session = lash_sansio::SessionId::from("compat-concurrent-stamp");
+    let scope = lash_core::ExecutionScope::turn(session.clone(), TurnId::from("turn-1"));
+    let gate = crate::durable_wait::restate_await_event_key(
+        &scope,
+        lash_core::AwaitEventWaitIdentity::TurnCancelGate,
+    )
+    .expect("derive the turn's cancellation gate");
+    let object = session.as_str().to_owned();
+    assert!(
+        server
+            .object_state("LashDurableWaitIndex", &object)
+            .is_empty()
+    );
+
+    // Command 0 is the input and command 1 the peek's first state read: the
+    // crash drops each attempt before its second read is stored.
+    server.crash_on(
+        CrashRule::new(CrashPoint::BeforeCommand { index: 2 })
+            .service("LashDurableWaitIndex")
+            .handler("peek_turn_gate")
+            .key(object.clone())
+            .times(u32::MAX),
+    );
+    let peek = tokio::spawn({
+        let ingress = ingress.clone();
+        let object = object.clone();
+        let request = RestateDurableWaitIndexRequest { key: gate.clone() };
+        async move {
+            ingress
+                .call_lash_object::<_, RestateTurnGatePeek>(
+                    "LashDurableWaitIndex",
+                    &object,
+                    "peek_turn_gate",
+                    &request,
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(30), async {
+        while server.stats().crashes == 0 {
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+    })
+    .await
+    .expect("the peek recorded its first read over the fresh index");
+
+    let registered = ingress
+        .call_lash_object::<_, RestateDurableWaitRegistration>(
+            "LashDurableWaitIndex",
+            &object,
+            "register",
+            &RestateDurableWaitIndexRequest { key: gate.clone() },
+        )
+        .await
+        .expect("register the gate on the fresh index");
+    assert_eq!(registered, RestateDurableWaitRegistration::Registered);
+    let state = server.object_state("LashDurableWaitIndex", &object);
+    assert_eq!(
+        state.get(COMPAT_KEY),
+        Some(&compat_bytes(1, 1, 1)),
+        "the register stamped the index it populated: {state:?}"
+    );
+    assert!(state.keys().any(|key| key != COMPAT_KEY), "{state:?}");
+
+    server.clear_crashes();
+    let peeked = tokio::time::timeout(Duration::from_secs(60), peek)
+        .await
+        .expect("the peek answers")
+        .expect("the peek task")
+        .unwrap_or_else(|error| {
+            panic!(
+                "the shared read refused an index its writer stamped: {:?}",
+                compat_refusal(&error)
+            )
+        });
+    assert_eq!(peeked, RestateTurnGatePeek::Open(None));
+    assert!(
+        server.stats().crashes > 0,
+        "the peek replayed across the register"
     );
 }
