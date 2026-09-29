@@ -331,7 +331,7 @@ impl PendingCompletion {
 /// # The completion-key contract
 ///
 /// Before returning [`ToolOutcome::Pending`], a tool **must** first obtain a completion
-/// key by calling [`ToolContext::completion_key`](crate::ToolContext::completion_key)
+/// key by calling [`AttemptContext::completion_key`](crate::AttemptContext::completion_key)
 /// (reachable through `call.context`). That key names the durable wait the runtime parks
 /// the call on, and is what an external resolver uses to deliver the outcome. Returning
 /// `Pending` *without* having taken a completion key fails the call with the internal
@@ -353,7 +353,7 @@ pub enum ToolOutcome {
     /// Active await: the tool finished inline; this is its final output.
     Done(Box<crate::ToolCallOutput>),
     /// Deferred completion: the tool parked on a durable wait keyed by the
-    /// [`ToolContext::completion_key`](crate::ToolContext::completion_key) it took
+    /// [`AttemptContext::completion_key`](crate::AttemptContext::completion_key) it took
     /// before returning. The outcome arrives later through the resolve seam and is
     /// shaped by the carried [`PendingCompletion`].
     ///

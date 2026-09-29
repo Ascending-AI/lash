@@ -411,7 +411,6 @@ pub mod facade_support {
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
     pub use crate::tool_registry::SupersededToolIdentity;
@@ -576,10 +575,7 @@ pub(crate) use lash_sansio::{
     visible_response_parts,
 };
 pub use protocol_build::ProtocolBuildInput;
-pub use tool_provider::{
-    ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
-    ToolSessionAdmin, ToolSessionModel,
-};
+pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
 pub use tool_registry::{
     SupersededToolIdentity, ToolRegistry, ToolRestoreReport, ToolSourcePolicy, ToolState,
     ToolSurfaceOpenMode,
@@ -847,8 +843,7 @@ pub use tool_intent::{
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
     PreparedToolBatchCall, PreparedToolCall, ToolCall, ToolChildExecutionTraceHook,
-    ToolChildProcessStarted, ToolContext, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext,
-    ToolProvider,
+    ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall, ToolPrepareContext, ToolProvider,
 };
 #[doc(hidden)]
 pub mod core_internal {

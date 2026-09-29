@@ -32,7 +32,7 @@ pub use lash_core::testing::tool_registry_with_live_provider;
 pub use lash_core::testing::{EffectLayer, LayeredEffectHost};
 pub use lash_core::testing::{
     MockSessionManager, TestClock, TestProvider, TestProviderBuilder, mock_attempt_context,
-    mock_tool_context, mock_tool_context_with_execution_binding, test_code_protocol_factories,
+    mock_attempt_context_with_execution_binding, test_code_protocol_factories,
 };
 
 /// [`RuntimeExecutionContext`](crate::tools::RuntimeExecutionContext)

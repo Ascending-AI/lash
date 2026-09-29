@@ -8,13 +8,13 @@
 //! command at the wrong ordinal and an ordinal-addressed engine rejects the
 //! invocation (Restate `RT0016`).
 //!
-//! The guards in [`crate::ToolContext`] close that hazard route by route. This
-//! sentinel closes the *class*: it wraps a controller and records every
-//! crossing of the controller boundary that happens while a `ToolAttempt`
-//! effect is open on that same controller, whatever route produced it. A new
-//! `ToolContext` capability that reaches the journal from inside an attempt
-//! shows up as an undeclared crossing without anyone writing a bespoke law for
-//! it.
+//! A body holds only the sealed [`crate::AttemptContext`], which has no route
+//! to the journal. This sentinel closes the *class*: it wraps a controller and
+//! records every crossing of the controller boundary that happens while a
+//! `ToolAttempt` effect is open on that same controller, whatever route
+//! produced it. A new capability that reaches the journal from inside an
+//! attempt shows up as an undeclared crossing without anyone writing a bespoke
+//! law for it.
 //!
 //! Depth is tracked on the controller instance rather than on a task-local,
 //! because that is the semantically correct question: a journal is one ordered

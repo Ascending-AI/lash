@@ -215,3 +215,67 @@ pub fn active_turn_internal_evidence(
 ) -> crate::runtime::TurnCancellationEvidence {
     active.internal_evidence(None)
 }
+
+/// `dispatch_tool_call_with_execution_context`: dispatches one call by name
+/// under the dispatch state `call` configures.
+pub async fn dispatch_tool_call_with_execution_context<'run>(
+    context: &crate::tool_dispatch::ToolDispatchContext<'run>,
+    tool_name: String,
+    args: serde_json::Value,
+    call: super::ToolCallFixture<'run>,
+) -> crate::tool_dispatch::ToolDispatchOutcome {
+    Box::pin(
+        crate::tool_dispatch::dispatch_tool_call_with_execution_context(
+            context,
+            tool_name,
+            args,
+            call.context,
+        ),
+    )
+    .await
+}
+
+/// `coordinate_prepared_tool_call_launch_with_execution_context`: coordinates
+/// a prepared call's attempts under the dispatch state `call` configures.
+pub async fn coordinate_prepared_tool_call_launch_with_execution_context<'run>(
+    context: &crate::tool_dispatch::ToolDispatchContext<'run>,
+    prepared: crate::PreparedToolCall,
+    execution_grant: Option<Box<crate::ToolExecutionGrant>>,
+    call: super::ToolCallFixture<'run>,
+) -> crate::tool_dispatch::ToolCallLaunch {
+    Box::pin(
+        crate::tool_dispatch::coordinate_prepared_tool_call_launch_with_execution_context(
+            context,
+            prepared,
+            execution_grant,
+            call.context,
+        ),
+    )
+    .await
+}
+
+/// `execute_once`: runs a leaf tool body exactly once, with no retry ladder.
+pub async fn execute_once<'run>(
+    context: &crate::tool_dispatch::ToolDispatchContext<'run>,
+    prepared: &crate::PreparedToolCall,
+    call: super::ToolCallFixture<'run>,
+    grant: Option<&crate::ToolExecutionGrant>,
+) -> crate::ToolAttemptOutcome {
+    Box::pin(crate::tool_dispatch::execute_once(
+        context,
+        prepared,
+        call.context,
+        grant,
+    ))
+    .await
+}
+
+/// `RuntimeEffectLocalExecutor::prepared_tool_attempt`: the local executor of
+/// one attempt of a prepared call, under the dispatch state `call` configures.
+pub fn prepared_tool_attempt<'run>(
+    dispatch: std::sync::Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+    call: super::ToolCallFixture<'run>,
+    completion_key: Option<crate::AwaitEventKey>,
+) -> crate::RuntimeEffectLocalExecutor<'run> {
+    crate::RuntimeEffectLocalExecutor::prepared_tool_attempt(dispatch, call.context, completion_key)
+}

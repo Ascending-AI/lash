@@ -588,7 +588,7 @@ impl RuntimeExecutionContext<'_> {
                     name: name.to_string(),
                     args,
                     graph_key: self.code_block_graph_key(),
-                    parent_call_id: self.batch_parent_call_id(),
+                    parent_call_id: None,
                 },
             },
         );
@@ -805,7 +805,7 @@ impl RuntimeExecutionContext<'_> {
                     output: record.output.clone(),
                     duration_ms,
                     graph_key: self.code_block_graph_key(),
-                    parent_call_id: self.batch_parent_call_id(),
+                    parent_call_id: None,
                 },
             },
         );

@@ -374,7 +374,6 @@ pub mod facade_support {
     pub use crate::store::{CommitBudget, CommitBudgetLimit};
     pub use crate::tool_intent::legacy_tool_intent_v1_lookup_key;
     pub use crate::tool_provider::ToolChildExecutionTraceHook;
-    pub use crate::tool_provider::ToolTriggerClient;
     pub use crate::tool_registry::PLUGIN_TOOL_SOURCE_ID;
     pub use crate::tool_registry::ReconfigureError;
     pub use crate::tool_registry::SupersededToolIdentity;
@@ -516,10 +515,7 @@ pub use lash_sansio::{
     ToolIntentRefusalReason, ToolManifest, ToolOutputContract, ToolRetryPolicy, ToolRetryStatus,
     ToolValue, ToolView, ToolViewBlock, ToolViewMeta, TurnCause, TurnId, TurnOutputSource,
 };
-pub use tool_provider::{
-    ToolAttachmentClient, ToolDirectCompletionClient, ToolDispatchClient, ToolProcessEventClient,
-    ToolSessionAdmin, ToolSessionModel,
-};
+pub use tool_provider::{ToolAttachmentClient, ToolDirectCompletionClient, ToolSessionModel};
 /// Project a successful tool control into its terminal turn outcome.
 ///
 /// Agent-frame seeds are typed at their serde boundary, so a terminal outcome
@@ -880,14 +876,18 @@ pub use tool_intent::{
     ToolIntentSubmissionAdmission, ToolIntentSubmissionRecord, ToolIntents, ToolOutcomeDone,
     derive_tool_intent_identity, derive_tool_intent_identity_under, rederive_tool_intent_identity,
 };
+/// The process wiring a process host hands the runtime for a tool call
+/// running inside a durable process.
+pub use tool_provider::ProcessToolCallWiring;
 /// Tool-provider contracts, including child-process execution observation hooks.
 pub use tool_provider::{
     AttemptContext, AttemptProcessReads, AttemptSessionReads, PreparedToolBatch,
     PreparedToolBatchCall, PreparedToolCall, ProgressRefused, ToolAttemptCaptureWriter, ToolCall,
-    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolContext, ToolExecutionGrant,
-    ToolPrepareCall, ToolPrepareContext, ToolProgressReporter, ToolProgressSink, ToolProvider,
-    TurnToolCapture,
+    ToolChildExecutionTraceHook, ToolChildProcessStarted, ToolExecutionGrant, ToolPrepareCall,
+    ToolPrepareContext, ToolProgressReporter, ToolProgressSink, ToolProvider, TurnToolCapture,
 };
+
+pub(crate) use tool_provider::ToolContext;
 
 #[doc(hidden)]
 pub mod core_internal {

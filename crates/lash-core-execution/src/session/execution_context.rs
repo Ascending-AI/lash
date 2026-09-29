@@ -92,8 +92,6 @@ pub struct RuntimeExecutionContext<'run> {
     code_block_graph_key: Option<String>,
     /// Workflow node that issued tool calls through this context.
     issuing_language_node_id: Option<Arc<str>>,
-    /// `None` for top-level tool execution.
-    batch_parent_call_id: Option<String>,
     /// Work-driver handle for this execution's process wiring, when the
     /// deployment provides one. Threaded through so in-run process
     /// operations (e.g. signalling another process) that build their own
@@ -537,7 +535,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             tracing: None,
             code_block_graph_key: None,
             issuing_language_node_id: None,
-            batch_parent_call_id: None,
             process_work: None,
             #[cfg(any(test, feature = "testing"))]
             live_opener_guard: None,
@@ -570,7 +567,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             code_block_graph_key: self.code_block_graph_key.clone(),
             issuing_language_node_id: self.issuing_language_node_id.clone(),
             unrecorded_sources: self.unrecorded_sources,
-            batch_parent_call_id: self.batch_parent_call_id.clone(),
             process_work: self.process_work.clone(),
             started_process_ids: Arc::clone(&self.started_process_ids),
             nested_effect_error: Arc::clone(&self.nested_effect_error),
@@ -760,21 +756,10 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub(crate) fn with_batch_parent_call_id(mut self, parent_call_id: Option<String>) -> Self {
-        self.batch_parent_call_id = parent_call_id;
-        self
-    }
-
     /// Graph key of the enclosing code block for tool calls run from this
     /// context, or `None` when no code block is executing.
     pub(super) fn code_block_graph_key(&self) -> Option<String> {
         self.code_block_graph_key.clone()
-    }
-
-    /// Parent batch call id for tool calls run from this context, or `None`
-    /// when this context is not executing batch children.
-    pub(super) fn batch_parent_call_id(&self) -> Option<String> {
-        self.batch_parent_call_id.clone()
     }
 
     /// No-op when the host installed no trace sink.

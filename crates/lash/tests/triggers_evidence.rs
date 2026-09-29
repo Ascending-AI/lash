@@ -30,12 +30,6 @@ fn drain_area_witnesses() {
     fn meth_0007<T: lash_conformance::TriggerOccurrenceRetentionFaultInjector>(_: &T) {
         let _ = T::fail_occurrence_delete;
     }
-    // W0008: lash::tools::ToolContext::triggers [function]
-    let _ = lash::tools::ToolContext::triggers;
-    // W0009: lash::tools::ToolTriggerClient [struct]
-    type_witness::<lash::tools::ToolTriggerClient>();
-    // W0010: lash::tools::ToolTriggerClient::emit [function]
-    let _ = lash::tools::ToolTriggerClient::emit;
     // W0015: lash::triggers::LashSchema::object [function]
     let _ = lash::triggers::LashSchema::object;
     // W0016: lash::triggers::LashSchema::schema [field]

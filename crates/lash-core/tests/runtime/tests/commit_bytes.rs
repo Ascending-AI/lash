@@ -29,10 +29,10 @@
 //! its sealed partial in `stopped_partial`. Removing that field from the
 //! masked commit reproduces each old digest.
 //!
-//! Every pin was re-pinned for ADR 0116 (FIG-4054): the test protocol no
-//! longer registers an orchestrating `batch` tool, so the committed tool
-//! state, which recorded that registration, is now empty. That body is the
-//! only difference.
+//! Every pin was re-pinned for ADR 0116 (FIG-4054): `batch` is protocol
+//! sugar, so the test protocol registers no `batch` tool and the committed
+//! tool state, which recorded that registration, is now empty. That body is
+//! the only difference.
 //!
 //! The digest is over the commit's serialized form with the values that differ
 //! between two runs of the same turn masked: worker and lease identities,

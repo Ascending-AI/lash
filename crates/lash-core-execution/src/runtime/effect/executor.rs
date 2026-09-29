@@ -871,7 +871,25 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
         }
     }
 
-    pub fn prepared_tool_attempt(
+    /// The local executor of one attempt of `call`, a prepared tool call
+    /// running inside the durable process `process` names, under
+    /// `cancellation`.
+    pub fn process_tool_attempt(
+        dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
+        call: &crate::PreparedToolCall,
+        cancellation: tokio_util::sync::CancellationToken,
+        process: crate::ProcessToolCallWiring,
+        completion_key: Option<crate::AwaitEventKey>,
+    ) -> Self {
+        let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
+            .prepared_call(call)
+            .cancellation_token(Some(cancellation))
+            .inside_process(process)
+            .build();
+        Self::prepared_tool_attempt(dispatch, tool_context, completion_key)
+    }
+
+    pub(crate) fn prepared_tool_attempt(
         dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
         tool_context: crate::ToolContext<'run>,
         completion_key: Option<crate::AwaitEventKey>,

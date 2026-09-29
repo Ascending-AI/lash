@@ -2545,7 +2545,6 @@ derive_mutation_jobs() {{
         # somewhere, and named.
         moved_gates = {
             "repo-gates": (
-                "python3 scripts/lint_orchestrating_tools.py",
                 "bash scripts/test-worktree-gate-env.sh",
                 "bash scripts/test-dev-script-process-identity.sh",
             ),

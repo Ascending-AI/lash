@@ -9,8 +9,9 @@ use crate::runtime::RuntimeEffectControllerHandle;
 use crate::support::prelude::*;
 use crate::tool_dispatch::*;
 use crate::{
-    ToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolProvider, ToolRetryPolicy,
-    ToolRetryStatus,
+    ToolCall, ToolCallOutcome, ToolOutcome, ToolProvider, ToolRetryPolicy, ToolRetryStatus,
+    coordinate_prepared_tool_call_launch_with_execution_context,
+    dispatch_tool_call_with_execution_context,
 };
 use lash_sansio::core_support::*;
 use lash_sansio::sync::MutexExt;
@@ -1342,10 +1343,9 @@ const SEED: u64 = 0x5_2d21;
 fn tool_context_for_prepared<'run>(
     context: &ToolDispatchContext<'run>,
     prepared: &crate::PreparedToolCall,
-) -> ToolContext<'run> {
-    ToolContext::from_dispatch(Arc::new(context.clone()))
+) -> crate::testing::ToolCallFixture<'run> {
+    crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(prepared)
-        .build()
 }
 
 #[tokio::test]
@@ -1713,10 +1713,9 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
             panic!("grant should prepare, got {:?}", outcome.record.output)
         }
     };
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
-        .tool_execution_binding(grant.execution_binding.clone())
-        .build();
+        .execution_binding(grant.execution_binding.clone());
     let launch = coordinate_prepared_tool_call_launch_with_execution_context(
         &context,
         prepared,
@@ -1873,10 +1872,9 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         None,
         serde_json::Value::Null,
     );
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
         .prepared_call(&prepared)
-        .cancellation_token(Some(tokio_util::sync::CancellationToken::new()))
-        .build();
+        .cancellation_token(Some(tokio_util::sync::CancellationToken::new()));
     let launch = coordinate_prepared_tool_call_launch_with_execution_context(
         &context,
         prepared,

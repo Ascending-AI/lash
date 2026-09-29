@@ -76,81 +76,27 @@ pub async fn enqueue_wake_delivery(
     Ok(())
 }
 
-#[derive(Clone)]
-pub struct ToolProcessEventClient {
-    pub(super) context: Option<ToolProcessEventContext>,
-}
-
-impl ToolProcessEventClient {
-    /// # Integrator class
-    ///
-    /// Durable-process tool implementors use this capability to await
-    /// runtime-journaled process events through the supported facade.
-    pub async fn wait_event_after(
-        &self,
-        event_type: &str,
-        after_sequence: u64,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        let Some(process) = self.context.as_ref() else {
-            return Err(PluginError::Session(
-                "process event waiting is unavailable outside a durable process".to_string(),
-            ));
-        };
-        process
-            .process_work
-            .event_awaiter()
-            .await_event(&process.process_id, event_type, after_sequence)
-            .await
-    }
-
-    /// Append one typed payload to the current process event journal.
-    ///
-    /// # Integrator class
-    ///
-    /// Durable-process tool implementors use this convenience capability when
-    /// the default append-request policy is sufficient.
-    pub async fn emit(
-        &self,
-        event_type: impl Into<String>,
-        payload: serde_json::Value,
-    ) -> Result<crate::ProcessEvent, PluginError> {
-        self.emit_request(crate::ProcessEventAppendRequest::new(event_type, payload))
-            .await
-    }
-
-    /// Append an explicit event request to the current process journal.
-    ///
-    /// # Integrator class
-    ///
-    /// Durable-process tool implementors use this capability when they need to
-    /// supply the complete supported append-request contract.
-    pub async fn emit_request(
+impl ToolProcessEventContext {
+    /// Append `request` to the journal of the process this call runs inside,
+    /// then nudge the wake delivery the append queued.
+    pub(crate) async fn append(
         &self,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, PluginError> {
-        let Some(process) = self.context.as_ref() else {
-            return Err(PluginError::Session(
-                "process event emission is unavailable outside a durable process".to_string(),
-            ));
-        };
-        let result = process
+        let result = self
             .process_work
             .registry()
-            .append_event_with_authority(
-                &process.process_id,
-                request,
-                &process.execution_write_authority,
-            )
+            .append_event_with_authority(&self.process_id, request, &self.execution_write_authority)
             .await?;
         enqueue_wake_delivery(
-            std::sync::Arc::clone(process.process_work.registry()),
-            process.store.clone(),
-            process.session_store_factory.as_ref(),
+            std::sync::Arc::clone(self.process_work.registry()),
+            self.store.clone(),
+            self.session_store_factory.as_ref(),
             result.wake_delivery,
-            Some(process.session_graph.as_ref()),
-            std::sync::Arc::clone(&process.queued_work),
-            process.process_wake_delivery_policy,
-            std::sync::Arc::clone(&process.clock),
+            Some(self.session_graph.as_ref()),
+            std::sync::Arc::clone(&self.queued_work),
+            self.process_wake_delivery_policy,
+            std::sync::Arc::clone(&self.clock),
         )
         .await?;
         Ok(result.event)

@@ -42,7 +42,9 @@ fn refusal(outcome: ToolAttemptOutcome) -> String {
 /// coordinator has prepared a call id, which is what the declaration identity
 /// is derived from, and names the process the body runs inside when there is
 /// one.
-fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'static> {
+fn attempt_context(
+    enclosing_process: Option<&str>,
+) -> lash_core::testing::ToolCallFixture<'static> {
     // A recorded attempt always runs under a real owner scope; the mock
     // default is `RuntimeOperation`, which names no opener.
     let scoped = lash_core::ScopedEffectController::shared(
@@ -50,12 +52,10 @@ fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'s
         lash_core::AdmittedScope::turn("test-session", "declaration-turn"),
     )
     .expect("the test scope validates");
-    lash_core::testing::mock_tool_context()
-        .__with_scoped_effect_controller_for_testing(scoped)
-        .__with_attempt_binding_for_testing(
-            Some("declaration-call".to_string()),
-            enclosing_process.map(lash_core::ProcessId::fixture),
-        )
+    lash_core::testing::ToolCallFixture::mock()
+        .scoped_effect_controller(scoped)
+        .tool_call_id(Some("declaration-call".to_string()))
+        .enclosing_process_id(enclosing_process.map(lash_core::ProcessId::fixture))
 }
 
 macro_rules! attempt {
@@ -63,8 +63,7 @@ macro_rules! attempt {
         attempt!($tool, $args, None)
     };
     ($tool:literal, $args:expr, $process:expr) => {{
-        let tool_context = attempt_context($process);
-        let context = lash_core::AttemptContext::__for_testing(&tool_context, "declaration-scope");
+        let context = attempt_context($process).attempt("declaration-scope");
         let tools = tools();
         let manifest = crate::processes_tool_definitions(true)
             .into_iter()
@@ -136,8 +135,8 @@ async fn a_session_start_declares_the_calling_session_as_its_wake_target() {
         panic!("expected one start declaration, got {declared:?}");
     };
     let session_id = {
-        let tool_context = attempt_context(None);
-        lash_core::SessionId::from(tool_context.session_id())
+        let call = attempt_context(None);
+        lash_core::SessionId::from(call.session_id())
     };
     assert_eq!(
         intent.declaration.wake_session_id.as_ref(),

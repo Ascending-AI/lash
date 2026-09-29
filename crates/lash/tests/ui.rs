@@ -80,13 +80,18 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/commit_budget_has_no_default.rs");
     t.compile_fail("tests/ui/runtime_host_config_requires_commit_budget.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_journal_capability.rs");
-    t.compile_fail("tests/ui/tool_call_context_is_journal_incapable.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_recursive_dispatch.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_session_mutations.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_trigger_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_process_event_commands.rs");
     t.compile_fail("tests/ui/attempt_context_has_no_child_trace_emission.rs");
     t.compile_fail("tests/ui/granted_attempt_context_is_not_constructible.rs");
+    // ADR 0116: no context a body holds reaches dispatch, process
+    // administration or a controller, and a plugin registers only providers.
+    t.compile_fail("tests/ui/tool_context_is_not_nameable.rs");
+    t.compile_fail("tests/ui/attempt_context_has_no_process_administration.rs");
+    t.compile_fail("tests/ui/attempt_context_has_no_controller.rs");
+    t.compile_fail("tests/ui/plugin_spec_registers_only_providers.rs");
     t.compile_fail("tests/ui/session_read_view_has_no_mutations.rs");
     t.compile_fail("tests/ui/pending_attempt_cannot_carry_intents.rs");
     t.compile_fail("tests/ui/pending_start_cannot_carry_intents.rs");

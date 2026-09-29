@@ -1,0 +1,23 @@
+error[E0599]: no method named `start` found for struct `AttemptProcessReads` in the current scope
+ --> tests/ui/attempt_context_has_no_process_administration.rs:9:23
+  |
+9 |     let _ = processes.start();
+  |                       ^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `cancel` found for struct `AttemptProcessReads` in the current scope
+  --> tests/ui/attempt_context_has_no_process_administration.rs:10:23
+   |
+10 |     let _ = processes.cancel();
+   |                       ^^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `signal` found for struct `AttemptProcessReads` in the current scope
+  --> tests/ui/attempt_context_has_no_process_administration.rs:11:23
+   |
+11 |     let _ = processes.signal();
+   |                       ^^^^^^ method not found in `AttemptProcessReads`
+
+error[E0599]: no method named `await_terminal` found for struct `AttemptProcessReads` in the current scope
+  --> tests/ui/attempt_context_has_no_process_administration.rs:12:23
+   |
+12 |     let _ = processes.await_terminal();
+   |                       ^^^^^^^^^^^^^^ method not found in `AttemptProcessReads`

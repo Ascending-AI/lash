@@ -195,8 +195,8 @@ async fn execute_process_dispatch(
         .build()
         .expect("process run context");
     let dispatch = run_context.dispatch();
-    let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch)).build();
-    let attempt = crate::AttemptContext::__for_testing(&tool_context, "process-route");
+    let attempt = crate::testing::ToolCallFixture::from_dispatch(Arc::clone(&dispatch))
+        .attempt("process-route");
     let manifest = dispatch
         .tools
         .resolve_manifest_by_id(&crate::ToolId::from("tool:process-route"))
@@ -210,7 +210,6 @@ async fn execute_process_dispatch(
         ))
         .await;
     drop(attempt);
-    drop(tool_context);
     drop(dispatch);
     run_context.shutdown().await;
     match outcome {

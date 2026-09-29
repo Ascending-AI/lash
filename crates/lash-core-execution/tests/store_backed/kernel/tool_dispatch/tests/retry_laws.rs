@@ -163,9 +163,8 @@ async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
     )
     .await;
     context.effect_controller = RuntimeEffectControllerHandle::shared(recorder.clone());
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
+        .tool_call_id("call-1".to_string());
 
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
@@ -212,9 +211,8 @@ async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
     .await;
     context.effect_controller =
         RuntimeEffectControllerHandle::shared(Arc::new(FailingSleepEffectController));
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
+        .tool_call_id("call-1".to_string());
 
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
@@ -308,9 +306,8 @@ async fn retry_context_has_stable_replay_key_across_attempts() {
         Arc::clone(&observed),
     )
     .await;
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
+    let tool_context = crate::testing::ToolCallFixture::from_dispatch(Arc::new(context.clone()))
+        .tool_call_id("call-1".to_string());
     let outcome = dispatch_tool_call_with_execution_context(
         &context,
         "retry_probe".to_string(),

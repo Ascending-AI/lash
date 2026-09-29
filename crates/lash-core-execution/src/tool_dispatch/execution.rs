@@ -115,8 +115,7 @@ async fn announce_pending_park(
         return Ok(pending);
     };
     match context
-        .process_events()
-        .emit_request(announcement.into_append_request())
+        .append_process_event(announcement.into_append_request())
         .await
     {
         Ok(_) => Ok(pending),
