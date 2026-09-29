@@ -370,12 +370,8 @@ pub trait RootStore: Send + Sync {
     /// [`StoreError::StaleDriveFence`] before anything is read.
     async fn admit_root(
         &self,
-        _request: &AdmitRootRequest,
-    ) -> Result<Option<RootAdmission>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "admit_root",
-        })
-    }
+        request: &AdmitRootRequest,
+    ) -> Result<Option<RootAdmission>, StoreError>;
 
     /// Admit the rows a running root's checkpoint delivers, in one
     /// transaction fenced by `request.fence` (FIG-3927).
@@ -390,12 +386,8 @@ pub trait RootStore: Send + Sync {
     /// their obligations.
     async fn admit_at_checkpoint(
         &self,
-        _request: &CheckpointAdmissionRequest,
-    ) -> Result<CheckpointAdmission, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "admit_at_checkpoint",
-        })
-    }
+        request: &CheckpointAdmissionRequest,
+    ) -> Result<CheckpointAdmission, StoreError>;
 
     /// The terminal evidence of `root` in `session_id`, if it has any.
     async fn root_terminal(

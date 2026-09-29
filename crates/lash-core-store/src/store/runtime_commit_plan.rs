@@ -189,23 +189,6 @@ impl RuntimeCommitPlanner {
         &self.operation_key
     }
 
-    /// Backends call this immediately after reading the head and before creating session
-    /// metadata, preserving the binding fence ahead of receipt replay.
-    pub fn validate_session_binding(
-        &self,
-        bound_session_id: Option<&SessionId>,
-    ) -> Result<(), StoreError> {
-        if let Some(bound_session_id) = bound_session_id
-            && bound_session_id != self.commit.session_id
-        {
-            return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: SessionId::from(bound_session_id.to_string()),
-                attempted_session_id: self.commit.session_id.clone(),
-            });
-        }
-        Ok(())
-    }
-
     /// Validate node identities after the backend has established session
     /// authority and metadata, but before it adjudicates a receipt.
     pub fn validate_node_derivation(&self) -> Result<(), StoreError> {

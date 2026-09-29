@@ -9,9 +9,8 @@ use tokio_util::task::TaskTracker;
 
 use crate::runtime::process_wake_batch_draft_with_delivery_policy;
 use crate::{
-    Clock, PluginError, ProcessRegistry, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionWorkEngine, StoreError, WakeDeliveryClaimOutcome,
-    WakeDiscardReason, WorkCadencePolicy,
+    Clock, DeploymentStore, PluginError, ProcessRegistry, SessionWorkEngine, StoreError,
+    WakeDeliveryClaimOutcome, WakeDiscardReason, WorkCadencePolicy,
 };
 
 fn retry_delay_ms(attempts: u64, work_cadence: &WorkCadencePolicy) -> u64 {
@@ -61,7 +60,7 @@ pub struct WakeDeliveryDriver {
 
 struct WakeDeliveryDriverInner {
     registry: Arc<dyn ProcessRegistry>,
-    session_store_factory: Arc<dyn SessionStoreFactory>,
+    session_store_factory: Arc<dyn DeploymentStore>,
     queued_work: std::sync::Weak<dyn SessionWorkEngine>,
     clock: Arc<dyn Clock>,
     delivery_policy: crate::DeliveryPolicy,
@@ -88,7 +87,7 @@ impl WakeDeliveryDriver {
     )]
     pub fn new(
         registry: Arc<dyn ProcessRegistry>,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
+        session_store_factory: Arc<dyn DeploymentStore>,
         queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
@@ -106,7 +105,7 @@ impl WakeDeliveryDriver {
 
     pub fn with_work_cadence(
         registry: Arc<dyn ProcessRegistry>,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
+        session_store_factory: Arc<dyn DeploymentStore>,
         queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
@@ -174,7 +173,7 @@ impl WakeDeliveryDriver {
     /// One bounded, idempotent delivery pass.
     pub async fn drive_pending_once(
         registry: Arc<dyn ProcessRegistry>,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
+        session_store_factory: Arc<dyn DeploymentStore>,
         queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         limit: usize,
@@ -193,7 +192,7 @@ impl WakeDeliveryDriver {
     /// One bounded delivery pass using the host-selected wake boundary.
     pub async fn drive_pending_once_with_delivery_policy(
         registry: Arc<dyn ProcessRegistry>,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
+        session_store_factory: Arc<dyn DeploymentStore>,
         queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
@@ -217,7 +216,7 @@ impl WakeDeliveryDriver {
     #[allow(clippy::too_many_arguments)]
     async fn drive_pending_once_with_delivery_policy_and_work_cadence(
         registry: Arc<dyn ProcessRegistry>,
-        session_store_factory: Arc<dyn SessionStoreFactory>,
+        session_store_factory: Arc<dyn DeploymentStore>,
         queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
@@ -245,74 +244,11 @@ impl WakeDeliveryDriver {
             }
 
             let target_session_id = delivery.wake.target_session_id.clone();
-            let request = SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: target_session_id.clone(),
-                relation: SessionRelation::default(),
-                policy: SessionPolicy::new(crate::TurnBudget::Unbounded),
-            };
-            let store = match session_store_factory.open_existing_store(&request).await {
-                Ok(Some(store)) => store,
-                Ok(None) => {
-                    let was_deleted = match session_store_factory
-                        .session_was_deleted(&target_session_id)
-                        .await
-                    {
-                        Ok(was_deleted) => was_deleted,
-                        Err(error) => {
-                            tracing::warn!(
-                                delivery_id = %delivery.delivery_id,
-                                target_session_id = %target_session_id,
-                                error = %error,
-                                "process wake target tombstone lookup failed; delivery remains pending"
-                            );
-                            Self::settle(
-                                registry.as_ref(),
-                                &delivery,
-                                claim_token,
-                                clock.as_ref(),
-                                WakeDeliverySettlement::Retry,
-                                None,
-                                work_cadence,
-                                &mut report,
-                            )
-                            .await?;
-                            continue;
-                        }
-                    };
-                    if was_deleted {
-                        Self::settle(
-                            registry.as_ref(),
-                            &delivery,
-                            claim_token,
-                            clock.as_ref(),
-                            WakeDeliverySettlement::Discard(WakeDiscardReason::TargetGone),
-                            None,
-                            work_cadence,
-                            &mut report,
-                        )
-                        .await?;
-                    } else {
-                        tracing::debug!(
-                            delivery_id = %delivery.delivery_id,
-                            target_session_id = %target_session_id,
-                            "process wake target has never existed; delivery remains pending"
-                        );
-                        Self::settle(
-                            registry.as_ref(),
-                            &delivery,
-                            claim_token,
-                            clock.as_ref(),
-                            WakeDeliverySettlement::Retry,
-                            None,
-                            work_cadence,
-                            &mut report,
-                        )
-                        .await?;
-                    }
-                    continue;
-                }
+            let lookup = match session_store_factory
+                .lookup_session(&target_session_id)
+                .await
+            {
+                Ok(lookup) => lookup,
                 Err(error) => {
                     tracing::warn!(
                         delivery_id = %delivery.delivery_id,
@@ -334,6 +270,43 @@ impl WakeDeliveryDriver {
                     continue;
                 }
             };
+            match lookup {
+                crate::store::SessionLookup::Live(_) => {}
+                crate::store::SessionLookup::Deleted => {
+                    Self::settle(
+                        registry.as_ref(),
+                        &delivery,
+                        claim_token,
+                        clock.as_ref(),
+                        WakeDeliverySettlement::Discard(WakeDiscardReason::TargetGone),
+                        None,
+                        work_cadence,
+                        &mut report,
+                    )
+                    .await?;
+                    continue;
+                }
+                crate::store::SessionLookup::Absent => {
+                    tracing::debug!(
+                        delivery_id = %delivery.delivery_id,
+                        target_session_id = %target_session_id,
+                        "process wake target has never existed; delivery remains pending"
+                    );
+                    Self::settle(
+                        registry.as_ref(),
+                        &delivery,
+                        claim_token,
+                        clock.as_ref(),
+                        WakeDeliverySettlement::Retry,
+                        None,
+                        work_cadence,
+                        &mut report,
+                    )
+                    .await?;
+                    continue;
+                }
+            }
+            let store = &session_store_factory;
 
             match store
                 .enqueue_queued_work_with_outcome(process_wake_batch_draft_with_delivery_policy(

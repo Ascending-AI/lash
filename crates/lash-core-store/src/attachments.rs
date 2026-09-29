@@ -1545,11 +1545,11 @@ fn now_epoch_ms() -> u64 {
     <crate::SystemClock as crate::ClockWallTime>::timestamp_ms(&crate::SystemClock)
 }
 
-/// Adapter that exposes the [`AttachmentManifest`] supertrait of an
-/// `Arc<dyn RuntimePersistence>` as an `Arc<dyn AttachmentManifest>`.
+/// Adapter that exposes the [`AttachmentManifest`] segment of an
+/// `Arc<dyn RuntimeStore>` as an `Arc<dyn AttachmentManifest>`.
 /// Rust's trait-object upcasting does not yet allow direct coercion
 /// between the two; this thin forwarder is the bridge.
-pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimePersistence>);
+pub struct PersistenceManifestAdapter(pub Arc<dyn crate::RuntimeStore>);
 
 #[async_trait::async_trait]
 impl AttachmentManifest for PersistenceManifestAdapter {

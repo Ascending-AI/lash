@@ -24,10 +24,12 @@ pub struct RuntimeServices {
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub clock: Arc<dyn crate::Clock>,
-    pub store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    /// The session's view of the store it persists through.
+    pub store: Option<crate::store::SessionStore>,
     /// Manifest persistence may differ from runtime-state persistence for
-    /// ephemeral process runtimes backed by a parent-bound session factory.
-    pub attachment_manifest_store: Option<Arc<dyn crate::store::RuntimePersistence>>,
+    /// ephemeral process runtimes whose manifest rows belong to a parent
+    /// session's store.
+    pub attachment_manifest_store: Option<Arc<dyn crate::store::RuntimeStore>>,
 }
 
 #[derive(Clone)]
@@ -111,7 +113,7 @@ impl PersistentRuntimeServices {
     /// process-exec-env store the caller's backend supplies.
     pub fn new(
         plugins: Arc<PluginSession>,
-        store: Arc<dyn crate::store::RuntimePersistence>,
+        store: crate::store::SessionStore,
         attachment_store: Arc<crate::SessionAttachmentStore>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     ) -> Self {
@@ -121,14 +123,14 @@ impl PersistentRuntimeServices {
             attachment_store,
             process_env_store,
             clock: Arc::new(crate::SystemClock),
-            store: Some(Arc::clone(&store)),
-            attachment_manifest_store: Some(store),
+            attachment_manifest_store: Some(Arc::clone(store.store())),
+            store: Some(store),
         })
     }
 
     pub fn with_attachment_manifest_store(
         mut self,
-        store: Arc<dyn crate::store::RuntimePersistence>,
+        store: Arc<dyn crate::store::RuntimeStore>,
     ) -> Self {
         self.0.attachment_manifest_store = Some(store);
         self
@@ -142,7 +144,7 @@ impl PersistentRuntimeServices {
         clippy::expect_used,
         reason = "the persistent constructor is the only one that hands out these services, and it always sets a store"
     )]
-    pub fn store(&self) -> Arc<dyn crate::store::RuntimePersistence> {
+    pub fn store(&self) -> crate::store::SessionStore {
         self.0
             .store
             .as_ref()

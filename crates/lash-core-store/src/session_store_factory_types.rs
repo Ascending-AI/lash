@@ -41,3 +41,18 @@ pub struct ForkSessionReceipt {
     /// Settlement receipts for the host-selected process observer intents.
     pub observed_processes: Vec<crate::session_identity::SessionObservedProcessReceipt>,
 }
+
+/// What the catalog holds for one session id
+/// ([`SessionCatalogStore::lookup_session`](crate::store::SessionCatalogStore::lookup_session)).
+///
+/// `Absent` and `Deleted` are answers. A catalog that cannot answer returns
+/// `Err`, never `Absent` (ADR 0097's negative-answer rule).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SessionLookup {
+    /// Durable metadata exists and no deletion tombstone does.
+    Live(crate::store::SessionMeta),
+    /// The id carries a permanent deletion tombstone.
+    Deleted,
+    /// The catalog has never held this id.
+    Absent,
+}

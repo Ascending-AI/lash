@@ -5,9 +5,9 @@ use std::sync::Arc;
 
 use crate::engine::BuildGeneration;
 use crate::{
-    AttachmentStore, Clock, EffectHost, ModuleArtifactStore, ProcessContinuationStore,
-    ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    SessionStoreFactory, SessionWorkEngine, TriggerStore,
+    AttachmentStore, Clock, DeploymentStore, EffectHost, ModuleArtifactStore,
+    ProcessContinuationStore, ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry,
+    ProcessWorkWiring, SessionWorkEngine, TriggerStore,
 };
 
 /// The identity of one store set: the storage it names, such as a SQLite
@@ -123,7 +123,7 @@ impl Backend {
     }
 
     /// The factory that creates and reopens this backend's session stores.
-    pub fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+    pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         self.stores().session_store_factory()
     }
 
@@ -245,7 +245,7 @@ pub trait StoreSet: Send + Sync {
     fn clock(&self) -> Arc<dyn Clock>;
 
     /// The factory that creates and reopens this store set's session stores.
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory>;
+    fn session_store_factory(&self) -> Arc<dyn DeploymentStore>;
 
     /// The durable registry of background processes.
     fn process_registry(&self) -> Arc<dyn ProcessRegistry>;

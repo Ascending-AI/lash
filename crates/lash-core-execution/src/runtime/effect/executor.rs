@@ -264,7 +264,7 @@ enum LocalTarget {
     Process(ProcessLocalExecution),
     ProcessDefinitions(ProcessDefinitionLocalExecution),
     Trigger(TriggerLocalExecution),
-    TurnAcceptance(Arc<dyn crate::IngressStore>),
+    TurnAcceptance(Arc<dyn crate::TurnInputStore>),
     /// The recorded presentation boundary's local work (ADR 0099 §6,
     /// FIG-3420): run the session's ordered presentation steps once over the
     /// journaled `PresentToolResult` input.
@@ -714,7 +714,7 @@ impl<'run> RuntimeEffectLocalExecutor<'run> {
     /// The acceptance write is the one store call a replaying engine must not
     /// repeat, so it crosses the runtime-effect envelope like every other
     /// journaled effect rather than being issued directly against the store.
-    pub fn turn_acceptance(store: Arc<dyn crate::IngressStore>) -> Self {
+    pub fn turn_acceptance(store: Arc<dyn crate::TurnInputStore>) -> Self {
         Self {
             state: RuntimeEffectLocalExecutorState::Target(LocalTarget::TurnAcceptance(store)),
             replay_trace: None,

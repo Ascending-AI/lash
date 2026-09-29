@@ -9,15 +9,19 @@ pub async fn commit_runtime_state_verified(
     store: &(dyn SessionCommitStore + '_),
     commit: RuntimeCommit,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    let meta = store.load_session_meta_for_commit().await?.ok_or_else(|| {
-        StoreError::SessionBindingNotMaterialized {
+    let meta = store
+        .load_session_meta_for_commit(&commit.session_id)
+        .await?
+        .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
             session_id: commit.session_id.clone(),
-        }
-    })?;
+        })?;
     if meta.session_id != commit.session_id {
-        return Err(StoreError::SessionBindingMismatch {
-            bound_session_id: meta.session_id,
-            attempted_session_id: commit.session_id,
+        return Err(StoreError::StoredDataCorrupt {
+            record_kind: "SessionMeta",
+            message: format!(
+                "metadata read for session `{}` names session `{}`",
+                commit.session_id, meta.session_id
+            ),
         });
     }
     commit.validate_budget_and_record_size()?;
@@ -46,27 +50,44 @@ mod tests {
         replayed: bool,
     }
 
-    crate::impl_noop_attachment_manifest!(FacadeTestStore);
-
     #[async_trait::async_trait]
     impl SessionCommitStore for FacadeTestStore {
-        async fn load_session(
+        async fn read_session_state_version(
             &self,
-        ) -> Result<Option<super::super::PersistedSessionRead>, StoreError> {
-            Ok(None)
+            _session_id: &SessionId,
+        ) -> Result<u32, StoreError> {
+            Ok(super::super::OLDEST_SUPPORTED_SESSION_STATE_VERSION)
         }
 
         async fn load_session_head_meta(
             &self,
+            _session_id: &SessionId,
         ) -> Result<Option<super::super::SessionHeadMeta>, StoreError> {
             Ok(None)
         }
 
-        async fn load_node(
+        async fn retain_admission_base(
             &self,
-            _node_id: &str,
-        ) -> Result<Option<crate::SessionNodeRecord>, StoreError> {
-            Ok(None)
+            _fence: &super::super::DriveFence,
+            _base: &super::super::SessionHeadRef,
+        ) -> Result<(), StoreError> {
+            Ok(())
+        }
+
+        async fn committed_turn_exists(
+            &self,
+            _session_id: &SessionId,
+            _turn_id: &crate::TurnId,
+        ) -> Result<bool, StoreError> {
+            Ok(false)
+        }
+
+        async fn drain_end_exists(
+            &self,
+            _session_id: &SessionId,
+            _drain_id: &str,
+        ) -> Result<bool, StoreError> {
+            Ok(false)
         }
 
         async fn commit_runtime_state(
@@ -126,13 +147,6 @@ mod tests {
             })
         }
 
-        async fn admit_and_bind_session(
-            &self,
-            _binding: &crate::SessionBinding,
-        ) -> Result<crate::SessionAdmission, StoreError> {
-            Ok(crate::SessionAdmission::Created)
-        }
-
         async fn save_session_meta(
             &self,
             _meta: super::super::SessionMeta,
@@ -140,7 +154,10 @@ mod tests {
             Ok(())
         }
 
-        async fn load_session_meta(&self) -> Result<Option<super::super::SessionMeta>, StoreError> {
+        async fn load_session_meta(
+            &self,
+            _session_id: &SessionId,
+        ) -> Result<Option<super::super::SessionMeta>, StoreError> {
             Ok(self
                 .materialized_session
                 .as_ref()
@@ -150,6 +167,29 @@ mod tests {
                     relation: crate::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),
                 }))
+        }
+
+        async fn load_session_meta_for_commit(
+            &self,
+            session_id: &SessionId,
+        ) -> Result<Option<super::super::SessionMeta>, StoreError> {
+            self.load_session_meta(session_id).await
+        }
+
+        async fn record_turn_park(
+            &self,
+            _park: &super::super::TurnParkWrite,
+        ) -> Result<super::super::TurnPark, StoreError> {
+            Err(StoreError::UnsupportedStoreOperation {
+                operation: "record_turn_park",
+            })
+        }
+
+        async fn load_turn_park(
+            &self,
+            _session_id: &SessionId,
+        ) -> Result<Option<super::super::TurnPark>, StoreError> {
+            Ok(None)
         }
     }
 
@@ -239,10 +279,13 @@ mod tests {
             commit,
         )
         .await
-        .expect_err("mismatched binding metadata must fence the commit");
+        .expect_err("metadata naming another session must fence the commit");
         assert!(matches!(
             mismatch_error,
-            StoreError::SessionBindingMismatch { .. }
+            StoreError::StoredDataCorrupt {
+                record_kind: "SessionMeta",
+                ..
+            }
         ));
         assert_eq!(
             metrics.histogram_count("lash.runtime_commit.budgeted_size"),
@@ -294,14 +337,6 @@ mod tests {
             ))
         };
         state.ensure_agent_frame_initialized();
-        let binding = crate::SessionBinding::root(state.session_id.clone());
-        assert_eq!(
-            store
-                .admit_and_bind_session(&binding)
-                .await
-                .expect("loose admission response"),
-            crate::SessionAdmission::Created
-        );
 
         let err = commit_runtime_state_verified(
             &store,

@@ -478,7 +478,7 @@ impl Session {
         &self.context_prompt_contributions
     }
 
-    pub fn history_store(&self) -> Option<Arc<dyn crate::store::RuntimePersistence>> {
+    pub fn history_store(&self) -> Option<crate::store::SessionStore> {
         self.services.store.clone()
     }
 
@@ -488,7 +488,7 @@ impl Session {
         self.services
             .store
             .as_ref()
-            .map(|store| crate::store::FleetFormatStore::fleet_format(store.as_ref()))
+            .map(crate::store::SessionStore::fleet_format)
             .unwrap_or_else(crate::FleetFormat::current)
     }
 
@@ -828,7 +828,7 @@ impl Session {
                     self.services
                         .store
                         .as_ref()
-                        .map(|store| crate::store::FleetFormatStore::fleet_format(store.as_ref()))
+                        .map(crate::store::SessionStore::fleet_format)
                         .unwrap_or_else(crate::FleetFormat::current),
                 )
                 .with_live_tool_catalog(tool_surface.live_tool_catalog())

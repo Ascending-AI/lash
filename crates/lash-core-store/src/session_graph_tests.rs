@@ -1373,3 +1373,185 @@ fn held_readers_isolate_folded_pending_tails() {
         &latest.prompt_render_cache
     ));
 }
+
+mod window_anchor {
+    use super::*;
+    use crate::store::WindowAnchorViolation;
+
+    fn frame_open(key: &str, parent: Option<&str>) -> SessionNodeRecord {
+        let frame_key =
+            crate::FrameKey::from_caller_material(key).expect("non-empty frame material");
+        SessionNodeRecord {
+            node_id: frame_node_id(&SessionId::from("window"), frame_key.as_str())
+                .into_inner()
+                .into(),
+            parent_node_id: parent.map(crate::NodeId::from),
+            timestamp: "2026-09-29T00:00:00Z".to_string(),
+            payload: SessionNodePayload::FrameOpen {
+                frame_key,
+                reason: crate::AgentFrameReason::initial(),
+                assignment: crate::AgentFrameAssignment::from_policy(crate::SessionPolicy::new(
+                    crate::TurnBudget::Unbounded,
+                )),
+                protocol_turn_options: crate::ProtocolTurnOptions::default(),
+            },
+        }
+    }
+
+    fn plugin(id: &str, parent: &str) -> SessionNodeRecord {
+        SessionNodeRecord {
+            node_id: id.into(),
+            parent_node_id: Some(parent.into()),
+            timestamp: "2026-09-29T00:00:00Z".to_string(),
+            payload: SessionNodePayload::Plugin {
+                plugin_type: "window-anchor-test".to_string(),
+                body: SharedJsonValue::new(serde_json::json!({"id": id})),
+            },
+        }
+    }
+
+    fn anchor_at(base: &SessionNodeRecord, generation: u64) -> WindowAnchor {
+        WindowAnchor {
+            frame_node_id: crate::FrameNodeId::new(base.node_id.to_string()).expect("non-empty"),
+            generation,
+            external_parent: base.parent_node_id.clone(),
+            previous_frame_node_id: base
+                .parent_node_id
+                .as_ref()
+                .map(|_| crate::FrameNodeId::new("previous-frame").expect("non-empty")),
+        }
+    }
+
+    /// A frame above generation 0: base `F` with external parent `outside`,
+    /// then `a` and `b`.
+    fn window() -> (Vec<SessionNodeRecord>, WindowAnchor) {
+        let base = frame_open("second-frame", Some("outside"));
+        let base_id = base.node_id.to_string();
+        let anchor = anchor_at(&base, 40);
+        (vec![base, plugin("a", &base_id), plugin("b", "a")], anchor)
+    }
+
+    fn violation(result: Result<SessionGraph, crate::StoreError>) -> WindowAnchorViolation {
+        match result {
+            Err(crate::StoreError::InvalidWindowAnchor { violation, .. }) => violation,
+            other => panic!("expected an anchor violation, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_anchored_window_admits_exactly_its_base_parent() {
+        let (nodes, anchor) = window();
+        let graph = SessionGraph::from_window(nodes, "b".into(), anchor.clone())
+            .expect("a well-formed window");
+        assert_eq!(graph.anchor(), Some(&anchor));
+        assert_eq!(graph.nodes.len(), 3);
+        graph
+            .validate_resident_integrity()
+            .expect("the base's external parent is admitted");
+
+        let encoded = serde_json::to_string(&graph).expect("encode window");
+        let decoded: SessionGraph = serde_json::from_str(&encoded).expect("decode window");
+        assert_eq!(decoded.anchor(), Some(&anchor));
+
+        let (nodes, _) = window();
+        assert!(matches!(
+            SessionGraph::from_nodes(nodes, Some("b".into())),
+            Err(crate::StoreError::InvalidGraphParent { .. })
+        ));
+    }
+
+    #[test]
+    fn a_root_frame_window_has_no_external_parent() {
+        let base = frame_open("first-frame", None);
+        let base_id = base.node_id.to_string();
+        let anchor = anchor_at(&base, 0);
+        let graph =
+            SessionGraph::from_window(vec![base, plugin("a", &base_id)], "a".into(), anchor)
+                .expect("a root window");
+        assert_eq!(graph.anchor().map(|anchor| anchor.generation), Some(0));
+    }
+
+    #[test]
+    fn a_base_that_is_not_a_frame_open_is_refused() {
+        let (mut nodes, anchor) = window();
+        nodes[0] = plugin(anchor.base_node_id(), "outside");
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
+            WindowAnchorViolation::BaseNotFrameOpen
+        );
+    }
+
+    #[test]
+    fn a_base_other_than_the_leaf_frame_is_refused() {
+        let (nodes, mut anchor) = window();
+        anchor.frame_node_id = crate::FrameNodeId::new("another-frame").expect("non-empty");
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
+            WindowAnchorViolation::BaseIsNotLeafFrame
+        );
+    }
+
+    #[test]
+    fn a_second_frame_open_inside_the_window_is_a_foreign_frame_pointer() {
+        let (mut nodes, anchor) = window();
+        nodes.push(frame_open("third-frame", Some("b")));
+        let leaf = nodes[3].node_id.clone();
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, leaf, anchor)),
+            WindowAnchorViolation::ForeignFramePointer
+        );
+    }
+
+    #[test]
+    fn external_parent_shape_follows_the_base_generation() {
+        let (nodes, mut anchor) = window();
+        anchor.generation = 0;
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
+            WindowAnchorViolation::ExternalParentShape,
+            "a generation-0 base with a parent"
+        );
+
+        let base = frame_open("second-frame", None);
+        let base_id = base.node_id.to_string();
+        let mut anchor = anchor_at(&base, 40);
+        anchor.external_parent = None;
+        anchor.previous_frame_node_id = None;
+        assert_eq!(
+            violation(SessionGraph::from_window(
+                vec![base, plugin("a", &base_id)],
+                "a".into(),
+                anchor,
+            )),
+            WindowAnchorViolation::ExternalParentShape,
+            "a base above generation 0 with no parent"
+        );
+
+        let (nodes, mut anchor) = window();
+        anchor.external_parent = Some("elsewhere".into());
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
+            WindowAnchorViolation::ExternalParentShape,
+            "a base whose parent is not the anchor's"
+        );
+    }
+
+    #[test]
+    fn a_deleted_middle_row_leaves_an_inner_parent_outside_the_window() {
+        let (mut nodes, anchor) = window();
+        nodes.remove(1);
+        assert_eq!(
+            violation(SessionGraph::from_window(nodes, "b".into(), anchor)),
+            WindowAnchorViolation::InnerParentOutsideWindow
+        );
+    }
+
+    #[test]
+    fn the_last_window_row_must_be_the_leaf() {
+        let (nodes, anchor) = window();
+        assert!(matches!(
+            SessionGraph::from_window(nodes, "a".into(), anchor),
+            Err(crate::StoreError::InvalidGraphLeaf { .. })
+        ));
+    }
+}

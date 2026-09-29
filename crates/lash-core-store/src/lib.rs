@@ -42,6 +42,7 @@ pub mod session_catalog;
 pub mod session_graph;
 pub(crate) mod session_graph_cache;
 pub(crate) mod session_graph_integrity;
+mod session_graph_window;
 pub mod session_identity;
 pub mod session_policy;
 mod session_policy_serde;
@@ -104,7 +105,7 @@ pub(crate) use session_graph::{
 pub(crate) use store::{
     AppendRequestIdentity, AttachmentManifestEntry, AttachmentOwner, AttachmentWriteToken, BlobRef,
     CheckpointComponentDescriptor, GraphAppend, HydratedCheckpointComponent, LeaseOwnerIdentity,
-    OperationId, RuntimePersistence, SessionMeta, StoreError,
+    OperationId, RuntimeStore, SessionMeta, StoreError,
 };
 pub(crate) use turn_failure_evidence::{TurnFailureEvidence, TurnFailureSettlement};
 pub(crate) use usage::{LedgerUsageDisposition, TokenLedgerEntry, UnreportedLedgerAttempt};

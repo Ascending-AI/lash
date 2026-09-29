@@ -140,7 +140,13 @@ pub struct SessionGraphData {
     pub nodes: Vec<Arc<SessionNodeRecord>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub leaf_node_id: Option<NodeId>,
+    /// Where a store-read window starts (ADR 0112 §5). `None` for a graph
+    /// built in memory with no store, whose root has no parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<WindowAnchor>,
 }
+
+pub use crate::session_graph_window::WindowAnchor;
 
 #[derive(Debug)]
 pub struct SessionGraph {
@@ -181,7 +187,8 @@ impl<'de> serde::Deserialize<'de> for SessionGraph {
         D: serde::Deserializer<'de>,
     {
         let inner = SessionGraphData::deserialize(deserializer)?;
-        Self::from_shared_nodes(inner.nodes, inner.leaf_node_id).map_err(serde::de::Error::custom)
+        Self::from_shared_anchored_nodes(inner.nodes, inner.leaf_node_id, inner.anchor)
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -872,7 +879,15 @@ impl SessionGraph {
         nodes: Vec<Arc<SessionNodeRecord>>,
         leaf_node_id: Option<NodeId>,
     ) -> Result<Self, crate::StoreError> {
-        let graph = Self::from_shared_validated_nodes(nodes, leaf_node_id);
+        Self::from_shared_anchored_nodes(nodes, leaf_node_id, None)
+    }
+
+    pub(crate) fn from_shared_anchored_nodes(
+        nodes: Vec<Arc<SessionNodeRecord>>,
+        leaf_node_id: Option<NodeId>,
+        anchor: Option<WindowAnchor>,
+    ) -> Result<Self, crate::StoreError> {
+        let graph = Self::from_shared_validated_parts(nodes, leaf_node_id, anchor);
         graph.validate_structural_integrity()?;
         Ok(graph)
     }
@@ -895,10 +910,19 @@ impl SessionGraph {
         nodes: Vec<Arc<SessionNodeRecord>>,
         leaf_node_id: Option<NodeId>,
     ) -> Self {
+        Self::from_shared_validated_parts(nodes, leaf_node_id, None)
+    }
+
+    fn from_shared_validated_parts(
+        nodes: Vec<Arc<SessionNodeRecord>>,
+        leaf_node_id: Option<NodeId>,
+        anchor: Option<WindowAnchor>,
+    ) -> Self {
         Self {
             inner: Arc::new(SessionGraphData {
                 nodes,
                 leaf_node_id,
+                anchor,
             }),
             cache: Arc::new(OnceLock::new()),
         }
@@ -928,6 +952,14 @@ impl SessionGraph {
 
     fn validate_structural_integrity(&self) -> Result<(), crate::StoreError> {
         let by_id = graph_node_indices(self)?;
+        if let Some(anchor) = self.anchor()
+            && !by_id.contains_key(anchor.base_node_id())
+        {
+            return Err(crate::StoreError::InvalidWindowAnchor {
+                frame_node_id: NodeId::from(anchor.base_node_id()),
+                violation: crate::store::WindowAnchorViolation::BaseIsNotLeafFrame,
+            });
+        }
         ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
         validate_graph_parent_topology(self, &by_id)
     }
@@ -1432,12 +1464,13 @@ impl SessionGraph {
         // Selecting the ancestry of a validated graph preserves unique ids, complete parents, and
         // the existing leaf, so repeating the full validation on this hot read projection is
         // unnecessary. The trimmed graph shares the source's immutable records.
-        SessionGraph::from_shared_validated_nodes(
+        SessionGraph::from_shared_validated_parts(
             indices
                 .iter()
                 .map(|index| Arc::clone(&self.nodes[*index]))
                 .collect(),
             self.leaf_node_id.clone(),
+            self.anchor.clone(),
         )
     }
 
@@ -1445,11 +1478,12 @@ impl SessionGraph {
         let by_id = graph_node_indices(self)?;
         let mut path = ancestry_indices(self, &by_id, self.leaf_node_id.as_deref())?;
         path.reverse();
-        SessionGraph::from_shared_nodes(
+        SessionGraph::from_shared_anchored_nodes(
             path.into_iter()
                 .map(|index| Arc::clone(&self.nodes[index]))
                 .collect(),
             self.leaf_node_id.clone(),
+            self.anchor.clone(),
         )
     }
 

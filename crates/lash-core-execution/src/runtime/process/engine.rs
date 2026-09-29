@@ -222,8 +222,8 @@ pub struct ProcessEngineProcessContext {
     process_id: ProcessId,
     process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-    store: Option<Arc<dyn crate::RuntimePersistence>>,
-    session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+    store: Option<Arc<dyn crate::RuntimeStore>>,
+    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
     queued_work: Arc<dyn crate::SessionWorkEngine>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
@@ -235,8 +235,8 @@ impl ProcessEngineProcessContext {
         process_id: ProcessId,
         process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
-        store: Option<Arc<dyn crate::RuntimePersistence>>,
-        session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+        store: Option<Arc<dyn crate::RuntimeStore>>,
+        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
@@ -362,8 +362,8 @@ pub struct ProcessEngineRunContext<'run> {
     session_id: SessionId,
     plugins: Arc<crate::PluginSession>,
     tool_catalog: Arc<crate::ToolCatalog>,
-    store: Option<Arc<dyn crate::RuntimePersistence>>,
-    session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+    store: Option<Arc<dyn crate::RuntimeStore>>,
+    session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
     queued_work: Arc<dyn crate::SessionWorkEngine>,
     process_registry_available: bool,
     cancellation: CancellationToken,
@@ -387,8 +387,8 @@ impl<'run> ProcessEngineRunContext<'run> {
         session_id: SessionId,
         plugins: Arc<crate::PluginSession>,
         tool_catalog: Arc<crate::ToolCatalog>,
-        store: Option<Arc<dyn crate::RuntimePersistence>>,
-        session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
+        store: Option<Arc<dyn crate::RuntimeStore>>,
+        session_store_factory: Option<Arc<dyn crate::DeploymentStore>>,
         queued_work: Arc<dyn crate::SessionWorkEngine>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
@@ -470,13 +470,13 @@ impl<'run> ProcessEngineRunContext<'run> {
 
     /// Exposes store to protocol and process-engine implementors while running a durable
     /// process.
-    pub fn store(&self) -> Option<Arc<dyn crate::RuntimePersistence>> {
+    pub fn store(&self) -> Option<Arc<dyn crate::RuntimeStore>> {
         self.store.clone()
     }
 
     /// Exposes session store factory to protocol and process-engine implementors while running
     /// a durable process.
-    pub fn session_store_factory(&self) -> Option<Arc<dyn crate::SessionStoreFactory>> {
+    pub fn session_store_factory(&self) -> Option<Arc<dyn crate::DeploymentStore>> {
         self.session_store_factory.clone()
     }
 

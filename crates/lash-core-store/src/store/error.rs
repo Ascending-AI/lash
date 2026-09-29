@@ -1,6 +1,32 @@
 use crate::ProcessId;
 use crate::SessionId;
 use crate::{BatchId, InputId, NodeId};
+
+/// Why a window's rows do not form one anchored frame (ADR 0112 §5).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowAnchorViolation {
+    /// The lowest window node is not a `FrameOpen`.
+    BaseNotFrameOpen,
+    /// The lowest node's id differs from the frame the leaf points at.
+    BaseIsNotLeafFrame,
+    /// A window row's `frame_node_id` differs from the base.
+    ForeignFramePointer,
+    /// The base is at generation 0 but has a parent, or above 0 without one.
+    ExternalParentShape,
+    /// A node other than the base names a parent outside the window.
+    InnerParentOutsideWindow,
+}
+
+/// Why a history anchor cannot be read (ADR 0112 §6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AnchorUnavailable {
+    /// No live row with this id is readable by the session: absent, owned by
+    /// an unrelated session, above a fork ceiling, or physically vacuumed.
+    NotReadable,
+    /// The row exists and is tombstoned: pruned, unpinned or retired.
+    Tombstoned,
+}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {
@@ -98,13 +124,6 @@ pub enum StoreError {
         rendered_tokens: usize,
         max_context_tokens: usize,
     },
-    #[error(
-        "store is already bound to session `{bound_session_id}` and cannot be reused for `{attempted_session_id}`"
-    )]
-    SessionBindingMismatch {
-        bound_session_id: SessionId,
-        attempted_session_id: SessionId,
-    },
     /// A rebind declared a lineage that disagrees with the one durably
     /// recorded for this session.
     ///
@@ -123,14 +142,55 @@ pub enum StoreError {
         recorded: Box<crate::SessionLineage>,
         requested: Box<crate::SessionLineage>,
     },
-    /// A session-scoped operation was attempted on a store handle that is not bound to a session.
-    #[error("store handle is not bound to a session")]
-    SessionNotBound,
-    /// An unbound read found multiple candidate sessions and cannot choose one safely.
+    /// A session-scoped operation named a session the catalog holds no head
+    /// or metadata for (ADR 0112 §6: `Head` on a headless session).
+    #[error("session `{session_id}` is not in this catalog")]
+    SessionNotFound { session_id: SessionId },
+    /// A request sent through a [`SessionStore`](crate::store::SessionStore)
+    /// view carries another session's id (ADR 0112 §3). Nothing reached the
+    /// store.
     #[error(
-        "unbound store cannot resolve one session from {session_count} candidates; bind an explicit session"
+        "session view `{view_session_id}` cannot forward a request for session `{request_session_id}`"
     )]
-    SessionResolutionAmbiguous { session_count: u64 },
+    ForeignSessionRequest {
+        view_session_id: SessionId,
+        request_session_id: SessionId,
+    },
+    /// A window read, or [`SessionGraph::from_window`](crate::SessionGraph::from_window),
+    /// found rows that do not form one anchored frame (ADR 0112 §5). A window
+    /// is never answered smaller than its frame.
+    #[error("session window anchored at `{frame_node_id}` is invalid: {violation:?}")]
+    InvalidWindowAnchor {
+        frame_node_id: NodeId,
+        violation: WindowAnchorViolation,
+    },
+    /// A history page's anchor node is gone (ADR 0112 §6).
+    #[error("history anchor `{node_id}` of session `{session_id}` is unavailable: {reason:?}")]
+    HistoryAnchorUnavailable {
+        session_id: SessionId,
+        node_id: NodeId,
+        reason: AnchorUnavailable,
+    },
+    /// A history page's first row alone exceeds the page's byte budget
+    /// (ADR 0112 §6). Retrying with `max_bytes >= required_bytes` succeeds.
+    #[error(
+        "history node `{node_id}` needs {required_bytes} bytes, over the page budget of {max_bytes}"
+    )]
+    HistoryNodeTooLarge {
+        node_id: NodeId,
+        required_bytes: u64,
+        max_bytes: u64,
+    },
+    /// A paging cursor minted for one session was presented for another.
+    #[error("cursor of session `{cursor_session_id}` cannot page session `{session_id}`")]
+    CursorForeignSession {
+        cursor_session_id: SessionId,
+        session_id: SessionId,
+    },
+    /// A history cursor's lineage stamp no longer matches the session's
+    /// `fork_lineage` rows (ADR 0112 §6).
+    #[error("history cursor for session `{session_id}` was minted under a different lineage")]
+    HistoryCursorLineageChanged { session_id: SessionId },
     #[error("session `{session_id}` was admitted without durable session metadata")]
     SessionBindingNotMaterialized { session_id: SessionId },
     #[error(
@@ -365,7 +425,9 @@ pub enum StoreError {
     ///
     /// Integrator class (ADR 0051): **store and durable-substrate implementors**
     /// return this typed corruption fence after deriving the nearest live
-    /// `FrameOpen` ancestor from the post-commit graph.
+    /// `FrameOpen` ancestor from the post-commit graph. A window read
+    /// returns it too when the head's frame pointer disagrees with the
+    /// frame its leaf row points at (ADR 0112 §5).
     #[error(
         "runtime commit current frame {claimed:?} does not match nearest FrameOpen ancestor {derived:?}"
     )]
@@ -746,11 +808,15 @@ impl StoreError {
                 "QueuedWorkActionReserveExhaustsContext"
             }
             Self::QueuedWorkRowExceedsContextWindow { .. } => "QueuedWorkRowExceedsContextWindow",
-            Self::SessionBindingMismatch { .. } => "SessionBindingMismatch",
             Self::SessionRelationMismatch { .. } => "SessionRelationMismatch",
-            Self::SessionNotBound => "SessionNotBound",
-            Self::SessionResolutionAmbiguous { .. } => "SessionResolutionAmbiguous",
             Self::SessionBindingNotMaterialized { .. } => "SessionBindingNotMaterialized",
+            Self::SessionNotFound { .. } => "SessionNotFound",
+            Self::ForeignSessionRequest { .. } => "ForeignSessionRequest",
+            Self::InvalidWindowAnchor { .. } => "InvalidWindowAnchor",
+            Self::HistoryAnchorUnavailable { .. } => "HistoryAnchorUnavailable",
+            Self::HistoryNodeTooLarge { .. } => "HistoryNodeTooLarge",
+            Self::CursorForeignSession { .. } => "CursorForeignSession",
+            Self::HistoryCursorLineageChanged { .. } => "HistoryCursorLineageChanged",
             Self::SessionStateVersionUnsupported { .. } => "SessionStateVersionUnsupported",
             Self::FleetFormatOutsideWritableRange { .. } => "FleetFormatOutsideWritableRange",
             Self::SessionStateVersionNewerThanRuntime { .. } => {

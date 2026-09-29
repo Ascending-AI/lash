@@ -1,17 +1,17 @@
 use super::{ProcessObserverBy, ProcessRegistry};
 use crate::SessionId;
-use crate::store::{RuntimePersistence, StoreError};
+use crate::store::{RuntimeStore, StoreError};
 use crate::{SessionObservedProcessOutcome, SessionObservedProcessReceipt, SessionObserverIntent};
 
 /// Source of the relation whose process-observer intents must be settled.
 pub enum SessionObserverIntentSource<'a> {
     /// Load a required durable relation, then persist it once at the end.
-    Persisted(&'a dyn RuntimePersistence),
+    Persisted(&'a dyn RuntimeStore),
     /// Settle a durable relation when metadata already exists.
     ///
     /// Opening a brand-new store has no relation to reconcile yet, so missing
     /// metadata is a no-op on that path.
-    PersistedIfPresent(&'a dyn RuntimePersistence),
+    PersistedIfPresent(&'a dyn RuntimeStore),
     /// Settle in-memory intents that have no persistence recovery path.
     Unstored(Vec<SessionObserverIntent>),
 }
@@ -32,7 +32,7 @@ pub async fn reconcile_session_process_observer_intents(
 ) -> Result<Vec<SessionObservedProcessReceipt>, StoreError> {
     let (pending_observer_intents, persisted) = match source {
         SessionObserverIntentSource::Persisted(store) => {
-            let mut meta = store.load_session_meta().await?.ok_or_else(|| {
+            let mut meta = store.load_session_meta(session_id).await?.ok_or_else(|| {
                 StoreError::Backend(format!(
                     "session `{session_id}` has no metadata for observer intent settlement"
                 ))
@@ -41,7 +41,7 @@ pub async fn reconcile_session_process_observer_intents(
             (pending, Some((store, meta)))
         }
         SessionObserverIntentSource::PersistedIfPresent(store) => {
-            let Some(mut meta) = store.load_session_meta().await? else {
+            let Some(mut meta) = store.load_session_meta(session_id).await? else {
                 return Ok(Vec::new());
             };
             let pending = std::mem::take(&mut meta.pending_observer_intents);

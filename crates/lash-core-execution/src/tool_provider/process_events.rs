@@ -5,8 +5,8 @@ use super::ToolProcessEventContext;
 #[allow(clippy::too_many_arguments)]
 pub async fn enqueue_wake_delivery(
     registry: std::sync::Arc<dyn crate::ProcessRegistry>,
-    _store: Option<std::sync::Arc<dyn crate::RuntimePersistence>>,
-    session_store_factory: Option<&std::sync::Arc<dyn crate::SessionStoreFactory>>,
+    _store: Option<std::sync::Arc<dyn crate::RuntimeStore>>,
+    session_store_factory: Option<&std::sync::Arc<dyn crate::DeploymentStore>>,
     wake_delivery: Option<crate::ProcessWakeDelivery>,
     trace_host: Option<&dyn crate::plugin::SessionGraphService>,
     queued_work: std::sync::Arc<dyn crate::SessionWorkEngine>,
@@ -36,14 +36,8 @@ pub async fn enqueue_wake_delivery(
     }
     if let Some(host) = trace_host {
         let target_session_id = wake_delivery.target_session_id.clone();
-        let request = crate::SessionStoreCreateRequest {
-            owning_process_id: None,
-            pending_observer_intents: Vec::new(),
-            session_id: target_session_id.clone(),
-            relation: crate::SessionRelation::default(),
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        };
-        if let Ok(Some(store)) = factory.open_existing_store(&request).await {
+        if let Ok(true) = crate::session_is_live(factory.as_ref(), &target_session_id).await {
+            let store = factory;
             let source_key =
                 crate::process_wake_source_key(&wake_delivery.process_id, wake_delivery.sequence);
             if let Ok(batches) = store.list_queued_work(&target_session_id).await

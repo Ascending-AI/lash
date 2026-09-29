@@ -915,10 +915,15 @@ fn append_leaf_is_derived_from_the_terminal_appended_node() {
 }
 
 #[test]
-// Architecture lint: lexical drift guard over the decorator's operation list,
-// not a behavior proof.
+// Architecture lint: lexical drift guard between the segment traits and the
+// store's operation list, not a behavior proof. It also pins ADR 0112 §1's
+// rule that no segment method has a default that answers for the backend.
 fn decorator_surface_covers_every_component_trait_method() {
-    fn declared_methods(source: &str, trait_name: &str) -> std::collections::BTreeSet<String> {
+    /// Each method a trait declares, and whether it has a default body.
+    fn declared_methods(
+        source: &str,
+        trait_name: &str,
+    ) -> std::collections::BTreeMap<String, bool> {
         let start = source
             .find(&format!("pub trait {trait_name}"))
             .unwrap_or_else(|| panic!("`pub trait {trait_name}` is present in the scanned source"));
@@ -926,77 +931,121 @@ fn decorator_surface_covers_every_component_trait_method() {
         let end = body
             .find("\n}\n")
             .unwrap_or_else(|| panic!("the `{trait_name}` body closes at column zero"));
-        body[..end]
-            .lines()
-            .filter_map(|line| {
-                let rest = line.strip_prefix("    ")?;
-                if rest.starts_with(' ') {
-                    return None;
-                }
-                let rest = rest.strip_prefix("async ").unwrap_or(rest);
-                let rest = rest.strip_prefix("fn ")?;
-                Some(rest.split('(').next()?.to_string())
-            })
-            .collect()
+        let lines: Vec<&str> = body[..end].lines().collect();
+        let mut methods = std::collections::BTreeMap::new();
+        for (index, line) in lines.iter().enumerate() {
+            let Some(rest) = line.strip_prefix("    ") else {
+                continue;
+            };
+            if rest.starts_with(' ') {
+                continue;
+            }
+            let rest = rest.strip_prefix("async ").unwrap_or(rest);
+            let Some(rest) = rest.strip_prefix("fn ") else {
+                continue;
+            };
+            let name = rest
+                .split(['(', '<'])
+                .next()
+                .unwrap_or_default()
+                .to_string();
+            let has_default = lines[index..]
+                .iter()
+                .map(|line| line.trim_end())
+                .find(|line| line.ends_with(';') || line.ends_with('{'))
+                .is_some_and(|line| line.ends_with('{'));
+            methods.insert(name, has_default);
+        }
+        methods
     }
 
-    fn forwarded_operations(decorator_source: &str) -> std::collections::BTreeSet<String> {
-        let start = decorator_source
-            .find("$emit! {")
-            .expect("the operation list opens the `persistence_operations!` expansion");
-        let end = decorator_source
-            .find("macro_rules! emit_decorator_trait")
-            .expect("the operation list ends before the first emitter");
-        decorator_source[start..end]
-            .lines()
-            .filter_map(|line| {
-                let rest = line.strip_prefix("                ")?;
-                if rest.starts_with(' ') {
-                    return None;
-                }
-                let rest = rest.strip_prefix("sync ").unwrap_or(rest);
-                let rest = rest.strip_prefix("fn ")?;
-                Some(rest.split('(').next()?.to_string())
-            })
-            .collect()
-    }
+    // Provided methods a backend overrides with stronger semantics, so a
+    // decorator forwards them rather than composing them over its own
+    // primitive: fence revalidation inside the backend's read, and a
+    // backend's own single-statement probes.
+    const FORWARDED_PROVIDED: &[&str] = &[
+        "admit_session_state",
+        "enqueue_queued_work",
+        "has_live_ref_for_id",
+    ];
+    // ADR 0112 §1 keeps `AttachmentManifest` verbatim, default included: a
+    // backend with no aged intents to forget answers the no-op.
+    const UNCHANGED_SEGMENT_DEFAULTS: &[&str] = &["forget_aged_uncommitted_intents"];
 
     let store_mod = include_str!("mod.rs");
-    let attachment_manifest = include_str!("attachment_manifest.rs");
-    let decorator = include_str!("runtime_persistence_decorator.rs");
-    let drive_fence = include_str!("drive_fence.rs");
-    let root = include_str!("root.rs");
-
-    let mut declared = declared_methods(attachment_manifest, "AttachmentManifest");
-    for trait_name in ["SessionCommitStore", "IngressStore", "StoreMaintenance"] {
+    let mut declared =
+        declared_methods(include_str!("attachment_manifest.rs"), "AttachmentManifest");
+    declared.extend(declared_methods(
+        include_str!("catalog.rs"),
+        "SessionCatalogStore",
+    ));
+    declared.extend(declared_methods(
+        include_str!("history.rs"),
+        "SessionHistoryStore",
+    ));
+    for trait_name in [
+        "SessionCommitStore",
+        "TurnInputStore",
+        "QueuedWorkStore",
+        "StoreMaintenance",
+    ] {
         declared.extend(declared_methods(store_mod, trait_name));
     }
-    declared.extend(declared_methods(drive_fence, "DriveEpochStore"));
-    declared.extend(declared_methods(root, "RootStore"));
+    declared.extend(declared_methods(
+        include_str!("drive_fence.rs"),
+        "DriveEpochStore",
+    ));
+    declared.extend(declared_methods(include_str!("root.rs"), "RootStore"));
     assert!(
-        declared.contains("commit_runtime_state") && declared.contains("vacuum"),
-        "the component-trait scan must cover every segment: {declared:?}"
+        declared.contains_key("commit_runtime_state")
+            && declared.contains_key("vacuum")
+            && declared.contains_key("load_session_window")
+            && declared.contains_key("admit_session"),
+        "the segment-trait scan must cover every segment: {declared:?}"
     );
 
-    let mut forwarded = forwarded_operations(decorator);
-    for convenience in super::runtime_persistence_decorator::SELF_ROUTED_CONVENIENCES {
+    let listed: std::collections::BTreeMap<&str, bool> =
+        super::runtime_store_decorator::RUNTIME_STORE_OPERATIONS
+            .iter()
+            .map(|operation| (operation.name, operation.provided))
+            .collect();
+    for convenience in super::runtime_store_decorator::self_routed_conveniences() {
         assert!(
-            declared.contains(*convenience) && !forwarded.contains(*convenience),
-            "a self-routed convenience is declared by a component trait and never forwarded: \
-             {convenience}"
+            declared.get(convenience) == Some(&true),
+            "a self-routed convenience is a provided method of its segment: {convenience}"
         );
-        forwarded.insert((*convenience).to_string());
     }
-    let missing: Vec<_> = declared.difference(&forwarded).cloned().collect();
-    let extra: Vec<_> = forwarded.difference(&declared).cloned().collect();
-
+    let missing: Vec<_> = declared
+        .keys()
+        .filter(|name| !listed.contains_key(name.as_str()))
+        .collect();
+    let extra: Vec<_> = listed
+        .keys()
+        .filter(|name| !declared.contains_key(**name))
+        .collect();
     assert!(
         missing.is_empty(),
-        "component-trait methods a decorator would silently resolve to the trait's own default \
-         instead of forwarding to `inner()`; add them to `persistence_operations!`: {missing:?}"
+        "segment methods a decorator would silently resolve to the trait's own default instead \
+         of forwarding to `inner()`; add them to `runtime_store_operations!`: {missing:?}"
     );
     assert!(
         extra.is_empty(),
-        "`persistence_operations!` forwards operations no component trait declares: {extra:?}"
+        "`runtime_store_operations!` lists operations no segment declares: {extra:?}"
+    );
+
+    let defaulted: Vec<_> = declared
+        .iter()
+        .filter(|(name, has_default)| {
+            **has_default
+                && listed.get(name.as_str()) != Some(&true)
+                && !FORWARDED_PROVIDED.contains(&name.as_str())
+                && !UNCHANGED_SEGMENT_DEFAULTS.contains(&name.as_str())
+        })
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        defaulted.is_empty(),
+        "segment methods with a default that is neither a listed composition nor a forwarded \
+         provided method; make them required (ADR 0112 §1): {defaulted:?}"
     );
 }

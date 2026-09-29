@@ -20,11 +20,21 @@ pub fn durable_turn_address(
     crate::TurnAddress::new(session_id, turn_id)
 }
 
-pub async fn bind_conformance_session(store: &Arc<dyn RuntimePersistence>, session_id: &SessionId) {
+/// Admit `session_id` as a root session of the conformance catalog.
+pub async fn admit_conformance_session(store: &Arc<dyn RuntimeStore>, session_id: &SessionId) {
     store
-        .admit_and_bind_session(&crate::SessionBinding::root(session_id))
+        .admit_session(&root_session_request(session_id))
         .await
-        .expect("bind conformance store to its explicit session");
+        .expect("admit the conformance session");
+}
+
+/// A root admission request for `session_id`, under the conformance model.
+pub fn root_session_request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
+    session_store_request(
+        session_id,
+        "conformance-model",
+        crate::SessionRelation::Root,
+    )
 }
 
 pub fn append_conformance_event_node(
@@ -54,7 +64,7 @@ pub fn append_conformance_event_node(
 }
 
 pub async fn commit_conformance_state(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     state: &mut crate::RuntimeSessionState,
 ) -> Result<(), crate::StoreError> {
     let operation = crate::OperationId::turn(
@@ -98,7 +108,7 @@ pub fn session_store_request(
 }
 
 pub async fn commit_runtime_state_for_test(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     commit: RuntimeCommit,
     _owner_id: &str,
 ) -> Result<crate::store::RuntimeCommitReceipt, StoreError> {
@@ -106,7 +116,7 @@ pub async fn commit_runtime_state_for_test(
 }
 
 pub async fn seal_drive_fence_for_test(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     owner_id: &str,
 ) -> crate::store::DriveFence {
@@ -115,7 +125,7 @@ pub async fn seal_drive_fence_for_test(
         Ok(stored) => stored,
         Err(crate::StoreError::DriveEpochUnavailable { .. }) => {
             store
-                .admit_and_bind_session(&crate::SessionBinding::root(session_id))
+                .admit_session(&root_session_request(session_id))
                 .await
                 .expect("admit drive-fence test session");
             store
@@ -161,7 +171,7 @@ impl DriveSealTestOutcome {
 
 /// Test support for admission laws that need an independent sealed drive epoch.
 #[async_trait::async_trait]
-pub trait RuntimePersistenceTestDriveExt: crate::RuntimePersistence {
+pub trait RuntimeStoreTestDriveExt: crate::RuntimeStore {
     async fn seal_drive_epoch_for_test(
         &self,
         session_id: &SessionId,
@@ -172,7 +182,7 @@ pub trait RuntimePersistenceTestDriveExt: crate::RuntimePersistence {
         let stored = match self.drive_epoch(session_id).await {
             Ok(stored) => stored,
             Err(crate::StoreError::DriveEpochUnavailable { .. }) => {
-                self.admit_and_bind_session(&crate::SessionBinding::root(session_id))
+                self.admit_session(&root_session_request(session_id))
                     .await?;
                 self.drive_epoch(session_id).await?
             }
@@ -227,7 +237,7 @@ pub trait RuntimePersistenceTestDriveExt: crate::RuntimePersistence {
     }
 }
 
-impl<T: crate::RuntimePersistence + ?Sized> RuntimePersistenceTestDriveExt for T {}
+impl<T: crate::RuntimeStore + ?Sized> RuntimeStoreTestDriveExt for T {}
 
 /// The admission request conformance laws present for `root` headed by
 /// `head` under `fence`: generous bounds, an empty base, and a test build
@@ -258,7 +268,7 @@ pub fn admit_root_request_for_test(
 /// Admit `root`'s turn-lane run headed by `head` under `fence`
 /// ([`RootStore::admit_root`](crate::store::RootStore::admit_root)).
 pub async fn admit_root_for_test(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &crate::store::DriveFence,
     root: &crate::TurnId,
     head: crate::store::AdmittedHead,
@@ -272,7 +282,7 @@ pub async fn admit_root_for_test(
 /// by `step` ([`RootStore::admit_at_checkpoint`](crate::store::RootStore::admit_at_checkpoint)).
 #[allow(clippy::too_many_arguments)]
 pub async fn admit_at_checkpoint_for_test(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &crate::store::DriveFence,
     root: &crate::TurnId,
     turn_id: &crate::TurnId,

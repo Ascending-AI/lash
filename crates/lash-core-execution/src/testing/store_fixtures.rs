@@ -1,11 +1,11 @@
 use crate::*;
 
 pub use lash_core_store::testing::store_fixtures::{
-    DriveSealTestOutcome, RuntimePersistenceTestDriveExt, admit_at_checkpoint_for_test,
-    admit_root_for_test, admit_root_request_for_test, append_conformance_event_node,
-    bind_conformance_session, commit_conformance_state, commit_runtime_state_for_test,
-    durable_admission, durable_turn_address, durable_turn_scope, seal_drive_fence_for_test,
-    session_store_request, settling_commit_for_test,
+    DriveSealTestOutcome, RuntimeStoreTestDriveExt, admit_at_checkpoint_for_test,
+    admit_conformance_session, admit_root_for_test, admit_root_request_for_test,
+    append_conformance_event_node, commit_conformance_state, commit_runtime_state_for_test,
+    durable_admission, durable_turn_address, durable_turn_scope, root_session_request,
+    seal_drive_fence_for_test, session_store_request, settling_commit_for_test,
 };
 
 /// The store-backed admitted scope for a registered process row: the
@@ -29,7 +29,7 @@ pub async fn recorded_process_admission(
 /// `authority`: the backend's effect host, which owns the turn-control
 /// promises.
 pub async fn authorize_completion_deferral_for_test(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     authority: &crate::TurnCancellationAuthority,
     fence: &crate::store::DriveFence,
     mut commit: RuntimeCommit,

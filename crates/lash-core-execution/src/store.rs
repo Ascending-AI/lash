@@ -5,6 +5,6 @@
 pub use lash_core_store::store::*;
 
 #[cfg(any(test, feature = "testing"))]
-mod conformance_factory;
+mod conformance_deployment;
 #[cfg(any(test, feature = "testing"))]
-pub use conformance_factory::ConformanceSessionStoreFactory;
+pub use conformance_deployment::ConformanceDeployment;

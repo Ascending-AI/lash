@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::process::{ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry};
 use super::{
-    EffectHost, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
+    DeploymentStore, EffectHost, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring,
     SessionWorkEngine, TerminationPolicy,
 };
 
@@ -248,9 +248,9 @@ impl RuntimeHostConfig {
         Self { backend, ..config }
     }
 
-    /// The backend's session-store factory: the catalog every session this
+    /// The backend's deployment store: the catalog every session this
     /// runtime creates, reopens or deletes goes through.
-    pub fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+    pub fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         self.backend.session_store_factory()
     }
 

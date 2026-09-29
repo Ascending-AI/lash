@@ -2,6 +2,11 @@
 //!
 //! Split from `session_graph` so the integrity rules read as one unit: identity uniqueness,
 //! ancestry acyclicity from a resolvable leaf, and whole-graph parent topology.
+//!
+//! An anchored graph (a store-read window, ADR 0112 §5) admits exactly one
+//! parent edge that leaves the graph: its base's edge to the anchor's
+//! external parent. Every other dangling parent is corrupt, as it is for a
+//! graph with no anchor.
 
 use std::collections::{HashMap, HashSet};
 
@@ -72,6 +77,9 @@ pub(crate) fn validate_graph_parent_topology(
     for node in &graph.nodes {
         if let Some(parent_node_id) = node.parent_node_id.as_ref()
             && !by_id.contains_key(parent_node_id)
+            && !graph
+                .anchor()
+                .is_some_and(|anchor| anchor.admits_external_parent(node))
         {
             return Err(crate::StoreError::InvalidGraphParent {
                 node_id: node.node_id.clone(),

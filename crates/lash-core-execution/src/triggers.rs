@@ -1804,7 +1804,7 @@ impl TriggerDeliveryReservation {
 
 /// Store and durable-substrate implementors provide this durable home for
 /// trigger subscriptions, occurrences, and delivery reservations, separate
-/// from [`RuntimePersistence`](crate::RuntimePersistence). Store tables and
+/// from [`RuntimeStore`](crate::RuntimeStore). Store tables and
 /// record JSON are private to Lash; hosts use [`TriggerCommand`] and the Lash
 /// facade instead of reading or writing backend tables directly.
 #[async_trait::async_trait]

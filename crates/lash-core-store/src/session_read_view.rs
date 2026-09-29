@@ -62,22 +62,6 @@ impl SessionReadView {
         })))
     }
 
-    pub(crate) fn from_persisted_state_with_relation_and_failures(
-        state: &RuntimeSessionState,
-        relation: crate::SessionRelation,
-        turn_failure_settlements: Vec<crate::TurnFailureSettlement>,
-    ) -> Result<Self, crate::SessionGraphScopeError> {
-        let graph = state.session_graph.clone();
-        let read_model = state.read_model()?;
-        Ok(Self(Arc::new(SessionReadState {
-            meta: SessionReadMeta::from_persisted_ref(state).with_durable_relation(relation),
-            graph: SessionReadGraph::Owned(graph),
-            read_model,
-            chronological_projection: OnceLock::new(),
-            turn_failure_settlements: Arc::new(turn_failure_settlements),
-        })))
-    }
-
     pub fn from_runtime_state(
         state: &RuntimeSessionState,
         policy: SessionPolicy,
@@ -271,11 +255,6 @@ impl SessionReadMeta {
 
     fn with_policy(mut self, policy: SessionPolicy) -> Self {
         self.policy = policy;
-        self
-    }
-
-    fn with_durable_relation(mut self, relation: crate::SessionRelation) -> Self {
-        self.durable_relation = Some(relation);
         self
     }
 

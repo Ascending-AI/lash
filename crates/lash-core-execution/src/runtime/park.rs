@@ -3,7 +3,7 @@ use crate::StoreError;
 
 /// Record a root park through the store's terminal-aware transaction.
 pub async fn record_root_park(
-    store: &dyn crate::store::RuntimePersistence,
+    store: &dyn crate::store::RuntimeStore,
     write: &crate::store::TurnParkWrite,
 ) -> Result<crate::store::TurnPark, StoreError> {
     store.record_turn_park(write).await
@@ -32,13 +32,13 @@ pub async fn record_root_park(
 /// Processes park through their registry, which the engine's own process
 /// reconcile writes; this writer refuses a process target.
 pub struct StoreParkRecovery<'a> {
-    sessions: &'a dyn crate::SessionStoreFactory,
+    sessions: &'a dyn crate::DeploymentStore,
     clock: &'a dyn crate::Clock,
 }
 
 impl<'a> StoreParkRecovery<'a> {
     /// The writer over `sessions`, stamping parks with `clock`.
-    pub fn new(sessions: &'a dyn crate::SessionStoreFactory, clock: &'a dyn crate::Clock) -> Self {
+    pub fn new(sessions: &'a dyn crate::DeploymentStore, clock: &'a dyn crate::Clock) -> Self {
         Self { sessions, clock }
     }
 }
@@ -64,7 +64,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 });
             }
         };
-        let Some(store) = self.sessions.open_existing_store_by_id(session).await? else {
+        if !super::session_is_live(self.sessions, session).await? {
             return Ok(
                 if self.sessions.root_terminal(session, root).await?.is_some() {
                     EngineParkRecorded::TargetTerminal
@@ -72,8 +72,9 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                     EngineParkRecorded::TargetGone
                 },
             );
-        };
-        let root = match store.load_pending_follow_on().await? {
+        }
+        let store = self.sessions;
+        let root = match store.load_pending_follow_on(session).await? {
             Some(owed) if owed.names_recovery(root) => owed.root_turn_id(),
             _ => root.clone(),
         };
@@ -164,9 +165,10 @@ impl StoreParkRecovery<'_> {
         execution: &dyn crate::engine::StalledExecution,
     ) -> Result<crate::engine::EngineParkRecorded, StoreError> {
         use crate::engine::EngineParkRecorded;
-        let Some(store) = self.sessions.open_existing_store_by_id(session).await? else {
+        if !super::session_is_live(self.sessions, session).await? {
             return Ok(EngineParkRecorded::TargetGone);
-        };
+        }
+        let store = self.sessions;
         let still_stopped = || async {
             execution
                 .still_stopped()
@@ -202,7 +204,7 @@ impl StoreParkRecovery<'_> {
                 });
             }
             None => {
-                let Some(root) = next_admission_root(store.as_ref(), session).await? else {
+                let Some(root) = next_admission_root(store, session).await? else {
                     return Ok(EngineParkRecorded::NothingToPark);
                 };
                 // A listing read before an operator resumed the drive is
@@ -252,10 +254,10 @@ impl StoreParkRecovery<'_> {
 /// drive's own admission order (ADR 0101 §4, §5), so a park written here is
 /// cleared by the commit of the root the resumed drive runs.
 async fn next_admission_root(
-    store: &dyn crate::store::RuntimePersistence,
+    store: &dyn crate::store::RuntimeStore,
     session: &crate::SessionId,
 ) -> Result<Option<crate::TurnId>, StoreError> {
-    if let Some(owed) = store.load_pending_follow_on().await? {
+    if let Some(owed) = store.load_pending_follow_on(session).await? {
         return Ok(Some(owed.recovery_root()));
     }
     if let Some(unfinished) = store.unfinished_root(session).await? {

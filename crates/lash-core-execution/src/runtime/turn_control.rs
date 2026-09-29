@@ -230,9 +230,9 @@ pub struct TurnWorkDriver {
 enum TurnWorkStore {
     Session {
         session_id: String,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
     },
-    Catalog(Arc<dyn crate::SessionStoreFactory>),
+    Catalog(Arc<dyn crate::DeploymentStore>),
 }
 
 impl TurnWorkDriver {
@@ -244,7 +244,7 @@ impl TurnWorkDriver {
     pub fn for_session(
         effect_host: Arc<dyn EffectHost>,
         session_id: impl Into<String>,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
     ) -> Self {
         Self {
             effect_host,
@@ -261,7 +261,7 @@ impl TurnWorkDriver {
     /// remote/admin form; an already-opened session uses [`Self::for_session`].
     pub fn for_catalog(
         effect_host: Arc<dyn EffectHost>,
-        store_factory: Arc<dyn crate::SessionStoreFactory>,
+        store_factory: Arc<dyn crate::DeploymentStore>,
     ) -> Self {
         Self {
             effect_host,
@@ -507,25 +507,27 @@ impl TurnWorkDriver {
     async fn store_for(
         &self,
         address: &TurnAddress,
-    ) -> Result<Arc<dyn crate::RuntimePersistence>, RuntimeError> {
+    ) -> Result<Arc<dyn crate::RuntimeStore>, RuntimeError> {
         self.validate_address(address)?;
         match &self.store {
             TurnWorkStore::Session { session_id, store } => {
                 debug_assert_eq!(session_id, &address.session_id);
                 Ok(Arc::clone(store))
             }
-            TurnWorkStore::Catalog(factory) => factory
-                .open_existing_store_by_id(&address.session_id)
-                .await
-                .map_err(|err| {
-                    RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
-                })?
-                .ok_or_else(|| {
-                    RuntimeError::new(
+            TurnWorkStore::Catalog(store) => {
+                let live = crate::session_is_live(store.as_ref(), &address.session_id)
+                    .await
+                    .map_err(|err| {
+                        RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
+                    })?;
+                if !live {
+                    return Err(RuntimeError::new(
                         crate::RuntimeErrorCode::InvalidTurnCancelRequest,
                         format!("session `{}` does not exist", address.session_id),
-                    )
-                }),
+                    ));
+                }
+                Ok(Arc::clone(store) as Arc<dyn crate::RuntimeStore>)
+            }
         }
     }
 

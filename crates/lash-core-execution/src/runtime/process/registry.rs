@@ -745,7 +745,7 @@ struct TriggerDeliveryReconciliationPlan {
 async fn prepare_pruned_trigger_delivery_reconciliation(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
-    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
+    session_store_factory: Option<&dyn crate::DeploymentStore>,
 ) -> Result<TriggerDeliveryReconciliationPlan, PluginError> {
     let surveyed = match trigger_store.list_delivery_retention_candidates().await {
         Ok(surveyed) => surveyed,
@@ -800,13 +800,14 @@ async fn prepare_pruned_trigger_delivery_reconciliation(
         let owner_ids = trigger_store.list_session_owner_ids_for_retention().await?;
         for session_id in owner_ids {
             if session_store_factory
-                .session_was_deleted(&session_id)
+                .lookup_session(&session_id)
                 .await
                 .map_err(|error| {
                     PluginError::Session(format!(
                         "failed to read deleted-session frontier for `{session_id}`: {error}"
                     ))
                 })?
+                == crate::store::SessionLookup::Deleted
             {
                 deleted_session_ids.push(session_id);
             }
@@ -903,7 +904,7 @@ async fn apply_pruned_trigger_delivery_reconciliation(
 async fn reconcile_pruned_trigger_deliveries_inner<F, Fut>(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
-    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
+    session_store_factory: Option<&dyn crate::DeploymentStore>,
     after_classification: F,
 ) -> Result<crate::TriggerRetentionReconciliationReport, PluginError>
 where
@@ -924,7 +925,7 @@ where
 pub async fn reconcile_pruned_trigger_deliveries_interleaved<F, Fut>(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
-    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
+    session_store_factory: Option<&dyn crate::DeploymentStore>,
     after_classification: F,
 ) -> Result<crate::TriggerRetentionReconciliationReport, PluginError>
 where
@@ -952,7 +953,7 @@ where
 pub async fn reconcile_pruned_trigger_deliveries(
     registry: &dyn ProcessRegistry,
     trigger_store: &dyn crate::TriggerStore,
-    session_store_factory: Option<&dyn crate::SessionStoreFactory>,
+    session_store_factory: Option<&dyn crate::DeploymentStore>,
 ) -> Result<crate::TriggerRetentionReconciliationReport, PluginError> {
     reconcile_pruned_trigger_deliveries_inner(
         registry,
