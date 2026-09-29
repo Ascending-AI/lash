@@ -43,10 +43,6 @@ export type ProcessType =
  */
 export type UnionMembers = [TypeExpr, TypeExpr, ...TypeExpr[]];
 /**
- * Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
- */
-export type WorkflowDiagnosticClass = 'definite' | 'advisory';
-/**
  * Closed host-facing vocabulary for linker diagnostics.
  */
 export type WorkflowDiagnosticKind =
@@ -138,7 +134,6 @@ export interface ProcessParamWire {
   ty: TypeExpr;
 }
 export interface WorkflowTypeDiagnostic {
-  class: WorkflowDiagnosticClass;
   kind: WorkflowDiagnosticKind;
   message: string;
   node_id: string;

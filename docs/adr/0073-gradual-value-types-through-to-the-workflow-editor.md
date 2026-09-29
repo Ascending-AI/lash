@@ -36,12 +36,12 @@ The real gaps are three unwired seams plus known inference holes, and one policy
 Add value types **as a derived, read-only projection facet** the editor consumes, keeping the lens
 laws intact and the language honestly gradual. Five ratified decisions:
 
-### D1 — Guarantee: save-time rejection on *definite* errors (not staged)
-The editor's end-state guarantee is **save-time rejection of workflows containing a _definite_ type
-error**, with typed pickers/completion and advisory (non-blocking) diagnostics always beneath it.
-"Definite-only" is what keeps rejection from false-positiving on unknowns. Typed LLM/subagent
-outputs are in scope (see D3). Runtime schema validation (`schema_validation.rs:39-40`) remains the
-exact safety net; a definite static mismatch blocks save, everything unknown is allowed.
+### D1 — Type diagnostics and draft policy
+Lash reports type errors; whether a workflow with errors saves as a draft is the editor's policy.
+The example editor saves drafts with type errors and shows those errors inline. Typed
+pickers/completion and typed LLM/subagent outputs remain in scope (see D3). Unknown values pass
+silently under D2. Runtime schema validation (`schema_validation.rs:39-40`) remains the exact
+execution safety net.
 
 ### D2 — `Any` is consistent (gradual), not strict-`unknown`
 Flip `is_resolved_type_assignable` (`trigger.rs:1022-1037`) so `Any` is **consistent with any
@@ -81,14 +81,14 @@ constructs** are added.
 - **Close every hole:** branch-join → proper `Union` (`type_helpers.rs:42-46`); `for`-element from
   `list<T>` (`lower_expr.rs:210-218`); `start`/`await` output type attached (`lower_expr.rs:287`,
   `pass_validation.rs:557`); `state.x = …` updates the field type; **missing field on a _known_
-  `Object` → definite error** (not `Any`); binary-operator operand checking.
+  `Object` → type error** (not `Any`); binary-operator operand checking.
 - **Bounded loop precision:** one forward pass + widen (`Union`/`Any`), **no fixpoint iteration**.
 
 ### D5 — Type facets in the graph contract
 The lens projection gains a **full facet set, inline per-node, derived-read-only, schema-versioned**:
 - typed `availableVars` → `[{name, type}]`;
 - **expected type per argument slot** (from the bidirectional pass);
-- **per-node diagnostics** (the definite-error list driving save-time rejection + inline underlines).
+- **per-node type errors** (for inline underlines and other editor feedback).
 Facets are recomputed on every GET/reproject, **never PUT back**, and **excluded from
 canonicalization/diffing**, so GetPut/PutGet and the canonical-source goldens are unaffected. Bump a
 facet schema version independently of the graph schema version (`workflow_graph.rs:34-35`).
@@ -121,7 +121,7 @@ facet schema version independently of the graph schema version (`workflow_graph.
 5. **Facet projection (D4-expose + D5)** — run the checker with host context in the lens; emit the
    derived facet set; schema-version; exclude from canonicalization.
 6. **Editor consumes facets** — type-filtered pickers, expected-slot hints, diagnostics/underlines,
-   save-time rejection.
+   and host-owned draft policy.
 
 ## References
 

@@ -14,8 +14,7 @@ import {
   expectedArgFieldType,
   nodeDiagnostics,
   mapDiagnosticsToNodes,
-  blockingDiagnostics,
-  saveBlocked,
+  documentDiagnostics,
   clearFacetDiagnostics,
   diagnosticFieldHint,
 } from './facets.js';
@@ -266,7 +265,7 @@ describe('expectedSlotType / expectedArgFieldType', () => {
   });
 });
 
-describe('diagnostics — mapping, blocking, save predicate', () => {
+describe('diagnostics — mapping and stale facet clearing', () => {
   const badIterable = {
     facetSchemaVersion: 1,
     nodes: [
@@ -309,23 +308,16 @@ describe('diagnostics — mapping, blocking, save predicate', () => {
     expect(byNode.get('container:for1')[0].kind).toBe('incompatible_iteration_target');
   });
 
-  it('collects blocking diagnostics only when facets are present', () => {
-    expect(blockingDiagnostics(badIterable)).toEqual([
+  it('collects type errors only when facets are present', () => {
+    expect(documentDiagnostics(badIterable)).toEqual([
       {
         nodeId: 'container:for1',
         kind: 'incompatible_iteration_target',
         message: 'cannot iterate over str; expected a list',
       },
     ]);
-    expect(blockingDiagnostics(clean)).toEqual([]);
-    // Older backend: diagnostics facet absent → never block (consistent-Any).
-    expect(blockingDiagnostics(legacy)).toEqual([]);
-  });
-
-  it('blocks Save iff a definite-error diagnostic exists', () => {
-    expect(saveBlocked(badIterable)).toBe(true);
-    expect(saveBlocked(clean)).toBe(false);
-    expect(saveBlocked(legacy)).toBe(false);
+    expect(documentDiagnostics(clean)).toEqual([]);
+    expect(documentDiagnostics(legacy)).toEqual([]);
   });
 
   it('hints the offending field for well-known diagnostic kinds', () => {
@@ -333,12 +325,11 @@ describe('diagnostics — mapping, blocking, save predicate', () => {
     expect(diagnosticFieldHint('unknown_resource_operation')).toBeNull();
   });
 
-  it('clears stale diagnostics on edit so a fixed graph stops blocking', () => {
+  it('clears stale diagnostics on edit', () => {
     const doc = structuredClone(badIterable);
-    expect(saveBlocked(doc)).toBe(true);
+    expect(documentDiagnostics(doc)).toHaveLength(1);
     expect(clearFacetDiagnostics(doc)).toBe(true);
-    expect(saveBlocked(doc)).toBe(false);
-    expect(blockingDiagnostics(doc)).toEqual([]);
+    expect(documentDiagnostics(doc)).toEqual([]);
     // Idempotent: nothing left to clear.
     expect(clearFacetDiagnostics(doc)).toBe(false);
   });

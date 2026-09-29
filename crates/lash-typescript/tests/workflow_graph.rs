@@ -19,12 +19,11 @@ use lash_typescript::workflow_graph::{
 use lashlang::{
     LashlangAbilities, LashlangHostCatalog, LashlangHostEnvironment, TypeExpr, TypeField,
     VariableVersion, WORKFLOW_GRAPH_SCHEMA_VERSION, WORKFLOW_TYPE_FACET_SCHEMA_VERSION,
-    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticClass,
-    WorkflowDiagnosticKind, WorkflowEdge, WorkflowEdgeKind, WorkflowExpectedArgument,
-    WorkflowGraph, WorkflowGraphDecodeError, WorkflowGraphReconcileSide, WorkflowNode,
-    WorkflowNodeId, WorkflowNodeKind, WorkflowNodeNameSource, WorkflowNodeTypeFacets,
-    WorkflowSlotPath, WorkflowSlotPathSegment, WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile,
-    workflow_call_to_ir, workflow_slot_value,
+    WorkflowArgument, WorkflowContainer, WorkflowDeclaration, WorkflowDiagnosticKind, WorkflowEdge,
+    WorkflowEdgeKind, WorkflowExpectedArgument, WorkflowGraph, WorkflowGraphDecodeError,
+    WorkflowGraphReconcileSide, WorkflowNode, WorkflowNodeId, WorkflowNodeKind,
+    WorkflowNodeNameSource, WorkflowNodeTypeFacets, WorkflowSlotPath, WorkflowSlotPathSegment,
+    WorkflowSubgraph, WorkflowTypeDiagnostic, reconcile, workflow_call_to_ir, workflow_slot_value,
 };
 
 /// The language-neutral IR projection, with TypeScript opaque-statement text.
@@ -323,7 +322,6 @@ fn facet_reader_refuses_unknown_variant() {
     value["main"]["nodes"][0]["type_facets"]["diagnostics"] = serde_json::json!([{
         "node_id": value["main"]["nodes"][0]["id"].clone(),
         "kind": "future_diagnostic",
-        "class": "definite",
         "slot": null,
         "message": "fixture",
         "span": null
@@ -1900,12 +1898,12 @@ finish(second);
 }
 
 #[test]
-fn type_diagnostic_carries_slot_kind_and_class() {
+fn type_diagnostic_carries_slot_and_kind() {
     let graph = workflow_graph_from_source_with_facets(
         "await tools.compose({ query: \"bad\", items: [\"a\"] });\n",
         Some(&slot_path_environment()),
     )
-    .expect("a definite mismatch remains projectable");
+    .expect("a type mismatch remains projectable");
     let diagnostic = graph.main.nodes[0]
         .type_facets
         .as_ref()
@@ -1917,7 +1915,6 @@ fn type_diagnostic_carries_slot_kind_and_class() {
         diagnostic.kind,
         WorkflowDiagnosticKind::IncompatibleExpectedLiteral
     );
-    assert_eq!(diagnostic.class, WorkflowDiagnosticClass::Definite);
     assert_eq!(
         diagnostic.slot.as_ref().map(ToString::to_string).as_deref(),
         Some("arg[0][\"query\"]")
@@ -2048,7 +2045,6 @@ fn type_facets_are_ignored_by_put_and_canonicalization() {
         .push(WorkflowTypeDiagnostic {
             node_id: terminal_id,
             kind: WorkflowDiagnosticKind::UnknownName,
-            class: WorkflowDiagnosticClass::Definite,
             slot: None,
             message: "must not become source".to_string(),
             span: None,

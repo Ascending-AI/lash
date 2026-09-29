@@ -465,10 +465,6 @@ export type UpdateOperator = 'add' | 'subtract' | 'multiply' | 'divide' | 'remai
 export type WorkflowTerminalKind = 'finish' | 'fail';
 export type WorkflowNodeNameSource = 'label' | 'derived';
 /**
- * Whether a diagnostic blocks save under ADR 0073's gradual typing rule.
- */
-export type WorkflowDiagnosticClass = 'definite' | 'advisory';
-/**
  * Closed host-facing vocabulary for linker diagnostics.
  */
 export type WorkflowDiagnosticKind =
@@ -701,7 +697,6 @@ export interface WorkflowTypedVariable {
   [k: string]: unknown;
 }
 export interface WorkflowTypeDiagnostic {
-  class: WorkflowDiagnosticClass;
   kind: WorkflowDiagnosticKind;
   message: string;
   node_id: string;

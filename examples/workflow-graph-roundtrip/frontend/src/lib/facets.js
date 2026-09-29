@@ -17,7 +17,7 @@
 
 // True when the document carries the derived facet contract at all. Older
 // backends omit `facetSchemaVersion`; the whole editor experience degrades to
-// its pre-facet behaviour when this is false (no filtering, no blocking).
+// its pre-facet behaviour when this is false (no filtering or diagnostics).
 export function hasFacets(doc) {
   return doc != null && doc.facetSchemaVersion != null;
 }
@@ -228,9 +228,7 @@ export function expectedArgFieldType(node, fieldName) {
 
 // --- diagnostic facets -----------------------------------------------------
 
-// Facet diagnostics are DEFINITE type errors (the lens only emits them for a
-// concrete mismatch; gradual `any` never produces one), so any diagnostic is a
-// blocking condition. Unknowns stay silent and never block.
+// Facet diagnostics are type errors. Gradual `any` passes silently.
 export function nodeDiagnostics(node) {
   return node?.data?.diagnostics ?? [];
 }
@@ -250,10 +248,9 @@ export function mapDiagnosticsToNodes(doc) {
   return byNode;
 }
 
-// Every blocking diagnostic in the document as `[{ nodeId, kind, message }]`.
-// Empty when facets are absent (older backend) — an un-analyzed graph never
-// blocks Save.
-export function blockingDiagnostics(doc) {
+// Every type error in the document as `[{ nodeId, kind, message }]`.
+// Empty when facets are absent (older backend).
+export function documentDiagnostics(doc) {
   if (!hasFacets(doc)) return [];
   const out = [];
   for (const [nodeId, diags] of mapDiagnosticsToNodes(doc)) {
@@ -264,16 +261,9 @@ export function blockingDiagnostics(doc) {
   return out;
 }
 
-// Should Save be blocked? True only when the document carries facets AND at
-// least one node has a definite-error diagnostic.
-export function saveBlocked(doc) {
-  return blockingDiagnostics(doc).length > 0;
-}
-
 // A client-side edit invalidates the last host derivation, so its diagnostics become STALE —
 // and a stale error is worse than none (it points at text the user already changed).
-// We clear them on edit so the graph reads as "unknown" (which never blocks Save) until the
-// next Save re-derives accurate facets.
+// We clear them on edit until the next Save re-derives accurate facets.
 export function clearFacetDiagnostics(doc) {
   let cleared = false;
   for (const node of doc?.nodes ?? []) {

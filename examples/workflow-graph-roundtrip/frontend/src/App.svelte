@@ -37,7 +37,7 @@
   import { History } from './lib/history.svelte.js';
   import { groupOperations, operationMeta } from './lib/operations.js';
   import { NODE_KINDS } from './lib/nodeKinds.js';
-  import { blockingDiagnostics, clearFacetDiagnostics } from './lib/facets.js';
+  import { documentDiagnostics, clearFacetDiagnostics } from './lib/facets.js';
 
   const run = new RunController();
   setContext('run', run);
@@ -87,11 +87,9 @@
   const legend = Object.entries(NODE_KINDS);
   const mainGroups = $derived(groupOperations(ops.entries, { includePower: mode.power }));
 
-  // Definite type-error diagnostics on the current draft (host-derived facets).
-  // These block Save (item 5). They are cleared on the next edit — a client edit
-  // makes the last derivation stale, and a stale error is worse than none — so
-  // the block only bites on a KNOWN-broken graph the user has not yet touched.
-  const blockingDiags = $derived(draftDoc ? blockingDiagnostics(draftDoc) : []);
+  // Host-derived type errors on the current draft. Edits clear stale diagnostics;
+  // Save re-derives them and keeps the draft even when it still has errors.
+  const typeErrors = $derived(draftDoc ? documentDiagnostics(draftDoc) : []);
 
   // Handlers threaded into every flow node (see buildFlow).
   const handlers = {
@@ -301,13 +299,6 @@
 
   async function onSave() {
     if (!draftDoc) return;
-    // Only real (host-derived) diagnostics block; unknowns never do.
-    // The draft is kept so the user can fix the flagged node and try again.
-    if (blockingDiags.length) {
-      saveOk = null;
-      saveError = null;
-      return;
-    }
     saving = true;
     saveError = null;
     saveOk = null;
@@ -604,14 +595,11 @@
         </button>
         <button
           class="btn btn-save"
-          class:is-blocked={blockingDiags.length > 0}
           onclick={onSave}
-          disabled={saving || loading || !!loadError || blockingDiags.length > 0}
-          title={blockingDiags.length
-            ? `Save blocked — ${blockingDiags.length} type error${blockingDiags.length > 1 ? 's' : ''} to fix`
-            : 'Send the edited graph → graph→code → new version'}
+          disabled={saving || loading || !!loadError}
+          title="Save this draft as a new version"
         >
-          {saving ? 'saving…' : blockingDiags.length ? 'Save · blocked' : 'Save'}
+          {saving ? 'saving…' : 'Save'}
         </button>
         <div class="ctrl-minor">
           <button
@@ -635,16 +623,16 @@
         </div>
       </div>
 
-      {#if blockingDiags.length}
+      {#if typeErrors.length}
         <div class="banner banner-err">
           <div class="banner-title">
-            save blocked · {blockingDiags.length} type error{blockingDiags.length > 1 ? 's' : ''}
+            {typeErrors.length} type error{typeErrors.length > 1 ? 's' : ''}
           </div>
-          {#each blockingDiags as d (d.nodeId + d.kind + d.message)}
+          {#each typeErrors as d (d.nodeId + d.kind + d.message)}
             <div class="banner-msg">{d.message}</div>
             <div class="banner-detail">node {d.nodeId} · {d.kind}</div>
           {/each}
-          <div class="banner-foot">fix the flagged node(s), then Save</div>
+          <div class="banner-foot">you can save this draft and fix the errors later</div>
         </div>
       {/if}
       {#if saveError}
@@ -1075,11 +1063,6 @@
   }
   .btn-save:hover:not(:disabled) {
     box-shadow: 0 8px 22px -12px rgba(120, 150, 200, 0.6);
-  }
-  .btn-save.is-blocked {
-    border-color: color-mix(in srgb, var(--rose) 55%, var(--line-strong));
-    color: #ffb4c6;
-    opacity: 1;
   }
   .btn-ghost {
     flex: 1 1 40%;

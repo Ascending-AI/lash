@@ -94,7 +94,6 @@ export interface ChildGroup {
   [k: string]: unknown;
 }
 export interface TypeDiagnostic {
-  class: string;
   kind: string;
   message: string;
   nodeId: string;
