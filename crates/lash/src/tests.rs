@@ -183,8 +183,8 @@ pub(crate) async fn backend_with_catalog(
     DecoratedBackend::over(double_backend().await).session_store_factory(decorate)
 }
 
-/// Records every session admission the catalog serves, then admits it on
-/// the catalog it wraps.
+/// Admits on the catalog it wraps and records the request of every
+/// admission that created its session.
 struct RecordingAdmissions {
     inner: Arc<dyn lash_core::DeploymentStore>,
     requests: Arc<std::sync::Mutex<Vec<lash_core::SessionStoreCreateRequest>>>,
@@ -219,8 +219,13 @@ impl lash_core::store::RuntimeStoreDecorator for RecordingAdmissions {
         &self,
         request: &lash_core::SessionStoreCreateRequest,
     ) -> std::result::Result<lash_core::store::SessionAdmission, StoreError> {
-        self.requests.lock_recover().push(request.clone());
-        self.inner.admit_session(request).await
+        let admission = self.inner.admit_session(request).await?;
+        // Only the admission that creates the session records what it was
+        // created with; a rebinding admission leaves the row untouched.
+        if admission == lash_core::store::SessionAdmission::Created {
+            self.requests.lock_recover().push(request.clone());
+        }
+        Ok(admission)
     }
 }
 

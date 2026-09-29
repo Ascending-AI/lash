@@ -42,8 +42,13 @@ impl lash_core::store::RuntimeStoreDecorator for CountingSessionStoreFactory {
         &self,
         request: &lash_core::SessionStoreCreateRequest,
     ) -> std::result::Result<lash_core::store::SessionAdmission, lash_core::StoreError> {
-        self.creates.fetch_add(1, Ordering::SeqCst);
-        self.inner.admit_session(request).await
+        let admission = self.inner.admit_session(request).await?;
+        // Admission is idempotent: an open that finds the session answers
+        // `Rebound`, and only `Created` creates.
+        if admission == lash_core::store::SessionAdmission::Created {
+            self.creates.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(admission)
     }
 
     async fn lookup_session(

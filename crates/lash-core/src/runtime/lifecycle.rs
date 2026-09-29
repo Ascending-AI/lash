@@ -48,22 +48,6 @@ async fn bind_state_to_store(
             },
         });
     }
-    let bind_error = |source| SessionError::Store {
-        context: format!("failed to bind session `{}` to its store", state.session_id),
-        source,
-    };
-    // A view's session is normally admitted already, by whoever resolved the
-    // view; then binding is the lineage guard admission's rebind applies,
-    // with no second admission. A view nothing admitted is admitted here.
-    let meta = store.load_session_meta().await.map_err(bind_error)?;
-    if let Some(meta) = meta {
-        return crate::store_backend_support::guard_rebind_lineage(
-            &state.session_id,
-            &crate::SessionLineage::of(&meta.relation),
-            &relation,
-        )
-        .map_err(bind_error);
-    }
     let request = crate::SessionStoreCreateRequest {
         session_id: state.session_id.clone(),
         relation,
@@ -75,7 +59,10 @@ async fn bind_state_to_store(
         .store()
         .admit_session(&request)
         .await
-        .map_err(bind_error)?;
+        .map_err(|source| SessionError::Store {
+            context: format!("failed to bind session `{}` to its store", state.session_id),
+            source,
+        })?;
     store
         .load_session_meta()
         .await
