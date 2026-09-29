@@ -18,9 +18,6 @@ pub(super) struct GeneratedRuntimeWorld {
     /// The workload's seed: every engine of the world derives its own from
     /// it.
     seed: u64,
-    /// Whether the world's server doubles run their attempts concurrently
-    /// (the search lane) or one at a time (the serial lane).
-    concurrent: bool,
     /// The world's own engine, under the workload's seed: effect boundaries
     /// run in its handlers and triggers land in its store. No core runs on it.
     engine: crate::backend::SimEngine,
@@ -43,14 +40,13 @@ pub(super) struct GeneratedRuntimeWorld {
     /// boundary was delivered: the discovered boundary carries an `at` in the
     /// future, so delivery order never moved, but the `scheduler.pending_before`
     /// recorded for every delivery in between shifted by one. That is the
-    /// FIG-3053 flake: a CI shard running the whole crate in one process is
-    /// loaded enough to change the discovery pass, and the search-mode
-    /// determinism sample compared the two runs byte for byte.
+    /// FIG-3053 timing case: host load changes when a future completion
+    /// appears in the queue, even though its virtual delivery time is later.
     ///
-    /// Staging here and admitting on a purely logical condition
-    /// (`flush_staged_admissions`) takes the host out of that decision: a
-    /// boundary enters the scheduler at the same simulated point on every run of
-    /// a seed, however early or late its task happened to get polled.
+    /// Staging here and admitting on a logical condition
+    /// (`flush_staged_admissions`) keeps host poll speed from deciding when a
+    /// discovered boundary enters the scheduler. The surrounding concurrent
+    /// interleaving can still differ between runs of the same seed.
     staged_admissions: BTreeMap<String, BoundaryEvent>,
     suspends_spawned: u64,
     /// Resolved suspend sessions, kept for the durable-content oracle.
@@ -135,33 +131,18 @@ struct ActiveProviderTurn {
 const SCHEDULE_TICK_MS: u64 = 40_000;
 
 impl GeneratedRuntimeWorld {
-    /// The generated SEARCH lane's world: full preserved cross-session
-    /// concurrency, on a server double whose attempts run concurrently.
+    /// A world with concurrent server attempts.
     pub(super) async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        Ok(Self::over_engine(
-            crate::backend::SimEngine::concurrent(seed).await?,
-            seed,
-            true,
-            false,
-        ))
-    }
-
-    /// The SERIAL lane's world: one live provider turn at a time, on a
-    /// server double that runs one attempt at a time, so one seed grants the
-    /// turn in one order.
-    pub(super) async fn serial(seed: u64) -> Result<Self, FixedScriptRunnerError> {
         Ok(Self::over_engine(
             crate::backend::SimEngine::new(seed).await?,
             seed,
             false,
-            true,
         ))
     }
 
     fn over_engine(
         engine: crate::backend::SimEngine,
         seed: u64,
-        concurrent: bool,
         serialize_provider_turns: bool,
     ) -> Self {
         let clock = SimClock::new();
@@ -175,7 +156,6 @@ impl GeneratedRuntimeWorld {
             trigger_harness: SimTriggerHarness::over(engine.backend().trigger_store()),
             runtime_boundaries: RuntimeBoundaryHarness::new(engine.clone()),
             seed,
-            concurrent,
             engine,
             session_engines: BTreeMap::new(),
             durable_writes,
@@ -186,12 +166,6 @@ impl GeneratedRuntimeWorld {
             recorder: crate::invariants::HistoryRecorder::default(),
             serialize_provider_turns,
         }
-    }
-
-    /// Every server double of the world, in a fixed order: the world's own,
-    /// then each session's by alias.
-    pub(super) fn engines(&self) -> impl Iterator<Item = &crate::backend::SimEngine> {
-        std::iter::once(&self.engine).chain(self.session_engines.values())
     }
 
     /// A fresh engine for `alias`'s session, under a seed derived from the
@@ -214,11 +188,7 @@ impl GeneratedRuntimeWorld {
             .fold(self.seed ^ 0xcbf2_9ce4_8422_2325, |hash, byte| {
                 (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
             });
-        let engine = if self.concurrent {
-            crate::backend::SimEngine::concurrent(seed).await?
-        } else {
-            crate::backend::SimEngine::new(seed).await?
-        };
+        let engine = crate::backend::SimEngine::new(seed).await?;
         let reopen_factory = lash::Backend::session_store_factory(&engine.backend());
         let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
             .observing(self.durable_writes.clone())
@@ -407,7 +377,6 @@ impl GeneratedRuntimeWorld {
         let provider_scripts = scripts.clone();
         let (engine, backend, reopen_factory) = self.session_engine(&event.actor_alias).await?;
         let provider_schedule = ScriptedTransportSchedule::new();
-        provider_schedule.declare_gates_to(engine.restate().server().outside_gates());
         let (core, transport, provider_kind) =
             runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
         let session = core

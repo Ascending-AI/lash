@@ -275,7 +275,6 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.runtime-single-active-agent-frame.v1"
         | "sim.oracle.runtime-usage-conservation.v1"
         | "sim.oracle.runtime-usage-monotonic.v1"
-        | "sim.oracle.serial-engine-determinism.v1"
         | "sim.oracle.postgres-abort-after-begin.v1"
         | "sim.oracle.postgres-abort-before-commit.v1"
         | "sim.oracle.postgres-commit-io.v1"
@@ -346,7 +345,7 @@ impl OracleCensus {
     }
 
     /// Record one evaluated check that produces no `OracleVerdict` row (the
-    /// search lane's per-seed replay outcome and determinism rerun). The
+    /// search lane's per-seed trace replay). The
     /// classification still comes from the observation classifier keyed on
     /// the check's oracle id.
     pub fn record_unverdicted(&mut self, oracle_id: &str, status: OracleStatus) {
@@ -450,10 +449,6 @@ mod observation_class_tests {
         assert_eq!(
             oracle_observation_class("sim.oracle.state-machine-semantic-invariants.v1"),
             Some(OracleObservationClass::ModelProperty)
-        );
-        assert_eq!(
-            oracle_observation_class("sim.oracle.serial-engine-determinism.v1"),
-            Some(OracleObservationClass::RealObservation)
         );
         assert_eq!(
             oracle_observation_class("sim.oracle.brand-new-oracle-nobody-classified.v1"),

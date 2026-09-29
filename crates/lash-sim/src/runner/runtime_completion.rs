@@ -17,14 +17,8 @@ pub(super) struct RuntimeCompletionState {
     pub(super) queued_boundaries: BTreeSet<String>,
     pub(super) provider_completions_by_session: BTreeMap<String, usize>,
     pub(super) active_provider_turns_by_session: BTreeMap<String, usize>,
-    /// When set, at most ONE live provider turn is admitted across ALL sessions,
-    /// and a boundary that runs an effect in its own handler (tool, exec-code,
-    /// durable effect) waits until none is live. This is the SERIAL lane's
-    /// discipline: the server double runs one attempt at a time, and a live
-    /// turn parked on a scripted provider gate holds that turn, so a second
-    /// handler admitted beside it could only start by preempting it. The
-    /// generated SEARCH lane leaves this OFF and keeps full preserved
-    /// concurrency (and its interleaving oracle) for concurrency fuzzing.
+    /// The cross-backend rerun can admit one provider turn at a time so its
+    /// recorded storage observations have a controlled order.
     pub(super) serialize_provider_turns: bool,
 }
 
@@ -117,8 +111,8 @@ impl RuntimeCompletionState {
     }
 
     /// Whether a boundary that runs its own handler may start now: never
-    /// beside a live provider turn of its session, and under the serial
-    /// discipline never beside any live provider turn.
+    /// beside a live provider turn of its session, and when serialized
+    /// provider turns are requested, never beside any live provider turn.
     fn handler_boundary_ready(&self, actor_alias: &str) -> bool {
         !self.provider_active(actor_alias)
             && (!self.serialize_provider_turns || !self.any_provider_active())
@@ -197,9 +191,8 @@ pub(super) fn runtime_completion_ready(
     match event.kind {
         BoundaryKind::Provider => {
             state.next_provider_turn_ready(event)
-                // Serial lane only: admit a provider turn only when none is
-                // live anywhere, so live turns never overlap. The generated
-                // SEARCH lane leaves this off.
+                // A serialized cross-backend rerun admits only one live
+                // provider turn at a time.
                 && (!state.serialize_provider_turns || !state.any_provider_active())
         }
         BoundaryKind::Observer => {

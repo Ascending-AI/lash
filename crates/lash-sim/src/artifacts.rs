@@ -103,7 +103,6 @@ pub struct GeneratedSimProfileReport {
     /// Stable name for a retained fixed-seed regression corpus.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed_corpus: Option<&'static str>,
-    pub determinism_sample: GeneratedDeterminismSample,
     pub generator_version: &'static str,
     pub script_bundle_hash: String,
     pub provider_manifest_path: &'static str,
@@ -128,14 +127,6 @@ pub struct GeneratedSimProfileReport {
     pub failure_artifact_shape: &'static str,
     #[serde(skip)]
     pub summary_path: PathBuf,
-}
-
-#[derive(Clone, Debug, Serialize)]
-pub struct GeneratedDeterminismSample {
-    pub policy: &'static str,
-    pub selected_seed_indices: Vec<usize>,
-    pub attempted_seeds: usize,
-    pub reproduced_identically: usize,
 }
 
 #[derive(Clone, Debug, Serialize)]

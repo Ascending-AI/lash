@@ -345,7 +345,7 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
     // The law holds the engine's drive while a root runs; the hold reaches
     // the running drive at its next step, which needs a server whose attempts
     // run concurrently.
-    let engine = lash_sim::backend::SimEngine::concurrent(0x5eed_7010)
+    let engine = lash_sim::backend::SimEngine::new(0x5eed_7010)
         .await
         .expect("concurrent sim engine");
     let backend = engine.backend();
@@ -609,10 +609,9 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .build()
         .into_handle();
     // The stop reaches the turn as a durable request over ingress while the
-    // turn's attempt is running, which serial scheduling would hold until the
-    // attempt ends (FIG-3672 P9).
+    // turn's attempt is running, so the stop request must be able to proceed.
     let (cancel_core, cancel_engine) = standard_core_on(
-        lash_sim::backend::SimEngine::concurrent(0x5eed_7010)
+        lash_sim::backend::SimEngine::new(0x5eed_7010)
             .await
             .expect("concurrent sim engine"),
         cancel_provider,

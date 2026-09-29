@@ -12,15 +12,17 @@
 // the environment.
 #![allow(clippy::disallowed_methods)]
 
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_http_transport::{HttpMethod, HttpRequest};
-use lash_restate_test::{RestateTestServer, Scheduling, ServerConfig};
+use lash_restate_test::{RestateTestServer, ServerConfig};
 use restate_sdk::prelude::*;
 use serde_json::json;
+use tokio::sync::oneshot;
 
 /// A workflow that parks on a promise nobody resolves and a sleep nobody
 /// fires: whatever a dropped server leaves behind, this leaves it.
@@ -48,58 +50,73 @@ async fn post(transport: &Arc<dyn lash_http_transport::HttpTransport>, url: Stri
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_server_frees_its_state_its_tasks_and_its_waiting_callers() {
-    for scheduling in [Scheduling::Concurrent, Scheduling::Serial] {
-        let server = RestateTestServer::start(
-            Endpoint::builder().bind(Parked).build(),
-            ServerConfig::default().scheduling(scheduling),
-        )
-        .await
-        .unwrap();
-        let transport = server.transport();
-        let base = server.ingress_url().to_owned();
-        assert_eq!(
-            post(&transport, format!("{base}/Parked/k/run/send")).await,
-            202
-        );
-        // Callers that wait on outcomes the dropped server never produces.
-        let callers: Vec<_> = ["run/attach", "wait"]
-            .into_iter()
-            .map(|path| {
-                let transport = Arc::clone(&transport);
-                let url = if path == "run/attach" {
-                    format!("{base}/restate/workflow/Parked/k/attach")
-                } else {
-                    format!("{base}/Parked/k/{path}")
-                };
-                tokio::spawn(async move { post(&transport, url).await })
-            })
-            .collect();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            !server.timers().is_empty(),
-            "the workflow sleeps on a timer"
-        );
-        let watch = server.drop_watch();
-        assert!(!watch.is_freed());
-        drop(server);
-        assert!(
-            watch.freed_within(Duration::from_secs(5)).await,
-            "{scheduling:?}: the dropped server is freed; {} task(s) left",
-            watch.live_tasks()
-        );
-        for caller in callers {
-            let status = tokio::time::timeout(Duration::from_secs(5), caller)
+    let server = RestateTestServer::start(
+        Endpoint::builder().bind(Parked).build(),
+        ServerConfig::default(),
+    )
+    .await
+    .unwrap();
+    let transport = server.transport();
+    let base = server.ingress_url().to_owned();
+    assert_eq!(
+        post(&transport, format!("{base}/Parked/k/run/send")).await,
+        202
+    );
+    // Callers that wait on outcomes the dropped server never produces.
+    let (callers, started): (Vec<_>, Vec<_>) = ["run/attach", "wait"]
+        .into_iter()
+        .map(|path| {
+            let transport = Arc::clone(&transport);
+            let url = if path == "run/attach" {
+                format!("{base}/restate/workflow/Parked/k/attach")
+            } else {
+                format!("{base}/Parked/k/{path}")
+            };
+            let (started_tx, started_rx) = oneshot::channel();
+            let caller = tokio::spawn(async move {
+                let mut request = Box::pin(post(&transport, url));
+                let mut started_tx = Some(started_tx);
+                std::future::poll_fn(|cx| {
+                    let result = request.as_mut().poll(cx);
+                    if let Some(started_tx) = started_tx.take() {
+                        assert!(result.is_pending(), "caller must be waiting");
+                        let _ = started_tx.send(());
+                    }
+                    result
+                })
                 .await
-                .expect("a waiting caller is answered once the server is gone")
-                .unwrap();
-            assert_eq!(status, 503, "{scheduling:?}");
-        }
-        // The transport outlives the server and answers for it.
-        assert_eq!(
-            post(&transport, format!("{base}/Parked/j/run/send")).await,
-            503
-        );
+            });
+            (caller, started_rx)
+        })
+        .unzip();
+    for started_rx in started {
+        started_rx.await.expect("caller started waiting");
     }
+    server.settle().await;
+    assert!(
+        !server.timers().is_empty(),
+        "the workflow sleeps on a timer"
+    );
+    let watch = server.drop_watch();
+    assert!(!watch.is_freed());
+    drop(server);
+    assert!(
+        watch.freed_within(Duration::from_secs(5)).await,
+        "the dropped server is freed; {} task(s) left",
+        watch.live_tasks()
+    );
+    for caller in callers {
+        let status = tokio::time::timeout(Duration::from_secs(5), caller)
+            .await
+            .expect("a waiting caller is answered once the server is gone")
+            .unwrap();
+        assert_eq!(status, 503);
+    }
+    // The transport outlives the server and answers for it.
+    assert_eq!(
+        post(&transport, format!("{base}/Parked/j/run/send")).await,
+        503
+    );
 }
 
 fn response(parts: Vec<LlmOutputPart>) -> LlmResponse {

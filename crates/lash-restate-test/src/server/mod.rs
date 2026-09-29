@@ -22,7 +22,6 @@ mod ingress;
 mod model;
 mod processor;
 mod query;
-mod serial;
 mod timers;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -81,20 +80,6 @@ impl TimeMode {
     }
 }
 
-/// How the server runs attempts that are live at the same time.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Scheduling {
-    /// Every live attempt runs whenever Tokio polls it, as against a real
-    /// server: lash's concurrent handlers race.
-    #[default]
-    Concurrent,
-    /// One attempt runs at a time and the turn passes in a seeded order, so
-    /// a scenario's attempts interleave the same way on every run of one
-    /// seed. See the `serial` module docs for what it orders and what it
-    /// cannot.
-    Serial,
-}
-
 /// The server's configuration. [`Default`] is what production runs:
 /// protocol V6, streaming attempts, Restate 1.7's default retry policy.
 #[derive(Clone, Debug)]
@@ -107,7 +92,6 @@ pub struct ServerConfig {
     /// step replays — the `INACTIVITY_TIMEOUT=0s` mode.
     pub always_replay: bool,
     pub time: TimeMode,
-    pub scheduling: Scheduling,
     /// Virtual epoch milliseconds the server starts at.
     pub start_time_ms: u64,
     /// Virtual idle time after which the invoker closes a starved stream.
@@ -129,7 +113,6 @@ impl Default for ServerConfig {
             protocol: ProtocolVersion::V6,
             always_replay: false,
             time: TimeMode::auto(),
-            scheduling: Scheduling::Concurrent,
             start_time_ms: 1_800_000_000_000,
             inactivity_timeout: Duration::from_secs(60),
             retry: RetryPolicy {
@@ -158,11 +141,6 @@ impl ServerConfig {
 
     pub fn time(mut self, time: TimeMode) -> Self {
         self.time = time;
-        self
-    }
-
-    pub fn scheduling(mut self, scheduling: Scheduling) -> Self {
-        self.scheduling = scheduling;
         self
     }
 
@@ -325,97 +303,14 @@ pub(crate) struct Shared {
     state: Mutex<State>,
     /// Pulsed whenever an attempt starts, blocks, or ends, or time moves.
     activity: Arc<Notify>,
-    /// Serial scheduling: pulsed whenever the turn is granted. A handler
-    /// resuming from its own ingress request waits on this rather than on
-    /// `activity`, which its own park pulses.
-    granted: Notify,
     /// Told the new virtual time whenever it moves, so clocks the handlers
     /// read (a store set's) move with it.
     time_listener: OnceLock<Arc<dyn Fn(u64) + Send + Sync>>,
     /// Told the crashed invocation's target after a crash drops its attempt
     /// and before the replaying attempt starts.
     crash_listener: OnceLock<CrashListener>,
-    /// The server's tasks still alive: attempts and time and turn drivers.
+    /// The server's tasks still alive: attempts and time drivers.
     tasks: Arc<AtomicUsize>,
-}
-
-/// What woke an attempt that waits for the serial turn.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Wake {
-    /// The server: a request of its handler's answered.
-    Server,
-    /// Something outside the server: the attempt has a frame to write.
-    Outside,
-}
-
-/// An outside ingress request waiting to land, or landing: once admitted,
-/// the request has landed when this drops.
-struct Landing {
-    shared: Arc<Shared>,
-    admitted: tokio::sync::oneshot::Receiver<()>,
-}
-
-impl Drop for Landing {
-    fn drop(&mut self) {
-        // Admitted (or its admission dropped by a shut server): the next
-        // request may go.
-        if !matches!(
-            self.admitted.try_recv(),
-            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
-        ) {
-            self.shared.lock().landed();
-            self.shared.activity.notify_waiters();
-        }
-    }
-}
-
-/// A test's declaration that a handler waits, inside a `ctx.run` closure,
-/// on something outside the server that the test drives — a scripted
-/// provider's next event, a task the handler spawned whose own requests
-/// must land first.
-///
-/// Under [`Scheduling::Serial`] a holder parked inside a `ctx.run` closure
-/// keeps the turn: the server cannot tell a closure waiting on work that
-/// finishes by itself (a store call) from one waiting on the test. While
-/// gates are [entered](Self::enter), attempts parked inside `ctx.run`
-/// closures with no request of their own in flight — no more of them than
-/// there are entered gates — are taken to wait on those gates: the turn
-/// moves on and outside work goes on between turns, at the same point on
-/// every run. A weak handle: it does not keep the server alive.
-#[derive(Clone, Debug)]
-pub struct OutsideGates {
-    shared: Weak<Shared>,
-}
-
-impl OutsideGates {
-    /// A handler is about to wait on a gate; it is held until the guard
-    /// drops. Enter it only once the gate is known closed, so the wait
-    /// really parks.
-    pub fn enter(&self) -> OutsideGate {
-        if let Some(shared) = self.shared.upgrade() {
-            shared.lock().gate_entered();
-            shared.activity.notify_waiters();
-        }
-        OutsideGate {
-            shared: self.shared.clone(),
-        }
-    }
-}
-
-/// A gate a handler waits on, entered through [`OutsideGates::enter`];
-/// dropping it says the wait is over.
-#[derive(Debug)]
-pub struct OutsideGate {
-    shared: Weak<Shared>,
-}
-
-impl Drop for OutsideGate {
-    fn drop(&mut self) {
-        if let Some(shared) = self.shared.upgrade() {
-            shared.lock().gate_left();
-            shared.activity.notify_waiters();
-        }
-    }
 }
 
 /// A hold on one virtual object or workflow key, taken with
@@ -440,11 +335,7 @@ impl Hold {
         };
         let mut state = shared.lock();
         state.release_hold(&shared, &target);
-        let granted = state.schedule();
         drop(state);
-        if granted {
-            shared.turn_granted();
-        }
         shared.activity.notify_waiters();
     }
 }
@@ -566,22 +457,14 @@ impl Shared {
     ) -> Flow {
         let mut state = self.lock();
         let flow = state.on_frame(self, key, number, frame, received_us);
-        let granted = state.schedule();
         drop(state);
-        if granted {
-            self.turn_granted();
-        }
         flow
     }
 
     fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
         let mut state = self.lock();
         state.stream_ended(self, key, number, detail);
-        let granted = state.schedule();
         drop(state);
-        if granted {
-            self.turn_granted();
-        }
     }
 
     /// Fail `key`'s attempt `number` terminally, as a handler answering a
@@ -600,98 +483,7 @@ impl Shared {
             None,
             crate::protocol::generated::ErrorBehavior::Fail,
         );
-        let granted = state.schedule();
         drop(state);
-        if granted {
-            self.turn_granted();
-        }
-    }
-
-    /// An attempt's handler parked: move the serial turn if that frees it.
-    fn parked(&self) {
-        if self.config.scheduling == Scheduling::Serial && self.lock().schedule() {
-            self.granted.notify_waiters();
-        }
-        self.activity.notify_waiters();
-    }
-
-    /// Serial scheduling: the turn moved to an attempt.
-    fn turn_granted(&self) {
-        self.granted.notify_waiters();
-        self.activity.notify_waiters();
-    }
-
-    /// Serial scheduling: an ingress request issued by the handler of
-    /// `turn` is in flight; the turn may move on.
-    fn ingress_began(&self, turn: serial::Turn) -> u64 {
-        let ticket = self.lock().ingress_began(turn);
-        self.activity.notify_waiters();
-        ticket
-    }
-
-    /// Serial scheduling: the request answered. Returns once `turn` holds
-    /// the turn again (or is no longer live), so its handler resumes alone.
-    async fn ingress_ended(&self, turn: serial::Turn, ticket: u64) {
-        self.lock().ingress_ended(ticket);
-        self.activity.notify_waiters();
-        self.await_turn(turn, Wake::Server).await;
-    }
-
-    /// Serial scheduling: return once `turn` holds the turn (or is no
-    /// longer live), queueing it for the turn meanwhile — at once when the
-    /// server woke it, between turns when something outside did.
-    async fn await_turn(&self, turn: serial::Turn, wake: Wake) {
-        loop {
-            let notified = self.granted.notified();
-            let granted = {
-                let mut state = self.lock();
-                if state.may_run(turn) {
-                    return;
-                }
-                match wake {
-                    Wake::Server => state.make_ready(turn),
-                    Wake::Outside => state.woke(turn),
-                }
-                state.schedule()
-            };
-            if granted {
-                self.turn_granted();
-            }
-            let _ = tokio::time::timeout(Duration::from_millis(2), notified).await;
-        }
-    }
-
-    /// Serial scheduling: an ingress request the handler of a turn issued
-    /// was dropped unanswered.
-    fn ingress_abandoned(&self, ticket: u64) {
-        self.lock().ingress_abandoned(ticket);
-        self.activity.notify_waiters();
-    }
-
-    /// Serial scheduling: wait until an ingress request from outside every
-    /// attempt may land. The request has landed once the returned guard
-    /// drops: drop it once the request has reached the server. A request
-    /// its caller drops once admitted frees the next one all the same.
-    async fn wait_to_land(self: &Arc<Self>, url: &str, body: &bytes::Bytes) -> Landing {
-        let (admit, admitted) = tokio::sync::oneshot::channel();
-        self.lock()
-            .wait_to_land(url.to_owned(), body.clone(), admit);
-        self.activity.notify_waiters();
-        let mut landing = Landing {
-            shared: Arc::clone(self),
-            admitted,
-        };
-        let _ = (&mut landing.admitted).await;
-        landing
-    }
-
-    /// Serial scheduling: the turn of the attempt whose task is running
-    /// this code, when that attempt is one of this server's.
-    fn current_turn(self: &Arc<Self>) -> Option<serial::Turn> {
-        if self.config.scheduling != Scheduling::Serial {
-            return None;
-        }
-        attempt::current_turn(self)
     }
 }
 
@@ -844,7 +636,7 @@ impl RestateTestServer {
     /// [`register`](Self::register)ed. Must run inside a Tokio runtime.
     pub fn new(config: ServerConfig) -> Result<Self, StartError> {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| StartError::NoRuntime)?;
-        let state = State::new(config.seed, config.start_time_ms, config.scheduling);
+        let state = State::new(config.seed, config.start_time_ms);
         let shared = Arc::new(Shared {
             deployments: Mutex::new(Vec::new()),
             registration_requests: Mutex::new(Vec::new()),
@@ -853,16 +645,12 @@ impl RestateTestServer {
             runtime,
             state: Mutex::new(state),
             activity: Arc::new(Notify::new()),
-            granted: Notify::new(),
             time_listener: OnceLock::new(),
             crash_listener: OnceLock::new(),
             tasks: Arc::new(AtomicUsize::new(0)),
         });
         if let TimeMode::AutoAdvance { idle, horizon } = shared.config.time {
             shared.spawn(auto_advance(Arc::downgrade(&shared), idle, horizon));
-        }
-        if shared.config.scheduling == Scheduling::Serial {
-            shared.spawn(serial::drive(Arc::downgrade(&shared)));
         }
         let shutdown = Arc::new(Shutdown {
             shared: Arc::downgrade(&shared),
@@ -949,14 +737,6 @@ impl RestateTestServer {
         let server = Self::new(config)?;
         server.register(endpoint).await?;
         Ok(server)
-    }
-
-    /// Where a test declares the gates it holds handlers on: see
-    /// [`OutsideGates`].
-    pub fn outside_gates(&self) -> OutsideGates {
-        OutsideGates {
-            shared: Arc::downgrade(&self.shared),
-        }
     }
 
     /// A watch on this server's release, for tests that prove a dropped
@@ -1348,21 +1128,6 @@ impl RestateTestServer {
             .map_or(0, |record| record.inbox_high_water)
     }
 
-    /// Under [`Scheduling::Serial`], every grant of the turn so far, in
-    /// order: the invocation id and attempt number that ran. Equal across
-    /// two runs of one seed exactly when their attempts interleaved the
-    /// same way. Empty under [`Scheduling::Concurrent`].
-    pub fn schedule_trace(&self) -> Vec<(String, u32)> {
-        let state = self.shared.lock();
-        state.serial.as_ref().map_or_else(Vec::new, |serial| {
-            serial
-                .trace()
-                .iter()
-                .map(|&(key, number)| (state.invocations[key.0].id.as_str().to_owned(), number))
-                .collect()
-        })
-    }
-
     /// `invocation`'s journal, commands and notifications in stored order.
     pub fn journal(&self, invocation: &str) -> Option<Vec<JournalEntryView>> {
         let state = self.shared.lock();
@@ -1379,32 +1144,6 @@ impl RestateTestServer {
                 })
                 .collect(),
         )
-    }
-
-    /// A digest of every invocation's id, target and journal, taken in id
-    /// order: equal across two runs exactly when both produced the same
-    /// invocations with the same journals, however concurrent handlers
-    /// interleaved.
-    pub fn journal_digest(&self) -> u64 {
-        let state = self.shared.lock();
-        let mut invocations: Vec<_> = state
-            .invocations
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| state.is_retained(InvKey(*index)))
-            .map(|(_, invocation)| invocation)
-            .collect();
-        invocations.sort_by(|left, right| left.id.cmp(&right.id));
-        let mut digest = FNV_OFFSET;
-        for invocation in invocations {
-            digest = fnv1a_extend(digest, invocation.id.as_str().as_bytes());
-            digest = fnv1a_extend(digest, invocation.target.display().as_bytes());
-            for entry in &invocation.journal {
-                digest = fnv1a_extend(digest, &entry.frame.ty.code().to_be_bytes());
-                digest = fnv1a_extend(digest, &stable_payload(&entry.frame));
-            }
-        }
-        digest
     }
 
     /// Whether `invocation` has completed, and with what: `Ok(bytes)` or

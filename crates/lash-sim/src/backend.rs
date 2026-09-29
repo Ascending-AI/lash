@@ -16,8 +16,8 @@ use crate::runner::FixedScriptRunnerError;
 use crate::store::{CheckpointWriteCollector, ObservedDeploymentStore};
 
 /// Where the simulator runs turns: lash-restate's engine on a fresh
-/// in-process Restate server double under the scenario's seed, with serial
-/// scheduling, over a SQLite memory store set.
+/// in-process Restate server double under the scenario's seed, with concurrent
+/// handlers, over a SQLite memory store set.
 ///
 /// A turn is sent to the session and the engine's session drive runs it
 /// ([`run_turn`](Self::run_turn)); a core that starts processes serves their
@@ -33,29 +33,9 @@ pub type SimTurnBuild =
     Arc<dyn Fn(&lash::LashSession) -> lash::Result<lash::SendBuilder> + Send + Sync>;
 
 impl SimEngine {
-    /// A fresh engine on a server double under `seed`, scheduled serially:
-    /// one attempt runs at a time, and one seed grants the turn in one order
-    /// on a current-thread runtime.
+    /// A fresh engine on a concurrent server double under `seed`.
     pub async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        Self::scheduled(seed, lash_restate_test::Scheduling::Serial).await
-    }
-
-    /// A fresh engine on a server double under `seed` whose live attempts
-    /// run whenever Tokio polls them, as `restate-server` does: the
-    /// generated search lane's cross-session concurrency. A scenario that
-    /// stops a running turn from outside it needs this too: a host-local stop
-    /// is a durable request on the turn's cancellation gate, an ingress call,
-    /// and serial scheduling lands ingress only between attempts, so it would
-    /// wait on the very attempt it stops (FIG-3672 P9).
-    pub async fn concurrent(seed: u64) -> Result<Self, FixedScriptRunnerError> {
-        Self::scheduled(seed, lash_restate_test::Scheduling::Concurrent).await
-    }
-
-    async fn scheduled(
-        seed: u64,
-        scheduling: lash_restate_test::Scheduling,
-    ) -> Result<Self, FixedScriptRunnerError> {
-        let mut config = lash_restate_test::ServerConfig::default().scheduling(scheduling);
+        let mut config = lash_restate_test::ServerConfig::default();
         // A crashed attempt is retried at once: retry timing is no contract,
         // and a simulated world crashes an attempt on every durable effect.
         config.retry.initial_interval = std::time::Duration::from_millis(1);
@@ -260,10 +240,8 @@ impl DecoratedBackend {
     /// alive.
     ///
     /// The session-work port is the engine's minus its wall-clock
-    /// reconcile interval: the sim's serial scheduling pins one grant
-    /// order per seed, and a pass that ticks on wall time would land its
-    /// drive asks — each named for a per-process nonce — wherever its
-    /// store reads happened to finish. A scenario reconciles explicitly
+    /// reconcile interval: a pass that ticks on wall time would land its
+    /// drive asks wherever store reads happen to finish. A scenario reconciles explicitly
     /// through `SessionDriver::reconcile` when it wants a pass.
     pub fn over_engine(engine: &SimEngine) -> Self {
         Self {

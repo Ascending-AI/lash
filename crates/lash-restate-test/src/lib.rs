@@ -1,5 +1,5 @@
 //! `lash-restate-test`: an in-process Restate server double for testing
-//! `lash-restate` fast, deterministically and without sockets.
+//! `lash-restate` fast and without sockets.
 //!
 //! It is a test double for the Restate *server*, not a second effect engine.
 //! The code under test is the real thing: lash-restate's services bound on a
@@ -16,7 +16,7 @@
 //! Engine-agnostic laws must not depend on this crate's internals; they run
 //! against lash's effect interface over a backend this crate builds.
 //!
-//! # Determinism contract
+//! # Seeded choices and concurrent execution
 //!
 //! The double's own decisions are fully seeded; lash's concurrent handlers
 //! race exactly as on a real server.
@@ -32,13 +32,6 @@
 //! journals some wall-clock values and fresh ids inside `ctx.run` results,
 //! FIG-3672.)
 //!
-//! [`Scheduling::Serial`] narrows that for a scenario that wants one
-//! interleaving per seed: one attempt runs at a time, the turn passes in the
-//! order attempts became ready, and ingress requests from outside every
-//! attempt land between turns. On a current-thread runtime one seed then
-//! grants the turn in one order on every run
-//! ([`RestateTestServer::schedule_trace`]); the `server::serial` module docs
-//! say what it cannot order.
 
 mod backend;
 pub mod live;
@@ -54,7 +47,7 @@ pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;
 pub use server::{
     AttemptDispatch, CrashListener, CrashPoint, CrashRule, DeploymentHooks, DeploymentId,
-    DropWatch, Hold, InvocationView, JournalEntryView, OutsideGate, OutsideGates, RandomCrashes,
-    Refusal, RefuseHook, RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal,
-    RetryPolicy, Scheduling, ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
+    DropWatch, Hold, InvocationView, JournalEntryView, RandomCrashes, Refusal, RefuseHook,
+    RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal, RetryPolicy,
+    ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };

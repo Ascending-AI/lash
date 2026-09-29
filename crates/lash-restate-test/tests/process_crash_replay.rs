@@ -16,7 +16,7 @@
 //! * (b) the same points, with a fresh process worker (a new core's, with no
 //!   live openers or caches) installed as the crash drops the attempt, as a
 //!   restarted deployment comes back;
-//! * (c) serial scheduling over 16 seeds under always-replay, with the
+//! * (c) concurrent scheduling over 16 seeds under always-replay, with the
 //!   process cancelled at a seeded point of its life.
 //!
 //! Every redrive must reach the reference terminal (or, when cancelled,
@@ -38,7 +38,7 @@ use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
 use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt as _};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, Scheduling, ServerConfig};
+use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
 use lashlang::testing::ast_builders as b;
 use serde_json::json;
 
@@ -652,15 +652,13 @@ async fn every_journal_point_recovers_on_a_fresh_process_worker() {
     every_journal_point_recovers(ServerConfig::default(), true).await;
 }
 
-/// (c): one attempt at a time in a seeded order, every step replayed, and
+/// (c): concurrent attempts, every step replayed, and
 /// the process cancelled at a seeded point. Each seed ends at the reference
 /// terminal or cancelled, never with a journal mismatch or a failed
 /// invocation; a cancel that lands before the signal always wins.
 #[tokio::test(flavor = "current_thread")]
-async fn serial_seeds_with_a_cancel_end_at_the_reference_or_cancelled() {
-    let config = ServerConfig::default()
-        .always_replay(true)
-        .scheduling(Scheduling::Serial);
+async fn concurrent_seeds_with_a_cancel_end_at_the_reference_or_cancelled() {
+    let config = ServerConfig::default().always_replay(true);
     let reference = reference(0x3809, &config).await;
     let mut violations = Vec::new();
     let mut outcomes = Vec::new();

@@ -13,6 +13,12 @@
 //! An artifact cleanup is delivered only by the recovery pass's relay (ADR
 //! 0113 §2.5). A history that never ran that pass leaves its cleanups `due`
 //! for it; only a history that ran it to quiescence is judged on them.
+//!
+//! A claim is judged only once its claimant had its lapse: a crash world
+//! whose deployment died inside a pass leaves that pass's claims held by
+//! nobody until they lapse, so its history ends after the pass that follows
+//! the last lapse (`check_crash_world`, FIG-4129). A row still claimed then
+//! was retaken and not settled.
 
 use std::collections::BTreeSet;
 

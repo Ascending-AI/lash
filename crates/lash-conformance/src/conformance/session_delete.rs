@@ -1,21 +1,28 @@
-//! L-D7 through L-D9 and L-D11: a session's two-phase delete (ADR 0109 §4).
-//! The close's acknowledgement arms the session's `SessionDelete`
+//! L-D7 through L-D9, L-D11 and L-D12: a session's two-phase delete (ADR
+//! 0109 §4). The close's acknowledgement arms the session's `SessionDelete`
 //! obligation, the obligation counts exactly the session's undelivered
 //! cleanup, and its delivery — the physical delete — waits for that cleanup
 //! and then deletes the session, closure pins its close superseded
-//! included.
+//! included; the frame cleanup that delete arms outlives a claimant that
+//! dies inside it.
 
 use crate::conformance::DeploymentViewExt as _;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 
-use lash_core::drive::relay::{RelayVerdict, deliver_now, relay_due};
+use lash_core::drive::relay::{
+    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now, relay_due,
+};
+use lash_core::runtime::artifact_cleanup::{
+    ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
+};
 use lash_core::session_delete::SessionDeleteRelay;
 use lash_core::store::session_delete::SessionCleanup;
 use lash_core::store::{
     ControlIntentState, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationState, StallReason,
+    ObligationSettlement, ObligationStanding, ObligationState, StallReason,
 };
+use lash_core::testing::TestClock;
 use lash_core::{ScopeId, StoreSet, TurnId};
 
 use super::session_close::{
@@ -438,4 +445,207 @@ pub async fn the_physical_delete_retires_the_closure_pins_its_close_superseded(
             .is_empty(),
         "the pin went with the session's storage"
     );
+}
+
+/// A cleanup pass whose deployment dies inside the frame's delivery (the
+/// chaos soak's S3 death, FIG-4129): it claims the page, applies the frame's
+/// cleanup in full, and never settles it.
+struct DyingPass {
+    inner: Arc<ArtifactCleanupRelay>,
+    frame: ObligationKey,
+    /// The frame cleanup's obligation, once the pass applied it.
+    applied: tokio::sync::watch::Sender<Option<ObligationId>>,
+}
+
+#[async_trait::async_trait]
+impl ObligationRelay for DyingPass {
+    fn ledger(&self) -> &dyn ObligationLedger {
+        self.inner.ledger()
+    }
+
+    fn policy(&self) -> RelayPolicy {
+        self.inner.policy()
+    }
+
+    async fn deliver(
+        &self,
+        id: &ObligationId,
+        key: &ObligationKey,
+        attempt: u32,
+    ) -> Result<(), DeliveryFailure> {
+        let applied = self.inner.deliver(id, key, attempt).await;
+        if *key != self.frame {
+            return applied;
+        }
+        self.applied.send_replace(Some(id.clone()));
+        std::future::pending().await
+    }
+}
+
+/// L-D12 (FIG-4129, ADR 0109 §1.4, ADR 0113 §2.5): the frame cleanup a
+/// session delete with an orphaned root arms outlives the claimant that dies
+/// inside its delivery. The dead claimant's claim holds the row until it
+/// lapses, and nobody retakes it before then; the first pass at the lapse
+/// retakes it and settles it, delivered (its row deleted) or stalled with a
+/// typed reason, never left claimed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_frame_cleanup_whose_claimant_died_is_retaken_at_its_lapse_and_settled(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn StoreSet>,
+    _runner: Option<Arc<dyn crate::ConformanceTurnRunner>>,
+) {
+    let factory = stores.session_store_factory();
+    let clock = stores.clock();
+    let (id, store) = session(&stores, prefix, "delete-frame-cleanup-lapse").await;
+    // The frame the delete ends.
+    let mut state = crate::RuntimeSessionState {
+        session_id: id.clone(),
+        ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
+    };
+    state.ensure_agent_frame_initialized();
+    store
+        .commit_runtime_state(crate::RuntimeCommit::persisted_state_for_test(&state, &[]))
+        .await
+        .expect("commit the session's frame");
+    let frame = ObligationKey::ArtifactCleanup {
+        referrer: lash_core::ArtifactReferrer::FrameEnvironment(
+            lash_core::FrameEnvironmentId::new(
+                id.clone(),
+                state
+                    .current_frame_node_id
+                    .clone()
+                    .expect("the commit opened a frame"),
+            ),
+        ),
+    };
+    // The orphaned root: a turn whose final commit the close cuts short.
+    pin_a_turn_cancel_closure(store.as_ref(), &id).await;
+    let intent = factory
+        .begin_session_close(&id, clock.timestamp_ms())
+        .await
+        .expect("commit the close's store half")
+        .expect("the session exists");
+    intent_relay(
+        &stores,
+        CloseSink::new(Arc::clone(&factory), 0),
+        Arc::clone(&clock),
+    )
+    .deliver_intent(&intent)
+    .await
+    .expect("deliver the close");
+    let delete = stores
+        .session_delete_ledger()
+        .delete_obligation(&id)
+        .await
+        .expect("read the delete obligation")
+        .expect("the acknowledgement armed the delete");
+    let admin = administration(
+        Arc::clone(&host),
+        &stores,
+        CloseSink::new(Arc::clone(&factory), 0),
+    );
+    let deleted = deliver_now(
+        &SessionDeleteRelay::new(admin.clone()),
+        &delete.id,
+        clock.as_ref(),
+    )
+    .await
+    .expect("attempt the delete");
+    assert!(matches!(deleted, RelayVerdict::ClaimLost), "{deleted:?}");
+
+    let relay = Arc::new(ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+        ledger: stores.artifact_cleanup(),
+        authorities: Arc::new(StoreSetAuthorities {
+            effect_host: host,
+            processes: stores.process_registry(),
+            triggers: stores.trigger_store(),
+            definitions: stores.process_definition_registry(),
+        }),
+        process_env: stores.process_env_store(),
+        modules: stores.module_artifacts(),
+        engines: admin.process_engines().clone(),
+    }));
+    let ttl = relay.policy().claim_ttl_ms;
+    let page = NonZeroUsize::new(64).expect("non-zero page");
+    // Past the delete's own instant on either backend's clock.
+    let claimed_at = clock.timestamp_ms() + 1_000;
+    let (applied, mut seen) = tokio::sync::watch::channel(None);
+    let dying = Arc::new(DyingPass {
+        inner: Arc::clone(&relay),
+        frame: frame.clone(),
+        applied,
+    });
+    let pass = tokio::spawn({
+        let dying = Arc::clone(&dying);
+        async move { relay_due(dying.as_ref(), &TestClock::new(claimed_at), page).await }
+    });
+    let cleanup = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        seen.wait_for(Option::is_some),
+    )
+    .await
+    .expect("the pass reaches the frame's cleanup")
+    .expect("the pass is alive")
+    .clone()
+    .expect("the frame's cleanup");
+    // The deployment dies with the pass.
+    pass.abort();
+    assert!(pass.await.is_err_and(|error| error.is_cancelled()));
+    let ledger = stores.artifact_cleanup();
+    let standing = |label: &'static str| {
+        let ledger = Arc::clone(&ledger);
+        let cleanup = cleanup.clone();
+        async move {
+            ledger
+                .standing(&cleanup)
+                .await
+                .unwrap_or_else(|error| panic!("read the cleanup {label}: {error}"))
+        }
+    };
+    assert_eq!(
+        standing("after the death").await,
+        Some(ObligationStanding {
+            state: ObligationState::Claimed,
+            attempts: 1
+        }),
+        "the dead claimant's claim holds the row"
+    );
+
+    relay_due(relay.as_ref(), &TestClock::new(claimed_at + ttl - 1), page)
+        .await
+        .expect("a pass before the lapse");
+    assert_eq!(
+        standing("before the lapse").await,
+        Some(ObligationStanding {
+            state: ObligationState::Claimed,
+            attempts: 1
+        }),
+        "nobody retakes a claim before it lapses"
+    );
+
+    let retaken = relay_due(relay.as_ref(), &TestClock::new(claimed_at + ttl), page)
+        .await
+        .expect("the pass at the lapse");
+    assert!(retaken.claimed >= 1, "{retaken:?}");
+    match standing("after the lapse").await {
+        None => {}
+        Some(ObligationStanding {
+            state: ObligationState::Stalled,
+            ..
+        }) => {
+            let stalled = ledger
+                .list_stalled(None, page)
+                .await
+                .expect("list the stalled cleanups");
+            assert!(
+                stalled.iter().any(|row| row.id == cleanup),
+                "a stalled cleanup carries its typed reason: {stalled:?}"
+            );
+        }
+        other => panic!("the retaken cleanup settles or stalls, not {other:?}"),
+    }
 }

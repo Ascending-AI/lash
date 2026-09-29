@@ -95,17 +95,8 @@ pub struct LiveAttempt {
     /// The request-body sender; `None` once the input is closed on the
     /// wire.
     input: Option<mpsc::UnboundedSender<Bytes>>,
-    /// Whether the server holds the input open. Under serial scheduling an
-    /// attempt that does not hold the turn sees a close only when it gets
-    /// the turn back, so this can be `false` while `input` is still set.
+    /// Whether the server holds the input open.
     open: bool,
-    /// Serial scheduling: the attempt does not hold the turn, so what the
-    /// server delivers waits in `held` until it does.
-    gated: bool,
-    held: Vec<Bytes>,
-    /// Serial scheduling: the attempt task waits on this before it first
-    /// polls the endpoint.
-    start_gate: Option<oneshot::Sender<()>>,
     pub probe: Arc<InputProbe>,
     /// The attempt's task: aborted to stop it, joined to know it stopped.
     /// Tokio drops an aborted task only at its next yield, so a poll in
@@ -122,23 +113,17 @@ pub struct LiveAttempt {
 }
 
 impl LiveAttempt {
-    /// A new attempt whose input is `input` (`None`: closed from the
-    /// start). A `start_gate` makes it a serially scheduled attempt that
-    /// does not run until [`release`](Self::release)d.
+    /// A new attempt whose input is `input` (`None`: closed from the start).
     pub fn new(
         number: u32,
         input: Option<mpsc::UnboundedSender<Bytes>>,
         probe: Arc<InputProbe>,
         task: tokio::task::JoinHandle<()>,
-        start_gate: Option<oneshot::Sender<()>>,
     ) -> Self {
         Self {
             number,
             open: input.is_some(),
             input,
-            gated: start_gate.is_some(),
-            held: Vec::new(),
-            start_gate,
             probe,
             task: Some(task),
             unseen_from: None,
@@ -151,17 +136,12 @@ impl LiveAttempt {
         self.open
     }
 
-    /// Push `frame` down the attempt's open input, or hold it for the
-    /// attempt's next turn. Returns whether it was delivered.
+    /// Push `frame` down the attempt's open input. Returns whether it was delivered.
     pub fn push(&mut self, frame: Bytes) -> bool {
         if !self.open {
             return false;
         }
         self.starved_since_ms = None;
-        if self.gated {
-            self.held.push(frame);
-            return true;
-        }
         self.send(frame)
     }
 
@@ -176,45 +156,10 @@ impl LiveAttempt {
         pushed
     }
 
-    /// Close the input: the SDK sees end of input and suspends at its next
-    /// await the journal cannot resolve. A gated attempt sees it on its
-    /// next turn.
+    /// Close the input: the SDK suspends at its next unresolved await.
     pub fn close(&mut self) {
         self.open = false;
-        if !self.gated {
-            self.input = None;
-        }
-    }
-
-    /// Serial scheduling: whether the attempt has anything to act on once
-    /// it gets the turn — its first poll, held frames, or a held close.
-    pub fn has_held_work(&self) -> bool {
-        self.start_gate.is_some() || !self.held.is_empty() || (!self.open && self.input.is_some())
-    }
-
-    /// Serial scheduling: take the turn away; deliveries hold until the
-    /// next [`release`](Self::release).
-    pub fn gate(&mut self) {
-        self.gated = true;
-    }
-
-    /// Serial scheduling: give the attempt the turn: start it, or deliver
-    /// what it was held.
-    pub fn release(&mut self) {
-        self.gated = false;
-        // Not parked until its handler parks again: whatever it parked on
-        // before the grant — a request of its own that has answered, say —
-        // may be what the turn lets it go on with.
-        self.probe.set_response_drained(false);
-        if let Some(gate) = self.start_gate.take() {
-            let _ = gate.send(());
-        }
-        for frame in std::mem::take(&mut self.held) {
-            self.send(frame);
-        }
-        if !self.open {
-            self.input = None;
-        }
+        self.input = None;
     }
 }
 
@@ -259,12 +204,8 @@ pub enum Waiter {
     Call { caller: InvKey, completion_id: u32 },
     /// An `AttachInvocationCommand`'s result notification.
     Attach { caller: InvKey, completion_id: u32 },
-    /// An ingress request/response call or attach, with the serial
-    /// scheduler's ticket when an attempt's handler issued it.
-    Ingress {
-        sender: oneshot::Sender<Outcome>,
-        ticket: Option<u64>,
-    },
+    /// An ingress request/response call or attach.
+    Ingress { sender: oneshot::Sender<Outcome> },
 }
 
 /// The invoker's retry bookkeeping for one invocation.

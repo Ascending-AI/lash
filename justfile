@@ -617,13 +617,6 @@ runtime-persistence-soak cases='256':
   LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-sqlite-store:conformance__test -- runtime_persistence_state_machine --nocapture
   LASH_RUNTIME_PERSISTENCE_PROPTEST_CASES="{{cases}}" kiln run //crates/lash-postgres-store:conformance__test -- runtime_persistence_state_machine --nocapture
 
-# Opt-in full serial-lane determinism sweep: the per-PR unit test run covers
-# a bounded seed subset; this runs every sweep seed twice on the server
-# double. `kiln run` cannot start a sharded test target, so the recipe is a
-# pool-side `kiln test` with the seed count passed through `--test_env`.
-sim-serial-sweep seeds='20':
-  kiln test //crates/lash-sim:lash-sim__unit_test --test_arg=serial_engine_lane_is_deterministic_across_seeds --test_sharding_strategy=disabled --nocache_test_results --test_env=LASH_SIM_SERIAL_LANE_SEEDS={{seeds}}
-
 # The release gate's chaos soak (FIG-3873): randomized lash-sim workloads
 # under deployment kills, leader-lease loss and rolling deploys on the Restate
 # server double, checked against the crash matrix's invariants. An empty
