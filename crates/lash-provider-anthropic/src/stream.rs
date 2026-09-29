@@ -42,27 +42,32 @@ pub(crate) enum StreamBlock {
 }
 
 impl StreamBlock {
-    fn tool_call_part(&self) -> Option<LlmOutputPart> {
+    fn tool_input_raw(&self) -> Option<String> {
         let Self::ToolUse {
             input_buffer,
-            call_id,
-            name,
             initial_input,
             ..
         } = self
         else {
             return None;
         };
-        if name.is_empty() {
-            return None;
-        }
-        let input_json = if !input_buffer.is_empty() {
+        Some(if !input_buffer.is_empty() {
             input_buffer.clone()
         } else if initial_input.is_object() {
             serde_json::to_string(initial_input).unwrap_or_else(|_| "{}".to_string())
         } else {
             "{}".to_string()
+        })
+    }
+
+    fn tool_call_part(&self) -> Option<LlmOutputPart> {
+        let Self::ToolUse { call_id, name, .. } = self else {
+            return None;
         };
+        if name.is_empty() {
+            return None;
+        }
+        let input_json = self.tool_input_raw()?;
         Some(LlmOutputPart::ToolCall {
             call_id: call_id.clone(),
             tool_name: name.clone(),
@@ -366,6 +371,7 @@ impl AnthropicProvider {
                                     tool_name: block_meta
                                         .get("name")
                                         .and_then(Value::as_str)
+                                        .filter(|name| !name.is_empty())
                                         .map(str::to_string),
                                     item_id: Some(block_id),
                                 },
@@ -456,7 +462,7 @@ impl AnthropicProvider {
                                     call: ToolInputIdentity {
                                         ordinal: *ordinal,
                                         call_id: Some(call_id.clone()),
-                                        tool_name: Some(name.clone()),
+                                        tool_name: (!name.is_empty()).then(|| name.clone()),
                                         item_id: Some(format!("content_block:{index}")),
                                     },
                                     text: piece.to_string(),
@@ -492,17 +498,16 @@ impl AnthropicProvider {
                         name,
                         ..
                     }) = state.blocks.get(index)
-                        && let Some(LlmOutputPart::ToolCall { input_json, .. }) =
-                            state.blocks[index].tool_call_part()
+                        && let Some(raw_arguments) = state.blocks[index].tool_input_raw()
                     {
                         tx.send(LlmStreamEvent::ToolInputEnd {
                             call: ToolInputIdentity {
                                 ordinal: *ordinal,
                                 call_id: Some(call_id.clone()),
-                                tool_name: Some(name.clone()),
+                                tool_name: (!name.is_empty()).then(|| name.clone()),
                                 item_id: Some(block_id.clone()),
                             },
-                            raw_arguments: input_json,
+                            raw_arguments,
                         });
                     }
                     match state.blocks.get(index) {
@@ -727,6 +732,37 @@ mod tool_input_tests {
         let events = seen.lock().unwrap_or_else(|poison| poison.into_inner());
         assert!(
             matches!(&events[..], [LlmStreamEvent::ToolInputStart { .. }, LlmStreamEvent::ToolInputEnd { raw_arguments, .. }, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })] if raw_arguments == "{\"q\":\"x\"}")
+        );
+    }
+
+    #[test]
+    fn closed_arguments_without_a_tool_name_still_emit_an_end() {
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&seen);
+        let sender = LlmEventSender::new(move |event| {
+            sink.lock()
+                .unwrap_or_else(|poison| poison.into_inner())
+                .push(event);
+        });
+        let mut state = StreamState::default();
+        for event in [
+            json!({"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"unnamed","input":{"q":"x"}}}),
+            json!({"type":"content_block_stop","index":0}),
+        ] {
+            AnthropicProvider::process_sse_event(
+                &event.to_string(),
+                &mut state,
+                Some(&sender),
+                false,
+            )
+            .expect("recorded unnamed call parses");
+        }
+        let events = seen.lock().unwrap_or_else(|poison| poison.into_inner());
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.tool_name.is_none() && raw_arguments == "{\"q\":\"x\"}")));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, LlmStreamEvent::Part(LlmOutputPart::ToolCall { .. })))
         );
     }
 }

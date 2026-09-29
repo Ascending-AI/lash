@@ -277,6 +277,18 @@ mod tool_input_tests {
         );
         assert_eq!(parts.len(), 1);
     }
+
+    #[test]
+    fn closed_arguments_without_a_name_do_not_disappear() {
+        let mut state = ResponsesStreamState::default();
+        let mut parts = Vec::new();
+        let done = serde_json::json!({"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc_unnamed","call_id":"unnamed","arguments":"{\"q\":\"x\"}"}});
+        process_sse_event("OpenAI", &done.to_string(), &mut state, Some(&mut parts))
+            .expect("recorded unnamed call parses");
+        let events = state.take_block_events();
+        assert!(events.iter().any(|event| matches!(event, LlmStreamEvent::ToolInputEnd { call, raw_arguments } if call.tool_name.is_none() && raw_arguments == "{\"q\":\"x\"}")));
+        assert!(parts.is_empty());
+    }
 }
 
 pub fn parse_sse_payload(

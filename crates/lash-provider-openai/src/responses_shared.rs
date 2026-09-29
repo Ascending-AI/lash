@@ -1470,15 +1470,15 @@ impl ResponsesStreamState {
             if tool_call.call_id.is_empty() {
                 tool_call.call_id = uuid::Uuid::new_v4().to_string();
             }
-            if tool_call.tool_name.is_empty() {
-                return None;
-            }
             if tool_call.input_json.is_empty() {
                 tool_call.input_json = "{}".to_string();
             }
             tool_call.clone()
         };
         self.end_tool_input(owner);
+        if tool_call.tool_name.is_empty() {
+            return None;
+        }
         let tool_name = tool_call.tool_name;
         let part = LlmOutputPart::ToolCall {
             call_id: tool_call.call_id,
