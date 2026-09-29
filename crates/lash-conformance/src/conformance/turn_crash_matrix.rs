@@ -79,6 +79,7 @@ mod invocation_effect_host;
 mod layered_group_child;
 mod recovery;
 mod reference_turn;
+mod root_end_crash_cells;
 mod seam_controllers;
 
 use recovery::run_crash_matrix_case;
@@ -109,6 +110,9 @@ pub use held_turn_input::admitted_turn_input_visibility_survives_worker_crash;
 use invocation_effect_host::InvocationEffectHost;
 pub use layered_group_child::a_host_layer_observes_its_group_childrens_effects;
 use pretty_assertions::assert_eq;
+pub use root_end_crash_cells::{
+    root_end_commit_crash_after_write_replays_once, root_end_commit_crash_before_write_replays_once,
+};
 pub(crate) use seam_controllers::{
     CrashAfterCheckpointExecutionController, LawSeamHost, SeamLayer,
 };
@@ -158,6 +162,7 @@ impl TurnSeamOperation {
                     | StoreOperation::OpenSessionCommandRun
                     | StoreOperation::AdmitAtCheckpoint { .. }
                     | StoreOperation::CommitFinalHead { .. }
+                    | StoreOperation::CommitRootEnd
                     | StoreOperation::AuthorizeTurnCancelClosure
                     | StoreOperation::ApplyTurnCancelEffectsAndConsume
             ) | Self::TurnControl(_)
@@ -181,6 +186,7 @@ enum StoreOperation {
         settles_queue: bool,
         settles_turn_input: bool,
     },
+    CommitRootEnd,
     AuthorizeTurnCancelClosure,
     ApplyTurnCancelEffectsAndConsume,
 }
@@ -576,7 +582,9 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let operation = if commit.turn_cancel_closure_settlement.is_some() {
+        let operation = if commit.turn_commit.operation.key == "root-end" {
+            TurnSeamOperation::Store(StoreOperation::CommitRootEnd)
+        } else if commit.turn_cancel_closure_settlement.is_some() {
             TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
         } else {
             TurnSeamOperation::Store(StoreOperation::CommitFinalHead {
@@ -1043,7 +1051,36 @@ async fn try_build_runtime_over_host(
     control: SeamControl,
     effect_host: Arc<dyn crate::EffectHost>,
     identity: &ReferenceIdentity,
-    mut trace_tool: TraceTool,
+    trace_tool: TraceTool,
+    lease_timings: crate::LeaseTimings,
+) -> Result<crate::LashRuntime, crate::SessionError> {
+    try_build_runtime_over_host_with_delivery_failure(
+        stores,
+        store,
+        control,
+        effect_host,
+        identity,
+        ReferenceRuntimeTools {
+            trace_tool,
+            fail_post_commit_delivery: false,
+        },
+        lease_timings,
+    )
+    .await
+}
+
+struct ReferenceRuntimeTools {
+    trace_tool: TraceTool,
+    fail_post_commit_delivery: bool,
+}
+
+async fn try_build_runtime_over_host_with_delivery_failure(
+    stores: Arc<dyn crate::StoreSet>,
+    store: Arc<dyn RuntimePersistence>,
+    control: SeamControl,
+    effect_host: Arc<dyn crate::EffectHost>,
+    identity: &ReferenceIdentity,
+    tools: ReferenceRuntimeTools,
     lease_timings: crate::LeaseTimings,
 ) -> Result<crate::LashRuntime, crate::SessionError> {
     super::bind_conformance_session(&store, &identity.session_id).await;
@@ -1053,6 +1090,7 @@ async fn try_build_runtime_over_host(
             crate::QueuedWorkBatchingConfig::new(1),
         )
         .with_lease_timings(lease_timings);
+    let mut trace_tool = tools.trace_tool;
     trace_tool.control = control.clone();
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(provider_handle(control)));
@@ -1061,6 +1099,22 @@ async fn try_build_runtime_over_host(
         "turn_crash_trace_tool",
         PluginSpec::new().with_tool_provider(Arc::new(trace_tool)),
     )));
+    if tools.fail_post_commit_delivery {
+        plugin_factories.push(Arc::new(StaticPluginFactory::new(
+            "turn_crash_post_commit_failure",
+            PluginSpec::new().with_runtime_event(Arc::new(|event| {
+                Box::pin(async move {
+                    if matches!(event, crate::plugin::PluginLifecycleEvent::TurnPersisted(_)) {
+                        Err(crate::PluginError::Session(
+                            "injected post-commit delivery failure".to_string(),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                })
+            })),
+        )));
+    }
     Box::pin(
         crate::LashRuntime::builder(
             host,
