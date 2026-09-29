@@ -864,6 +864,7 @@ mod tests {
                 failure_evidence: Vec::new(),
                 tool_calls: Vec::new(),
                 omitted: None,
+                stopped_partial: None,
                 execution: Default::default(),
                 errors: Vec::new(),
                 source: lash::ReportSource::Live,
