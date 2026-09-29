@@ -44,6 +44,7 @@ fn malformed_history_request(model: &str) -> LlmRequest {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new("replay-session", "replay-frame", "replay-request"),
         output_spec: None,
         stream_events: None,

@@ -73,6 +73,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",
@@ -84,6 +85,9 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         provider_trace: None,
     }
 }
+
+#[path = "passthrough_tests.rs"]
+mod passthrough_tests;
 
 fn traced_request(messages: Vec<LlmMessage>, trace: Arc<Mutex<Vec<Value>>>) -> LlmRequest {
     let mut req = request(messages);

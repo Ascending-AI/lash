@@ -588,6 +588,7 @@ fn openai_compatible_request(stream: bool) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -610,6 +611,7 @@ fn openai_responses_request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -632,6 +634,7 @@ fn anthropic_messages_request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
@@ -654,6 +657,7 @@ fn google_request(stream: bool) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",

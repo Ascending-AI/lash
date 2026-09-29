@@ -28,6 +28,11 @@ impl OpenAiCompatibleProvider {
         self
     }
 
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.wire.extra_headers = headers.into();
+        self
+    }
+
     pub fn with_reasoning_dialect(mut self, dialect: OpenAiReasoningDialect) -> Self {
         self.compat.reasoning = Some(dialect);
         self
@@ -63,6 +68,11 @@ impl OpenAiProvider {
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
         self.inner.options = options;
+        self
+    }
+
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.inner.wire.extra_headers = headers.into();
         self
     }
 
@@ -148,10 +158,12 @@ impl Provider for OpenAiCompatibleProvider {
                 serde_json::to_value(&self.compat).unwrap_or(serde_json::Value::Null),
             );
         }
-        if self.wire != OpenAiWireConfig::default() {
+        let mut durable_wire = self.wire.clone();
+        durable_wire.extra_headers = Default::default();
+        if durable_wire != OpenAiWireConfig::default() {
             map.insert(
                 "wire".to_string(),
-                serde_json::to_value(&self.wire).unwrap_or(serde_json::Value::Null),
+                serde_json::to_value(&durable_wire).unwrap_or(serde_json::Value::Null),
             );
         }
         serde_json::Value::Object(map)

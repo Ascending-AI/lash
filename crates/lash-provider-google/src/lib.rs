@@ -42,7 +42,8 @@ mod tests {
         ProviderRouteIdentity, ResponseTextMeta,
     };
     use lash_core::provider::{
-        ModelCapability, ProviderOptions, ReasoningCapability, ReasoningEncoding, StreamTermination,
+        ModelCapability, Provider, ProviderOptions, ReasoningCapability, ReasoningEncoding,
+        StreamTermination,
     };
     use lash_core::{Message, MessageRole, Part};
     use serde_json::{Value, json};
@@ -102,6 +103,7 @@ mod tests {
                 .map(|effort| lash_core::provider::ReasoningSelection::Effort(effort.to_string()))
                 .unwrap_or_default(),
             model_capability,
+            extra_body: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -117,6 +119,8 @@ mod tests {
     fn request(model_variant: Option<&str>) -> LlmRequest {
         request_with_capability(model_variant, ModelCapability::default())
     }
+
+    mod passthrough_tests;
 
     #[tokio::test]
     async fn response_metadata_capture_respects_shared_allowlists() {

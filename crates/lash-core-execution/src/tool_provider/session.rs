@@ -3,6 +3,7 @@ pub struct ToolSessionModel {
     pub model: String,
     pub model_variant: crate::ReasoningSelection,
     pub model_capability: crate::provider::ModelCapability,
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     /// The session's generation options, so a tool making its own LLM call on
     /// the session's behalf runs under the same sampling intent as the turn
     /// that invoked it rather than at provider defaults.

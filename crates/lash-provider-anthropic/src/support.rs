@@ -36,7 +36,8 @@ pub(crate) use lash_llm_transport::timeouts::response_start_timeout;
 pub(crate) use lash_llm_transport::util::{emit_provider_request_trace, emit_provider_trace};
 pub(crate) use lash_llm_transport::{
     LlmHttpRequest, LlmHttpTransport, ReqwestLlmHttpTransport, ResponseMetadataCapture,
-    first_header_value, read_http_body_text,
+    first_header_value, merge_extra_body, merge_extra_headers, read_http_body_text,
+    reserved_generation_paths, validate_extra_headers,
 };
 pub(crate) use lash_sansio::{ModelToolReturnPart, Redacted};
 

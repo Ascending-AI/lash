@@ -43,6 +43,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         no_progress_budget: lash_core::NoProgressBudget::bounded(3),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         generation: Default::default(),
         autonomous: false,
         tool_specs: Arc::new(Vec::new()),

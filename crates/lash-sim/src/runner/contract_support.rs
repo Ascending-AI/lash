@@ -554,6 +554,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         no_progress_budget: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         autonomous: false,
         tool_specs: Vec::new().into(),

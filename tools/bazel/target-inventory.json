@@ -19855,6 +19855,7 @@
         "lash-internal-llm-transport",
         "lash-internal-sansio",
         "proptest",
+        "serde",
         "serde_json",
         "tokio"
       ],

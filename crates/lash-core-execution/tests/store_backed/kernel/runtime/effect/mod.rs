@@ -36,6 +36,7 @@ mod tests {
             tool_choice: LlmToolChoice::None,
             model_variant: crate::ReasoningSelection::Effort("fast".to_string()),
             model_capability: crate::ModelCapability::default(),
+            extra_body: Default::default(),
             scope: crate::LlmRequestScope::new(
                 "session",
                 "session:frame:test",

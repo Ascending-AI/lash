@@ -51,6 +51,7 @@ fn attachment_acceptance_wire_literals_are_pinned() {
     assert!(!lash_core::provider::ModelCapability::from(capability.clone()).is_empty());
     let intent = RemoteModelIntent {
         model: "fixture".into(),
+        extra_body: Default::default(),
         variant: Default::default(),
         capability,
         provider: None,

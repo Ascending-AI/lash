@@ -53,6 +53,7 @@ fn request() -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         scope: LlmRequestScope::new(
             "charge-safety",
             "charge-safety:frame",

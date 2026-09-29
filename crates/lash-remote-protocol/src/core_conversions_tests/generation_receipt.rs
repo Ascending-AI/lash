@@ -12,12 +12,14 @@ fn every_generation_receipt_row_crosses_the_boundary_and_the_pinned_disposition_
         parallel_tool_calls: core_llm::GenerationOptionOutcome::Applied,
         thinking_summary: core_llm::GenerationOptionOutcome::Applied,
         thinking_visibility: core_llm::GenerationOptionOutcome::Applied,
+        passthrough: core_llm::GenerationOptionOutcome::Applied,
     };
     let wire = serde_json::to_value(RemoteGenerationReceipt::from(receipt)).expect("serialize");
     assert_eq!(wire["reasoning"], serde_json::json!("applied"));
     assert_eq!(wire["parallel_tool_calls"], serde_json::json!("applied"));
     assert_eq!(wire["thinking_summary"], serde_json::json!("applied"));
     assert_eq!(wire["thinking_visibility"], serde_json::json!("applied"));
+    assert_eq!(wire["passthrough"], serde_json::json!("applied"));
     let decoded: RemoteGenerationReceipt = serde_json::from_value(wire).expect("deserialize");
     assert_eq!(core_llm::GenerationReceipt::from(decoded), receipt);
 

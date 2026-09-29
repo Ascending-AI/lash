@@ -317,12 +317,14 @@ impl From<lash_core::ModelSpec> for RemoteProcessModelSpec {
     fn from(value: lash_core::ModelSpec) -> Self {
         let lash_core::ModelSpec {
             id,
+            extra_body,
             variant,
             capability,
             limits,
         } = value;
         Self {
             id,
+            extra_body,
             variant: variant.into(),
             capability: capability.into(),
             limits: limits.into(),
@@ -336,6 +338,7 @@ impl TryFrom<RemoteProcessModelSpec> for lash_core::ModelSpec {
     fn try_from(value: RemoteProcessModelSpec) -> Result<Self, Self::Error> {
         let RemoteProcessModelSpec {
             id,
+            extra_body,
             variant,
             capability,
             limits,
@@ -353,7 +356,8 @@ impl TryFrom<RemoteProcessModelSpec> for lash_core::ModelSpec {
                 type_name: "RemoteProcessExecutionPolicy",
                 message: err.to_string(),
             })?
-            .with_capability(capability.into());
+            .with_capability(capability.into())
+            .with_extra_body(extra_body);
         Ok(model)
     }
 }

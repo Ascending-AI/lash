@@ -8,6 +8,8 @@ use crate::provider::{ModelCapability, ReasoningSelection};
 #[serde(deny_unknown_fields)]
 pub struct ModelSpec {
     pub id: String,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub variant: ReasoningSelection,
     pub limits: ModelLimits,
@@ -26,6 +28,7 @@ impl ModelSpec {
     pub fn new(id: impl Into<String>, context_window_tokens: NonZeroUsize) -> Self {
         Self {
             id: id.into(),
+            extra_body: serde_json::Map::new(),
             variant: ReasoningSelection::ProviderDefault,
             limits: ModelLimits {
                 context_window_tokens,
@@ -42,6 +45,7 @@ impl ModelSpec {
     ) -> Self {
         Self {
             id: id.into(),
+            extra_body: serde_json::Map::new(),
             variant,
             limits,
             capability: ModelCapability::default(),
@@ -55,6 +59,14 @@ impl ModelSpec {
 
     pub fn with_capability(mut self, capability: ModelCapability) -> Self {
         self.capability = capability;
+        self
+    }
+
+    pub fn with_extra_body(
+        mut self,
+        extra_body: serde_json::Map<String, serde_json::Value>,
+    ) -> Self {
+        self.extra_body = extra_body;
         self
     }
 
@@ -96,6 +108,7 @@ pub struct ModelSpecBuilder {
     context_window_tokens: Option<usize>,
     output_token_capacity: Option<usize>,
     capability: ModelCapability,
+    extra_body: serde_json::Map<String, serde_json::Value>,
 }
 
 impl ModelSpecBuilder {
@@ -106,6 +119,7 @@ impl ModelSpecBuilder {
             context_window_tokens: None,
             output_token_capacity: None,
             capability: ModelCapability::default(),
+            extra_body: serde_json::Map::new(),
         }
     }
 
@@ -130,6 +144,11 @@ impl ModelSpecBuilder {
         self
     }
 
+    pub fn extra_body(mut self, extra_body: serde_json::Map<String, serde_json::Value>) -> Self {
+        self.extra_body = extra_body;
+        self
+    }
+
     pub fn build(self) -> Result<ModelSpec, ModelLimitsError> {
         let context_window_tokens = self
             .context_window_tokens
@@ -139,7 +158,8 @@ impl ModelSpecBuilder {
             self.variant,
             ModelLimits::validated(context_window_tokens, self.output_token_capacity)?,
         )
-        .with_capability(self.capability))
+        .with_capability(self.capability)
+        .with_extra_body(self.extra_body))
     }
 }
 

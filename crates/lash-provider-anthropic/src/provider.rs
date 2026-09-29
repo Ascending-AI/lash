@@ -53,6 +53,17 @@ impl Provider for AnthropicProvider {
     }
 
     async fn complete(&mut self, mut req: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        validate_extra_headers(
+            &self.extra_headers,
+            &[
+                "x-api-key",
+                "anthropic-version",
+                "anthropic-beta",
+                "content-type",
+                "accept",
+            ],
+            true,
+        )?;
         let minting_route = self.route_identity(&req.model);
         minting_route.validate_endpoint().map_err(|error| {
             LlmTransportError::new(error.to_string())
@@ -109,7 +120,7 @@ impl Provider for AnthropicProvider {
         }
 
         let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
-        let request = LlmHttpRequest::post(url.clone(), request_body_bytes)
+        let mut request = LlmHttpRequest::post(url.clone(), request_body_bytes)
             .with_header("x-api-key", self.api_key.expose_secret().to_string())
             .with_header("anthropic-version", ANTHROPIC_VERSION)
             .with_header("anthropic-beta", betas.join(","))
@@ -117,6 +128,7 @@ impl Provider for AnthropicProvider {
             .with_header("Accept", "text/event-stream")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Anthropic response start timed out");
+        merge_extra_headers(&mut request.headers, &self.extra_headers, true)?;
         let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
 
         let resp = self

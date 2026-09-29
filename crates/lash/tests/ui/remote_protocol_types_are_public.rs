@@ -106,6 +106,7 @@ fn main() {
                 provider_id: "provider".to_string(),
                 model: lash::remote::processes::RemoteProcessModelSpec {
                     id: "model".to_string(),
+                    extra_body: Default::default(),
                     variant: Default::default(),
                     capability: Default::default(),
                     limits: lash::remote::processes::RemoteProcessModelLimits {
@@ -145,6 +146,7 @@ fn main() {
         parallel_tool_calls: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         thinking_summary: lash::remote::llm::RemoteGenerationOptionOutcome::NotRequested,
         thinking_visibility: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
+        passthrough: lash::remote::llm::RemoteGenerationOptionOutcome::Applied,
     };
     assert_ne!(
         disposition.seed,

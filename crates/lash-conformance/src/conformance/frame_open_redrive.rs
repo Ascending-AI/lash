@@ -263,6 +263,7 @@ async fn summarize(
         tool_choice: lash_sansio::llm::types::LlmToolChoice::None,
         model_variant: policy.model.variant.clone(),
         model_capability: policy.model.capability.clone(),
+        extra_body: policy.model.extra_body.clone(),
         generation: policy.generation.clone(),
         scope: crate::LlmRequestScope::new(
             session_id.clone(),

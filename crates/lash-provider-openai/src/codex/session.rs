@@ -19,7 +19,7 @@ use lash_core::llm::transport::{
 };
 use lash_core::llm::types::LlmRequest;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 use super::CodexProvider;
@@ -403,6 +403,19 @@ impl CodexProvider {
                     )))
                 })?,
             );
+        }
+        for (name, value) in self.extra_headers.iter() {
+            let name = HeaderName::from_bytes(name.as_bytes()).map_err(|error| {
+                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                    "Invalid extra WebSocket header name: {error}"
+                )))
+            })?;
+            let value = HeaderValue::from_str(value).map_err(|error| {
+                CodexWebSocketAttemptError::before_send(LlmTransportError::new(format!(
+                    "Invalid extra WebSocket header value: {error}"
+                )))
+            })?;
+            headers.insert(name, value);
         }
 
         let connect = tokio::time::timeout(connect_timeout, connect_async(ws_request))

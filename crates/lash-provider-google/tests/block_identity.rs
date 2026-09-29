@@ -56,6 +56,7 @@ fn request(events: Arc<Mutex<Vec<LlmStreamEvent>>>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: lash_core::provider::ModelCapability::default(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

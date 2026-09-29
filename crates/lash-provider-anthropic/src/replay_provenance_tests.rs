@@ -41,6 +41,7 @@ fn request(messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability: crate::attachment_test_capability(),
+        extra_body: Default::default(),
         scope: LlmRequestScope::new(
             "session-1",
             "session-1:frame:test",

@@ -625,6 +625,7 @@ fn effect_request_spec(request: &LlmRequest) -> LlmRequestSpec {
         tool_choice: request.tool_choice.clone(),
         model_variant: request.model_variant.clone(),
         model_capability: request.model_capability.clone(),
+        extra_body: Default::default(),
         generation: request.generation.clone(),
         scope: request.scope.clone(),
         output_spec: request.output_spec.clone(),

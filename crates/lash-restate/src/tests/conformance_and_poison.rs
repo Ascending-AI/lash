@@ -1908,6 +1908,7 @@ pub(super) fn llm_spec() -> lash_core::LlmRequestSpec {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions::default(),
         scope: lash_core::LlmRequestScope::new(
             "session".to_string(),

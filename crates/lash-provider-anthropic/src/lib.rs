@@ -150,6 +150,7 @@ mod tests {
             tool_choice: LlmToolChoice::Auto,
             model_variant: Default::default(),
             model_capability: crate::attachment_test_capability(),
+            extra_body: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "session-1",
                 "session-1:frame:test",
@@ -164,6 +165,84 @@ mod tests {
             },
             provider_trace: None,
         }
+    }
+
+    #[tokio::test]
+    async fn messages_passthrough_refuses_owned_nested_and_header_conflicts() {
+        let provider = AnthropicProvider::new("key");
+        let base = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        for extra in [
+            json!({"model":"other"}),
+            json!({"messages":[]}),
+            json!({"model":null}),
+        ] {
+            let mut req = base.clone();
+            req.extra_body = extra.as_object().cloned().unwrap();
+            assert_eq!(
+                provider
+                    .build_request_body(&req)
+                    .unwrap_err()
+                    .code
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .as_deref(),
+                Some("lash:passthrough_conflict")
+            );
+        }
+        let mut req = base.clone();
+        req.output_spec = Some(LlmOutputSpec::JsonObject);
+        req.extra_body = json!({"output_config":{"format":{"type":"other"}}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert!(provider.build_request_body(&req).is_err());
+        let mut req = base.clone();
+        req.generation.stop_sequences = vec!["END".into()];
+        req.generation.suppress_stop_sequences_for_protocol();
+        req.extra_body = json!({"stop_sequences":["END"]})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert!(
+            provider
+                .build_request_body(&req)
+                .unwrap_err()
+                .message
+                .contains("/stop_sequences")
+        );
+        let mut req = base.clone();
+        req.model_capability.sampling = lash_core::SamplingCapability::Pinned;
+        req.extra_body = json!({"temperature":0.3}).as_object().cloned().unwrap();
+        assert!(
+            provider
+                .build_request_body(&req)
+                .unwrap_err()
+                .message
+                .contains("/temperature")
+        );
+        let mut req = base.clone();
+        req.extra_body = json!({"host":{"nested":true}})
+            .as_object()
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            provider.build_request_body(&req).unwrap()["host"]["nested"],
+            true
+        );
+        let mut provider = provider
+            .with_extra_headers(vec![("AnThRoPiC-VeRsIoN".into(), "other".into())])
+            .with_transport(Arc::new(StaticSseTransport("")));
+        assert_eq!(
+            provider
+                .complete(base)
+                .await
+                .unwrap_err()
+                .code
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            Some("lash:passthrough_conflict")
+        );
     }
 
     fn count_object_key(value: &Value, key: &str) -> usize {
@@ -1068,6 +1147,30 @@ mod tests {
             .expect("stream completes");
         let value = beta.lock_recover().clone();
         value.expect("anthropic-beta header sent")
+    }
+
+    #[test]
+    fn host_beta_tokens_append_without_duplicating_adapter_tokens() {
+        let beta = Arc::new(std::sync::Mutex::new(None));
+        let mut provider = AnthropicProvider::new("key")
+            .with_extra_headers(vec![(
+                "ANTHROPIC-BETA".into(),
+                format!("{},host-beta,host-beta", crate::policy::FINE_GRAINED_BETA),
+            )])
+            .with_transport(Arc::new(HeaderCaptureTransport {
+                beta: Arc::clone(&beta),
+            }));
+        let req = request(vec![LlmMessage::text(LlmRole::User, "hello")]);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(provider.complete(req))
+            .unwrap();
+        assert_eq!(
+            beta.lock_recover().as_deref(),
+            Some(format!("{},host-beta", crate::policy::FINE_GRAINED_BETA).as_str())
+        );
     }
 
     #[test]

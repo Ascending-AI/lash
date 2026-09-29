@@ -10,6 +10,7 @@ impl RemoteLlmRequest {
             tool_choice,
             model_variant,
             model_capability,
+            extra_body,
             generation,
             scope,
             output_spec,
@@ -24,6 +25,7 @@ impl RemoteLlmRequest {
                 model,
                 variant: model_variant.into(),
                 capability: model_capability.into(),
+                extra_body,
                 provider: None,
                 metadata: HashMap::new(),
             },
@@ -59,6 +61,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             model,
             variant,
             capability,
+            extra_body,
             provider: _,
             metadata: _,
         } = model_intent;
@@ -74,6 +77,7 @@ impl TryFrom<RemoteLlmRequest> for core_llm::LlmRequest {
             tool_choice: tool_choice.into(),
             model_variant: variant.into(),
             model_capability: capability.into(),
+            extra_body,
             generation: generation.try_into()?,
             scope: scope.into(),
             output_spec: output_spec.map(Into::into),
@@ -498,6 +502,7 @@ impl From<core_llm::GenerationReceipt> for RemoteGenerationReceipt {
             parallel_tool_calls,
             thinking_summary,
             thinking_visibility,
+            passthrough,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
@@ -509,6 +514,7 @@ impl From<core_llm::GenerationReceipt> for RemoteGenerationReceipt {
             parallel_tool_calls: parallel_tool_calls.into(),
             thinking_summary: thinking_summary.into(),
             thinking_visibility: thinking_visibility.into(),
+            passthrough: passthrough.into(),
         }
     }
 }
@@ -525,6 +531,7 @@ impl From<RemoteGenerationReceipt> for core_llm::GenerationReceipt {
             parallel_tool_calls,
             thinking_summary,
             thinking_visibility,
+            passthrough,
         } = value;
         Self {
             output_token_cap: output_token_cap.into(),
@@ -536,6 +543,7 @@ impl From<RemoteGenerationReceipt> for core_llm::GenerationReceipt {
             parallel_tool_calls: parallel_tool_calls.into(),
             thinking_summary: thinking_summary.into(),
             thinking_visibility: thinking_visibility.into(),
+            passthrough: passthrough.into(),
         }
     }
 }

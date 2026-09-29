@@ -731,6 +731,7 @@ pub(super) fn empty_request() -> LlmRequest {
         generation: Default::default(),
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         scope: LlmRequestScope::new(
             "runtime-perf-empty".to_string(),
             "runtime-perf-empty:frame".to_string(),

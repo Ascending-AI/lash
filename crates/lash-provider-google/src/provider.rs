@@ -47,11 +47,12 @@ impl GoogleOAuthProvider {
         if stream_events.is_some() {
             url.push_str("?alt=sse");
         }
-        let http_request = LlmHttpRequest::post(url.clone(), request_body_bytes)
+        let mut http_request = LlmHttpRequest::post(url.clone(), request_body_bytes)
             .with_header("Authorization", format!("Bearer {access_token}"))
             .with_header("Content-Type", "application/json")
             .with_body_for_error(request_body.clone().unwrap_or_default())
             .with_response_start_timeout_message("Cloud Code response start timed out");
+        merge_extra_headers(&mut http_request.headers, &self.extra_headers, false)?;
         let timeouts = self.options.llm_timeouts();
         let stream_bounds = SseStreamBounds::new(timeouts.request_timeout, &self.options);
         let resp = self
@@ -576,6 +577,12 @@ impl Provider for GoogleOAuthProvider {
             })?;
         let req = self.reasoning_retention_safe_request(&req)?.into_owned();
         Self::validate_attachments(&req)?;
+        validate_extra_headers(
+            &self.extra_headers,
+            &["authorization", "content-type"],
+            false,
+        )?;
+        Self::build_request_with_receipt(self, &req, Vec::new(), None)?;
         // Every generation refusal lands before the credential refresh, the
         // project lookup and any attachment upload.
         Self::resolve_generation(self, &req)?;
@@ -687,6 +694,7 @@ mod error_detail_tests {
             tool_choice: LlmToolChoice::Auto,
             model_variant: Default::default(),
             model_capability: Default::default(),
+            extra_body: Default::default(),
             scope: lash_core::LlmRequestScope::new(
                 "project-resolution",
                 "project-resolution:frame",

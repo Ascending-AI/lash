@@ -1293,6 +1293,8 @@ impl Default for RemoteProcessModelLimits {
 pub struct RemoteProcessModelSpec {
     #[serde(default)]
     pub id: String,
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub extra_body: serde_json::Map<String, serde_json::Value>,
     #[serde(default)]
     pub variant: crate::llm::RemoteReasoningSelection,
     #[serde(

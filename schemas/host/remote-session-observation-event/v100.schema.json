@@ -734,6 +734,14 @@
           ],
           "default": "not_requested"
         },
+        "passthrough": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/RemoteGenerationOptionOutcome"
+            }
+          ],
+          "default": "not_requested"
+        },
         "reasoning": {
           "allOf": [
             {

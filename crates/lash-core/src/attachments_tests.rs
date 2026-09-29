@@ -1709,6 +1709,7 @@ fn attachment_request(
         tool_choice: crate::llm::types::LlmToolChoice::None,
         model_variant: crate::ReasoningSelection::ProviderDefault,
         model_capability: lash_core_store::attachments::attachment_test_capability(),
+        extra_body: Default::default(),
         generation: crate::llm::types::GenerationOptions::default(),
         scope: crate::llm::types::LlmRequestScope::new(
             "attachment-session",

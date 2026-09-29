@@ -117,6 +117,7 @@ impl RuntimeTurnDriver<'_> {
             no_progress_budget: session_policy.no_progress_budget,
             model_variant: session_policy.model.variant.clone(),
             model_capability: session_policy.model.capability.clone(),
+            extra_body: session_policy.model.extra_body.clone(),
             generation: session_policy.generation.clone(),
             emit_llm_trace: false,
             termination: self.protocol_turn_options.clone(),

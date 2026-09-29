@@ -720,6 +720,7 @@ pub(super) fn empty_request() -> LlmRequest {
         tool_choice: LlmToolChoice::None,
         model_variant: Default::default(),
         model_capability: crate::ModelCapability::default(),
+        extra_body: Default::default(),
         scope: crate::LlmRequestScope::new(
             "provider-test",
             "provider-test:frame",

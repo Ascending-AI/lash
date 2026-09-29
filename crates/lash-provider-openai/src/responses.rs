@@ -150,7 +150,17 @@ impl OpenAiCompatibleProvider {
         if policy.cache_retention == CacheRetention::Long && compat.prompt_cache_retention {
             body["prompt_cache_retention"] = json!("24h");
         }
-        let receipt = policy.receipt(req, &emission);
+        let mut reserved = reserved_generation_paths(req, "/stop", "/temperature");
+        if compat.cache_session_affinity {
+            reserved.push("/session_id");
+        }
+        let passthrough = merge_extra_body(&mut body, &req.extra_body, &reserved)?;
+        let mut receipt = policy.receipt(req, &emission);
+        receipt.passthrough = if !self.wire.extra_headers.is_empty() {
+            lash_core::GenerationOptionOutcome::Applied
+        } else {
+            passthrough
+        };
         Ok(BuiltRequest { body, receipt })
     }
 

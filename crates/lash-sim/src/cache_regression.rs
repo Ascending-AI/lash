@@ -68,6 +68,7 @@ fn request(model: &str, messages: Vec<LlmMessage>) -> LlmRequest {
         tool_choice: Default::default(),
         model_variant: Default::default(),
         model_capability: Default::default(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "cache-regression-session",
             "cache-regression-frame",

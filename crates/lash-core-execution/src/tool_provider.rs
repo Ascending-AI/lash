@@ -42,6 +42,7 @@ impl AttemptSessionReads {
             model: snapshot.policy.model.id,
             model_variant: snapshot.policy.model.variant,
             model_capability: snapshot.policy.model.capability,
+            extra_body: snapshot.policy.model.extra_body,
             generation,
         })
     }

@@ -36,7 +36,9 @@ use lash_core::provider::{
     ThinkingSummaryWire, resolve_generation_policy,
 };
 use lash_core::{facade_support::ProviderSchemaCapabilities, facade_support::SchemaPurpose};
-use lash_llm_transport::LlmHttpTransport;
+use lash_llm_transport::{
+    LlmHttpTransport, merge_extra_body, reserved_generation_paths, validate_extra_headers,
+};
 use lash_provider_auth::CredentialManager;
 use lash_sansio::Redacted;
 
@@ -77,6 +79,7 @@ pub(crate) enum CodexTransport {
 pub struct CodexProvider {
     credentials: Arc<CredentialManager<CodexCredential>>,
     pub options: ProviderOptions,
+    pub extra_headers: lash_llm_transport::ExtraHeaders,
     pub(crate) transport: CodexTransport,
     websocket_sessions: CodexWebsocketSessionCache,
     responses_url: String,
@@ -109,6 +112,7 @@ impl CodexProvider {
                 reliability: ProviderReliability::codex(),
                 ..ProviderOptions::default()
             },
+            extra_headers: Default::default(),
             transport: CodexTransport::Auto,
             websocket_sessions: CodexWebsocketSessionCache::default(),
             responses_url: Self::CODEX_RESPONSES_URL.to_string(),
@@ -129,6 +133,11 @@ impl CodexProvider {
 
     pub fn with_options(mut self, options: ProviderOptions) -> Self {
         self.options = options;
+        self
+    }
+
+    pub fn with_extra_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.extra_headers = headers.into();
         self
     }
 
@@ -213,7 +222,23 @@ impl CodexProvider {
     /// Refuse, before any credential, WebSocket or HTTP I/O, every host
     /// setting this request carries that the Codex wire cannot send.
     pub(crate) fn preflight(&self, req: &LlmRequest) -> Result<(), LlmTransportError> {
-        self.validated(req, |_, _, _| Ok(()))
+        validate_extra_headers(
+            &self.extra_headers,
+            &[
+                "authorization",
+                "content-type",
+                "accept",
+                "openai-beta",
+                "originator",
+                "user-agent",
+                "session-id",
+                "x-client-request-id",
+                "chatgpt-account-id",
+            ],
+            false,
+        )?;
+        self.build_request(req, req.stream_events.is_some())
+            .map(|_| ())
     }
 
     /// Run `then` over the retention-safe request with every host setting
@@ -344,7 +369,17 @@ impl CodexProvider {
             };
             body["text"] = json!({ "format": format });
         }
-        let receipt = policy.receipt(req, &emission);
+        let passthrough = merge_extra_body(
+            &mut body,
+            &req.extra_body,
+            &reserved_generation_paths(req, "/stop", "/temperature"),
+        )?;
+        let mut receipt = policy.receipt(req, &emission);
+        receipt.passthrough = if !self.extra_headers.is_empty() {
+            lash_core::GenerationOptionOutcome::Applied
+        } else {
+            passthrough
+        };
         Ok(BuiltRequest { body, receipt })
     }
 }

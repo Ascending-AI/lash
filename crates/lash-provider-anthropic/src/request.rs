@@ -656,7 +656,17 @@ impl AnthropicProvider {
         }
 
         body["stream"] = json!(true);
-        let receipt = policy.receipt(req, &emission);
+        let passthrough = merge_extra_body(
+            &mut body,
+            &req.extra_body,
+            &reserved_generation_paths(req, "/stop_sequences", "/temperature"),
+        )?;
+        let mut receipt = policy.receipt(req, &emission);
+        receipt.passthrough = if !self.extra_headers.is_empty() {
+            lash_core::GenerationOptionOutcome::Applied
+        } else {
+            passthrough
+        };
         Ok((body, receipt))
     }
 }

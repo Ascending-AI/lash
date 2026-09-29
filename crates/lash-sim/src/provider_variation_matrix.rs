@@ -914,6 +914,7 @@ fn matrix_request(
         tool_choice: LlmToolChoice::Auto,
         model_variant: Default::default(),
         model_capability,
+        extra_body: Default::default(),
         generation: lash_core::GenerationOptions {
             stop_sequences: (row.variation == "stop_consumed")
                 .then(|| TYPESCRIPT_CLOSE_DELIMITER.to_string())

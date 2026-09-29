@@ -230,6 +230,8 @@ pub enum TurnFailureCode {
     /// A host-set generation setting has no field on this wire, or the model
     /// pins it; the call is refused before any I/O instead of dropping it.
     UnsupportedGenerationOption,
+    /// A passthrough value would overwrite a field the adapter owns.
+    PassthroughConflict,
     /// The wire requires an output-token cap and neither the request nor the
     /// provider options set one.
     OutputTokenCapRequired,
@@ -352,6 +354,7 @@ impl TurnFailureCode {
             Self::UnsupportedReasoningRetention => "unsupported_reasoning_retention",
             Self::ReasoningEncodingUnrepresentable => "reasoning_encoding_unrepresentable",
             Self::UnsupportedGenerationOption => "unsupported_generation_option",
+            Self::PassthroughConflict => "passthrough_conflict",
             Self::OutputTokenCapRequired => "output_token_cap_required",
             Self::ReasoningBudgetExceedsOutputCap => "reasoning_budget_exceeds_output_cap",
             Self::InvalidToolCallInputJson => "invalid_tool_call_input_json",
@@ -458,6 +461,7 @@ impl TurnFailureCode {
             "unsupported_reasoning_retention" => Self::UnsupportedReasoningRetention,
             "reasoning_encoding_unrepresentable" => Self::ReasoningEncodingUnrepresentable,
             "unsupported_generation_option" => Self::UnsupportedGenerationOption,
+            "passthrough_conflict" => Self::PassthroughConflict,
             "output_token_cap_required" => Self::OutputTokenCapRequired,
             "reasoning_budget_exceeds_output_cap" => Self::ReasoningBudgetExceedsOutputCap,
             "invalid_tool_call_input_json" => Self::InvalidToolCallInputJson,
@@ -543,6 +547,7 @@ impl TurnFailureCode {
         Self::UnsupportedReasoningRetention,
         Self::ReasoningEncodingUnrepresentable,
         Self::UnsupportedGenerationOption,
+        Self::PassthroughConflict,
         Self::OutputTokenCapRequired,
         Self::ReasoningBudgetExceedsOutputCap,
         Self::InvalidToolCallInputJson,
@@ -1165,6 +1170,7 @@ mod tests {
             TurnFailureCode::UnsupportedReasoningRetention,
             TurnFailureCode::ReasoningEncodingUnrepresentable,
             TurnFailureCode::UnsupportedGenerationOption,
+            TurnFailureCode::PassthroughConflict,
             TurnFailureCode::OutputTokenCapRequired,
             TurnFailureCode::ReasoningBudgetExceedsOutputCap,
             TurnFailureCode::InvalidToolCallInputJson,

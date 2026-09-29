@@ -1338,6 +1338,7 @@ async fn direct_llm_completion_envelope_stores_attachment_refs_not_bytes() {
         tool_choice: LlmToolChoice::None,
         model_variant: Default::default(),
         model_capability: lash_core::ModelCapability::default(),
+        extra_body: Default::default(),
         scope: lash_core::LlmRequestScope::new(
             "direct-attachment-test",
             "direct-attachment-test:frame",
