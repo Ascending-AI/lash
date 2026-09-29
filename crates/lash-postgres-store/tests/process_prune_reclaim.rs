@@ -10,8 +10,8 @@ use lash_core_execution::testing::store_fixtures::RuntimePersistenceTestClaimExt
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry, ProcessRetention as _,
-    SessionStoreFactory,
+    ProcessExecutionEnvStore, ProcessLifecycle as _, ProcessRegistrar as _, ProcessRegistry,
+    ProcessRetention as _, SessionStoreFactory,
 };
 use lash_postgres_store::PostgresStorage;
 
@@ -77,6 +77,17 @@ lash_conformance::process_prune_reclaim_tests!({
         "fail_process_prune_blob_delete",
     ));
     (database_lock, "postgres", factory, registry, probe)
+});
+
+lash_conformance::process_prune_start_staging_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!("skipping Postgres prune and late-transfer law: database URL is not set");
+        return;
+    };
+    reset(&storage).await;
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+    let env_store = Arc::new(storage.process_env_store()) as Arc<dyn ProcessExecutionEnvStore>;
+    (database_lock, registry, env_store)
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
