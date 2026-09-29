@@ -2,7 +2,8 @@
 //!
 //! The operation language and reference model live in `lash-core` so every
 //! backend executes the same cases. Backend tests provide only a fresh
-//! [`DeploymentStore`](crate::DeploymentStore) for each case.
+//! [`ConformanceDeployment`](crate::store::ConformanceDeployment) for each
+//! case: a deployment store with the test seams that corrupt its accelerators.
 
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::testing::RuntimeStoreTestDriveExt as _;
@@ -57,6 +58,14 @@ pub enum SessionGraphContractOp {
         node: u8,
     },
     ReachabilitySweep,
+    /// Raise one live session's fork ceiling on an ancestor owner to a node
+    /// that owner holds off the session's path, check that readability and
+    /// the active-ancestor predicate still follow the session's parent edges
+    /// exactly, then restore the honest ceiling (ADR 0057, edge authority).
+    InflateCeiling {
+        session: u8,
+        node: u8,
+    },
     TombstoneVacuum,
     CheckpointCommit {
         session: u8,
@@ -108,7 +117,7 @@ struct LiveSession {
 
 struct SessionGraphScenario {
     seed: u64,
-    factory: Arc<dyn crate::DeploymentStore>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
     live: BTreeMap<u8, LiveSession>,
     handles_by_physical_id: BTreeMap<String, crate::store::SessionStore>,
     model: ReferenceModel,
@@ -130,6 +139,7 @@ enum RunShapeCounter {
     CheckpointCommits,
     ColdReloads,
     ReachabilitySweeps,
+    InflatedCeilings,
     VacuumRuns,
     TypedRejections,
     BoundedTraversals,
@@ -147,6 +157,7 @@ impl Counter for RunShapeCounter {
         Self::CheckpointCommits,
         Self::ColdReloads,
         Self::ReachabilitySweeps,
+        Self::InflatedCeilings,
         Self::VacuumRuns,
         Self::TypedRejections,
         Self::BoundedTraversals,
@@ -164,6 +175,7 @@ impl Counter for RunShapeCounter {
             Self::CheckpointCommits => "checkpoint_commits",
             Self::ColdReloads => "cold_reloads",
             Self::ReachabilitySweeps => "reachability_sweeps",
+            Self::InflatedCeilings => "inflated_ceilings",
             Self::VacuumRuns => "vacuum_runs",
             Self::TypedRejections => "typed_rejections",
             Self::BoundedTraversals => "bounded_traversals",
@@ -185,7 +197,7 @@ type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
 pub async fn session_graph_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Arc<dyn crate::DeploymentStore>> + Send + 'static,
+    Fut: Future<Output = Arc<dyn crate::store::ConformanceDeployment>> + Send + 'static,
 {
     let first = make(u64::MAX - 1).await;
     let second = make(u64::MAX - 1).await;
@@ -231,6 +243,10 @@ where
                     shape[RunShapeCounter::ForksCommitted] > 0
                         && shape[RunShapeCounter::RewindsCommitted] > 0,
                     "generated alphabet starvation: fork/rewind lifecycle was not reached"
+                );
+                prop_assert!(
+                    shape[RunShapeCounter::InflatedCeilings] > 0,
+                    "generated alphabet starvation: no fork ceiling was inflated"
                 );
                 prop_assert!(
                     shape[RunShapeCounter::TypedRejections] >= 5,
@@ -300,6 +316,10 @@ fn generated_prefix() -> Vec<SessionGraphContractOp> {
             node_count: 1,
             requirement: 2,
         },
+        SessionGraphContractOp::InflateCeiling {
+            session: 1,
+            node: 0,
+        },
         SessionGraphContractOp::Pin {
             session: 1,
             node: 0,
@@ -362,6 +382,8 @@ fn operation() -> impl Strategy<Value = SessionGraphContractOp> {
             SessionGraphContractOp::TruncateRewind { session, node }
         }),
         2 => Just(SessionGraphContractOp::ReachabilitySweep),
+        2 => (0..SESSION_COUNT, 0_u8..8)
+            .prop_map(|(session, node)| SessionGraphContractOp::InflateCeiling { session, node }),
         2 => Just(SessionGraphContractOp::TombstoneVacuum),
         3 => (0..SESSION_COUNT)
             .prop_map(|session| SessionGraphContractOp::CheckpointCommit { session }),
@@ -376,7 +398,7 @@ fn operation() -> impl Strategy<Value = SessionGraphContractOp> {
 
 async fn replay_case(
     seed: u64,
-    factory: Arc<dyn crate::DeploymentStore>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
     operations: &[SessionGraphContractOp],
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = SessionGraphScenario::new(seed, factory);
@@ -396,7 +418,7 @@ async fn replay_case(
 }
 
 impl SessionGraphScenario {
-    fn new(seed: u64, factory: Arc<dyn crate::DeploymentStore>) -> Self {
+    fn new(seed: u64, factory: Arc<dyn crate::store::ConformanceDeployment>) -> Self {
         Self {
             seed,
             factory,
@@ -426,6 +448,9 @@ impl SessionGraphScenario {
                 self.truncate_rewind(*session, *node).await
             }
             SessionGraphContractOp::ReachabilitySweep => self.reachability_sweep().await,
+            SessionGraphContractOp::InflateCeiling { session, node } => {
+                self.inflate_ceiling(*session, *node).await
+            }
             SessionGraphContractOp::TombstoneVacuum => self.tombstone_vacuum().await,
             SessionGraphContractOp::CheckpointCommit { session } => {
                 self.checkpoint_commit(*session).await
@@ -898,6 +923,95 @@ impl SessionGraphScenario {
         }
         self.assert_reachability().await?;
         self.shape[RunShapeCounter::ReachabilitySweeps] += 1;
+        Ok(())
+    }
+
+    async fn inflate_ceiling(&mut self, slot: u8, selector: u8) -> Result<(), String> {
+        let slot = slot % SESSION_COUNT;
+        let (Some(session), Some(live)) = (self.model.sessions.get(&slot), self.live.get(&slot))
+        else {
+            return Ok(());
+        };
+        let session_id = SessionId::from(session.physical_id.clone());
+        // The honest ceilings: the highest node each ancestor owner holds on
+        // this session's path (the ForkPlan of ADR 0057).
+        let mut honest = BTreeMap::<SessionId, lash_core::NodeId>::new();
+        for node_id in &session.path {
+            let owner = &self
+                .model
+                .nodes
+                .get(node_id)
+                .ok_or_else(|| format!("path node `{node_id}` is not modeled"))?
+                .owner_session_id;
+            if *owner != session_id {
+                honest.insert(owner.clone(), node_id.clone());
+            }
+        }
+        let on_path = session.path.iter().cloned().collect::<BTreeSet<_>>();
+        // A live node of an ancestor owner off this session's path: one the
+        // owner appended after the fork.
+        let candidates = self
+            .reachable_nodes()
+            .into_iter()
+            .filter(|node_id| {
+                !on_path.contains(node_id)
+                    && self
+                        .model
+                        .nodes
+                        .get(node_id)
+                        .is_some_and(|node| honest.contains_key(&node.owner_session_id))
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            return Ok(());
+        }
+        let inflated = candidates[usize::from(selector) % candidates.len()].clone();
+        let owner = self
+            .model
+            .nodes
+            .get(&inflated)
+            .map(|node| node.owner_session_id.clone())
+            .ok_or_else(|| format!("candidate `{inflated}` is not modeled"))?;
+        let restored = honest
+            .get(&owner)
+            .cloned()
+            .ok_or_else(|| format!("owner `{owner}` has no honest ceiling"))?;
+        let store = live.store.clone();
+        self.factory
+            .force_fork_lineage_for_testing(&session_id, &inflated)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        for node_id in self.model.nodes.keys() {
+            let expected = on_path.contains(node_id);
+            match crate::conformance::helpers::node_readable(&store, node_id).await {
+                Ok(readable) if readable == expected => {}
+                // A corrupt ceiling may deny a node the edges reach: two rows
+                // then share a generation, and the page refuses as corrupt.
+                Err(crate::StoreError::StoredDataCorrupt { .. }) if expected => {}
+                other => {
+                    return Err(format!(
+                        "edge authority: with `{session_id}`'s ceiling on `{owner}` raised to `{inflated}`, reading `{node_id}` (on path: {expected}) gave {other:?}"
+                    ));
+                }
+            }
+            let active = self
+                .factory
+                .contains_active_ancestor(&session_id, node_id)
+                .await
+                .map_err(|error| error.to_string())?;
+            if active != expected {
+                return Err(format!(
+                    "edge authority: with `{session_id}`'s ceiling on `{owner}` raised to `{inflated}`, `{node_id}` active={active}, on path={expected}"
+                ));
+            }
+        }
+
+        self.factory
+            .force_fork_lineage_for_testing(&session_id, &restored)
+            .await
+            .map_err(|error| error.to_string())?;
+        self.shape[RunShapeCounter::InflatedCeilings] += 1;
         Ok(())
     }
 
@@ -1637,7 +1751,7 @@ async fn persisted_projection(
 async fn assert_dedicated_laws<F, Fut>(make: &F, seed: u64) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn crate::DeploymentStore>>,
+    Fut: Future<Output = Arc<dyn crate::store::ConformanceDeployment>>,
 {
     assert_on_fresh_factory(make, seed, |factory| async move {
         let operations = generated_prefix();
@@ -1694,8 +1808,8 @@ async fn assert_on_fresh_factory<F, Fut, Law, LawFut>(
 ) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn crate::DeploymentStore>>,
-    Law: FnOnce(Arc<dyn crate::DeploymentStore>) -> LawFut,
+    Fut: Future<Output = Arc<dyn crate::store::ConformanceDeployment>>,
+    Law: FnOnce(Arc<dyn crate::store::ConformanceDeployment>) -> LawFut,
     LawFut: Future<Output = Result<(), TestCaseError>>,
 {
     law(make(seed).await).await

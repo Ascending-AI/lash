@@ -1810,7 +1810,8 @@ lash_conformance::session_graph_state_machine_tests!({
         let storage = Arc::clone(&storage);
         async move {
             reset(storage.pool()).await;
-            Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>
+            Arc::new(storage.session_store_factory())
+                as Arc<dyn lash_core_execution::store::ConformanceDeployment>
         }
     })
 });
@@ -2026,6 +2027,38 @@ mod session_history {
             return;
         };
         lash_conformance::history_fork_respects_ceiling(store).await;
+    }
+
+    #[tokio::test]
+    async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(store).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn history_selection_and_confirmation_share_one_snapshot() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::history_selection_and_confirmation_share_one_snapshot(store).await;
+    }
+
+    #[tokio::test]
+    async fn graph_generation_overflow_rolls_back_every_write() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::graph_generation_overflow_rolls_back_every_write(store).await;
+    }
+
+    #[tokio::test]
+    async fn a_later_frame_open_cannot_rescue_earlier_root_nodes() {
+        let Some((_lock, store, _storage)) = catalog().await else {
+            return;
+        };
+        lash_conformance::a_later_frame_open_cannot_rescue_earlier_root_nodes(store).await;
     }
 
     #[tokio::test]

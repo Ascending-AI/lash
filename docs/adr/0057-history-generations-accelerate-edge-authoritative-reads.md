@@ -54,26 +54,67 @@ below that ancestor row's ceiling. Ceilings stay per ancestor; combining them
 into one global floor or ceiling can expose nodes appended to an older source
 after a descendant forked.
 
-Lineage is not authority. A cross-session `load_node` that passes the indexed
-predicate fetches the involved sessions' bounded generation range in one query,
-then confirms the result by walking parent edges in memory from the requesting
-session's live head. A mismatched node is not readable. A missing row,
-generation gap, or tombstone encountered within that bounded segment is stored
-data corruption. Returning corruption, rather than treating a mid-segment
-tombstone as an ordinary unreadable candidate, follows ADR 0024's ruling: a
-live head-to-candidate path cannot legitimately be partly reclaimed while
-edges and roots are authority. Session-graph reads likewise validate a
-continuous generation/parent chain and every frame pointer after selecting
-rows through the accelerator. SQLite performs candidate selection and this
-confirmation inside one read transaction; PostgreSQL uses `REPEATABLE READ`.
+Lineage is not authority. Every read that names a node — a history page
+anchored at `Node(id)` or at a cursor, an admitted-base window, the
+`contains_active_ancestor` predicate, and the commit path's requested-ancestor
+fence — selects its candidate through the indexed ownership-or-ceiling
+predicate and then admits it only if the requesting head leaf reaches it
+through parent edges. The ceiling therefore narrows and never widens: a
+deflated ceiling can deny a reachable node, and an inflated one can grant
+nothing. Pages then walk down from an admitted anchor checking every parent
+edge and generation, and window reads check every parent from the leaf down
+to the frame base. A missing row, generation gap, or tombstone met along a
+live head-to-node path is stored data corruption, following ADR 0024's ruling
+that such a path cannot legitimately be partly reclaimed. SQLite performs the
+selection and the confirmation inside one read transaction (or the commit's
+write transaction for the fence); PostgreSQL uses `REPEATABLE READ`.
 
-The commit-path requested-ancestor fence may use lineage to select one indexed
-candidate because the normal runtime can construct that commit only from
-`load_persisted_session_state`. A false lineage row makes that preceding session
-load fail `StoredDataCorrupt` when its rows do not form the head's continuous
-edge path, before a commit can be built. Thus the fence is shielded by the
-edge-authoritative state-load contract; this is a required argument, not an
-incidental property of current call order.
+### Edge authority
+
+Amended 2026-09-29 (FIG-4154). This section replaces the earlier argument that
+the requested-ancestor fence was shielded by a complete-history state load;
+ADR 0112 removed that load, and an inflated `B → A` ceiling then let B read,
+predicate as active, and append past a node A appended after B forked.
+
+The check is the head-path probe in
+`lash-core-store/src/store_backend_support/head_path.rs`, which both backends
+drive with the same two indexed reads: the head leaf's `(node_id, session_id,
+generation)`, and, per owning session, that owner's lowest-generation row and
+the row its parent edge names.
+
+It rests on three facts about `graph_nodes`, none of which a lineage row can
+change:
+
+1. A node's parent, owning session and generation are written once in the
+   same insert and never rewritten; a non-root node's generation is its
+   parent's plus one.
+2. `UNIQUE (session_id, generation)`: an owner holds at most one node per
+   generation.
+3. An owner appends only from its own head leaf (the planner refuses any other
+   first parent), and a head leaf moves only by such an append or is set once
+   when a fork creates the session. So an owner's first node has a foreign
+   parent or none, and each later node's parent is the owner's previous node.
+
+Hence an owner's nodes form one parent chain over contiguous generations, and
+walking parent edges down from any node `e` of owner `s` visits every node of
+`s` at or below `e`'s generation, then leaves `s` through the parent of `s`'s
+lowest node and never returns. The probe starts at the head leaf and, while
+undecided, jumps from the current owner's entry node to the parent of that
+owner's lowest node. A candidate of owner `o` at generation `g` is reached iff
+the walk enters `o` at a node of generation at least `g`: that candidate is
+then `o`'s only node at `g`, which the chain passes through. Otherwise the walk
+passes below `g` without entering `o`, or enters `o` below `g`. Generations
+strictly decrease at every hop, so the probe ends after at most one hop per
+owning session on the path — the same count as the session's lineage rows, and
+independent of history depth. A row that contradicts the chain shape (an
+owner's lowest node above the node the walk entered it at, a parent in the
+same owner or not one generation lower, or a missing or retired parent under a
+live path) is `StoredDataCorrupt`.
+
+The fence runs the probe from the commit's own parent leaf inside the write
+transaction, under the head compare-and-swap, so no preceding state load is
+part of the argument. An anchor owned by the head leaf's owner costs one
+statement beyond the candidate read and no hop.
 
 Deriving frame facts also intentionally tightens `MissingFrameOpenAncestor`.
 For a root append, the first appended node must be `FrameOpen`; a later
@@ -94,15 +135,21 @@ there is no backfill, migration, dual read, or compatibility path.
 ## Consequences
 
 - Active-path materialization and append-ancestor checks no longer execute
-  recursive SQL. The latter is one indexed node lookup under commit authority.
+  recursive SQL. The latter is one indexed candidate lookup plus the
+  head-path probe, at most one indexed lookup per owning session, under
+  commit authority.
 - Deep fork reads carry one small lineage row per node-owning ancestor session,
   while zero-node sessions add no row.
 - Fork creation is a rare, generation-bounded edge walk; correctness, including
   deleted-owner/no-carrier forks, owns this path.
 - Corrupt accelerators can deny a reachable node, but they cannot grant access
-  to a node that parent edges do not reach because `load_node` confirms the
-  edge path.
+  to a node that parent edges do not reach: every named anchor, the
+  active-ancestor predicate and the requested-ancestor fence pass the
+  head-path probe (§"Edge authority").
 - Store conformance covers both directions of lineage/readability versus edge
   reachability, distinct ancestor ceilings, post-fork source appends,
   unrelated sessions, intermediate tombstones, deep fork chains, and
-  generation/frame congruence.
+  generation/frame congruence. `inflated_fork_ceiling_cannot_expose_post_fork_source_nodes`
+  pins the inflated-ceiling case on every anchor, the predicate and the
+  fence, and the session-graph property law generates inflated ceilings
+  against its reachability model.

@@ -14,6 +14,10 @@ struct StoreHardeningPhaseNames {
     attachment_adopt: &'static str,
     append_receipt_usage_fresh: &'static str,
     append_receipt_replay: &'static str,
+    history_head_page: &'static str,
+    history_cursor_page: &'static str,
+    history_fork_node_anchor: &'static str,
+    history_fork_contains_active_ancestor: &'static str,
 }
 
 const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
@@ -24,6 +28,10 @@ const MEMORY_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
     attachment_adopt: "store_hardening.memory.attachment_adopt",
     append_receipt_usage_fresh: "store_hardening.memory.append_receipt_usage_fresh",
     append_receipt_replay: "store_hardening.memory.append_receipt_replay",
+    history_head_page: "store_hardening.memory.history_head_page",
+    history_cursor_page: "store_hardening.memory.history_cursor_page",
+    history_fork_node_anchor: "store_hardening.memory.history_fork_node_anchor",
+    history_fork_contains_active_ancestor: "store_hardening.memory.history_fork_contains_active_ancestor",
 };
 
 const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
@@ -34,6 +42,10 @@ const SQLITE_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNam
     attachment_adopt: "store_hardening.sqlite.attachment_adopt",
     append_receipt_usage_fresh: "store_hardening.sqlite.append_receipt_usage_fresh",
     append_receipt_replay: "store_hardening.sqlite.append_receipt_replay",
+    history_head_page: "store_hardening.sqlite.history_head_page",
+    history_cursor_page: "store_hardening.sqlite.history_cursor_page",
+    history_fork_node_anchor: "store_hardening.sqlite.history_fork_node_anchor",
+    history_fork_contains_active_ancestor: "store_hardening.sqlite.history_fork_contains_active_ancestor",
 };
 
 const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseNames {
@@ -44,6 +56,10 @@ const POSTGRES_HARDENING_PHASES: StoreHardeningPhaseNames = StoreHardeningPhaseN
     attachment_adopt: "store_hardening.postgres.attachment_adopt",
     append_receipt_usage_fresh: "store_hardening.postgres.append_receipt_usage_fresh",
     append_receipt_replay: "store_hardening.postgres.append_receipt_replay",
+    history_head_page: "store_hardening.postgres.history_head_page",
+    history_cursor_page: "store_hardening.postgres.history_cursor_page",
+    history_fork_node_anchor: "store_hardening.postgres.history_fork_node_anchor",
+    history_fork_contains_active_ancestor: "store_hardening.postgres.history_fork_contains_active_ancestor",
 };
 
 pub(crate) async fn run_once_store_hardening_hot_paths(
@@ -142,6 +158,9 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
     })
     .await?;
 
+    let mut memory_history_fork = None;
+    let mut sqlite_history_fork = None;
+    let mut postgres_history_fork = None;
     for turn_index in 0..chat_turns {
         run.turn(
             turn_index,
@@ -189,6 +208,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                         &memory_store,
                         &memory_session_id,
                         turn_index,
+                        &mut memory_history_fork,
                         MEMORY_HARDENING_PHASES,
                     )
                     .await?,
@@ -198,6 +218,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                         &sqlite_store,
                         &sqlite_session_id,
                         turn_index,
+                        &mut sqlite_history_fork,
                         SQLITE_HARDENING_PHASES,
                     )
                     .await?,
@@ -207,6 +228,7 @@ pub(crate) async fn run_once_store_hardening_hot_paths(
                         &postgres_store,
                         &postgres_session_id,
                         turn_index,
+                        &mut postgres_history_fork,
                         POSTGRES_HARDENING_PHASES,
                     )
                     .await?,
@@ -340,6 +362,7 @@ async fn measure_store_hardening_backend_turn(
     store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &SessionId,
     turn_index: usize,
+    history_fork: &mut Option<HardeningHistoryFork>,
     names: StoreHardeningPhaseNames,
 ) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
     let mut phases = BTreeMap::new();
@@ -468,6 +491,116 @@ async fn measure_store_hardening_backend_turn(
     })
     .await?;
     phases.insert(phase.0, phase.1);
+
+    phases.extend(
+        measure_store_hardening_history_reads(store, session_id, history_fork, names).await?,
+    );
+    Ok(phases)
+}
+
+/// A fork of the hardening session that owns one node above its fork point,
+/// so a read anchored at the fork point is one owning session below the
+/// fork's head leaf.
+struct HardeningHistoryFork {
+    session_id: SessionId,
+    fork_point: lash_core::NodeId,
+}
+
+/// The history-read hot path: one-node pages from the head and from a
+/// cursor on the hardening session, and a one-node page and the
+/// active-ancestor predicate anchored in a fork's source session.
+async fn measure_store_hardening_history_reads(
+    store: &Arc<dyn lash_core::RuntimeStore>,
+    session_id: &SessionId,
+    history_fork: &mut Option<HardeningHistoryFork>,
+    names: StoreHardeningPhaseNames,
+) -> anyhow::Result<BTreeMap<String, RuntimePerfPhaseRunResult>> {
+    let one_node = lash_core::store::HistoryBudget {
+        max_nodes: std::num::NonZeroU32::MIN,
+        max_bytes: std::num::NonZeroU64::MAX,
+    };
+    let mut phases = BTreeMap::new();
+    let (head_page, phase) = measure_runtime_perf_async_phase(names.history_head_page, async {
+        store
+            .load_ancestors(session_id, lash_core::store::HistoryAnchor::Head, one_node)
+            .await
+            .map_err(anyhow::Error::from)
+    })
+    .await?;
+    phases.insert(phase.0, phase.1);
+    let Some(cursor) = head_page.next.clone() else {
+        anyhow::bail!("the hardening session holds more than one node, so its head page continues");
+    };
+    let (_, phase) = measure_runtime_perf_async_phase(names.history_cursor_page, async {
+        store
+            .load_ancestors(
+                session_id,
+                lash_core::store::HistoryAnchor::Cursor(cursor),
+                one_node,
+            )
+            .await
+            .map_err(anyhow::Error::from)
+    })
+    .await?;
+    phases.insert(phase.0, phase.1);
+
+    let fork = match history_fork {
+        Some(fork) => fork,
+        None => {
+            let Some(fork_point) = head_page.pinned_leaf.clone() else {
+                anyhow::bail!("the hardening session has a head leaf to fork at");
+            };
+            let fork_session_id = SessionId::from(format!("{session_id}-history-fork"));
+            store
+                .fork_session(&lash_core::ForkSessionRequest {
+                    session_id: fork_session_id.clone(),
+                    node_id: fork_point.clone(),
+                    relation: lash_core::SessionRelation::Root,
+                    pending_observer_intents: Vec::new(),
+                    policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+                })
+                .await?;
+            let mut state = load_store_hardening_state(store, &fork_session_id).await?;
+            let commit = lash_core::store::append_request_commit_for_testing(
+                &mut state,
+                "hardening-history-fork-append",
+                &[lash_core::SessionAppendNode::plugin(
+                    "perf-hardening",
+                    serde_json::json!({"fork": true}),
+                )],
+                None,
+            )?;
+            store.commit_runtime_state(commit).await?;
+            history_fork.insert(HardeningHistoryFork {
+                session_id: fork_session_id,
+                fork_point,
+            })
+        }
+    };
+    let (_, phase) = measure_runtime_perf_async_phase(names.history_fork_node_anchor, async {
+        store
+            .load_ancestors(
+                &fork.session_id,
+                lash_core::store::HistoryAnchor::Node(fork.fork_point.clone()),
+                one_node,
+            )
+            .await
+            .map_err(anyhow::Error::from)
+    })
+    .await?;
+    phases.insert(phase.0, phase.1);
+    let (reaches, phase) =
+        measure_runtime_perf_async_phase(names.history_fork_contains_active_ancestor, async {
+            store
+                .contains_active_ancestor(&fork.session_id, &fork.fork_point)
+                .await
+                .map_err(anyhow::Error::from)
+        })
+        .await?;
+    phases.insert(phase.0, phase.1);
+    if !reaches {
+        anyhow::bail!("the fork's head reaches its own fork point");
+    }
     Ok(phases)
 }
 

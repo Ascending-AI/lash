@@ -30,6 +30,30 @@ async fn fork_respects_ceiling() {
 }
 
 #[tokio::test]
+async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(store).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn history_selection_and_confirmation_share_one_snapshot() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::history_selection_and_confirmation_share_one_snapshot(store).await;
+}
+
+#[tokio::test]
+async fn graph_generation_overflow_rolls_back_every_write() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::graph_generation_overflow_rolls_back_every_write(store).await;
+}
+
+#[tokio::test]
+async fn a_later_frame_open_cannot_rescue_earlier_root_nodes() {
+    let (_backend, store) = catalog().await;
+    lash_conformance::a_later_frame_open_cannot_rescue_earlier_root_nodes(store).await;
+}
+
+#[tokio::test]
 async fn window_rejects_corrupt_anchors() {
     let guards = Arc::new(Mutex::new(Vec::<TestBackend>::new()));
     lash_conformance::history_window_rejects_corrupt_anchors(|_| {

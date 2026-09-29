@@ -571,49 +571,83 @@ impl SqliteStore {
                     let old_leaf_node_id = existing
                         .as_ref()
                         .and_then(|head| head.leaf_node_id.clone());
-                    let parent_node_facts = old_leaf_node_id
+                    let parent_leaf = old_leaf_node_id
                         .as_deref()
                         .map(|leaf_node_id| {
                             tx.query_row(
                                 session_sql().graph_sqlite.select_parent_facts.sql(),
                                 params![leaf_node_id],
-                                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                                |row| {
+                                    Ok((
+                                        row.get::<_, i64>(0)?,
+                                        row.get::<_, String>(1)?,
+                                        row.get::<_, String>(2)?,
+                                    ))
+                                },
                             )
                             .optional()
                             .map_err(sqlite_error)?
-                            .map(|(generation, frame_node_id)| {
-                                Ok(lash_core_execution::store::ParentNodeFacts {
-                                    node_id: leaf_node_id.to_string().into(),
-                                    generation: u64::try_from(generation).map_err(|_| {
-                                        stored_data_corrupt(
-                                            "SessionGraph node",
-                                            format!("negative generation {generation}"),
-                                        )
-                                    })?,
-                                    frame_node_id: frame_node_id.into(),
-                                })
+                            .map(|(generation, frame_node_id, owner)| {
+                                let generation = u64::try_from(generation).map_err(|_| {
+                                    stored_data_corrupt(
+                                        "SessionGraph node",
+                                        format!("negative generation {generation}"),
+                                    )
+                                })?;
+                                Ok((
+                                    lash_core_execution::store::ParentNodeFacts {
+                                        node_id: leaf_node_id.to_string().into(),
+                                        generation,
+                                        frame_node_id: frame_node_id.into(),
+                                    },
+                                    lash_core_execution::store_backend_support::PathNode {
+                                        node_id: leaf_node_id.to_string().into(),
+                                        owner_session_id: owner.into(),
+                                        generation,
+                                    },
+                                ))
                             })
                             .transpose()
                         })
                         .transpose()?
                         .flatten();
+                    let (parent_node_facts, parent_path_node) = parent_leaf.unzip();
+                    // The ceilings select the requested ancestor; the head
+                    // leaf's parent edges decide whether it is active
+                    // (ADR 0057, edge authority).
                     let requested_ancestor_is_active = match (
                         requested_append_ancestor(&commit.turn_commit),
                         parent_node_facts.as_ref(),
                     ) {
                         (None, _) => true,
                         (Some(_), None) => false,
-                        (Some(required), Some(parent)) => tx
+                        (Some(required), Some(parent)) => match tx
                             .query_row(
-                                session_sql().graph_sqlite.exists_readable_ancestor.sql(),
+                                session_sql().graph_sqlite.select_readable_ancestor.sql(),
                                 params![required, commit.session_id.as_str(), i64::try_from(parent.generation).map_err(|_| {
                                     StoreError::Backend("parent generation does not fit SQLite INTEGER".to_string())
                                 })?],
-                                |_| Ok(()),
+                                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
                             )
                             .optional()
                             .map_err(sqlite_error)?
-                            .is_some(),
+                        {
+                            None => false,
+                            Some((owner, generation)) => crate::history::head_reaches(
+                                tx,
+                                parent_path_node.clone(),
+                                lash_core_execution::store_backend_support::PathNode {
+                                    node_id: required.to_string().into(),
+                                    owner_session_id: owner.into(),
+                                    generation: u64::try_from(generation).map_err(|_| {
+                                        stored_data_corrupt(
+                                            "SessionGraph node",
+                                            format!("negative generation {generation}"),
+                                        )
+                                    })?,
+                                },
+                            )?,
+                        },
                     };
                     let occupied_node_ids = occupied_node_ids_conn(tx, commit.graph.nodes())?;
                     let published_leaf = match old_leaf_node_id {

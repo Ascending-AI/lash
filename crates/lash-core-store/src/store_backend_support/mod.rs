@@ -4,6 +4,7 @@ use lash_sansio::SessionId;
 
 mod append_identity;
 mod attachment_owner_sql;
+mod head_path;
 mod process_lifecycle_sql;
 mod run_spec_admission;
 mod session_meta;
@@ -14,6 +15,7 @@ pub use append_identity::decode_append_request_identity;
 pub use attachment_owner_sql::{
     process_attachment_owner_predicate_sql, turn_attachment_owner_predicate_sql,
 };
+pub use head_path::{HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode};
 pub use process_lifecycle_sql::{
     live_process_status_predicate_sql, nonterminal_process_status_predicate_sql,
     retired_process_status_predicate_sql, undelivered_wake_delivery_state_predicate_sql,

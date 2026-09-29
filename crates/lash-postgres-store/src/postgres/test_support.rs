@@ -52,6 +52,15 @@ impl StoreTestSupport for PostgresStore {
                     .execute(&self.pool)
                     .await
             }
+            GraphRowCorruption::SetGeneration(generation) => {
+                sqlx::query("UPDATE lash_graph_nodes SET generation = $2 WHERE node_id = $1")
+                    .bind(node_id.as_str())
+                    .bind(i64::try_from(generation).map_err(|_| {
+                        StoreError::Backend("test generation exceeds BIGINT".to_string())
+                    })?)
+                    .execute(&self.pool)
+                    .await
+            }
             GraphRowCorruption::SetPayloadKindToPlugin => {
                 let original: String = sqlx::query_scalar(
                     "SELECT node_json FROM lash_graph_nodes WHERE node_id = $1",
@@ -89,6 +98,33 @@ impl StoreTestSupport for PostgresStore {
         if result.rows_affected() != 1 {
             return Err(StoreError::Backend(format!(
                 "test graph node `{node_id}` is missing"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn force_fork_lineage_for_testing(
+        &self,
+        session_id: &SessionId,
+        ancestor_node_id: &lash_core_execution::NodeId,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query(
+            "INSERT INTO lash_fork_lineage
+             (session_id, ancestor_session_id, fork_node_id, fork_generation)
+             SELECT $1, session_id, node_id, generation
+             FROM lash_graph_nodes WHERE node_id = $2
+             ON CONFLICT (session_id, ancestor_session_id) DO UPDATE SET
+                 fork_node_id = EXCLUDED.fork_node_id,
+                 fork_generation = EXCLUDED.fork_generation",
+        )
+        .bind(session_id.as_str())
+        .bind(ancestor_node_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(store_sqlx_error)?;
+        if result.rows_affected() != 1 {
+            return Err(StoreError::Backend(format!(
+                "test lineage ancestor `{ancestor_node_id}` is missing"
             )));
         }
         Ok(())

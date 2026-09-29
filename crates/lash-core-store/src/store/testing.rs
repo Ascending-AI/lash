@@ -18,6 +18,8 @@ pub enum GraphRowCorruption {
     SetParent(Option<NodeId>),
     SetFramePointer(NodeId),
     SetBodyBytes(u64),
+    /// Rewrite the row's stored generation, leaving its parent edge as it is.
+    SetGeneration(u64),
     /// Rewrite the row to a valid `Plugin` payload,
     /// [`GraphRowCorruption::plugin_payload`], and set `body_bytes` to the
     /// new body's JSON length. The node id, parent, generation and frame
@@ -63,6 +65,17 @@ pub trait StoreTestSupport: Send + Sync {
         &self,
         session_id: &SessionId,
         frame: Option<FrameNodeId>,
+    ) -> Result<(), StoreError>;
+
+    /// Point `session_id`'s `fork_lineage` row for the owner of
+    /// `ancestor_node_id` at that node, inserting the row when there is
+    /// none: its ceiling becomes that node's generation, whatever the parent
+    /// edges say. The fork-lineage accelerator is then corrupt, and reads
+    /// must still answer from the edges (ADR 0057).
+    async fn force_fork_lineage_for_testing(
+        &self,
+        session_id: &SessionId,
+        ancestor_node_id: &NodeId,
     ) -> Result<(), StoreError>;
 
     /// Rewrite the versioned session-head authority bytes in the real backend.

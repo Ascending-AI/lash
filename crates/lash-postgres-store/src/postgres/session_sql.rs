@@ -426,9 +426,9 @@ lash_store_sql::statements! {
         select_frame_body = "SELECT parent_node_id, node_json FROM graph_nodes
          WHERE node_id = ?1 AND tombstoned = FALSE";
 
-        /// The generation and frame pointer of the live leaf `?1`, row-locked
-        /// for the duration of the commit.
-        select_parent_facts_for_update = "SELECT generation, frame_node_id FROM graph_nodes
+        /// The generation, frame pointer and owner of the live leaf `?1`,
+        /// row-locked for the duration of the commit.
+        select_parent_facts_for_update = "SELECT generation, frame_node_id, session_id FROM graph_nodes
                  WHERE node_id = ?1 AND tombstoned = FALSE
                  FOR UPDATE";
 
@@ -436,10 +436,11 @@ lash_store_sql::statements! {
         select_frame_node_id = "SELECT frame_node_id FROM graph_nodes
          WHERE node_id = ?1 AND tombstoned = FALSE";
 
-        /// Whether session `?2` may read live node `?1` at or below
-        /// generation `?3`: the fresh-append ancestor fence.
-        exists_readable_ancestor = "SELECT EXISTS(
-                     SELECT 1 FROM graph_nodes AS node
+        /// The owner and generation of live node `?1` when session `?2`'s
+        /// ownership-or-ceiling accelerator admits it at or below generation
+        /// `?3`: the fresh-append ancestor fence's candidate. The head-path
+        /// probe then confirms it through parent edges (ADR 0057).
+        select_readable_ancestor = "SELECT node.session_id, node.generation FROM graph_nodes AS node
                      WHERE node.node_id = ?1
                        AND node.tombstoned = FALSE
                        AND node.generation <= ?3
@@ -451,8 +452,7 @@ lash_store_sql::statements! {
                                  AND lineage.ancestor_session_id = node.session_id
                                  AND node.generation <= lineage.fork_generation
                            )
-                       )
-                 )";
+                       )";
 
         /// The parent of live node `?1`, row-locked.
         ///

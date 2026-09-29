@@ -554,3 +554,456 @@ pub async fn history_fork_respects_ceiling(store: Arc<dyn ConformanceDeployment>
             .expect("grandchild remains below source ceiling")
     );
 }
+
+/// Fork `child` from `source` at `node_id` with a root relation.
+async fn fork_at(store: &dyn ConformanceDeployment, child: &SessionId, node_id: &NodeId) {
+    store
+        .fork_session(&ForkSessionRequest {
+            session_id: child.clone(),
+            node_id: node_id.clone(),
+            relation: SessionRelation::Root,
+            pending_observer_intents: Vec::new(),
+            policy: SessionPolicy::new(TurnBudget::Unbounded),
+        })
+        .await
+        .expect("fork at a retained node");
+}
+
+/// A one-node page anchored at `node_id`, as `session_id` reads it.
+async fn one_node(
+    store: &dyn ConformanceDeployment,
+    session_id: &SessionId,
+    node_id: &NodeId,
+) -> Result<crate::store::HistoryPage, StoreError> {
+    store
+        .load_ancestors(
+            session_id,
+            HistoryAnchor::Node(node_id.clone()),
+            budget(1, u64::MAX),
+        )
+        .await
+}
+
+fn assert_not_readable(result: Result<crate::store::HistoryPage, StoreError>, what: &str) {
+    match result {
+        Err(StoreError::HistoryAnchorUnavailable {
+            reason: crate::store::AnchorUnavailable::NotReadable,
+            ..
+        }) => {}
+        other => panic!("{what} must be NotReadable, got {other:?}"),
+    }
+}
+
+/// ADR 0057, edge authority: A0→A1→A2 belong to A and B forks at A1. A
+/// corrupt B→A ceiling raised from 1 to 2 must not let B read A2, predicate
+/// it active, resume a cursor at it, page through it, or append past a
+/// request naming it. The ceiling may only narrow what the edges admit.
+pub async fn inflated_fork_ceiling_cannot_expose_post_fork_source_nodes(
+    store: Arc<dyn ConformanceDeployment>,
+) {
+    let mut source = state("inflated-ceiling-source");
+    admit(store.as_ref(), &source.session_id).await;
+    source.ensure_agent_frame_initialized();
+    append_nodes(&mut source, 1);
+    commit(store.as_ref(), &mut source).await;
+    let [a0, a1] = <[NodeId; 2]>::try_from(active_tail(&source, 2)).expect("A0 and A1");
+    let child = SessionId::from("inflated-ceiling-child");
+    fork_at(store.as_ref(), &child, &a1).await;
+    append_nodes(&mut source, 1);
+    commit(store.as_ref(), &mut source).await;
+    let a2 = active_tail(&source, 1).remove(0);
+
+    // Before the corruption: B reads A0 and A1, never A2.
+    for inherited in [&a0, &a1] {
+        one_node(store.as_ref(), &child, inherited)
+            .await
+            .expect("an inherited node is readable");
+    }
+    assert_not_readable(
+        one_node(store.as_ref(), &child, &a2).await,
+        "a post-fork source node under an honest ceiling",
+    );
+
+    store
+        .force_fork_lineage_for_testing(&child, &a2)
+        .await
+        .expect("raise B's ceiling on A to A2");
+
+    // The auditor's case: B's head is still A1.
+    assert_not_readable(
+        one_node(store.as_ref(), &child, &a2).await,
+        "A2 through an inflated ceiling",
+    );
+    assert!(
+        !store
+            .contains_active_ancestor(&child, &a2)
+            .await
+            .expect("predicate over an inflated ceiling"),
+        "A2 is not on B's active path"
+    );
+    let head = store
+        .load_ancestors(&child, HistoryAnchor::Head, budget(16, u64::MAX))
+        .await
+        .expect("B's own ancestry stays readable");
+    assert_eq!(
+        head.nodes
+            .iter()
+            .map(|node| node.record.node_id.clone())
+            .collect::<Vec<_>>(),
+        vec![a1.clone(), a0.clone()],
+        "B's head page is its edge path"
+    );
+    // A forged cursor stamped with the corrupt lineage resumes nowhere new.
+    let forged = crate::store::HistoryCursor::new(
+        child.clone(),
+        a2.clone(),
+        crate::store::LineageStamp::of_lineage([(&source.session_id, 2_u64)]),
+        a2.clone(),
+        2,
+    );
+    assert_not_readable(
+        store
+            .load_ancestors(&child, HistoryAnchor::Cursor(forged), budget(16, u64::MAX))
+            .await,
+        "a cursor resuming at A2",
+    );
+    // An admitted base naming A2 is no base of B's.
+    match store
+        .load_session_window(
+            &child,
+            WindowSelector::Admitted(crate::store::SessionHeadRef {
+                generation: 0,
+                revision: 0,
+                leaf: Some(a2.clone()),
+                checkpoint: None,
+            }),
+        )
+        .await
+    {
+        Err(StoreError::TurnBaseNotRetained { .. }) => {}
+        other => panic!("an admitted window at A2 must be refused, got {other:?}"),
+    }
+
+    // B appends B2 at A2's generation. The corrupt ceiling now admits two
+    // rows there; neither the predicate nor a page may take A2 for B's. B's
+    // window ends at A1, below both, so B still loads.
+    let runtime: &dyn crate::store::RuntimeStore = store.as_ref();
+    let mut child_state = crate::conformance::helpers::load_window_state(runtime, &child)
+        .await
+        .expect("load B under the corrupt ceiling")
+        .expect("B has a head");
+    append_nodes(&mut child_state, 1);
+    commit(store.as_ref(), &mut child_state).await;
+    let b2 = active_tail(&child_state, 1).remove(0);
+    assert!(
+        !store
+            .contains_active_ancestor(&child, &a2)
+            .await
+            .expect("predicate beside B2"),
+        "A2 is not on B's active path even at B2's generation"
+    );
+    assert!(
+        store
+            .contains_active_ancestor(&child, &a1)
+            .await
+            .expect("predicate over the real fork point"),
+        "the corrupt ceiling does not deny A1, which the edges reach"
+    );
+    assert_not_readable(one_node(store.as_ref(), &child, &a2).await, "A2 beside B2");
+    match store
+        .load_ancestors(&child, HistoryAnchor::Head, budget(16, u64::MAX))
+        .await
+    {
+        Ok(page) => assert!(
+            page.nodes.iter().all(|node| node.record.node_id != a2),
+            "B's head page must never carry A2: {:?}",
+            page.nodes
+                .iter()
+                .map(|node| &node.record.node_id)
+                .collect::<Vec<_>>()
+        ),
+        Err(StoreError::StoredDataCorrupt { .. }) => {}
+        Err(other) => panic!("B's head page over a corrupt ceiling: {other:?}"),
+    }
+
+    // The commit fence: an append that requires A2 active is refused, and
+    // one that requires A1 commits.
+    let mut refused = child_state.clone();
+    let commit_a2 = crate::store::append_request_commit_for_testing(
+        &mut refused,
+        "inflated-ceiling-requires-a2",
+        &[crate::SessionAppendNode::plugin(
+            "history-conformance",
+            serde_json::json!({"requires": "a2"}),
+        )],
+        Some(a2.as_str()),
+    )
+    .expect("build an append requiring A2");
+    match store.commit_runtime_state(commit_a2).await {
+        Err(StoreError::AppendAncestorNotActive { required_node_id }) => {
+            assert_eq!(required_node_id, a2);
+        }
+        other => panic!("an append requiring A2 must be refused, got {other:?}"),
+    }
+    let commit_a1 = crate::store::append_request_commit_for_testing(
+        &mut child_state,
+        "inflated-ceiling-requires-a1",
+        &[crate::SessionAppendNode::plugin(
+            "history-conformance",
+            serde_json::json!({"requires": "a1"}),
+        )],
+        Some(a1.as_str()),
+    )
+    .expect("build an append requiring A1");
+    let receipt = store
+        .commit_runtime_state(commit_a1)
+        .await
+        .expect("an append requiring the real fork point commits");
+    assert_ne!(receipt.committed_leaf_node_id.as_ref(), Some(&b2));
+}
+
+/// ADR 0057 and ADR 0112 §5: a history read selects its rows and confirms
+/// them in one snapshot. While a writer commits one node and one usage token
+/// per commit, every concurrent window read agrees with itself: its head
+/// revision, leaf generation and usage totals all describe the same commit,
+/// and every paged read is one edge path from its pinned leaf to the root.
+pub async fn history_selection_and_confirmation_share_one_snapshot(
+    store: Arc<dyn ConformanceDeployment>,
+) {
+    const COMMITS: u64 = 60;
+    let mut state = state("history-one-snapshot");
+    admit(store.as_ref(), &state.session_id).await;
+    state.ensure_agent_frame_initialized();
+    commit(store.as_ref(), &mut state).await;
+    let session_id = state.session_id.clone();
+    let base = window(store.as_ref(), &session_id).await;
+    let base_revision = base.head_revision;
+    let base_generation = u64::try_from(base.window.nodes.len()).expect("small window") - 1;
+
+    let writer = {
+        let store = Arc::clone(&store);
+        tokio::spawn(async move {
+            for _ in 0..COMMITS {
+                append_nodes(&mut state, 1);
+                commit_entries(
+                    store.as_ref(),
+                    &mut state,
+                    &[TokenLedgerEntry::reported(
+                        "turn",
+                        "snapshot-model",
+                        TokenUsage {
+                            input_tokens: 1,
+                            ..TokenUsage::default()
+                        },
+                    )],
+                )
+                .await;
+            }
+        })
+    };
+    let readers = (0..2)
+        .map(|_| {
+            let store = Arc::clone(&store);
+            let session_id = session_id.clone();
+            tokio::spawn(async move {
+                let mut reads = 0_u64;
+                loop {
+                    let read = window(store.as_ref(), &session_id).await;
+                    let commits = read.head_revision - base_revision;
+                    let tokens = read
+                        .usage
+                        .rows
+                        .iter()
+                        .map(|row| u64::try_from(row.usage.input_tokens).expect("tokens"))
+                        .sum::<u64>();
+                    assert_eq!(
+                        tokens, commits,
+                        "usage totals and head revision {} come from different snapshots",
+                        read.head_revision
+                    );
+                    let leaf = read.window.nodes.last().expect("a committed window");
+                    assert_eq!(read.window.leaf_node_id.as_ref(), Some(&leaf.node_id));
+                    assert_eq!(
+                        u64::try_from(read.window.nodes.len()).expect("small window") - 1,
+                        base_generation + commits,
+                        "window rows and head revision {} come from different snapshots",
+                        read.head_revision
+                    );
+                    let page = store
+                        .load_ancestors(&session_id, HistoryAnchor::Head, budget(1_000, u64::MAX))
+                        .await
+                        .expect("page the whole ancestry");
+                    assert_eq!(page.stop, HistoryStop::Root);
+                    assert_eq!(
+                        page.nodes.first().map(|node| &node.record.node_id),
+                        page.pinned_leaf.as_ref()
+                    );
+                    for pair in page.nodes.windows(2) {
+                        assert_eq!(
+                            pair[0].record.parent_node_id.as_ref(),
+                            Some(&pair[1].record.node_id)
+                        );
+                    }
+                    let pinned = page.pinned_leaf.clone().expect("a pinned leaf");
+                    assert!(
+                        store
+                            .contains_active_ancestor(&session_id, &pinned)
+                            .await
+                            .expect("the pinned leaf stays active"),
+                    );
+                    reads += 1;
+                    if commits == COMMITS {
+                        return reads;
+                    }
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    writer.await.expect("snapshot writer");
+    for reader in readers {
+        let reads = reader.await.expect("snapshot reader");
+        assert!(reads > 0, "every reader read at least once");
+    }
+}
+
+/// ADR 0057: generation is a checked increment, and the check sits inside
+/// the commit. A commit whose second node would overflow the stored
+/// generation writes nothing: no node, no head move, no usage row, and no
+/// receipt, so the identical commit is fresh once the parent is sound.
+pub async fn graph_generation_overflow_rolls_back_every_write(
+    store: Arc<dyn ConformanceDeployment>,
+) {
+    let mut state = state("history-generation-overflow");
+    admit(store.as_ref(), &state.session_id).await;
+    state.ensure_agent_frame_initialized();
+    append_nodes(&mut state, 1);
+    commit(store.as_ref(), &mut state).await;
+    let leaf = active_tail(&state, 1).remove(0);
+    let before_meta = store
+        .load_session_head_meta(&state.session_id)
+        .await
+        .expect("head before the overflow")
+        .expect("committed head");
+    let before_usage = store
+        .load_usage_totals(&state.session_id)
+        .await
+        .expect("usage before the overflow");
+    store
+        .corrupt_graph_row_for_testing(
+            &leaf,
+            GraphRowCorruption::SetGeneration(i64::MAX as u64 - 1),
+        )
+        .await
+        .expect("move the leaf to the last generation below the ceiling");
+
+    append_nodes(&mut state, 2);
+    let operation = OperationId::turn(&state.session_id, "history-overflow", "commit");
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(
+        &mut state,
+        &[TokenLedgerEntry::reported(
+            "turn",
+            "overflow-model",
+            TokenUsage {
+                input_tokens: 1,
+                ..TokenUsage::default()
+            },
+        )],
+        operation,
+    )
+    .expect("prepare the overflowing commit");
+    let appended = commit
+        .graph
+        .nodes()
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(appended.len(), 2, "the commit appends two nodes");
+    match store.commit_runtime_state(commit.clone()).await {
+        Err(StoreError::MonotonicCounterOverflow { counter, current }) => {
+            assert_eq!(counter, "session_graph_generation");
+            assert_eq!(current, i64::MAX as u64);
+        }
+        other => panic!("the second node's generation must overflow, got {other:?}"),
+    }
+
+    let after_meta = store
+        .load_session_head_meta(&state.session_id)
+        .await
+        .expect("head after the overflow")
+        .expect("committed head");
+    assert_eq!(after_meta.head_revision, before_meta.head_revision);
+    assert_eq!(after_meta.leaf_node_id, before_meta.leaf_node_id);
+    assert_eq!(after_meta.checkpoint_ref, before_meta.checkpoint_ref);
+    assert_eq!(
+        store
+            .load_usage_totals(&state.session_id)
+            .await
+            .expect("usage after the overflow"),
+        before_usage
+    );
+    for node_id in &appended {
+        assert_not_readable(
+            one_node(store.as_ref(), &state.session_id, node_id).await,
+            "a node from the refused commit",
+        );
+    }
+
+    store
+        .corrupt_graph_row_for_testing(&leaf, GraphRowCorruption::SetGeneration(1))
+        .await
+        .expect("restore the leaf's generation");
+    let receipt = store
+        .commit_runtime_state(commit)
+        .await
+        .expect("the identical commit is fresh once the parent is sound");
+    assert!(
+        !receipt.receipt_replayed,
+        "the refused commit left a receipt behind"
+    );
+    assert_eq!(receipt.head_revision, before_meta.head_revision + 1);
+}
+
+/// ADR 0057: frame facts are derived as nodes are appended, so the first
+/// node of a root append must be a `FrameOpen`. A later `FrameOpen` in the
+/// same append does not rescue the root nodes before it, and the refused
+/// append writes nothing.
+pub async fn a_later_frame_open_cannot_rescue_earlier_root_nodes(
+    store: Arc<dyn ConformanceDeployment>,
+) {
+    let mut state = state("history-late-frame-open");
+    admit(store.as_ref(), &state.session_id).await;
+    append_nodes(&mut state, 1);
+    open_frame(&mut state, "history-late-frame");
+    append_nodes(&mut state, 1);
+    let operation = OperationId::turn(&state.session_id, "history-late-frame", "commit");
+    let (commit, _) = RuntimeCommit::persisted_state_with_operation(&mut state, &[], operation)
+        .expect("prepare the root append");
+    let appended = commit
+        .graph
+        .nodes()
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    assert_eq!(appended.len(), 3, "plugin, FrameOpen, plugin");
+    let root = appended[0].clone();
+    match store.commit_runtime_state(commit).await {
+        Err(StoreError::MissingFrameOpenAncestor { leaf_node_id }) => {
+            assert_eq!(leaf_node_id, root, "the refusal names the unframed root");
+        }
+        other => panic!("a root append must open its frame first, got {other:?}"),
+    }
+    assert!(
+        store
+            .load_session_head_meta(&state.session_id)
+            .await
+            .expect("head after the refusal")
+            .is_none_or(|head| head.leaf_node_id.is_none()),
+        "the refused append published no leaf"
+    );
+    for node_id in &appended {
+        assert_not_readable(
+            one_node(store.as_ref(), &state.session_id, node_id).await,
+            "a node from the refused root append",
+        );
+    }
+}

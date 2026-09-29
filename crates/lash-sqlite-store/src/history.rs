@@ -5,6 +5,9 @@ use lash_core_execution::store::{
     HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
     SessionWindowRead, UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowSelector,
 };
+use lash_core_execution::store_backend_support::{
+    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
+};
 use std::num::NonZeroU32;
 use std::sync::atomic::Ordering;
 
@@ -87,6 +90,133 @@ fn missing_anchor(
         },
     })
 }
+fn path_generation(value: i64) -> Result<u64, StoreError> {
+    nonnegative("SessionGraph", "generation", value)
+}
+
+/// The live head leaf of `session`, where [`head_reaches`] starts. `None`
+/// when the session has no head row or its head has no live leaf.
+pub(crate) fn head_leaf_path_node(
+    conn: &Connection,
+    session: &SessionId,
+) -> Result<Option<PathNode>, StoreError> {
+    conn.query_row(
+        session_sql::session_sql()
+            .graph_sqlite
+            .select_head_leaf_path_node
+            .sql(),
+        params![session.as_str()],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        },
+    )
+    .optional()
+    .map_err(sqlite_error)?
+    .map(|(node_id, owner, generation)| {
+        Ok(PathNode {
+            node_id: node_id.into(),
+            owner_session_id: owner.into(),
+            generation: path_generation(generation)?,
+        })
+    })
+    .transpose()
+}
+
+fn owner_exit(conn: &Connection, owner: &SessionId) -> Result<OwnerExit, StoreError> {
+    let row = conn
+        .query_row(
+            session_sql::session_sql()
+                .graph_sqlite
+                .select_owner_exit
+                .sql(),
+            params![owner.as_str()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    let Some((
+        node_id,
+        generation,
+        parent_edge,
+        parent_id,
+        parent_owner,
+        parent_generation,
+        tombstoned,
+    )) = row
+    else {
+        return Ok(OwnerExit { lowest: None });
+    };
+    let parent = match (
+        parent_edge,
+        parent_id,
+        parent_owner,
+        parent_generation,
+        tombstoned,
+    ) {
+        (None, ..) => OwnerExitParent::Root,
+        (Some(_), Some(id), Some(owner), Some(generation), Some(tombstoned)) => {
+            OwnerExitParent::Node {
+                node: PathNode {
+                    node_id: id.into(),
+                    owner_session_id: owner.into(),
+                    generation: path_generation(generation)?,
+                },
+                tombstoned: tombstoned != 0,
+            }
+        }
+        (Some(edge), ..) => OwnerExitParent::Missing {
+            node_id: edge.into(),
+        },
+    };
+    Ok(OwnerExit {
+        lowest: Some(OwnerLowestNode {
+            node_id: node_id.into(),
+            generation: path_generation(generation)?,
+            parent,
+        }),
+    })
+}
+
+/// Whether `head_leaf` reaches `candidate` through parent edges (ADR 0057,
+/// edge authority). The fork-lineage ceilings that selected the candidate
+/// are never consulted.
+pub(crate) fn head_reaches(
+    conn: &Connection,
+    head_leaf: Option<PathNode>,
+    candidate: PathNode,
+) -> Result<bool, StoreError> {
+    let mut probe = HeadPathProbe::new(candidate, head_leaf);
+    loop {
+        if let Some(reaches) = probe.verdict() {
+            return Ok(reaches);
+        }
+        let exit = owner_exit(conn, probe.owner())?;
+        probe.descend(exit)?;
+    }
+}
+
+fn header_path_node(row: &Header) -> Result<PathNode, StoreError> {
+    Ok(PathNode {
+        node_id: row.id.clone().into(),
+        owner_session_id: row.owner.clone().into(),
+        generation: path_generation(row.generation)?,
+    })
+}
+
 fn lineage(conn: &Connection, session: &SessionId) -> Result<LineageStamp, StoreError> {
     let mut statement = conn
         .prepare_cached(session_sql::session_sql().lineage.select_for_stamp.sql())
@@ -168,6 +298,17 @@ fn window(
                 ));
             }
         };
+        // An admitted base names a leaf the head moved on from; it is this
+        // session's base only while the head still reaches it.
+        if admitted
+            && !head_reaches(
+                conn,
+                head_leaf_path_node(conn, session)?,
+                header_path_node(&last)?,
+            )?
+        {
+            return Err(StoreError::TurnBaseNotRetained { revision });
+        }
         if !admitted
             && meta.current_frame_node_id.as_ref().map(|id| id.as_str())
                 != Some(last.frame.as_str())
@@ -322,15 +463,44 @@ impl SessionHistoryStore for SqliteStore {
             .read(move |conn| {
                 Ok((|| {
                     live(conn, &session)?;
-                    conn.query_row(
-                        session_sql::session_sql()
-                            .graph_sqlite
-                            .exists_active_ancestor
-                            .sql(),
-                        params![session.as_str(), node.as_str()],
-                        |row| row.get::<_, bool>(0),
+                    let Some((leaf, candidate)) = conn
+                        .query_row(
+                            session_sql::session_sql()
+                                .graph_sqlite
+                                .select_active_ancestor_candidate
+                                .sql(),
+                            params![session.as_str(), node.as_str()],
+                            |row| {
+                                Ok((
+                                    (
+                                        row.get::<_, String>(0)?,
+                                        row.get::<_, String>(1)?,
+                                        row.get::<_, i64>(2)?,
+                                    ),
+                                    (row.get::<_, String>(3)?, row.get::<_, i64>(4)?),
+                                ))
+                            },
+                        )
+                        .optional()
+                        .map_err(sqlite_error)?
+                    else {
+                        return Ok(false);
+                    };
+                    let (leaf_id, leaf_owner, leaf_generation) = leaf;
+                    let (owner, generation) = candidate;
+                    head_reaches(
+                        conn,
+                        Some(PathNode {
+                            node_id: leaf_id.into(),
+                            owner_session_id: leaf_owner.into(),
+                            generation: path_generation(leaf_generation)?,
+                        }),
+                        PathNode {
+                            node_id: node.clone(),
+                            owner_session_id: owner.into(),
+                            generation: path_generation(generation)?,
+                        },
                     )
-                    .map_err(sqlite_error)
                 })())
             })
             .await
@@ -388,6 +558,12 @@ impl SessionHistoryStore for SqliteStore {
             .map_err(sqlite_error)?
     }
 }
+/// Whether a page starts at the head leaf or at a node the caller named.
+enum AnchorKind {
+    Head,
+    Named,
+}
+
 fn ancestors(
     conn: &Connection,
     session: &SessionId,
@@ -398,6 +574,10 @@ fn ancestors(
 ) -> Result<HistoryPage, StoreError> {
     live(conn, session)?;
     let stamp = lineage(conn, session)?;
+    let anchor_kind = match &anchor {
+        HistoryAnchor::Head => AnchorKind::Head,
+        HistoryAnchor::Node(_) | HistoryAnchor::Cursor(_) => AnchorKind::Named,
+    };
     let (pinned, start, expected) = match anchor {
         HistoryAnchor::Head => {
             let meta =
@@ -434,6 +614,21 @@ fn ancestors(
         Some(row) => row,
         None => return Err(missing_anchor(conn, session, start.as_str())?),
     };
+    // The ceilings only selected the anchor; the head's parent edges admit
+    // it. A `Head` anchor is the head leaf itself.
+    if !matches!(anchor_kind, AnchorKind::Head)
+        && !head_reaches(
+            conn,
+            head_leaf_path_node(conn, session)?,
+            header_path_node(&first)?,
+        )?
+    {
+        return Err(StoreError::HistoryAnchorUnavailable {
+            session_id: session.clone(),
+            node_id: start.clone(),
+            reason: AnchorUnavailable::NotReadable,
+        });
+    }
     let start_generation = nonnegative("SessionGraph", "generation", first.generation)?;
     if expected.is_some_and(|g| g != start_generation) {
         return Err(corrupt("SessionGraph", "history cursor generation changed"));

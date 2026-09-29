@@ -685,8 +685,8 @@ impl PostgresStore {
                     message: "head row disappeared while commit authority was held".to_string(),
                 })?;
         let old_leaf_node_id = existing.as_ref().and_then(|head| head.leaf_node_id.clone());
-        let parent_node_facts = match old_leaf_node_id.as_deref() {
-            Some(leaf_node_id) => sqlx::query_as::<_, (i64, String)>(
+        let parent_leaf = match old_leaf_node_id.as_deref() {
+            Some(leaf_node_id) => sqlx::query_as::<_, (i64, String, String)>(
                 session_sql()
                     .graph_postgres
                     .select_parent_facts_for_update
@@ -696,33 +696,63 @@ impl PostgresStore {
             .fetch_optional(&mut **tx)
             .await
             .map_err(store_sqlx_error)?
-            .map(|(generation, frame_node_id)| {
-                Ok(lash_core_execution::store::ParentNodeFacts {
-                    node_id: leaf_node_id.to_string().into(),
-                    generation: u64_from_sql("SessionGraph node", "generation", generation)?,
-                    frame_node_id: frame_node_id.into(),
-                })
+            .map(|(generation, frame_node_id, owner)| {
+                let generation = u64_from_sql("SessionGraph node", "generation", generation)?;
+                Ok::<_, StoreError>((
+                    lash_core_execution::store::ParentNodeFacts {
+                        node_id: leaf_node_id.to_string().into(),
+                        generation,
+                        frame_node_id: frame_node_id.into(),
+                    },
+                    lash_core_execution::store_backend_support::PathNode {
+                        node_id: leaf_node_id.to_string().into(),
+                        owner_session_id: owner.into(),
+                        generation,
+                    },
+                ))
             })
             .transpose()?,
             None => None,
         };
+        let (parent_node_facts, parent_path_node) = parent_leaf.unzip();
+        // The ceilings select the requested ancestor; the head leaf's parent
+        // edges decide whether it is active (ADR 0057, edge authority).
         let requested_ancestor_is_active = match (
             requested_append_ancestor(&commit.turn_commit),
             parent_node_facts.as_ref(),
         ) {
             (None, _) => true,
             (Some(_), None) => false,
-            (Some(required), Some(parent)) => sqlx::query_scalar::<_, bool>(
-                session_sql().graph_postgres.exists_readable_ancestor.sql(),
+            (Some(required), Some(parent)) => match sqlx::query_as::<_, (String, i64)>(
+                session_sql().graph_postgres.select_readable_ancestor.sql(),
             )
             .bind(required)
             .bind(commit.session_id.as_str())
             .bind(i64::try_from(parent.generation).map_err(|_| {
                 StoreError::Backend("parent generation does not fit PostgreSQL BIGINT".to_string())
             })?)
-            .fetch_one(&mut **tx)
+            .fetch_optional(&mut **tx)
             .await
-            .map_err(store_sqlx_error)?,
+            .map_err(store_sqlx_error)?
+            {
+                None => false,
+                Some((owner, generation)) => {
+                    super::history::head_reaches(
+                        &mut tx,
+                        parent_path_node.clone(),
+                        lash_core_execution::store_backend_support::PathNode {
+                            node_id: required.to_string().into(),
+                            owner_session_id: owner.into(),
+                            generation: u64_from_sql(
+                                "SessionGraph node",
+                                "generation",
+                                generation,
+                            )?,
+                        },
+                    )
+                    .await?
+                }
+            },
         };
         // The head-CAS verdict, in shared code, over the two reads this
         // transaction made: `existing` without a row lock (it serves early

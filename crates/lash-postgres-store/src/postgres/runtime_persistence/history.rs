@@ -5,6 +5,9 @@ use lash_core_execution::store::{
     HistoryCursor, HistoryNode, HistoryPage, HistoryStop, LineageStamp, SessionHistoryStore,
     SessionWindowRead, UsageLedgerCursor, UsageLedgerPage, UsageLedgerRow, WindowSelector,
 };
+use lash_core_execution::store_backend_support::{
+    HeadPathProbe, OwnerExit, OwnerExitParent, OwnerLowestNode, PathNode,
+};
 use std::num::NonZeroU32;
 #[cfg(any(test, feature = "testing"))]
 use std::sync::atomic::Ordering;
@@ -88,6 +91,117 @@ const PAGE_HEADERS: &str = "WITH readable_sessions AS (
       AND (readable.generation_ceiling IS NULL
            OR node.generation <= readable.generation_ceiling)
     WHERE node.tombstoned = FALSE ORDER BY node.generation DESC LIMIT $3";
+
+/// The live head leaf of `$1`, where the head-path probe starts.
+const HEAD_LEAF_PATH_NODE: &str = "SELECT leaf.node_id, leaf.session_id, leaf.generation
+    FROM lash_sessions AS head
+    JOIN lash_graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
+    WHERE head.session_id = $1 AND NOT leaf.tombstoned";
+
+/// The lowest-generation node owner `$1` holds and the row its parent edge
+/// names: where the head-path probe leaves that owner.
+const OWNER_EXIT: &str = "SELECT low.node_id, low.generation, low.parent_node_id,
+           parent.node_id AS parent_id, parent.session_id AS parent_owner,
+           parent.generation AS parent_generation, parent.tombstoned AS parent_tombstoned
+    FROM lash_graph_nodes AS low
+    LEFT JOIN lash_graph_nodes AS parent ON parent.node_id = low.parent_node_id
+    WHERE low.session_id = $1
+    ORDER BY low.generation LIMIT 1";
+
+/// The live head leaf of `session_id`, where [`head_reaches`] starts. `None`
+/// when the session has no head row or its head has no live leaf.
+pub(super) async fn head_leaf_path_node(
+    tx: &mut PgTx<'_>,
+    session_id: &SessionId,
+) -> Result<Option<PathNode>, StoreError> {
+    sqlx::query_as::<_, (String, String, i64)>(HEAD_LEAF_PATH_NODE)
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .map(|(node_id, owner, generation)| {
+            Ok(PathNode {
+                node_id: node_id.into(),
+                owner_session_id: owner.into(),
+                generation: u64_from_sql("SessionGraph", "generation", generation)?,
+            })
+        })
+        .transpose()
+}
+
+async fn owner_exit(tx: &mut PgTx<'_>, owner: &SessionId) -> Result<OwnerExit, StoreError> {
+    let Some(row) = sqlx::query(OWNER_EXIT)
+        .bind(owner.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+    else {
+        return Ok(OwnerExit { lowest: None });
+    };
+    let parent_edge: Option<String> = row.get("parent_node_id");
+    let parent_id: Option<String> = row.get("parent_id");
+    let parent_owner: Option<String> = row.get("parent_owner");
+    let parent_generation: Option<i64> = row.get("parent_generation");
+    let parent_tombstoned: Option<bool> = row.get("parent_tombstoned");
+    let parent = match (
+        parent_edge,
+        parent_id,
+        parent_owner,
+        parent_generation,
+        parent_tombstoned,
+    ) {
+        (None, ..) => OwnerExitParent::Root,
+        (Some(_), Some(id), Some(owner), Some(generation), Some(tombstoned)) => {
+            OwnerExitParent::Node {
+                node: PathNode {
+                    node_id: id.into(),
+                    owner_session_id: owner.into(),
+                    generation: u64_from_sql("SessionGraph", "generation", generation)?,
+                },
+                tombstoned,
+            }
+        }
+        (Some(edge), ..) => OwnerExitParent::Missing {
+            node_id: edge.into(),
+        },
+    };
+    let node_id: String = row.get("node_id");
+    Ok(OwnerExit {
+        lowest: Some(OwnerLowestNode {
+            node_id: node_id.into(),
+            generation: u64_from_sql("SessionGraph", "generation", row.get("generation"))?,
+            parent,
+        }),
+    })
+}
+
+/// Whether `head_leaf` reaches `candidate` through parent edges (ADR 0057,
+/// edge authority). The fork-lineage ceilings that selected the candidate
+/// are never consulted.
+pub(super) async fn head_reaches(
+    tx: &mut PgTx<'_>,
+    head_leaf: Option<PathNode>,
+    candidate: PathNode,
+) -> Result<bool, StoreError> {
+    let mut probe = HeadPathProbe::new(candidate, head_leaf);
+    loop {
+        if let Some(reaches) = probe.verdict() {
+            return Ok(reaches);
+        }
+        let exit = owner_exit(tx, probe.owner()).await?;
+        probe.descend(exit)?;
+    }
+}
+
+fn row_path_node(row: &PgRow) -> Result<PathNode, StoreError> {
+    let node_id: String = row.get("node_id");
+    let owner: String = row.get("session_id");
+    Ok(PathNode {
+        node_id: node_id.into(),
+        owner_session_id: owner.into(),
+        generation: u64_from_sql("SessionGraph", "generation", row.get("generation"))?,
+    })
+}
 
 async fn readable_row(
     tx: &mut PgTx<'_>,
@@ -221,6 +335,14 @@ impl SessionHistoryStore for PostgresStore {
                 } else {
                     corrupt("SessionGraph", format!("leaf `{leaf}` is tombstoned"))
                 });
+            }
+            // An admitted base names a leaf the head moved on from; it is
+            // this session's base only while the head still reaches it.
+            if admitted {
+                let head_leaf = head_leaf_path_node(&mut tx, session_id).await?;
+                if !head_reaches(&mut tx, head_leaf, row_path_node(&leaf_row)?).await? {
+                    return Err(StoreError::TurnBaseNotRetained { revision });
+                }
             }
             let leaf_generation: i64 = leaf_row.get("generation");
             let frame_id: String = leaf_row.get("frame_node_id");
@@ -386,6 +508,7 @@ impl SessionHistoryStore for PostgresStore {
         }
         check_live(&mut tx, session_id).await?;
         let lineage = lineage_stamp(&mut tx, session_id).await?;
+        let named_anchor = !matches!(anchor, HistoryAnchor::Head);
         let (pinned_leaf, start, expected_generation) = match anchor {
             HistoryAnchor::Head => {
                 let meta =
@@ -424,6 +547,18 @@ impl SessionHistoryStore for PostgresStore {
         };
         if first.get::<bool, _>("tombstoned") {
             return Err(missing_anchor(&mut tx, session_id, start.as_str()).await?);
+        }
+        // The ceilings only selected the anchor; the head's parent edges
+        // admit it. A `Head` anchor is the head leaf itself.
+        if named_anchor {
+            let head_leaf = head_leaf_path_node(&mut tx, session_id).await?;
+            if !head_reaches(&mut tx, head_leaf, row_path_node(&first)?).await? {
+                return Err(StoreError::HistoryAnchorUnavailable {
+                    session_id: session_id.clone(),
+                    node_id: start.clone(),
+                    reason: AnchorUnavailable::NotReadable,
+                });
+            }
         }
         let start_generation = u64_from_sql("SessionGraph", "generation", first.get("generation"))?;
         if expected_generation.is_some_and(|expected| expected != start_generation) {
@@ -581,8 +716,10 @@ impl SessionHistoryStore for PostgresStore {
     ) -> Result<bool, StoreError> {
         let mut tx = read_tx(self).await?;
         check_live(&mut tx, session_id).await?;
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM lash_sessions AS head
+        let candidate = sqlx::query_as::<_, (String, String, i64, String, i64)>(
+            "SELECT leaf.node_id, leaf.session_id, leaf.generation,
+                    node.session_id, node.generation
+             FROM lash_sessions AS head
              JOIN lash_graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
              JOIN lash_graph_nodes AS node ON node.node_id = $2
              WHERE head.session_id = $1 AND NOT leaf.tombstoned AND NOT node.tombstoned
@@ -590,13 +727,34 @@ impl SessionHistoryStore for PostgresStore {
                AND (node.session_id = $1 OR EXISTS (
                  SELECT 1 FROM lash_fork_lineage AS lineage WHERE lineage.session_id = $1
                    AND lineage.ancestor_session_id = node.session_id
-                   AND node.generation <= lineage.fork_generation)))",
+                   AND node.generation <= lineage.fork_generation))",
         )
         .bind(session_id.as_str())
         .bind(node_id.as_str())
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
+        // The ceilings select the candidate with the head leaf; the leaf's
+        // parent edges decide (ADR 0057, edge authority).
+        let exists = match candidate {
+            None => false,
+            Some((leaf_id, leaf_owner, leaf_generation, owner, generation)) => {
+                head_reaches(
+                    &mut tx,
+                    Some(PathNode {
+                        node_id: leaf_id.into(),
+                        owner_session_id: leaf_owner.into(),
+                        generation: u64_from_sql("SessionGraph", "generation", leaf_generation)?,
+                    }),
+                    PathNode {
+                        node_id: node_id.clone(),
+                        owner_session_id: owner.into(),
+                        generation: u64_from_sql("SessionGraph", "generation", generation)?,
+                    },
+                )
+                .await?
+            }
+        };
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(exists)
     }

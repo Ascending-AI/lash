@@ -2711,6 +2711,22 @@
               "budget_ms": 8.911,
               "required": true
             },
+            "store_hardening.memory.history_cursor_page": {
+              "budget_ms": 36.0,
+              "required": true
+            },
+            "store_hardening.memory.history_fork_contains_active_ancestor": {
+              "budget_ms": 30.0,
+              "required": true
+            },
+            "store_hardening.memory.history_fork_node_anchor": {
+              "budget_ms": 36.0,
+              "required": true
+            },
+            "store_hardening.memory.history_head_page": {
+              "budget_ms": 30.0,
+              "required": true
+            },
             "store_hardening.memory.complete_queued_work": {
               "budget_ms": 26.529,
               "required": true
@@ -2741,6 +2757,22 @@
             },
             "store_hardening.postgres.seal_drive_epoch": {
               "budget_ms": 309.862,
+              "required": true
+            },
+            "store_hardening.postgres.history_cursor_page": {
+              "budget_ms": 200.0,
+              "required": true
+            },
+            "store_hardening.postgres.history_fork_contains_active_ancestor": {
+              "budget_ms": 176.0,
+              "required": true
+            },
+            "store_hardening.postgres.history_fork_node_anchor": {
+              "budget_ms": 255.0,
+              "required": true
+            },
+            "store_hardening.postgres.history_head_page": {
+              "budget_ms": 200.0,
               "required": true
             },
             "store_hardening.postgres.complete_queued_work": {
@@ -2781,6 +2813,22 @@
             },
             "store_hardening.sqlite.seal_drive_epoch": {
               "budget_ms": 44.198,
+              "required": true
+            },
+            "store_hardening.sqlite.history_cursor_page": {
+              "budget_ms": 40.0,
+              "required": true
+            },
+            "store_hardening.sqlite.history_fork_contains_active_ancestor": {
+              "budget_ms": 30.0,
+              "required": true
+            },
+            "store_hardening.sqlite.history_fork_node_anchor": {
+              "budget_ms": 36.0,
+              "required": true
+            },
+            "store_hardening.sqlite.history_head_page": {
+              "budget_ms": 40.0,
               "required": true
             },
             "store_hardening.sqlite.complete_queued_work": {

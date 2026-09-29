@@ -364,17 +364,19 @@ lash_store_sql::statements! {
         select_frame_body = "SELECT parent_node_id, node_json FROM graph_nodes
              WHERE node_id = ?1 AND tombstoned = 0";
 
-        /// The generation and frame pointer of the live leaf `?1`.
-        select_parent_facts = "SELECT generation, frame_node_id FROM graph_nodes
+        /// The generation, frame pointer and owner of the live leaf `?1`.
+        select_parent_facts = "SELECT generation, frame_node_id, session_id FROM graph_nodes
                                  WHERE node_id = ?1 AND tombstoned = 0";
 
         /// The frame node nearest to `?1`.
         select_frame_node_id = "SELECT frame_node_id FROM graph_nodes
          WHERE node_id = ?1 AND tombstoned = 0";
 
-        /// Whether session `?2` may read live node `?1` at or below
-        /// generation `?3`: the fresh-append ancestor fence.
-        exists_readable_ancestor = "SELECT 1 FROM graph_nodes AS node
+        /// The owner and generation of live node `?1` when session `?2`'s
+        /// ownership-or-ceiling accelerator admits it at or below generation
+        /// `?3`: the fresh-append ancestor fence's candidate. The head-path
+        /// probe then confirms it through parent edges (ADR 0057).
+        select_readable_ancestor = "SELECT node.session_id, node.generation FROM graph_nodes AS node
                                  WHERE node.node_id = ?1
                                    AND node.tombstoned = 0
                                    AND node.generation <= ?3
@@ -388,10 +390,13 @@ lash_store_sql::statements! {
                                        )
                                    )";
 
-        /// Whether `?2` is readable on `?1`'s current path. The head leaf
-        /// supplies the generation ceiling in the same read statement.
-        exists_active_ancestor = "SELECT EXISTS (
-                SELECT 1 FROM session_head AS head
+        /// `?1`'s live head leaf and live candidate `?2` when the accelerator
+        /// admits the candidate at or below the leaf's generation: the
+        /// active-ancestor predicate's candidate, read with the leaf in one
+        /// statement. The head-path probe confirms it (ADR 0057).
+        select_active_ancestor_candidate = "SELECT leaf.node_id, leaf.session_id, leaf.generation,
+                       node.session_id, node.generation
+                FROM session_head AS head
                 JOIN graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
                 JOIN graph_nodes AS node ON node.node_id = ?2
                 WHERE head.session_id = ?1
@@ -403,8 +408,22 @@ lash_store_sql::statements! {
                       WHERE lineage.session_id = ?1
                         AND lineage.ancestor_session_id = node.session_id
                         AND node.generation <= lineage.fork_generation
-                  ))
-            )";
+                  ))";
+
+        /// The live head leaf of `?1`, where the head-path probe starts.
+        select_head_leaf_path_node = "SELECT leaf.node_id, leaf.session_id, leaf.generation
+                FROM session_head AS head
+                JOIN graph_nodes AS leaf ON leaf.node_id = head.leaf_node_id
+                WHERE head.session_id = ?1 AND leaf.tombstoned = 0";
+
+        /// The lowest-generation node owner `?1` holds and the row its parent
+        /// edge names: where the head-path probe leaves that owner.
+        select_owner_exit = "SELECT low.node_id, low.generation, low.parent_node_id,
+                       parent.node_id, parent.session_id, parent.generation, parent.tombstoned
+                FROM graph_nodes AS low
+                LEFT JOIN graph_nodes AS parent ON parent.node_id = low.parent_node_id
+                WHERE low.session_id = ?1
+                ORDER BY low.generation LIMIT 1";
 
         /// The parent of `?1` when `?1` itself is unreachable: no live child,
         /// no head pointing at it, no anchor holding it.
@@ -458,6 +477,7 @@ lash_store_sql::statements! {
         set_parent_for_testing = "UPDATE graph_nodes SET parent_node_id = ?2 WHERE node_id = ?1";
         set_frame_pointer_for_testing = "UPDATE graph_nodes SET frame_node_id = ?2 WHERE node_id = ?1";
         set_body_bytes_for_testing = "UPDATE graph_nodes SET body_bytes = ?2 WHERE node_id = ?1";
+        set_generation_for_testing = "UPDATE graph_nodes SET generation = ?2 WHERE node_id = ?1";
         set_body_for_testing = "UPDATE graph_nodes SET node_json = ?2, body_bytes = ?3 WHERE node_id = ?1";
 
         /// One statement rather than one per node: the rows are known in full

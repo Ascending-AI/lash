@@ -56,6 +56,15 @@ impl StoreTestSupport for SqliteStore {
                             params![node_id.as_str(), bytes],
                         )?
                     }
+                    GraphRowCorruption::SetGeneration(generation) => {
+                        let generation =
+                            i64::try_from(generation).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.set_generation_for_testing.sql(),
+                            params![node_id.as_str(), generation],
+                        )?
+                    }
                     GraphRowCorruption::SetPayloadKindToPlugin => {
                         let (parent, body): (Option<String>, String) = tx.query_row(
                             "SELECT parent_node_id, node_json FROM graph_nodes WHERE node_id = ?1",
@@ -85,6 +94,31 @@ impl StoreTestSupport for SqliteStore {
                         )?
                     }
                 };
+                if changed != 1 {
+                    return Err(rusqlite::Error::QueryReturnedNoRows);
+                }
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
+    async fn force_fork_lineage_for_testing(
+        &self,
+        session_id: &SessionId,
+        ancestor_node_id: &lash_core_execution::NodeId,
+    ) -> Result<(), StoreError> {
+        let session_id = session_id.clone();
+        let ancestor_node_id = ancestor_node_id.clone();
+        self.conn
+            .write(move |tx| {
+                let changed = tx.execute(
+                    "INSERT OR REPLACE INTO fork_lineage
+                     (session_id, ancestor_session_id, fork_node_id, fork_generation)
+                     SELECT ?1, session_id, node_id, generation
+                     FROM graph_nodes WHERE node_id = ?2",
+                    params![session_id.as_str(), ancestor_node_id.as_str()],
+                )?;
                 if changed != 1 {
                     return Err(rusqlite::Error::QueryReturnedNoRows);
                 }

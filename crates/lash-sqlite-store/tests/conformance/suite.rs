@@ -685,7 +685,7 @@ lash_conformance::session_graph_state_machine_tests!({
         async move {
             let backend = TestBackend::open(SUBSTRATE).await;
             retained.keep(&backend);
-            backend.store().await as Arc<dyn DeploymentStore>
+            backend.store().await as Arc<dyn ConformanceDeployment>
         }
     })
 });
