@@ -206,6 +206,11 @@ where
         .publish_module_artifact(&fresh, module_ref, &module_bytes)
         .await
         .expect("fresh pin publishes");
+    handles
+        .process_env
+        .publish_process_execution_env(&fresh, &env_ref, &env_bytes)
+        .await
+        .expect("fresh pin publishes environment");
     assert_eq!(
         handles
             .artifacts
@@ -213,6 +218,14 @@ where
             .await
             .expect("read"),
         Some(module_bytes)
+    );
+    assert_eq!(
+        handles
+            .process_env
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read"),
+        Some(env_bytes)
     );
 }
 
@@ -230,6 +243,12 @@ where
     let artifact = module("idempotent");
     let key = artifact.module_ref().as_str();
     let bytes = artifact.to_store_bytes().expect("module bytes");
+    let env = lash_core::ProcessExecutionEnvSpec::new(
+        lash_core::PluginOptions::default(),
+        lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
+    );
+    let env_ref = env.stable_ref().expect("env ref");
+    let env_bytes = env.to_store_bytes().expect("env bytes");
     let (source, source_claim) = pin_claim();
     let (destination, _) = pin_claim();
     handles
@@ -237,21 +256,40 @@ where
         .publish_module_artifact(&source_claim, key, &bytes)
         .await
         .expect("publish source");
+    handles
+        .process_env
+        .publish_process_execution_env(&source_claim, &env_ref, &env_bytes)
+        .await
+        .expect("publish source environment");
     let carry = ResolvedArtifactCleanup {
         referrer: source.clone(),
-        carries: vec![ArtifactCarry {
-            artifact: ArtifactName {
-                store: ArtifactStoreId::LashlangModule,
-                artifact_ref: key.to_owned(),
+        carries: vec![
+            ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::LashlangModule,
+                    artifact_ref: key.to_owned(),
+                },
+                to: destination.clone(),
             },
-            to: destination.clone(),
-        }],
+            ArtifactCarry {
+                artifact: ArtifactName {
+                    store: ArtifactStoreId::ProcessEnv,
+                    artifact_ref: env_ref.as_str().to_owned(),
+                },
+                to: destination.clone(),
+            },
+        ],
     };
     handles
         .artifacts
         .end_module_referrer(&carry)
         .await
         .expect("first delivery");
+    handles
+        .process_env
+        .end_process_env_referrer(&carry)
+        .await
+        .expect("first environment delivery");
     assert_eq!(
         handles
             .artifacts
@@ -260,23 +298,49 @@ where
             .expect("read"),
         Some(bytes)
     );
+    assert_eq!(
+        handles
+            .process_env
+            .get_process_execution_env(&env_ref)
+            .await
+            .expect("read carried environment"),
+        Some(env_bytes)
+    );
     handles
         .artifacts
-        .end_module_referrer(&end(destination))
+        .end_module_referrer(&end(destination.clone()))
         .await
         .expect("end destination");
+    handles
+        .process_env
+        .end_process_env_referrer(&end(destination))
+        .await
+        .expect("end environment destination");
     for _ in 0..2 {
         handles
             .artifacts
             .end_module_referrer(&carry)
             .await
             .expect("replay delivery");
+        handles
+            .process_env
+            .end_process_env_referrer(&carry)
+            .await
+            .expect("replay environment delivery");
         assert_eq!(
             handles
                 .artifacts
                 .get_module_artifact(key)
                 .await
                 .expect("read"),
+            None
+        );
+        assert_eq!(
+            handles
+                .process_env
+                .get_process_execution_env(&env_ref)
+                .await
+                .expect("read reclaimed environment"),
             None
         );
     }

@@ -146,6 +146,19 @@ fn rlm_core(
         .expect("RLM core")
 }
 
+#[expect(
+    clippy::expect_used,
+    reason = "test fixture installs its process worker"
+)]
+fn serve_processes(double: &lash_restate_test::RestateTestBackend, core: &LashCore) {
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        core.durable_process_worker_config()
+            .expect("process-worker config"),
+    )
+    .expect("process worker");
+    double.install_process_worker(worker);
+}
+
 #[expect(clippy::expect_used, reason = "acceptance test validates each turn")]
 #[tokio::test]
 async fn cold_reopen_globals_across_turns() {
@@ -168,7 +181,10 @@ async fn cold_reopen_globals_across_turns() {
         .await
         .expect("first turn");
     assert!(first.is_success());
-    let first_edges = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
+    let first_edges = wait_edges(&double, |edges| {
+        edges.len() == 1 && edges[0].kind == "frame_environment"
+    })
+    .await;
     let frame_id = first_edges
         .iter()
         .find(|edge| edge.kind == "frame_environment")
@@ -178,7 +194,13 @@ async fn cold_reopen_globals_across_turns() {
     drop(first_session);
     drop(first_core);
 
-    let second_core = rlm_core(&double, vec![response("finish(await saved());")]);
+    let second_core = rlm_core(
+        &double,
+        vec![response(
+            "const run = await processes.start({ definition: saved }); finish(await run);",
+        )],
+    );
+    serve_processes(&double, &second_core);
     let second_session = second_core
         .session("artifact-referrers-cold-reopen")
         .open()
@@ -198,11 +220,17 @@ async fn cold_reopen_globals_across_turns() {
         text.contains('7'),
         "the retained definition executes: {text}"
     );
-    let settled = wait_edges(&double, |edges| {
-        edges.len() == 1 && edges[0].kind == "frame_environment"
+    let after_start = wait_edges(&double, |edges| {
+        edges
+            .iter()
+            .any(|edge| edge.kind == "frame_environment" && edge.id == frame_id)
     })
     .await;
-    assert_eq!(settled[0].id, frame_id, "both turns used the same frame");
+    assert_eq!(
+        frame_artifacts(&after_start).len(),
+        1,
+        "both turns use one frame"
+    );
 }
 
 #[expect(
@@ -287,14 +315,18 @@ async fn continue_as_carries_only_seeded_definition() {
     let core = rlm_core(
         &double,
         vec![
-            response(
-                "let carried = async () => 11; let dropped = async () => 22; finish('bound');",
-            ),
+            response("let carried = async () => 11; finish('carried bound');"),
+            response("let dropped = async () => 22; finish('dropped bound');"),
             response("await control.continue_as({ task: 'use seed', seed: { carried } });"),
-            response("finish(await carried());"),
-            response("finish(await carried());"),
+            response(
+                "const run = await processes.start({ definition: carried }); finish(await run);",
+            ),
+            response(
+                "const run = await processes.start({ definition: carried }); finish(await run);",
+            ),
         ],
     );
+    serve_processes(&double, &core);
     let session = core
         .session("artifact-referrers-carry")
         .open()
@@ -302,13 +334,32 @@ async fn continue_as_carries_only_seeded_definition() {
         .expect("session");
     assert!(
         session
-            .send(TurnInput::text("bind two definitions"))
+            .send(TurnInput::text("bind carried definition"))
             .output()
             .await
             .expect("first turn")
             .is_success()
     );
+    let carried_before = wait_edges(&double, |edges| frame_artifacts(edges).len() == 1).await;
+    let carried_ref = frame_artifacts(&carried_before)
+        .into_iter()
+        .next()
+        .expect("carried module")
+        .to_owned();
+    assert!(
+        session
+            .send(TurnInput::text("bind dropped definition"))
+            .output()
+            .await
+            .expect("second turn")
+            .is_success()
+    );
     let before = wait_edges(&double, |edges| frame_artifacts(edges).len() == 2).await;
+    let dropped_ref = frame_artifacts(&before)
+        .into_iter()
+        .find(|artifact_ref| *artifact_ref != carried_ref)
+        .expect("second definition has its own module")
+        .to_owned();
     let old_frame = before
         .iter()
         .find(|edge| edge.kind == "frame_environment")
@@ -328,7 +379,10 @@ async fn continue_as_carries_only_seeded_definition() {
             .iter()
             .filter(|edge| edge.kind == "frame_environment")
             .collect();
-        frame.len() == 1 && frame[0].id != old_frame
+        frame.len() == 1
+            && frame[0].id != old_frame
+            && frame[0].artifact_ref == carried_ref
+            && !edges.iter().any(|edge| edge.artifact_ref == dropped_ref)
     })
     .await;
     assert_eq!(frame_artifacts(&after).len(), 1);
@@ -368,12 +422,7 @@ async fn named_definition_survives_uncarried_frame_switch() {
                 "let named = async () => 31; await processes.register({ name: 'saved', definition: named }); finish('registered');",
             ),
             response("await control.continue_as({ task: 'use saved name' });"),
-            response(
-                "const run = await processes.start({ definition: { name: 'saved' } }); finish(run);",
-            ),
-            response(
-                "const run = await processes.start({ definition: { name: 'saved' } }); finish(run);",
-            ),
+            response("finish('switched');"),
         ],
     );
     let session = core
@@ -423,7 +472,32 @@ async fn named_definition_survives_uncarried_frame_switch() {
             .count(),
         1
     );
-    let started = session
+    let registry = double.lash_backend().process_definition_registry();
+    let saved = lash_core::process_registry::resolve_named_definition(
+        registry.as_ref(),
+        &lash_core::SessionId::from("artifact-referrers-named"),
+        "saved",
+    )
+    .await
+    .expect("resolve registered name")
+    .expect("the registered name survives the frame switch");
+    let definition = serde_json::to_string(saved.definition.definition.as_json())
+        .expect("registered definition value");
+    drop(session);
+    drop(core);
+    let reopened = rlm_core(
+        &double,
+        vec![response(&format!(
+            "const run = await processes.start({{ definition: {definition} }}); finish(await run);"
+        ))],
+    );
+    serve_processes(&double, &reopened);
+    let reopened_session = reopened
+        .session("artifact-referrers-named")
+        .open()
+        .await
+        .expect("cold reopen after switch");
+    let started = reopened_session
         .send(TurnInput::text("start by name"))
         .output()
         .await
@@ -432,4 +506,5 @@ async fn named_definition_survives_uncarried_frame_switch() {
         started.is_success(),
         "the registered definition remains resolvable"
     );
+    assert_eq!(started.result.assistant_message(), Some("31"));
 }
