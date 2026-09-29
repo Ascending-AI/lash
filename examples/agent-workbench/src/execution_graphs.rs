@@ -1,6 +1,6 @@
 use lash::ProcessId;
 use lash::SessionId;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use lash::tracing::{TraceLashlangGraph, TraceRuntimeScope, TraceRuntimeSubject};
 use serde::Serialize;
@@ -89,9 +89,14 @@ struct GraphProjection<'a> {
     process_observer: &'a lash::process::ProcessWorkObserver,
     graphs: Vec<TraceLashlangGraph>,
     graph_by_key: BTreeMap<String, usize>,
+    process_graphs: BTreeMap<ProcessId, Vec<(usize, Option<u32>)>>,
     effect_graphs_by_session: BTreeMap<Option<SessionId>, Vec<usize>>,
     processes: BTreeMap<ProcessId, Option<lash::process::ObservedProcess>>,
     visible_keys: BTreeSet<String>,
+    #[cfg(test)]
+    expansions: BTreeMap<String, usize>,
+    #[cfg(test)]
+    fallback_candidates: std::cell::Cell<usize>,
 }
 
 impl<'a> GraphProjection<'a> {
@@ -119,6 +124,7 @@ impl<'a> GraphProjection<'a> {
             .enumerate()
             .map(|(index, graph)| (graph.graph_key.clone(), index))
             .collect::<BTreeMap<_, _>>();
+        let mut process_graphs: BTreeMap<ProcessId, Vec<(usize, Option<u32>)>> = BTreeMap::new();
         let mut effect_graphs_by_session: BTreeMap<Option<SessionId>, Vec<usize>> = BTreeMap::new();
         for (index, graph) in graphs.iter().enumerate() {
             if matches!(&graph.subject, TraceRuntimeSubject::Effect { .. }) {
@@ -126,6 +132,13 @@ impl<'a> GraphProjection<'a> {
                     .entry(graph.scope.session_id.clone())
                     .or_default()
                     .push(index);
+            } else if let TraceRuntimeSubject::Process { process_id } = &graph.subject
+                && let Some(event) = graph.history.first()
+            {
+                process_graphs
+                    .entry(process_id.clone())
+                    .or_default()
+                    .push((index, event.event.identity.attempt()));
             }
         }
         for indices in effect_graphs_by_session.values_mut() {
@@ -153,44 +166,59 @@ impl<'a> GraphProjection<'a> {
             process_observer,
             graphs,
             graph_by_key,
+            process_graphs,
             effect_graphs_by_session,
             processes,
             visible_keys,
+            #[cfg(test)]
+            expansions: BTreeMap::new(),
+            #[cfg(test)]
+            fallback_candidates: std::cell::Cell::new(0),
         })
     }
 
     async fn compute_visibility(&mut self) {
-        loop {
-            let mut changed = false;
-            let roots = self.visible_keys.iter().cloned().collect::<Vec<_>>();
-            for graph_key in roots {
-                let Some(graph_index) = self.graph_by_key.get(&graph_key).copied() else {
+        let mut pending = self
+            .visible_keys
+            .iter()
+            .filter_map(|key| self.graph_by_key.get(key).copied())
+            .collect::<VecDeque<_>>();
+        while let Some(graph_index) = pending.pop_front() {
+            #[cfg(test)]
+            {
+                *self
+                    .expansions
+                    .entry(self.graphs[graph_index].graph_key.clone())
+                    .or_default() += 1;
+            }
+            for child_index in 0..self.graphs[graph_index].children.len() {
+                let child = self.graphs[graph_index].children[child_index].clone();
+                for graph_key in self.resolved_child_graph_keys(&child) {
+                    self.enqueue_visible_graph(graph_key, &mut pending);
+                }
+                let Some(process) = self.observed_process(&child.child_process_id).await else {
                     continue;
                 };
-                let children = self.graphs[graph_index].children.clone();
-                for child in children {
-                    for child_graph_key in self.resolved_child_graph_keys(&child) {
-                        changed |= self.visible_keys.insert(child_graph_key);
-                    }
-                    let Some(process) = self.observed_process(&child.child_process_id).await else {
-                        continue;
-                    };
-                    let Some(child_session_id) = process.child_session_id.as_deref() else {
-                        continue;
-                    };
-                    let child_graph_keys = self
-                        .child_session_effect_graphs(&SessionId::from(child_session_id))
-                        .into_iter()
-                        .map(|graph| graph.graph_key.clone())
-                        .collect::<Vec<_>>();
-                    for child_graph_key in child_graph_keys {
-                        changed |= self.visible_keys.insert(child_graph_key);
-                    }
+                let Some(child_session_id) = process.child_session_id else {
+                    continue;
+                };
+                let child_graph_keys = self
+                    .child_session_effect_graphs(&child_session_id)
+                    .into_iter()
+                    .map(|graph| graph.graph_key.clone())
+                    .collect::<Vec<_>>();
+                for graph_key in child_graph_keys {
+                    self.enqueue_visible_graph(graph_key, &mut pending);
                 }
             }
-            if !changed {
-                break;
-            }
+        }
+    }
+
+    fn enqueue_visible_graph(&mut self, graph_key: String, pending: &mut VecDeque<usize>) {
+        if self.visible_keys.insert(graph_key.clone())
+            && let Some(index) = self.graph_by_key.get(&graph_key)
+        {
+            pending.push_back(*index);
         }
     }
 
@@ -364,20 +392,19 @@ impl<'a> GraphProjection<'a> {
         {
             return vec![graph_key.clone()];
         }
-        self.graphs
-            .iter()
-            .filter(|graph| {
-                matches!(
-                    &graph.subject,
-                    TraceRuntimeSubject::Process { process_id }
-                        if process_id == child.child_process_id
-                ) && graph.history.first().is_some_and(|event| {
-                    child
-                        .child_attempt
-                        .is_none_or(|attempt| event.event.identity.attempt() == Some(attempt))
-                })
+        self.process_graphs
+            .get(&child.child_process_id)
+            .into_iter()
+            .flatten()
+            .filter(|(_, attempt)| {
+                #[cfg(test)]
+                self.fallback_candidates
+                    .set(self.fallback_candidates.get() + 1);
+                child
+                    .child_attempt
+                    .is_none_or(|expected| *attempt == Some(expected))
             })
-            .map(|graph| graph.graph_key.clone())
+            .map(|(index, _)| self.graphs[*index].graph_key.clone())
             .collect()
     }
 
@@ -814,5 +841,374 @@ mod tests {
         assert!(keys.contains(&format!("process:{subagent_process_id}")));
         assert!(keys.contains("effect:child-session:turn-1:exec-1"));
         assert!(!keys.contains(&format!("process:{old_process_id}")));
+    }
+    fn effect_graph(key: &str, session: &str) -> TraceLashlangGraph {
+        test_graph(
+            key,
+            &SessionId::from(session),
+            TraceRuntimeSubject::Effect {
+                address: lash::runtime::EffectAddress::new(
+                    lash::runtime::ExecutionScope::turn(session, "turn"),
+                    key,
+                )
+                .expect("effect address"),
+                effect_id: key.to_string(),
+            },
+            Vec::new(),
+        )
+    }
+
+    fn child_link(
+        parent: &str,
+        target: Option<&str>,
+        process: &str,
+        attempt: Option<u32>,
+    ) -> TraceLashlangGraphChildLink {
+        TraceLashlangGraphChildLink {
+            parent_graph_key: parent.to_string(),
+            parent_node_id: format!("spawn-{process}"),
+            child_graph_key: target.map(str::to_string),
+            child_process_id: ProcessId::parse(process)
+                .unwrap_or_else(|_| ProcessId::fixture(process)),
+            child_attempt: attempt,
+            child_module_ref: None,
+            child_entry_ref: None,
+            child_entry_name: None,
+        }
+    }
+
+    fn process_graph(
+        key: &str,
+        process: &str,
+        history_attempt: Option<Option<u32>>,
+    ) -> TraceLashlangGraph {
+        let mut graph = test_graph(
+            key,
+            &SessionId::from("other"),
+            TraceRuntimeSubject::Process {
+                process_id: ProcessId::parse(process)
+                    .unwrap_or_else(|_| ProcessId::fixture(process)),
+            },
+            Vec::new(),
+        );
+        if let Some(attempt) = history_attempt {
+            graph.history.push(
+                serde_json::from_value(json!({
+                    "identity": { "attempt": attempt, "transition": "execution_finished" },
+                    "timestamp": "2026-09-29T00:00:00Z",
+                    "event": {
+                        "event_key": key,
+                        "identity": {
+                            "scope": graph.scope,
+                            "subject": graph.subject,
+                            "source_identity": graph.source_identity,
+                            "module_ref": graph.module_ref,
+                            "entry_kind": "main",
+                            "entry_name": "main",
+                            "attempt": attempt,
+                        },
+                        "kind": "execution_finished",
+                        "status": "completed",
+                    },
+                }))
+                .expect("history event"),
+            );
+        }
+        graph
+    }
+
+    fn traversal_fixtures() -> Vec<Vec<TraceLashlangGraph>> {
+        let chain = (0..64)
+            .map(|index| {
+                let key = format!("chain-{index:02}");
+                let mut graph = effect_graph(&key, if index == 0 { "root" } else { "other" });
+                if index < 63 {
+                    graph.children.push(child_link(
+                        &key,
+                        Some(&format!("chain-{:02}", index + 1)),
+                        "absent",
+                        None,
+                    ));
+                }
+                graph
+            })
+            .collect::<Vec<_>>();
+        let mut diamond = ["root", "left", "right", "leaf", "inaccessible"]
+            .map(|key| effect_graph(key, if key == "root" { "root" } else { "other" }))
+            .to_vec();
+        diamond[0].children = vec![
+            child_link("root", Some("left"), "absent", None),
+            child_link("root", Some("right"), "absent", None),
+        ];
+        diamond[1].children = vec![child_link("left", Some("leaf"), "absent", None)];
+        diamond[2].children = vec![child_link("right", Some("leaf"), "absent", None)];
+        let mut cycle = diamond.clone();
+        cycle[3].children = vec![child_link("leaf", Some("root"), "absent", None)];
+        vec![chain, diamond, cycle]
+    }
+
+    async fn reference_visibility(projection: &mut GraphProjection<'_>) {
+        loop {
+            let mut changed = false;
+            for key in projection.visible_keys.clone() {
+                let children = projection.graphs[projection.graph_by_key[&key]]
+                    .children
+                    .clone();
+                for child in children {
+                    let targets = if let Some(key) = &child.child_graph_key
+                        && projection.graph_by_key.contains_key(key)
+                    {
+                        vec![key.clone()]
+                    } else {
+                        projection.graphs.iter().filter(|graph| {
+                            matches!(&graph.subject, TraceRuntimeSubject::Process { process_id } if process_id == child.child_process_id)
+                                && graph.history.first().is_some_and(|event| child.child_attempt.is_none_or(|attempt| event.event.identity.attempt() == Some(attempt)))
+                        }).map(|graph| graph.graph_key.clone()).collect()
+                    };
+                    for target in targets {
+                        changed |= projection.visible_keys.insert(target);
+                    }
+                    if let Some(process) =
+                        projection.observed_process(&child.child_process_id).await
+                        && let Some(session) = process.child_session_id
+                    {
+                        let targets = projection
+                            .child_session_effect_graphs(&session)
+                            .iter()
+                            .map(|graph| graph.graph_key.clone())
+                            .collect::<Vec<_>>();
+                        for target in targets {
+                            changed |= projection.visible_keys.insert(target);
+                        }
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
+    async fn assert_projection_matches_reference(
+        observer: &lash::process::ProcessWorkObserver,
+        graphs: Vec<TraceLashlangGraph>,
+    ) {
+        let session = SessionId::from("root");
+        let mut reference = GraphProjection::new(observer, &session, graphs.clone())
+            .await
+            .expect("reference");
+        reference_visibility(&mut reference).await;
+        let expected =
+            serde_json::to_value(reference.index().await.expect("reference index")).expect("JSON");
+        let actual = serde_json::to_value(
+            index_for_session(observer, &session, graphs.clone())
+                .await
+                .expect("index"),
+        )
+        .expect("JSON");
+        assert_eq!(actual, expected);
+        for graph in &graphs {
+            let detail =
+                visible_graph_by_key(observer, &session, graphs.clone(), &graph.graph_key).await;
+            if reference.visible_keys.contains(&graph.graph_key) {
+                assert_eq!(
+                    serde_json::to_value(detail.expect("visible detail")).unwrap(),
+                    serde_json::to_value(graph).unwrap()
+                );
+            } else {
+                assert!(detail.is_err(), "{} must be inaccessible", graph.graph_key);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn visibility_expands_each_graph_once() {
+        let (observer, _, _double) = test_process_observer().await;
+        for graphs in traversal_fixtures() {
+            let mut projection = GraphProjection::new(&observer, &SessionId::from("root"), graphs)
+                .await
+                .expect("projection");
+            projection.compute_visibility().await;
+            assert_eq!(
+                projection
+                    .expansions
+                    .keys()
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+                projection.visible_keys
+            );
+            assert!(
+                projection.expansions.values().all(|count| *count == 1),
+                "expansions: {:?}",
+                projection.expansions
+            );
+            assert_eq!(projection.fallback_candidates.get(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn fallback_only_inspects_process_candidates() {
+        let (observer, _, _double) = test_process_observer().await;
+        let mut graphs = vec![
+            process_graph("attempt-two", "target", Some(Some(2))),
+            process_graph("empty", "target", None),
+            process_graph("attempt-one", "target", Some(Some(1))),
+            process_graph("unset", "target", Some(None)),
+        ];
+        // The first history event owns the attempt, even if a later one differs.
+        let later = graphs[2].history[0].clone();
+        graphs[0].history.push(later);
+        graphs.extend(
+            (0..40).map(|index| {
+                process_graph(&format!("unrelated-{index}"), "unrelated", Some(Some(1)))
+            }),
+        );
+        let projection = GraphProjection::new(&observer, &SessionId::from("root"), graphs)
+            .await
+            .expect("projection");
+        for (explicit, attempt, expected, inspected) in [
+            (Some("missing"), Some(1), vec!["attempt-one"], 3),
+            (None, Some(2), vec!["attempt-two"], 3),
+            (None, None, vec!["attempt-two", "attempt-one", "unset"], 3),
+            (None, Some(3), vec![], 3),
+            (Some("empty"), Some(1), vec!["empty"], 0),
+            (Some("unrelated-0"), Some(2), vec!["unrelated-0"], 0),
+        ] {
+            projection.fallback_candidates.set(0);
+            assert_eq!(
+                projection
+                    .resolved_child_graph_keys(&child_link("root", explicit, "target", attempt)),
+                expected
+            );
+            assert_eq!(projection.fallback_candidates.get(), inspected);
+        }
+        projection.fallback_candidates.set(0);
+        assert!(
+            projection
+                .resolved_child_graph_keys(&child_link("root", None, "absent", None))
+                .is_empty()
+        );
+        assert_eq!(projection.fallback_candidates.get(), 0);
+    }
+
+    #[tokio::test]
+    async fn visibility_matches_reference_index_and_detail() {
+        let (observer, _, _double) = test_process_observer().await;
+        let mut fixtures = traversal_fixtures();
+        let mut root = effect_graph("root", "root");
+        root.children = vec![
+            child_link("root", Some("missing"), "target", Some(1)),
+            child_link("root", None, "target", None),
+        ];
+        let mut first = process_graph("attempt-one", "target", Some(Some(1)));
+        first.scope.turn_index = Some(2);
+        let mut second = process_graph("attempt-two", "target", Some(Some(2)));
+        second.scope.protocol_iteration = Some(3);
+        fixtures.push(vec![
+            root,
+            second,
+            process_graph("empty", "target", None),
+            first,
+            process_graph("unset", "target", Some(None)),
+            effect_graph("inaccessible", "old"),
+        ]);
+        for graphs in fixtures {
+            assert_projection_matches_reference(&observer, graphs).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn visibility_keeps_later_child_session_paths() {
+        let (observer, registry, _double) = test_process_observer().await;
+        let process_id = registry
+            .register_process(lash::process::ProcessRegistration::new(
+                RuntimeInput::SessionTurn {
+                    definition_key: "agent-workbench-subagent:v1".to_string(),
+                    create_request: Box::new(
+                        lash::SessionCreateRequest::child_session(
+                            "root",
+                            lash::SessionStartPoint::Empty,
+                            lash::plugins::PluginOptions::default(),
+                        )
+                        .with_session_id("child"),
+                    ),
+                    turn_input: Box::new(lash::TurnInput::text("run child")),
+                    result: lash::process::SessionTurnOutcome::Turn,
+                },
+                lash::process::ProcessProvenance::host(),
+                lash::process::Lifetime::Detached,
+            ))
+            .await
+            .expect("register process")
+            .id;
+        let mut root = effect_graph("root", "root");
+        root.children = vec![
+            child_link("root", Some("bridge"), "absent", None),
+            child_link("root", Some("later"), "absent", None),
+        ];
+        let bridge = process_graph("bridge", process_id.as_str(), None);
+        let mut later = effect_graph("later", "other");
+        later.children = vec![child_link(
+            "later",
+            Some("bridge"),
+            process_id.as_str(),
+            None,
+        )];
+        let mut first_effect = effect_graph("child-first", "child");
+        first_effect.scope.turn_index = Some(1);
+        first_effect.children = vec![child_link(
+            "child-first",
+            Some("descendant"),
+            "absent",
+            None,
+        )];
+        let graphs = vec![
+            root,
+            bridge,
+            later,
+            first_effect,
+            effect_graph("child-second", "child"),
+            effect_graph("descendant", "other"),
+            effect_graph("inaccessible", "old"),
+        ];
+        let mut projection =
+            GraphProjection::new(&observer, &SessionId::from("root"), graphs.clone())
+                .await
+                .expect("projection");
+        projection.compute_visibility().await;
+        assert_eq!(
+            projection.visible_keys,
+            [
+                "root",
+                "bridge",
+                "later",
+                "child-first",
+                "child-second",
+                "descendant"
+            ]
+            .map(str::to_string)
+            .into_iter()
+            .collect()
+        );
+        assert!(projection.expansions.values().all(|count| *count == 1));
+        let index = projection.index().await.expect("index");
+        let child_edges = index
+            .lineage_edges
+            .iter()
+            .filter(|edge| edge.parent_graph_key == "later")
+            .collect::<Vec<_>>();
+        assert_eq!(
+            child_edges
+                .iter()
+                .map(|edge| edge.child_graph_key.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("child-first"), Some("child-second")]
+        );
+        assert!(
+            child_edges
+                .iter()
+                .all(|edge| edge.child_session_id.as_deref() == Some("child") && !edge.pending)
+        );
+        assert_projection_matches_reference(&observer, graphs).await;
     }
 }
