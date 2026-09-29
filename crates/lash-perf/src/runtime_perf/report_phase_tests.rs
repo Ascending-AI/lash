@@ -14,6 +14,7 @@ use crate::runtime_perf::measurement::{
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
+use lash_core::store::QueuedWorkStore as _;
 use lash_core::{SessionCatalogStore as _, SessionListFilter};
 
 const STABLE_DURABLE_PHASES: [&str; 5] = [
@@ -64,6 +65,35 @@ fn postgres_database_url() -> String {
                 .filter(|database_url| !database_url.trim().is_empty())
         })
         .expect("PostgreSQL URL checked by require_postgres")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn postgres_pool_checkout_wait_is_recorded_for_runtime_store_reads() {
+    if !require_postgres() {
+        return;
+    }
+
+    let database =
+        lash_postgres_store::testing::IsolatedDatabase::create(&postgres_database_url()).await;
+    let storage = lash_postgres_store::PostgresStorage::connect(database.url())
+        .await
+        .expect("provision PostgreSQL store");
+    let store = storage.session_store_factory_with_shared_process_registry();
+    let witness =
+        lash_core::perf_witness::Collector::install().expect("install pool checkout witness");
+
+    let batches = store
+        .list_queued_work(&lash_core::SessionId::from("pool-wait-witness"))
+        .await
+        .expect("read queued work through the runtime store");
+    assert!(batches.is_empty());
+    let waits = witness.snapshot().pool_checkout_wait_nanos;
+    assert_eq!(
+        waits.len(),
+        1,
+        "one runtime store read checks out one connection"
+    );
+    assert!(waits[0] > 0, "checkout duration must be observed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
