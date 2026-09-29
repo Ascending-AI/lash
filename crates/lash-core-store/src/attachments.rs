@@ -128,6 +128,13 @@ pub enum AttachmentStoreError {
         #[source]
         source: Box<StoreError>,
     },
+    /// A per-blob root-set operation failed during reclamation.
+    #[error("attachment root set {operation} failed: {source}")]
+    RootSetOperationFailed {
+        operation: &'static str,
+        #[source]
+        source: Box<StoreError>,
+    },
     #[error(
         "attachment `{attachment_id}` is being reclaimed: a sweep armed its physical delete before this write recorded an intent, and the condemnation was still held after {attempts} fence attempts. The sweep may simply be slow — a large or remote delete can outlast the retry window — so retrying the put is the normal response; a completed delete retires the condemnation and the retry then re-puts the bytes. If it never clears and no sweep is running, the condemnation was abandoned by a sweeper that died mid-delete, and the host clears it with `AttachmentRootSet::release_attachment_condemnation`."
     )]
@@ -139,13 +146,15 @@ pub enum AttachmentStoreError {
 
 impl AttachmentStoreError {
     /// Whether retrying the identical operation may succeed. A transient
-    /// backend failure is retryable, and so is a write refused by an in-flight
-    /// reclamation: the retry re-puts the bytes once the delete settles.
+    /// blob backend or root-set failure is retryable when its source is
+    /// transient, as is a write refused by an in-flight reclamation: the
+    /// retry re-puts the bytes once the delete settles.
     /// A contract violation or a terminal backend failure retries to the same
     /// refusal.
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Backend { class, .. } => class.is_retryable(),
+            Self::RootSetOperationFailed { source, .. } => source.is_transient(),
             Self::ReclamationInFlight { .. } => true,
             _ => false,
         }
@@ -545,7 +554,8 @@ pub struct AttachmentReclamationReport {
     pub reclaimed_count: usize,
     /// Blobs whose per-candidate handling failed: final `HEAD`, physical
     /// delete, or condemnation-state settlement. The sweep continues past
-    /// per-blob failures and reports them here rather than aborting.
+    /// per-blob failures and reports them in the partial error report after
+    /// attempting the remaining candidates.
     pub failed_ids: Vec<AttachmentId>,
     /// Why the live root set could not be enumerated. The sweep deleted
     /// nothing: no blob was deletion-eligible, so nothing was at risk.
@@ -603,8 +613,9 @@ impl crate::store::MaintenanceReport for AttachmentReclamationReport {
     }
 }
 
-/// An attachment sweep that stopped before completing its scope, carrying the
-/// partial report accumulated before the stop (ADR 0067 §4).
+/// An attachment sweep that refused a step or finished with failed candidates,
+/// carrying the report accumulated before that refusal or across the pass
+/// (ADR 0067 §4).
 pub type AttachmentReclamationFailure =
     crate::store::MaintenanceFailure<AttachmentReclamationReport, AttachmentStoreError>;
 
@@ -640,8 +651,9 @@ pub struct AttachmentReclamationPolicy {
 /// [`MaintenanceRefusal::EmptyRootSetUnauthorized`](crate::store::MaintenanceRefusal::EmptyRootSetUnauthorized)
 /// and the partial report accumulated before the first eligible blob.
 /// Per-blob final-`HEAD`, delete, and condemnation-settlement failures are collected into
-/// [`AttachmentReclamationReport::failed_ids`]; the sweep does not abort on the
-/// first failure.
+/// [`AttachmentReclamationReport::failed_ids`]; the sweep attempts the remaining
+/// candidates, then returns [`AttachmentReclamationFailure`] with that partial
+/// report and the first error.
 ///
 /// # Two reconciliation windows, one grace period
 ///
@@ -757,6 +769,7 @@ where
         fence,
         ..AttachmentReclamationReport::default()
     };
+    let mut first_failure = None;
     let live = match live {
         Ok(live) => live,
         Err(err) => {
@@ -861,8 +874,16 @@ where
             }
             // Could not reach the authority: do not delete a blob we cannot
             // fence.
-            Err(_) => {
-                report.failed_ids.push(blob.id);
+            Err(error) => {
+                record_reclamation_failure(
+                    &mut report,
+                    &mut first_failure,
+                    blob.id,
+                    AttachmentStoreError::RootSetOperationFailed {
+                        operation: "condemn",
+                        source: Box::new(error),
+                    },
+                );
                 continue;
             }
         };
@@ -893,9 +914,17 @@ where
                     report.condemn_deferred_ids.push(blob.id);
                     continue;
                 }
-                Err(_) => {
+                Err(error) => {
                     release_condemnation(root_set, true, &blob.id).await;
-                    report.failed_ids.push(blob.id);
+                    record_reclamation_failure(
+                        &mut report,
+                        &mut first_failure,
+                        blob.id,
+                        AttachmentStoreError::RootSetOperationFailed {
+                            operation: "arm delete",
+                            source: Box::new(error),
+                        },
+                    );
                     continue;
                 }
             }
@@ -925,20 +954,25 @@ where
             // physical delete does: retire the condemnation row.
             Ok(None) => {
                 if condemned
-                    && root_set
-                        .retire_attachment_condemnation(&blob.id)
-                        .await
-                        .is_err()
+                    && let Err(error) = root_set.retire_attachment_condemnation(&blob.id).await
                 {
-                    report.failed_ids.push(blob.id);
+                    record_reclamation_failure(
+                        &mut report,
+                        &mut first_failure,
+                        blob.id,
+                        AttachmentStoreError::RootSetOperationFailed {
+                            operation: "retire condemnation",
+                            source: Box::new(error),
+                        },
+                    );
                 }
                 continue;
             }
             // Could not re-stat: treat as a per-blob failure rather than risk
             // deleting a blob we can no longer vouch for.
-            Err(_) => {
+            Err(error) => {
                 release_condemnation(root_set, condemned, &blob.id).await;
-                report.failed_ids.push(blob.id);
+                record_reclamation_failure(&mut report, &mut first_failure, blob.id, error);
                 continue;
             }
         }
@@ -957,8 +991,16 @@ where
                 Ok(false) => {}
                 // Could not probe the root set: do not delete a blob we can no longer
                 // prove is unreferenced.
-                Err(_) => {
-                    report.failed_ids.push(blob.id);
+                Err(error) => {
+                    record_reclamation_failure(
+                        &mut report,
+                        &mut first_failure,
+                        blob.id,
+                        AttachmentStoreError::RootSetOperationFailed {
+                            operation: "probe live reference",
+                            source: Box::new(error),
+                        },
+                    );
                     continue;
                 }
             }
@@ -1017,21 +1059,41 @@ where
                 // with its write-ahead intent and clears it only after
                 // restoring the bytes.
                 if condemned
-                    && root_set
-                        .retire_attachment_condemnation(&blob.id)
-                        .await
-                        .is_err()
+                    && let Err(error) = root_set.retire_attachment_condemnation(&blob.id).await
                 {
-                    report.failed_ids.push(blob.id.clone());
+                    record_reclamation_failure(
+                        &mut report,
+                        &mut first_failure,
+                        blob.id.clone(),
+                        AttachmentStoreError::RootSetOperationFailed {
+                            operation: "retire condemnation",
+                            source: Box::new(error),
+                        },
+                    );
                 }
             }
-            Err(_) => {
-                report.failed_ids.push(blob.id.clone());
+            Err(error) => {
+                record_reclamation_failure(&mut report, &mut first_failure, blob.id.clone(), error);
                 release_condemnation(root_set, condemned, &blob.id).await;
             }
         }
     }
-    Ok(report)
+    match first_failure {
+        Some(error) => Err(AttachmentReclamationFailure::failed(error, report)),
+        None => Ok(report),
+    }
+}
+
+fn record_reclamation_failure(
+    report: &mut AttachmentReclamationReport,
+    first_failure: &mut Option<AttachmentStoreError>,
+    id: AttachmentId,
+    error: AttachmentStoreError,
+) {
+    report.failed_ids.push(id);
+    if first_failure.is_none() {
+        *first_failure = Some(error);
+    }
 }
 
 /// Hand a condemned digest back to `Free`. A no-op for an unfenced sweep, which

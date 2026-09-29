@@ -1834,7 +1834,7 @@ impl lash_core::ProcessEngine for IngressAdmissionEngine {
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> std::result::Result<(), lash_core::PluginError> {
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 

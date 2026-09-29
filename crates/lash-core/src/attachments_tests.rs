@@ -438,7 +438,7 @@ async fn gc_all_deletes_failed_is_incomplete() {
         .expect("put second deletion candidate");
     let roots = RecordingRootSet { manifests: vec![] };
 
-    let report = reclaim_unreferenced_attachments(
+    let failure = reclaim_unreferenced_attachments(
         &roots,
         &backend,
         AttachmentReclamationPolicy {
@@ -447,7 +447,16 @@ async fn gc_all_deletes_failed_is_incomplete() {
         },
     )
     .await
-    .expect("per-item delete failures ride in a completed report");
+    .expect_err("per-item delete failures fail the sweep with a partial report");
+
+    assert!(matches!(
+        failure.stop,
+        crate::store::MaintenanceStop::Failed(AttachmentStoreError::Backend {
+            operation: "delete",
+            ..
+        })
+    ));
+    let report = failure.partial;
 
     assert_eq!(report.reclaimed_count, 0);
     assert_eq!(

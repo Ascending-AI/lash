@@ -431,7 +431,7 @@ impl ArtifactCleanupRelay {
                 carries: engine_carries,
             })
             .await
-            .map_err(retryable("engine store"))
+            .map_err(store_failure("engine store"))
     }
 }
 

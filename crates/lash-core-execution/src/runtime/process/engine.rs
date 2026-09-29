@@ -581,11 +581,13 @@ pub trait ProcessEngine: Send + Sync {
     /// whose artifacts all live in a store-set port answers `Ok(())`: lashlang
     /// names only `ArtifactStoreId::LashlangModule`, which the module port
     /// ends. The cleanup's carries are only those under
-    /// `ArtifactStoreId::Engine` of this engine's kind.
+    /// `ArtifactStoreId::Engine` of this engine's kind. A carry whose bytes
+    /// are missing returns `ArtifactStoreError::CarryArtifactMissing` so the
+    /// cleanup row stalls instead of retrying indefinitely.
     async fn end_artifact_referrer(
         &self,
         cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::PluginError>;
+    ) -> Result<(), crate::ArtifactStoreError>;
 
     /// Add the claim's edge to one artifact this engine's store holds,
     /// refusing a fenced referrer with `ReferrerEnded`. Called only for names
@@ -824,7 +826,7 @@ impl ProcessEngineRegistry {
     pub async fn end_artifact_referrer(
         &self,
         cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         for (kind, engine) in self.engines.iter() {
             let own = crate::ResolvedArtifactCleanup::for_store(
                 &cleanup.referrer,

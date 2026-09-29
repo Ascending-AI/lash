@@ -21,7 +21,7 @@ impl lash_core::ProcessEngine for PayloadGatedEngine {
     async fn end_artifact_referrer(
         &self,
         _cleanup: &lash_core::ResolvedArtifactCleanup,
-    ) -> Result<(), lash_core::PluginError> {
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 

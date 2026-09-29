@@ -21,6 +21,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use lash_core::ClockWallTime as _;
+use lash_core::runtime::artifact_cleanup::{
+    ArtifactCleanupAuthorities, ArtifactCleanupPorts, ArtifactCleanupRelay, RetainedStart,
+    SubscriptionRevisionStanding,
+};
 use lash_core::runtime::drive::relay::{
     DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now, relay_due,
 };
@@ -31,6 +35,86 @@ use lash_core::store::{
 };
 use lash_core::testing::TestClock;
 use lash_sansio::SessionId;
+
+const MISSING_CARRY_ENGINE: &str = "missing-carry-engine";
+
+struct MissingCarryEngine;
+
+#[async_trait::async_trait]
+impl crate::ProcessEngine for MissingCarryEngine {
+    fn kind(&self) -> &'static str {
+        MISSING_CARRY_ENGINE
+    }
+
+    async fn run(
+        &self,
+        _context: crate::ProcessEngineRunContext<'_>,
+        _payload: serde_json::Value,
+    ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
+        unreachable!("the law delivers cleanup without running a process")
+    }
+
+    fn start_artifacts(
+        &self,
+        _payload: &serde_json::Value,
+    ) -> Result<Vec<crate::ArtifactName>, crate::PluginError> {
+        Ok(Vec::new())
+    }
+
+    async fn end_artifact_referrer(
+        &self,
+        cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError> {
+        let [carry] = cleanup.carries.as_slice() else {
+            panic!("the engine receives its missing carry");
+        };
+        Err(crate::ArtifactStoreError::CarryArtifactMissing {
+            artifact_ref: carry.artifact.artifact_ref.clone(),
+            to: carry.to.clone(),
+        })
+    }
+
+    async fn acquire_engine_artifact(
+        &self,
+        _claim: &crate::ReferrerClaim,
+        _artifact_ref: &str,
+    ) -> Result<(), crate::PluginError> {
+        unreachable!("the law does not acquire an engine artifact")
+    }
+}
+
+struct NoGuardAuthorities;
+
+#[async_trait::async_trait]
+impl ArtifactCleanupAuthorities for NoGuardAuthorities {
+    async fn journal_replay(
+        &self,
+        _journal: &crate::EffectJournalIdentity,
+    ) -> Result<crate::JournalReplay, String> {
+        unreachable!("an ended cleanup asks no journal verdict")
+    }
+
+    async fn retained_start(
+        &self,
+        _key: &crate::StartKey,
+    ) -> Result<Option<RetainedStart>, String> {
+        unreachable!("a host pin has no retained start")
+    }
+
+    async fn subscription_revision(
+        &self,
+        _revision: &crate::SubscriptionRevisionId,
+    ) -> Result<SubscriptionRevisionStanding, String> {
+        unreachable!("a host pin has no subscription revision")
+    }
+
+    async fn definition_revision_current(
+        &self,
+        _revision: &crate::DefinitionRevisionId,
+    ) -> Result<bool, String> {
+        unreachable!("a host pin has no definition revision")
+    }
+}
 
 /// What one relay law runs over: a backend's store set, fresh per law.
 pub struct ObligationLawFixture {
@@ -737,6 +821,62 @@ pub async fn an_unknown_referrer_kind_is_refused_typed_and_stalled(
         .await
         .expect_err("the stalled row is still refused, never absent");
     assert!(typed(&refused), "the refusal is typed: {refused:?}");
+}
+
+/// ADR 0113 §2.5: an engine store's missing carry refuses the actual durable
+/// cleanup row on either backend, rather than putting it back for retry.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn a_missing_engine_carry_stalls_the_cleanup_row(fixture: ObligationLawFixture) {
+    let ledger = fixture.stores.artifact_cleanup();
+    let source = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    let destination = crate::ArtifactReferrer::HostPin(crate::HostArtifactPin::mint());
+    let cleanup = crate::ArtifactCleanup::ended(
+        source.clone(),
+        vec![crate::ArtifactCarry {
+            artifact: crate::ArtifactName {
+                store: crate::ArtifactStoreId::Engine(MISSING_CARRY_ENGINE.to_owned()),
+                artifact_ref: "missing-engine-bytes".to_owned(),
+            },
+            to: destination,
+        }],
+        None,
+    );
+    let id = ledger.arm_cleanup(&cleanup, T0).await.expect("arm cleanup");
+    let engines = crate::ProcessEngineRegistry::new().with_registration(
+        crate::ProcessEngineRegistration::accepting(Arc::new(MissingCarryEngine)),
+    );
+    let relay = ArtifactCleanupRelay::new(ArtifactCleanupPorts {
+        ledger: Arc::clone(&ledger),
+        authorities: Arc::new(NoGuardAuthorities),
+        process_env: fixture.stores.process_env_store(),
+        modules: fixture.stores.module_artifacts(),
+        engines,
+    });
+    assert_eq!(
+        deliver_now(&relay, &id, &TestClock::new(T0))
+            .await
+            .expect("deliver cleanup"),
+        RelayVerdict::Stalled(StallReason::Refused),
+    );
+    let row = ledger
+        .list_stalled(None, page(10))
+        .await
+        .expect("list stalled cleanup")
+        .into_iter()
+        .find(|row| row.id == id)
+        .expect("the cleanup row remains stalled");
+    assert_eq!(row.reason, StallReason::Refused);
+    assert_eq!(row.attempts, 1);
+    assert_eq!(
+        row.key,
+        Ok(ObligationKey::ArtifactCleanup { referrer: source })
+    );
+    assert!(
+        row.last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("missing-engine-bytes")),
+        "the stalled row names the missing carry: {row:?}"
+    );
 }
 
 /// Only an explicit re-arm puts a stalled obligation back: due now, its

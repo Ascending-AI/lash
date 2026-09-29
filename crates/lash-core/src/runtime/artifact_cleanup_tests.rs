@@ -203,6 +203,7 @@ struct Applied {
     modules: Mutex<Vec<ResolvedArtifactCleanup>>,
     engine: Mutex<Vec<ResolvedArtifactCleanup>>,
     module_failure: Mutex<Option<fn() -> ArtifactStoreError>>,
+    engine_failure: Mutex<Option<fn() -> ArtifactStoreError>>,
     /// Every edge an acquisition added, in any store.
     acquired: Mutex<Vec<(ArtifactReferrer, String)>>,
     /// Artifacts no store holds bytes for.
@@ -371,7 +372,15 @@ impl crate::ProcessEngine for Engine {
     async fn end_artifact_referrer(
         &self,
         cleanup: &ResolvedArtifactCleanup,
-    ) -> Result<(), PluginError> {
+    ) -> Result<(), ArtifactStoreError> {
+        if let Some(failure) = *self
+            .0
+            .engine_failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            return Err(failure());
+        }
         record(&self.0.engine, cleanup);
         Ok(())
     }
@@ -844,6 +853,22 @@ async fn a_missing_carry_is_refused_and_a_store_fault_is_retried() {
     ));
     let (_, _, engine) = harness.applied();
     assert!(engine.is_empty(), "no store after the failing one is asked");
+}
+
+#[tokio::test]
+async fn an_engine_store_fault_is_retried() {
+    let harness = harness();
+    *harness
+        .applied
+        .engine_failure
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(|| ArtifactStoreError::Backend("connection reset".to_owned()));
+    let ended = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
+    assert!(matches!(
+        harness.deliver(ended).await,
+        Err(DeliveryFailure::Retryable(_))
+    ));
 }
 
 #[tokio::test]

@@ -550,7 +550,7 @@ impl crate::ProcessEngine for ModuleNamingEngine {
     async fn end_artifact_referrer(
         &self,
         _cleanup: &crate::ResolvedArtifactCleanup,
-    ) -> Result<(), crate::PluginError> {
+    ) -> Result<(), crate::ArtifactStoreError> {
         Ok(())
     }
 

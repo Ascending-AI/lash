@@ -10,8 +10,9 @@
 //!
 //! * **Swept** — `Ok(report)` that reclaimed at least one item and recorded no
 //!   per-item failures.
-//! * **Incomplete** — `Ok(report)` that completed its scope but recorded failed
-//!   destructive steps in report-specific failure channels.
+//! * **Incomplete** — `Ok(report)` that completed its scope but reports
+//!   unfinished work. Failed attachment steps return `Err` with their partial
+//!   report.
 //! * **Nothing to do** — `Ok(report)` that reclaimed nothing and recorded no
 //!   failures or deferrals. Emptiness here is *witnessed*: the pass enumerated
 //!   its whole scope and there was nothing to reclaim.
@@ -87,10 +88,8 @@ pub enum MaintenanceSweep {
     /// The pass enumerated its scope and reclaimed at least one row or blob,
     /// with no per-item failures.
     Swept,
-    /// The pass completed its scope, but one or more destructive steps failed
-    /// or were deferred, or the root authority could not prove process-owner
-    /// death (see `owner_death_proof_degraded`). The report carries their
-    /// identities or counts.
+    /// The pass completed its scope but reports unfinished work. Failed
+    /// attachment steps return `Err` with their partial report.
     Incomplete,
     /// The pass enumerated its *whole* scope and found nothing reclaimable.
     ///
