@@ -60,12 +60,12 @@ impl PostgresStore {
             let created_head = lash_core_execution::store::SessionHeadMeta::created(
                 &request.session_id,
                 request.config.clone(),
-                self.fleet_format,
+                self.fence.fleet(),
             );
             sqlx::query(session_sql().head.insert_created.sql())
                 .bind(request.session_id.as_str())
                 .bind(encode_json(&created_head.payload())?)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
         } else if !inserted {

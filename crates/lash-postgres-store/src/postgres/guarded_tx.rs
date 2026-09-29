@@ -187,6 +187,7 @@ fn missing_fence_row(detail: &str) -> StoreError {
         refusal: CompatRefusal::MalformedStamp {
             component: ComponentId::POSTGRES.as_str().to_string(),
             detail: format!("writer fence: {detail}"),
+            writing_release: None,
         },
     }
 }
