@@ -877,6 +877,7 @@ impl lash_core_execution::QueuedWorkStore for SqliteStore {
     }
 
     async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
         let session_id = session_id.clone();
         self.read_connection()
             .call(move |conn| {

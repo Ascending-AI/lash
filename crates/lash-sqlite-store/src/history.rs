@@ -563,7 +563,9 @@ fn usage_totals(
     decoded_holes: &AtomicU64,
 ) -> Result<SessionUsageTotals, StoreError> {
     let mut totals = SessionUsageTotals::default();
-    let mut stmt=conn.prepare_cached("SELECT source,model,SUM(input_tokens),SUM(output_tokens),SUM(cache_read_input_tokens),SUM(cache_write_input_tokens),SUM(reasoning_output_tokens),COUNT(*) FILTER (WHERE reconciled_call_id IS NOT NULL) FROM usage_deltas AS usage WHERE session_id=?1 AND (input_tokens<>0 OR output_tokens<>0 OR cache_read_input_tokens<>0 OR cache_write_input_tokens<>0 OR reasoning_output_tokens<>0 OR reconciled_call_id IS NOT NULL OR EXISTS(SELECT 1 FROM usage_delta_holes AS hole WHERE hole.session_id=usage.session_id AND hole.seq=usage.seq)) GROUP BY source,model ORDER BY source,model").map_err(sqlite_error)?;
+    // Fold ordered rows in Rust: SQLite's integer SUM fails before we can
+    // report the typed counter overflow required by the store contract.
+    let mut stmt=conn.prepare_cached("SELECT source,model,input_tokens,output_tokens,cache_read_input_tokens,cache_write_input_tokens,reasoning_output_tokens,(reconciled_call_id IS NOT NULL) FROM usage_deltas AS usage WHERE session_id=?1 AND (input_tokens<>0 OR output_tokens<>0 OR cache_read_input_tokens<>0 OR cache_write_input_tokens<>0 OR reasoning_output_tokens<>0 OR reconciled_call_id IS NOT NULL OR EXISTS(SELECT 1 FROM usage_delta_holes AS hole WHERE hole.session_id=usage.session_id AND hole.seq=usage.seq)) ORDER BY source,model,seq").map_err(sqlite_error)?;
     let rows = stmt
         .query_map(params![session.as_str()], |row| {
             Ok((
@@ -574,7 +576,7 @@ fn usage_totals(
                 row.get::<_, i64>(4)?,
                 row.get::<_, i64>(5)?,
                 row.get::<_, i64>(6)?,
-                row.get::<_, i64>(7)?,
+                row.get::<_, bool>(7)?,
             ))
         })
         .map_err(sqlite_error)?;
@@ -596,24 +598,33 @@ fn usage_totals(
             cache_write_input_tokens,
             reasoning_output_tokens,
         };
-        usage
-            .checked_total()
-            .map_err(|overflow| StoreError::TokenUsageAccountingOverflow {
+        let overflow =
+            |overflow: lash_sansio::TokenUsageOverflow| StoreError::TokenUsageAccountingOverflow {
                 usage_source: source.clone(),
                 model: model.clone(),
                 counter: overflow.counter(),
-            })?;
-        totals.rows.push(UsageTotalRow {
-            source,
-            model,
-            usage,
-            unreported_attempts: 0,
-            reconciled_attempts: nonnegative(
-                "TokenLedgerEntry",
-                "reconciled_attempts",
-                reconciled,
-            )?,
-        });
+            };
+        usage.checked_total().map_err(&overflow)?;
+        if totals
+            .rows
+            .last()
+            .is_none_or(|last| last.source != source || last.model != model)
+        {
+            totals.rows.push(UsageTotalRow {
+                source: source.clone(),
+                model: model.clone(),
+                ..UsageTotalRow::default()
+            });
+        }
+        let total = totals
+            .rows
+            .last_mut()
+            .ok_or_else(|| corrupt("TokenLedgerEntry", "missing usage total"))?;
+        total.usage = total.usage.checked_add(&usage).map_err(&overflow)?;
+        total.reconciled_attempts = total
+            .reconciled_attempts
+            .checked_add(u64::from(reconciled))
+            .ok_or_else(|| corrupt("TokenLedgerEntry", "too many reconciled attempts"))?;
     }
     let mut stmt=conn.prepare_cached("SELECT usage.source,usage.model,hole.call_id,hole.attempt_ordinal,hole.generation_id,EXISTS(SELECT 1 FROM usage_deltas AS correction WHERE correction.session_id=?1 AND correction.reconciled_call_id=hole.call_id AND correction.reconciled_attempt_ordinal=hole.attempt_ordinal) FROM usage_delta_holes AS hole JOIN usage_deltas AS usage ON usage.seq=hole.seq AND usage.session_id=hole.session_id WHERE hole.session_id=?1 ORDER BY hole.call_id,hole.attempt_ordinal,hole.seq").map_err(sqlite_error)?;
     let rows = stmt

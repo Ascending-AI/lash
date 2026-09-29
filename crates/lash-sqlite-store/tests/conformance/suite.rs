@@ -141,7 +141,8 @@ impl ScenarioBackends {
                 .or_insert(backend)
                 .clone()
         });
-        backend.blocking_store()
+        let reopened = sync_await(async move { backend.reopen().await });
+        reopened.blocking_store()
     }
 }
 
@@ -375,9 +376,15 @@ lash_conformance::artifact_store_reopenable_tests!({
     let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move || {
         let backend = retained.open_blocking();
+        let keep_reopen = retained.clone();
         lash_conformance::fused_artifact_store::ReopenableArtifactStore {
             open: artifact_store_handles(&backend),
-            reopen: Arc::new(move || artifact_store_handles(&backend)),
+            reopen: Arc::new(move || {
+                let source = backend.clone();
+                let reopened = sync_await(async move { source.reopen().await });
+                keep_reopen.keep(&reopened);
+                artifact_store_handles(&reopened)
+            }),
         }
     })
 });
@@ -836,12 +843,37 @@ mod cancelled_queued_append {
             .admit_session(&root_session_request("root"))
             .await
             .expect("admit cancellation session");
+        let committed_store = Arc::clone(&store);
         (backend, store, move || {
             // The append commit is the first write after the pause is armed.
             let pause = injector.pause(SqliteFaultPoint::BeforeCommit);
             async move {
                 pause.wait_until_reached().await;
-                move || pause.release()
+                move || {
+                    pause.release();
+                    sync_await(async move {
+                        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                            loop {
+                                match lash_core_execution::SessionHistoryStore::load_session_window(
+                                    committed_store.as_ref(),
+                                    &SessionId::from("root"),
+                                    lash_core_execution::store::WindowSelector::Current,
+                                )
+                                .await
+                                .expect("read cancelled append after release")
+                                {
+                                    Some(_) => break,
+                                    None => {
+                                        tokio::time::sleep(std::time::Duration::from_millis(1))
+                                            .await
+                                    }
+                                }
+                            }
+                        })
+                        .await
+                        .expect("cancelled append commits after seam release");
+                    });
+                }
             }
         })
     });
