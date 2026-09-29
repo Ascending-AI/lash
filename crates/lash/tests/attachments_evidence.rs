@@ -176,17 +176,42 @@ fn drain_area_witnesses() {
             let _ = source;
         }
     });
-    // W0038: lash::persistence::AttachmentStoreError::ManifestRecordFailed [variant]
+    // W0038: lash::persistence::AttachmentStoreError::ManifestOperationFailed [variant]
     variant_witness(|value: &lash::persistence::AttachmentStoreError| {
         matches!(
             value,
-            lash::persistence::AttachmentStoreError::ManifestRecordFailed(..)
+            lash::persistence::AttachmentStoreError::ManifestOperationFailed { .. }
         )
     });
-    // W0039: lash::persistence::AttachmentStoreError::ManifestRecordFailed::0 [field]
+    // W0039: the manifest failure retains its operation, attachment id and typed cause.
     field_witness(|value: &lash::persistence::AttachmentStoreError| {
-        if let lash::persistence::AttachmentStoreError::ManifestRecordFailed(f0) = value {
-            let _ = f0;
+        if let lash::persistence::AttachmentStoreError::ManifestOperationFailed {
+            operation,
+            attachment_id,
+            source,
+        } = value
+        {
+            let _: &&'static str = operation;
+            let _: &lash::attachments::AttachmentId = attachment_id;
+            let _: &Box<lash::persistence::StoreError> = source;
+        }
+    });
+    variant_witness(|value: &lash::persistence::AttachmentStoreError| {
+        matches!(
+            value,
+            lash::persistence::AttachmentStoreError::WriteRollbackFailed { .. }
+        )
+    });
+    field_witness(|value: &lash::persistence::AttachmentStoreError| {
+        if let lash::persistence::AttachmentStoreError::WriteRollbackFailed {
+            attachment_id,
+            write_error,
+            abort_error,
+        } = value
+        {
+            let _: &lash::attachments::AttachmentId = attachment_id;
+            let _: &Box<lash::persistence::AttachmentStoreError> = write_error;
+            let _: &Box<lash::persistence::StoreError> = abort_error;
         }
     });
     // W0040: lash::persistence::AttachmentStorePersistence::Ephemeral [variant]

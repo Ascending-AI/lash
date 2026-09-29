@@ -396,3 +396,159 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     drop(execution);
     handler.close().await.expect("close the dispatch handler");
 }
+
+struct CountedAttachmentTools {
+    inner: AttachmentProbeTools,
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl ToolProvider for CountedAttachmentTools {
+    fn tool_manifests(&self) -> Vec<crate::ToolManifest> {
+        self.inner.tool_manifests()
+    }
+
+    fn resolve_contract(&self, name: &str) -> Option<Arc<crate::ToolContract>> {
+        self.inner.resolve_contract(name)
+    }
+
+    async fn execute(&self, call: ToolCall<'_>) -> crate::ToolAttemptOutcome {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.execute(call).await
+    }
+}
+
+struct TransientPublicationManifest {
+    fail_completion: bool,
+    failures: AtomicUsize,
+}
+
+impl TransientPublicationManifest {
+    fn failure(&self) -> crate::StoreError {
+        self.failures.fetch_add(1, Ordering::SeqCst);
+        crate::StoreError::StorageFailure {
+            backend: "publication-probe",
+            message: "manifest unavailable".to_string(),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::AttachmentManifest for TransientPublicationManifest {
+    async fn begin_attachment_write(
+        &self,
+        intent: crate::AttachmentIntent,
+    ) -> Result<crate::AttachmentWriteFence, crate::StoreError> {
+        if !self.fail_completion {
+            return Err(self.failure());
+        }
+        crate::AttachmentManifest::begin_attachment_write(
+            &crate::attachments::NoopAttachmentManifest,
+            intent,
+        )
+        .await
+    }
+
+    async fn complete_attachment_write(
+        &self,
+        _intent: &crate::AttachmentIntent,
+        _permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        Err(self.failure())
+    }
+
+    async fn abort_attachment_write(
+        &self,
+        _intent: &crate::AttachmentIntent,
+        _permit: crate::AttachmentWritePermit,
+    ) -> Result<(), crate::StoreError> {
+        panic!("publication failure must not start a rollback retry")
+    }
+
+    async fn commit_refs(
+        &self,
+        _session: &SessionId,
+        _ids: &[crate::AttachmentId],
+    ) -> Result<(), crate::StoreError> {
+        panic!("unexpected commit_refs")
+    }
+
+    async fn list_uncommitted(
+        &self,
+        _cutoff: u64,
+    ) -> Result<Vec<crate::AttachmentManifestEntry>, crate::StoreError> {
+        panic!("unexpected list_uncommitted")
+    }
+
+    async fn forget(
+        &self,
+        _session: &SessionId,
+        _id: &crate::AttachmentId,
+    ) -> Result<(), crate::StoreError> {
+        panic!("unexpected forget")
+    }
+
+    async fn list_all_refs(&self) -> Result<Vec<crate::AttachmentId>, crate::StoreError> {
+        panic!("unexpected list_all_refs")
+    }
+}
+
+#[tokio::test]
+async fn transient_manifest_publication_failure_never_reexecutes_the_tool() {
+    for fail_completion in [false, true] {
+        let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let definition = named_beta_tool("publication_failure_probe")
+            .with_retry_policy(ToolRetryPolicy::safe(3, 0, 0));
+        let provider: Arc<dyn ToolProvider> = Arc::new(CountedAttachmentTools {
+            inner: AttachmentProbeTools {
+                definition: definition.clone(),
+                sources: vec![inline_attachment(FIRST_BYTES)],
+            },
+            calls: Arc::clone(&calls),
+        });
+        let mut context = exact_dispatch_context_with_plugins(
+            crate::support::double_dispatch_ports(&double, &handler),
+            test_plugins(provider),
+        )
+        .await;
+        let backend = crate::support::memory_store_backend().await;
+        let manifest = Arc::new(TransientPublicationManifest {
+            fail_completion,
+            failures: AtomicUsize::new(0),
+        });
+        context.attachment_store = Arc::new(crate::SessionAttachmentStore::new(
+            backend.attachment_store(),
+            manifest.clone(),
+            SessionId::from("session"),
+        ));
+        let outcome = dispatch_tool_call(
+            &context,
+            definition.name().to_string(),
+            json!({ "value": "valid" }),
+        )
+        .await;
+        let crate::ToolCallOutcome::Failure(failure) = &outcome.record.output.outcome else {
+            panic!("manifest failure must fail the completed tool result");
+        };
+        assert_eq!(failure.code, "attachment_store_failed");
+        assert_eq!(failure.retry, ToolRetryStatus::Never);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "an executed tool must not be replayed"
+        );
+        assert_eq!(
+            manifest.failures.load(Ordering::SeqCst),
+            1,
+            "no publication retry loop"
+        );
+        assert_eq!(outcome.attempts.len(), 1);
+        assert_eq!(
+            backend.attachment_store().list().await.unwrap().len(),
+            usize::from(fail_completion)
+        );
+        drop(context);
+        handler.close().await.expect("close the dispatch handler");
+    }
+}

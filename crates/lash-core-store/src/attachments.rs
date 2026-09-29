@@ -104,8 +104,27 @@ pub enum AttachmentStoreError {
         #[source]
         source: std::io::Error,
     },
-    #[error("attachment manifest write failed: {0}")]
-    ManifestRecordFailed(String),
+    /// A manifest operation failed for one attachment. The store cause keeps
+    /// its classification and structured refusal fields.
+    #[error("attachment manifest {operation} for `{attachment_id}` failed: {source}")]
+    ManifestOperationFailed {
+        operation: &'static str,
+        attachment_id: AttachmentId,
+        #[source]
+        source: Box<StoreError>,
+    },
+    /// A blob write or its returned-id contract failed, then aborting the
+    /// manifest write failed too. The source chain follows the original write
+    /// failure; `abort_error` retains the separate rollback cause.
+    #[error(
+        "attachment write for `{attachment_id}` failed: {write_error}; manifest abort also failed: {abort_error}"
+    )]
+    WriteRollbackFailed {
+        attachment_id: AttachmentId,
+        #[source]
+        write_error: Box<AttachmentStoreError>,
+        abort_error: Box<StoreError>,
+    },
     /// The blob backend failed an operation. `operation` names the failed
     /// request, `class` is the actionable verdict, and `source` preserves the
     /// underlying cause for operators.
@@ -150,15 +169,22 @@ pub enum AttachmentStoreError {
 
 impl AttachmentStoreError {
     /// Whether retrying the identical operation may succeed. A transient
-    /// blob backend or root-set failure is retryable when its source is
+    /// blob backend, manifest or root-set failure is retryable when its source is
     /// transient, as is a write refused by an in-flight reclamation: the
     /// retry re-puts the bytes once the delete settles.
     /// A contract violation or a terminal backend failure retries to the same
-    /// refusal.
+    /// refusal. A failed rollback is retryable only if both causes are
+    /// retryable. This verdict does not authorize replaying an executed tool.
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::Backend { class, .. } => class.is_retryable(),
-            Self::RootSetOperationFailed { source, .. } => source.is_transient(),
+            Self::RootSetOperationFailed { source, .. }
+            | Self::ManifestOperationFailed { source, .. } => source.is_transient(),
+            Self::WriteRollbackFailed {
+                write_error,
+                abort_error,
+                ..
+            } => write_error.is_retryable() && abort_error.is_transient(),
             Self::ReclamationInFlight { .. } => true,
             _ => false,
         }
@@ -1711,10 +1737,10 @@ impl SessionAttachmentStore {
                 .manifest
                 .begin_attachment_write(intent.clone())
                 .await
-                .map_err(|err| {
-                    AttachmentStoreError::ManifestRecordFailed(format!(
-                        "failed to record attachment intent for `{attachment_id}`: {err}"
-                    ))
+                .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
+                    operation: "begin_attachment_write",
+                    attachment_id: attachment_id.clone(),
+                    source: Box::new(source),
                 })?;
             let permit = match fence {
                 AttachmentWriteFence::Granted(permit) => permit,
@@ -1745,10 +1771,11 @@ impl SessionAttachmentStore {
                     if let Err(rollback_error) =
                         self.manifest.abort_attachment_write(&intent, permit).await
                     {
-                        return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                            "backend put for `{attachment_id}` failed ({backend_error}); \
-                             condemnation rollback also failed: {rollback_error}"
-                        )));
+                        return Err(AttachmentStoreError::WriteRollbackFailed {
+                            attachment_id,
+                            write_error: Box::new(backend_error),
+                            abort_error: Box::new(rollback_error),
+                        });
                     }
                     return Err(backend_error);
                 }
@@ -1761,9 +1788,11 @@ impl SessionAttachmentStore {
                 if let Err(rollback_error) =
                     self.manifest.abort_attachment_write(&intent, permit).await
                 {
-                    return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                        "{backend_error}; condemnation rollback also failed: {rollback_error}"
-                    )));
+                    return Err(AttachmentStoreError::WriteRollbackFailed {
+                        attachment_id,
+                        write_error: Box::new(backend_error),
+                        abort_error: Box::new(rollback_error),
+                    });
                 }
                 return Err(backend_error);
             }
@@ -1789,10 +1818,12 @@ impl SessionAttachmentStore {
                     reclamation_fence_backoff(self.clock.as_ref(), attempts).await;
                     continue;
                 }
-                Err(err) => {
-                    return Err(AttachmentStoreError::ManifestRecordFailed(format!(
-                        "failed to complete attachment write for `{attachment_id}` after the backend put succeeded: {err}"
-                    )));
+                Err(source) => {
+                    return Err(AttachmentStoreError::ManifestOperationFailed {
+                        operation: "complete_attachment_write",
+                        attachment_id,
+                        source: Box::new(source),
+                    });
                 }
             }
         };
@@ -1815,10 +1846,10 @@ impl SessionAttachmentStore {
         self.manifest
             .forget(&self.session_id, id)
             .await
-            .map_err(|err| {
-                AttachmentStoreError::ManifestRecordFailed(format!(
-                    "failed to forget attachment ref for `{id}`: {err}"
-                ))
+            .map_err(|source| AttachmentStoreError::ManifestOperationFailed {
+                operation: "forget",
+                attachment_id: id.clone(),
+                source: Box::new(source),
             })?;
         Ok(())
     }
@@ -2086,6 +2117,10 @@ pub fn degrade_unmaterializable_request_attachments(
 #[cfg(test)]
 #[path = "attachments/fail_closed_tests.rs"]
 mod fail_closed_tests;
+
+#[cfg(test)]
+#[path = "attachments/manifest_failure_tests.rs"]
+mod manifest_failure_tests;
 
 #[cfg(any(test, feature = "testing"))]
 #[path = "attachments/test_capability.rs"]
