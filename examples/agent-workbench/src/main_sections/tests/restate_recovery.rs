@@ -1749,32 +1749,40 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         1,
         "active-turn input must reach the next provider iteration exactly once"
     );
-    let completed_in_running_turn = std::fs::read_to_string(&harness.trace_path)
+    // Settlement is keyed by the root and the turn (ADR 0101, FIG-3927
+    // amendment): the commit that settles the input names it in its
+    // `ingress.settled` record, under that turn and its root.
+    let in_flight_turn = injected.ingress.active_turn_id().map(TurnId::as_str);
+    let settlements = std::fs::read_to_string(&harness.trace_path)
         .expect("read turn ingress trace")
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|record| {
-            record.get("name").and_then(Value::as_str) == Some("turn_input.completed")
-                && record.pointer("/context/turn_id").and_then(Value::as_str)
-                    == injected.ingress.active_turn_id().map(TurnId::as_str)
+            record.get("name").and_then(Value::as_str) == Some("ingress.settled")
                 && record
-                    .pointer("/payload/claims")
+                    .pointer("/payload/input_ids")
                     .and_then(Value::as_array)
-                    .is_some_and(|claims| {
-                        claims.iter().any(|claim| {
-                            claim
-                                .get("input_ids")
-                                .and_then(Value::as_array)
-                                .is_some_and(|ids| {
-                                    ids.iter().any(|id| id.as_str() == Some(&injected.input_id))
-                                })
-                        })
-                    })
+                    .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(&injected.input_id)))
         })
-        .count();
+        .map(|record| {
+            (
+                record
+                    .pointer("/context/turn_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                record
+                    .pointer("/payload/root")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        completed_in_running_turn,
-        1,
+        settlements,
+        vec![(
+            in_flight_turn.map(str::to_owned),
+            in_flight_turn.map(str::to_owned)
+        )],
         "active-turn input must complete exactly once under the in-flight turn id; trace={} ",
         trace_tail(&harness.trace_path)
     );
