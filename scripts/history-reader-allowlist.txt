@@ -7,3 +7,13 @@ crates/lash-perf/src/runtime_perf/measurement/checkpoint.rs  |  .load_session_wi
 crates/lash-sim/src/content_oracle.rs  |  .load_ancestors(  |  1  # PAGED simulator oracle walks committed graph in bounded pages
 crates/lash-sim/src/content_oracle.rs  |  .load_usage_ledger_page(  |  1  # PAGED simulator oracle folds reported usage in bounded pages
 runbooks/restate-postgres-workers/src/bin/runner/process_assertions.rs  |  .load_session_window(  |  1  # WINDOW read-view runbook assertion reads current frame
+crates/lash-sim/src/crash_matrix/invariants.rs  |  .load_ancestors(  |  1  # PAGED crash matrix reconstructs committed transcript across frames
+crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Current)  |  1  # WINDOW read-view session API reads current frame
+crates/lash-core/src/runtime/session_api.rs  |  .load_session_window(crate::store::WindowSelector::Admitted(base.clone()))  |  1  # WINDOW turn session API reads admitted frame
+crates/lash-core/src/runtime/session_manager/mod.rs  |  .load_session_window(crate::store::WindowSelector::Current)  |  1  # WINDOW reopen session manager reads current frame
+crates/lash/src/durable_session.rs  |  Ok(self.store().await?.load_ancestors(anchor, budget).await?)  |  1  # PAGED public history facade forwards caller budget
+crates/lash/src/durable_session.rs  |  .load_failure_evidence_page(after, limit)  |  1  # PAGED public failure evidence facade forwards caller limit
+crates/lash-core-store/src/store/window_load.rs  |  let Some(read) = store.load_session_window(selector).await? else {  |  1  # WINDOW reopen canonical window loader
+crates/lash-core-store/src/store/window_load.rs  |  let Some(read) = store.load_session_window(WindowSelector::Current).await? else {  |  2  # WINDOW read-view and refresh loaders read current frame
+examples/agent-workbench/src/main_sections/routes.rs  |  .load_ancestors(  |  1  # PAGED state projection reconciles committed input ancestry
+examples/agent-workbench/src/main_sections/state_reads.rs  |  .load_failure_evidence_page(  |  1  # PAGED state projection reads failure evidence in bounded pages

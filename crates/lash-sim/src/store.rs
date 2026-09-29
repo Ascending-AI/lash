@@ -564,7 +564,7 @@ impl ModelStore {
                     turn_usage: turn_usage.clone(),
                     total_usage: turn_usage.clone(),
                     token_ledger_total: total_usage,
-                    token_ledger_entry_count: ledger_keys.len(),
+                    token_ledger_entry_count: Some(ledger_keys.len()),
                     usage_event_count: 1,
                     usage_event_cumulative_totals: vec![turn_usage],
                     non_negative: true,

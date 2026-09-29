@@ -580,7 +580,6 @@ pub(super) async fn prove_final_value_semantic_channel()
     let transcript_text = result
         .state
         .read_view()
-        .expect("runtime frame scope resolves")
         .messages()
         .iter()
         .flat_map(|message| message.parts.iter())

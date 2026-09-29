@@ -72,16 +72,14 @@ pub async fn run_backend_contention_report_against(
     let mut scenarios = Vec::new();
 
     let sqlite_root = artifact_root.join("sqlite-store");
-    let sqlite_factory: Arc<dyn DeploymentStore> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root),
-    );
+    let sqlite_factory: Arc<dyn DeploymentStore> =
+        lash_sqlite_store::SqliteStoreSet::open(&sqlite_root)
+            .await
+            .map_err(|error| format!("open SQLite contention store: {error}"))?
+            .session_store_factory();
     scenarios.push(
-        run_factory_contention_scenario(
-            "sqlite",
-            "lash_sqlite_store::SqliteSessionStoreFactory",
-            sqlite_factory,
-        )
-        .await?,
+        run_factory_contention_scenario("sqlite", "lash_sqlite_store::SqliteStore", sqlite_factory)
+            .await?,
     );
 
     match postgres_database_url {
@@ -92,13 +90,13 @@ pub async fn run_backend_contention_report_against(
                     .map_err(|err| format!("connect postgres contention store: {err}"))?,
             );
             let postgres_factory: Arc<dyn DeploymentStore> =
-                Arc::new(lash_postgres_store::PostgresSessionStoreFactory::new(
+                Arc::new(lash_postgres_store::PostgresStore::new(
                     &storage,
                 ));
             scenarios.push(
                 run_factory_contention_scenario(
                     "postgres",
-                    "lash_postgres_store::PostgresSessionStoreFactory",
+                    "lash_postgres_store::PostgresStore",
                     postgres_factory,
                 )
                 .await?,
@@ -107,7 +105,7 @@ pub async fn run_backend_contention_report_against(
         None => scenarios.push(BackendContentionScenario {
             backend: "postgres".to_string(),
             status: "skipped".to_string(),
-            store_factory: "lash_postgres_store::PostgresSessionStoreFactory".to_string(),
+            store_factory: "lash_postgres_store::PostgresStore".to_string(),
             session_id: SessionId::from("not-created"),
             operations: Vec::new(),
             skip_reason: Some(
@@ -188,9 +186,11 @@ async fn create_store(
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimeStore>, String> {
     factory
-        .create_store(&store_request(session_id))
+        .admit_session(&store_request(session_id))
         .await
-        .map_err(|err| format!("create store `{session_id}`: {err}"))
+        .map_err(|err| format!("create store `{session_id}`: {err}"))?;
+    let store: Arc<dyn RuntimeStore> = factory;
+    Ok(store)
 }
 
 async fn open_store(
@@ -198,12 +198,16 @@ async fn open_store(
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimeStore>, String> {
     match factory
-        .open_existing_store(&store_request(session_id))
+        .lookup_session(session_id)
         .await
         .map_err(|err| format!("open store `{session_id}`: {err}"))?
     {
-        Some(store) => Ok(store),
-        None => create_store(factory, session_id).await,
+        lash_core::SessionLookup::Live(_) => {
+            let store: Arc<dyn RuntimeStore> = factory;
+            Ok(store)
+        }
+        lash_core::SessionLookup::Absent => create_store(factory, session_id).await,
+        lash_core::SessionLookup::Deleted => Err(format!("store `{session_id}` was deleted")),
     }
 }
 

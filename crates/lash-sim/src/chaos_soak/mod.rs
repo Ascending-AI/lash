@@ -496,14 +496,11 @@ mod tests {
             driver.wait_reached("held-second").await,
             "both inputs reach the model under the held root"
         );
-        let store = driver
-            .world
-            .backend()
-            .session_store_factory()
-            .open_existing_store_by_id(&session)
-            .await
-            .expect("open store")
-            .expect("existing store");
+        let store = driver.world.backend().session_store_factory();
+        assert!(matches!(
+            store.lookup_session(&session).await.expect("lookup store"),
+            lash_core::SessionLookup::Live(_)
+        ));
         let second = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
             &session,
             "held-second",
@@ -607,11 +604,14 @@ mod tests {
             "both inputs reach the model under the held root"
         );
         let factory = driver.world.backend().session_store_factory();
-        let store = factory
-            .open_existing_store_by_id(&session)
-            .await
-            .expect("open store")
-            .expect("existing store");
+        assert!(matches!(
+            factory
+                .lookup_session(&session)
+                .await
+                .expect("lookup store"),
+            lash_core::SessionLookup::Live(_)
+        ));
+        let store = factory;
         let second = lash_core::InputId::from(lash_core::PendingTurnInputDraft::keyed_input_id(
             &session,
             "held-second",

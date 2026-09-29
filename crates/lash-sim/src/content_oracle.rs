@@ -517,7 +517,7 @@ pub async fn reopen_session(
     let ledger = serde_json::to_value(ledger_rows)
         .map_err(|err| format!("reopened `{session_id}` ledger does not encode: {err}"))?;
     let mut reopened = ReopenedSession::default();
-    for message in active_path_messages(&graph, session_id)? {
+    for message in active_path_messages(&graph, session_id.as_str())? {
         let parts = message
             .get("parts")
             .and_then(Value::as_array)

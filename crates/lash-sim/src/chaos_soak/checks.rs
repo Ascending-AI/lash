@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
-use lash_core::{ScopeId, SessionId, TurnId};
+use lash_core::{ScopeId, SessionId, SessionLookup, TurnId};
 
 use super::driver::{Admission, Ledger, Retired};
 use crate::crash_matrix::invariants::{
@@ -35,7 +35,13 @@ async fn delete_fate(
     admission: Admission,
 ) -> Result<DeleteFate, String> {
     let factory = world.backend().session_store_factory();
-    if factory.session_was_deleted(session).await? {
+    if matches!(
+        factory
+            .lookup_session(session)
+            .await
+            .map_err(|error| error.to_string())?,
+        SessionLookup::Deleted
+    ) {
         return Ok(DeleteFate::Owed);
     }
     if never_created(world, session).await? {
@@ -189,23 +195,26 @@ fn no_open_ingress(live: Vec<SessionId>) -> CustomCheck {
             let factory = world.backend().session_store_factory();
             let mut violations = Vec::new();
             for session in live {
-                match factory.open_existing_store_by_id(&session).await {
-                    Ok(Some(store)) => match store.list_pending_turn_inputs(&session).await {
-                        Ok(pending) if pending.is_empty() => {}
-                        Ok(pending) => violations.push(format!(
-                            "`{session}` holds {} open ingress row(s) nothing drove: {:?}",
-                            pending.len(),
-                            pending
-                                .iter()
-                                .map(|read| read.input.input_id.to_string())
-                                .collect::<Vec<_>>()
-                        )),
-                        Err(error) => {
-                            violations.push(format!("list open ingress of `{session}`: {error}"));
+                match factory.lookup_session(&session).await {
+                    Ok(SessionLookup::Live(_)) => {
+                        match factory.list_pending_turn_inputs(&session).await {
+                            Ok(pending) if pending.is_empty() => {}
+                            Ok(pending) => violations.push(format!(
+                                "`{session}` holds {} open ingress row(s) nothing drove: {:?}",
+                                pending.len(),
+                                pending
+                                    .iter()
+                                    .map(|read| read.input.input_id.to_string())
+                                    .collect::<Vec<_>>()
+                            )),
+                            Err(error) => {
+                                violations
+                                    .push(format!("list open ingress of `{session}`: {error}"));
+                            }
                         }
-                    },
+                    }
                     // A session whose open never committed has nothing open.
-                    Ok(None) => {}
+                    Ok(SessionLookup::Absent | SessionLookup::Deleted) => {}
                     Err(error) => violations.push(format!("open `{session}`: {error}")),
                 }
             }

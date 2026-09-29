@@ -131,7 +131,7 @@ pub struct RuntimeUsageInvariantFacts {
     pub turn_usage: RuntimeUsageTotals,
     pub total_usage: RuntimeUsageTotals,
     pub token_ledger_total: RuntimeUsageTotals,
-    pub token_ledger_entry_count: usize,
+    pub token_ledger_entry_count: Option<usize>,
     pub usage_event_count: usize,
     pub usage_event_cumulative_totals: Vec<RuntimeUsageTotals>,
     pub non_negative: bool,
@@ -576,8 +576,7 @@ pub fn runtime_usage_invariant_facts(
 ) -> RuntimeUsageInvariantFacts {
     let turn_usage = RuntimeUsageTotals::from_usage(&result.usage);
     let total_usage = turn_usage.clone();
-    let token_ledger_total =
-        RuntimeUsageTotals::sum(result.state.token_ledger.iter().map(|entry| &entry.usage));
+    let token_ledger_total = RuntimeUsageTotals::from_usage(&result.state.token_usage);
     let usage_event_cumulative_totals = activities
         .iter()
         .filter_map(|activity| match &activity.event {
@@ -600,19 +599,12 @@ pub fn runtime_usage_invariant_facts(
         &token_ledger_total,
         &mut negative_fields,
     );
-    for (index, entry) in result.state.token_ledger.iter().enumerate() {
-        collect_negative_usage_fields(
-            &format!("token_ledger[{index}]"),
-            &RuntimeUsageTotals::from_usage(&entry.usage),
-            &mut negative_fields,
-        );
-    }
     let non_negative = negative_fields.is_empty();
     RuntimeUsageInvariantFacts {
         turn_usage,
         total_usage,
         token_ledger_total,
-        token_ledger_entry_count: result.state.token_ledger.len(),
+        token_ledger_entry_count: None,
         usage_event_count: usage_event_cumulative_totals.len(),
         usage_event_cumulative_totals,
         non_negative,
@@ -680,14 +672,6 @@ impl RuntimeUsageTotals {
             usage.cache_write_input_tokens,
             usage.reasoning_output_tokens,
         )
-    }
-
-    fn sum<'a>(usages: impl IntoIterator<Item = &'a lash_core::TokenUsage>) -> Self {
-        let mut total = Self::default();
-        for item in usages {
-            total.saturating_add_assign(&Self::from_usage(item));
-        }
-        total
     }
 
     pub fn is_non_negative(&self) -> bool {

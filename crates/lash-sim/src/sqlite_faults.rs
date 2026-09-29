@@ -525,7 +525,7 @@ async fn run_composition_case(
         std::fs::remove_dir_all(&case_root).map_err(|error| error.to_string())?;
     }
     std::fs::create_dir_all(&case_root).map_err(|error| error.to_string())?;
-    let (factory, injector) = lane.armed_factory(&case_root);
+    let (factory, injector) = lane.armed_factory(&case_root).await?;
     let session_id = SessionId::from(format!(
         "lash-sim-{}-composition-{:016x}-{label}",
         lane.kind().name(),
@@ -726,7 +726,10 @@ async fn run_seed(
     }
     std::fs::create_dir_all(&seed_root)
         .map_err(|err| ScenarioFailure::harness(backend, format!("create seed root: {err}")))?;
-    let (factory, injector) = lane.armed_factory(&seed_root);
+    let (factory, injector) = lane
+        .armed_factory(&seed_root)
+        .await
+        .map_err(|error| ScenarioFailure::harness(backend, error))?;
     let session_id = SessionId::from(format!("lash-sim-{}-fault-{seed:016x}", backend.name()));
     let mut store = create_store(backend, Arc::clone(&factory), &session_id).await?;
     let mut state = RuntimeSessionState {
@@ -984,9 +987,11 @@ async fn create_store(
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimeStore>, ScenarioFailure> {
     factory
-        .create_store(&request(session_id))
+        .admit_session(&request(session_id))
         .await
-        .map_err(|err| ScenarioFailure::harness(backend, format!("create store: {err}")))
+        .map_err(|err| ScenarioFailure::harness(backend, format!("create store: {err}")))?;
+    let store: Arc<dyn RuntimeStore> = factory;
+    Ok(store)
 }
 
 async fn open_store(
@@ -994,11 +999,19 @@ async fn open_store(
     factory: Arc<dyn DeploymentStore>,
     session_id: &SessionId,
 ) -> Result<Arc<dyn RuntimeStore>, ScenarioFailure> {
-    factory
-        .open_existing_store(&request(session_id))
+    match factory
+        .lookup_session(session_id)
         .await
         .map_err(|err| ScenarioFailure::harness(backend, format!("open store: {err}")))?
-        .ok_or_else(|| ScenarioFailure::harness(backend, "reopened store did not exist"))
+    {
+        lash_core::SessionLookup::Live(_) => {
+            let store: Arc<dyn RuntimeStore> = factory;
+            Ok(store)
+        }
+        lash_core::SessionLookup::Absent | lash_core::SessionLookup::Deleted => Err(
+            ScenarioFailure::harness(backend, "reopened store did not exist"),
+        ),
+    }
 }
 
 fn persist_failure(

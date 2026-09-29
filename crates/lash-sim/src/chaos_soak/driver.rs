@@ -696,16 +696,18 @@ impl Driver {
         session: &SessionId,
         input: &str,
     ) -> Result<ScopeId, String> {
-        let store = self
-            .world
-            .backend()
-            .session_store_factory()
-            .open_existing_store_by_id(session)
-            .await
-            .map_err(|error| format!("open `{session}` to resolve `{input}`: {error}"))?
-            .ok_or_else(|| {
-                format!("`{session}` disappeared before `{input}` registered a child")
-            })?;
+        let store = self.world.backend().session_store_factory();
+        if !matches!(
+            store
+                .lookup_session(session)
+                .await
+                .map_err(|error| format!("open `{session}` to resolve `{input}`: {error}"))?,
+            lash_core::SessionLookup::Live(_)
+        ) {
+            return Err(format!(
+                "`{session}` disappeared before `{input}` registered a child"
+            ));
+        }
         let owner = store
             .root_of_input(session, &input_id(session, input))
             .await
@@ -732,14 +734,19 @@ impl Driver {
         root: &str,
     ) -> Result<String, String> {
         let root = root.to_owned();
-        let target = self
-            .world
-            .backend()
-            .session_store_factory()
-            .open_existing_store_by_id(session)
-            .await
-            .map_err(|error| format!("open `{session}` to cancel `{root}`: {error}"))?
-            .ok_or_else(|| format!("`{session}` disappeared before cancelling `{root}`"))?
+        let store = self.world.backend().session_store_factory();
+        if !matches!(
+            store
+                .lookup_session(session)
+                .await
+                .map_err(|error| format!("open `{session}` to cancel `{root}`: {error}"))?,
+            lash_core::SessionLookup::Live(_)
+        ) {
+            return Err(format!(
+                "`{session}` disappeared before cancelling `{root}`"
+            ));
+        }
+        let target = store
             .root_of_input(session, &input_id(session, &root))
             .await
             .map_err(|error| format!("resolve root to cancel `{root}`: {error}"))?

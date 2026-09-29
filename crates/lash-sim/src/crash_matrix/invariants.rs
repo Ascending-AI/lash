@@ -23,8 +23,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use lash_core::store::{ObligationKind, ObligationState, scope_close_obligation_id};
-use lash_core::{ProcessId, ScopeId, SessionId, TurnId};
+use lash_core::store::{
+    HistoryAnchor, HistoryBudget, ObligationKind, ObligationState, scope_close_obligation_id,
+};
+use lash_core::{ProcessId, ScopeId, SessionId, SessionLookup, TurnId};
 
 use super::world::CrashWorld;
 
@@ -304,7 +306,10 @@ impl ObligationProbe for IngressObligationProbe {
                 .map_err(|error| format!("read obligation {id}: {error}"))?
             {
                 Some(ObligationState::Delivered | ObligationState::Stalled) => {}
-                None if factory.session_was_deleted(&input.session).await == Ok(true) => {}
+                None if matches!(
+                    factory.lookup_session(&input.session).await,
+                    Ok(SessionLookup::Deleted)
+                ) => {}
                 state => unsettled.push(format!(
                     "input `{}` of `{}` owes its drive: its ingress obligation is {state:?}",
                     input.root, input.session
@@ -497,29 +502,52 @@ pub(crate) async fn transcript(
     world: &CrashWorld,
     session: &SessionId,
 ) -> Result<Vec<(String, String)>, String> {
-    // A session that never committed has no transcript yet: nothing of it
-    // was driven.
-    let Some(view) = world
-        .backend()
-        .session_store_factory()
-        .read_session(session)
-        .await
-        .map_err(|error| format!("read session `{session}`: {error}"))?
-    else {
+    let factory = world.backend().session_store_factory();
+    if !matches!(
+        factory
+            .lookup_session(session)
+            .await
+            .map_err(|error| error.to_string())?,
+        SessionLookup::Live(_)
+    ) {
         return Ok(Vec::new());
-    };
-    view.messages()
-        .iter()
-        .map(|message| {
-            let value = serde_json::to_value(message)
-                .map_err(|error| format!("encode a message of `{session}`: {error}"))?;
-            let role = value
-                .get("role")
-                .map(|role| role.to_string().trim_matches('"').to_ascii_lowercase())
-                .unwrap_or_default();
-            Ok((role, value.to_string()))
-        })
-        .collect()
+    }
+    let mut anchor = HistoryAnchor::Head;
+    let mut messages = Vec::new();
+    loop {
+        let page = factory
+            .load_ancestors(
+                session,
+                anchor,
+                HistoryBudget {
+                    max_nodes: std::num::NonZeroU32::new(128).expect("positive page limit"),
+                    max_bytes: std::num::NonZeroU64::new(32 * 1024 * 1024)
+                        .expect("positive byte limit"),
+                },
+            )
+            .await
+            .map_err(|error| format!("read session `{session}` ancestry: {error}"))?;
+        for node in page.nodes {
+            if let lash_core::SessionNodePayload::Event {
+                event: lash_core::SessionHistoryRecord::Conversation(message),
+            } = node.record.payload
+            {
+                let value = serde_json::to_value(message)
+                    .map_err(|error| format!("encode a message of `{session}`: {error}"))?;
+                let role = value
+                    .get("role")
+                    .map(|role| role.to_string().trim_matches('"').to_ascii_lowercase())
+                    .unwrap_or_default();
+                messages.push((role, value.to_string()));
+            }
+        }
+        match page.next {
+            Some(next) => anchor = HistoryAnchor::Cursor(next),
+            None => break,
+        }
+    }
+    messages.reverse();
+    Ok(messages)
 }
 
 /// How often the terminated token `marker` appears in `text`.
@@ -578,8 +606,8 @@ async fn check_inputs(world: &CrashWorld, expected: &Expected, violations: &mut 
     sessions.sort();
     sessions.dedup();
     for session in sessions {
-        match factory.open_existing_store_by_id(session).await {
-            Ok(Some(store)) => match store.list_pending_turn_inputs(session).await {
+        match factory.lookup_session(session).await {
+            Ok(SessionLookup::Live(_)) => match factory.list_pending_turn_inputs(session).await {
                 Ok(pending) if pending.is_empty() => {}
                 Ok(pending) => violations.push(format!(
                     "`{session}` holds {} open ingress row(s) nothing drove: {:?}",
@@ -591,7 +619,9 @@ async fn check_inputs(world: &CrashWorld, expected: &Expected, violations: &mut 
                 )),
                 Err(error) => violations.push(format!("list open ingress of `{session}`: {error}")),
             },
-            Ok(None) => violations.push(format!("`{session}` has no store")),
+            Ok(SessionLookup::Absent | SessionLookup::Deleted) => {
+                violations.push(format!("`{session}` has no store"))
+            }
             Err(error) => violations.push(format!("open `{session}`: {error}")),
         }
     }
@@ -647,7 +677,7 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
                         // A deleted session's rows are gone with their
                         // obligations; its physical delete waited for every
                         // scope close it owed (ADR 0109 §4).
-                        Ok(None) if factory.session_was_deleted(session_id).await == Ok(true) => {}
+                        Ok(None) if matches!(factory.lookup_session(session_id).await, Ok(SessionLookup::Deleted)) => {}
                         Ok(state) => violations.push(format!(
                             "the scope-close obligation `{id}` of terminal root `{scope}` is {state:?}, neither delivered nor stalled"
                         )),
@@ -675,9 +705,9 @@ async fn check_scopes(world: &CrashWorld, expected: &Expected, violations: &mut 
 async fn check_deletions(world: &CrashWorld, expected: &Expected, violations: &mut Vec<String>) {
     let factory = world.backend().session_store_factory();
     for session in &expected.deleted_sessions {
-        match factory.session_was_deleted(session).await {
-            Ok(true) => {}
-            Ok(false) => violations.push(format!(
+        match factory.lookup_session(session).await {
+            Ok(SessionLookup::Deleted) => {}
+            Ok(SessionLookup::Live(_) | SessionLookup::Absent) => violations.push(format!(
                 "the host asked to delete `{session}` and it is not deleted"
             )),
             Err(error) => violations.push(format!("read the deletion of `{session}`: {error}")),
