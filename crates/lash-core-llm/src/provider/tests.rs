@@ -1,4 +1,5 @@
 use super::support::*;
+use lash_sansio::sync::MutexExt as _;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -2238,4 +2239,87 @@ async fn provider_handle_attachment_413_remains_plain_non_retryable_validation()
         error.message,
         "Request too large: attachment exceeds upload limit"
     );
+}
+
+#[derive(Debug)]
+struct AdmissionRecorder {
+    inner: Box<dyn Provider>,
+    requests: Arc<std::sync::Mutex<Vec<LlmRequest>>>,
+}
+
+#[async_trait::async_trait]
+impl Provider for AdmissionRecorder {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+    fn route_identity(&self, model: &str) -> ProviderRouteIdentity {
+        self.inner.route_identity(model)
+    }
+    fn options(&self) -> ProviderOptions {
+        self.inner.options()
+    }
+    fn set_options(&mut self, options: ProviderOptions) {
+        self.inner.set_options(options);
+    }
+    fn serialize_config(&self) -> serde_json::Value {
+        self.inner.serialize_config()
+    }
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(Self {
+            inner: self.inner.clone_boxed(),
+            requests: self.requests.clone(),
+        })
+    }
+    async fn close(&self) -> Result<(), LlmTransportError> {
+        self.inner.close().await
+    }
+    async fn complete(&mut self, request: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        self.requests.lock_recover().push(request.clone());
+        self.inner.complete(request).await
+    }
+}
+
+#[tokio::test]
+async fn admission_decorator_observes_all_retry_requests_with_session_identity() {
+    let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let components = FailingProvider {
+        options: ProviderOptions {
+            reliability: ProviderReliability::default()
+                .max_attempts(3)
+                .base_delay_ms(0)
+                .max_delay_ms(0),
+            ..Default::default()
+        },
+        attempts: attempts.clone(),
+        fail_until: 2,
+        retryable: true,
+    }
+    .into_components()
+    .map_provider({
+        let requests = requests.clone();
+        move |inner| Box::new(AdmissionRecorder { inner, requests })
+    });
+    let mut handle = ProviderHandle::new(components);
+    let mut request = empty_request();
+    request.scope = crate::LlmRequestScope::new("host-tenant-session", "frame", "request");
+    request.messages = vec![LlmMessage::text(LlmRole::User, "preserve this payload")];
+    let completion = handle
+        .complete(request.clone())
+        .await
+        .expect("third attempt succeeds");
+    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    assert_eq!(completion.call_record.attempts.len(), 3);
+    let observed = requests.lock_recover();
+    assert_eq!(
+        observed.len(),
+        3,
+        "every physical attempt enters host admission"
+    );
+    for retry in observed.iter() {
+        assert_eq!(retry.scope, request.scope);
+        assert_eq!(retry.model, request.model);
+        assert_eq!(retry.messages, request.messages);
+        assert_eq!(retry.generation, request.generation);
+    }
 }

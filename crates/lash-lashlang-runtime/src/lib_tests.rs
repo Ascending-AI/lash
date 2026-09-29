@@ -2123,3 +2123,203 @@ fn test_process_start(
         args,
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+enum RebuildArtifactFault {
+    Missing,
+    CorruptBytes,
+    CorruptStore,
+    MissingStore,
+    Unavailable,
+}
+
+struct RebuildArtifactStore {
+    fault: RebuildArtifactFault,
+    bytes: Vec<u8>,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash_core::ModuleArtifactStore for RebuildArtifactStore {
+    async fn publish_module_artifact(
+        &self,
+        _: &lash_core::ReferrerClaim,
+        _: &str,
+        _: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("reconstruction must not publish artifacts")
+    }
+    async fn acquire_module_artifact(
+        &self,
+        _: &lash_core::ReferrerClaim,
+        _: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("reconstruction must not acquire artifacts")
+    }
+    async fn end_module_referrer(
+        &self,
+        _: &lash_core::ResolvedArtifactCleanup,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        panic!("reconstruction must not clean artifacts")
+    }
+    async fn get_module_artifact(
+        &self,
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        use std::sync::atomic::Ordering;
+        let read = self.reads.fetch_add(1, Ordering::SeqCst);
+        match self.fault {
+            RebuildArtifactFault::Missing => Ok(None),
+            RebuildArtifactFault::CorruptBytes => Ok(Some(b"not an artifact".to_vec())),
+            RebuildArtifactFault::CorruptStore => {
+                Err(lash_core::ArtifactStoreError::StoredDataCorrupt {
+                    record_kind: "module artifact",
+                    message: "corrupt store row".into(),
+                })
+            }
+            RebuildArtifactFault::MissingStore => {
+                Err(lash_core::ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: module_ref.into(),
+                })
+            }
+            RebuildArtifactFault::Unavailable if read == 0 => Err(
+                lash_core::ArtifactStoreError::Backend("storage unavailable".into()),
+            ),
+            RebuildArtifactFault::Unavailable => Ok(Some(self.bytes.clone())),
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn process_rebuild_failure_is_terminal_but_artifact_io_failure_retries() {
+    let environment = LashlangHostEnvironment::new(
+        lashlang::LashlangHostCatalog::new(),
+        LashlangAbilities::default(),
+    );
+    let compiled = lashlang::compile_module(lashlang::ModuleCompileRequest {
+        source: "process scan(root: str) -> str { finish root }",
+        program: scan_module(),
+        environment: &environment,
+    })
+    .expect("compile artifact");
+    let start = test_process_start(&compiled, test_start_site("rebuild", 1), "validated");
+    let input = LashlangProcessInput {
+        module_ref: start.module_ref.clone(),
+        process_ref: start.process_ref.clone(),
+        host_requirements_ref: lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new(
+            "validation-must-run-before-effects",
+        )),
+        process_name: start.process_name.clone(),
+        args: serde_json::json!({"root": "validated"})
+            .as_object()
+            .unwrap()
+            .clone(),
+    };
+    for fault in [
+        RebuildArtifactFault::Missing,
+        RebuildArtifactFault::CorruptBytes,
+        RebuildArtifactFault::CorruptStore,
+        RebuildArtifactFault::MissingStore,
+        RebuildArtifactFault::Unavailable,
+    ] {
+        let double = lash_restate_test::backend(SEED, Default::default())
+            .await
+            .unwrap();
+        let store = Arc::new(RebuildArtifactStore {
+            fault,
+            bytes: compiled.artifact.to_store_bytes().unwrap(),
+            reads: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let engine = LashlangProcessEngine::new(
+            LashlangArtifacts::new(store.clone()),
+            LashlangSurface::default(),
+        );
+        let registration = lash_core::ProcessRegistration::new(
+            input.to_process_input().unwrap(),
+            lash_core::ProcessProvenance::host(),
+            lash_core::LifetimeDecision::Detached,
+        )
+        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+            input.process_identity(),
+        ));
+        let make_context = || {
+            lash_core::testing::process_engine_run_context_for_validation(
+                &double.lash_backend(),
+                registration.clone(),
+                Arc::new(lash_core::ToolCatalog::default()),
+                false,
+            )
+        };
+        let context = make_context();
+        let before = double.server().stats();
+        let result = Box::pin(crate::process::run_lashlang_process(
+            engine.clone(),
+            context,
+            serde_json::to_value(&input).unwrap(),
+        ))
+        .await;
+        assert_eq!(
+            double.server().stats(),
+            before,
+            "no effect may run before validation: {fault:?}"
+        );
+        assert!(double.server().timers().is_empty());
+        match fault {
+            RebuildArtifactFault::Unavailable => {
+                let error = result.expect_err("a storage outage stays an infrastructure failure");
+                assert!(error.to_string().contains("storage unavailable"));
+                let outcome = Box::pin(crate::process::run_lashlang_process(
+                    engine,
+                    make_context(),
+                    serde_json::to_value(&input).unwrap(),
+                ))
+                .await
+                .expect("retry reconstructs after storage recovers");
+                let lash_core::ProcessAwaitOutput::Settled { output } =
+                    outcome.terminal_output().unwrap()
+                else {
+                    panic!("retry settles")
+                };
+                let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+                    panic!("recovered artifact reaches validation")
+                };
+                assert_eq!(
+                    failure.code,
+                    LashlangProcessFailureCode::ProcessHostRequirementsMismatch.as_str()
+                );
+                assert_eq!(
+                    double.server().stats(),
+                    before,
+                    "recovered storage still validates before effects"
+                );
+                assert_eq!(store.reads.load(std::sync::atomic::Ordering::SeqCst), 2);
+            }
+            RebuildArtifactFault::Missing | RebuildArtifactFault::MissingStore => {
+                let outcome = result.expect("missing artifacts terminalize");
+                let lash_core::ProcessAwaitOutput::Settled { output } =
+                    outcome.terminal_output().unwrap()
+                else {
+                    panic!("missing artifact settles")
+                };
+                let lash_core::ToolCallOutcome::Failure(failure) = &output.outcome else {
+                    panic!("missing artifact fails")
+                };
+                assert_eq!(
+                    failure.code,
+                    LashlangProcessFailureCode::ProcessModuleArtifactMissing.as_str()
+                );
+            }
+            RebuildArtifactFault::CorruptBytes | RebuildArtifactFault::CorruptStore => {
+                let outcome = result.expect("corrupt artifacts terminalize");
+                let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } =
+                    outcome.terminal_output().unwrap()
+                else {
+                    panic!("corrupt artifact refuses resume")
+                };
+                assert!(
+                    matches!(&evidence.writer, lash_core::AbandonWriter::ResumeRefused { reason: lash_core::ProcessResumeRefusal::RetiredGeneration { found } } if found == input.module_ref.as_str())
+                );
+            }
+        }
+    }
+}

@@ -1057,3 +1057,177 @@ async fn provider_turn_panic_reaches_the_harness_when_loud() {
         .expect("close the scope's handler");
     assert!(panic.is_err(), "loud provider panic must reach the harness");
 }
+
+#[derive(Clone, Debug)]
+struct AuxiliaryPanicProvider {
+    reconcile: bool,
+}
+
+#[async_trait]
+impl Provider for AuxiliaryPanicProvider {
+    fn kind(&self) -> &'static str {
+        "panic-provider"
+    }
+    fn route_identity(&self, model: &str) -> lash_core::ProviderRouteIdentity {
+        lash_core::ProviderRouteIdentity::new(self.kind(), self.kind(), model)
+    }
+    fn options(&self) -> ProviderOptions {
+        ProviderOptions::default()
+    }
+    fn set_options(&mut self, _: ProviderOptions) {}
+    fn serialize_config(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
+    fn clone_boxed(&self) -> Box<dyn Provider> {
+        Box::new(self.clone())
+    }
+    async fn close(&self) -> Result<(), LlmTransportError> {
+        panic!("auxiliary close payload")
+    }
+    async fn reconcile_usage(
+        &mut self,
+        _: &str,
+    ) -> Result<Option<lash_core::provider::ReconciledUsage>, LlmTransportError> {
+        panic!("auxiliary reconciliation payload")
+    }
+    async fn complete(&mut self, _: LlmRequest) -> Result<LlmResponse, LlmTransportError> {
+        let mut auxiliary = ProviderHandle::new(ProviderComponents::new(Box::new(self.clone())));
+        if self.reconcile {
+            auxiliary.reconcile_usage("generation").await?;
+        } else {
+            auxiliary.close().await?;
+        }
+        panic!("the panicking callback cannot succeed")
+    }
+}
+
+#[allow(
+    clippy::disallowed_methods,
+    reason = "isolated test processes own the process-scoped panic mode"
+)]
+#[tokio::test]
+async fn provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes() {
+    use futures_util::FutureExt as _;
+    const TEST: &str = "provider_auxiliary_panics_are_typed_in_quiet_and_loud_modes";
+    let Ok(case) = std::env::var("LASH_AUXILIARY_PANIC_CASE") else {
+        for case in [
+            "quiet-close",
+            "loud-close",
+            "quiet-reconcile",
+            "loud-reconcile",
+        ] {
+            let output = tokio::time::timeout(
+                std::time::Duration::from_secs(30),
+                tokio::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["--exact", TEST, "--nocapture", "--test-threads=1"])
+                    .env("LASH_AUXILIARY_PANIC_CASE", case)
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
+            .expect("isolated panic case has a bounded lifetime")
+            .unwrap();
+            assert!(
+                output.status.success(),
+                "{case}: {}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "isolated case must actually run"
+            );
+        }
+        return;
+    };
+    let loud = case.starts_with("loud");
+    let reconcile = case.ends_with("reconcile");
+    let expected_message = if reconcile {
+        "auxiliary reconciliation payload"
+    } else {
+        "auxiliary close payload"
+    };
+    lash_core::panic_containment::set_loud(loud);
+    let mut auxiliary =
+        ProviderHandle::new(ProviderComponents::new(Box::new(AuxiliaryPanicProvider {
+            reconcile,
+        })));
+    let direct = std::panic::AssertUnwindSafe(async {
+        if reconcile {
+            auxiliary.reconcile_usage("generation").await.map(|_| ())
+        } else {
+            auxiliary.close().await
+        }
+    })
+    .catch_unwind()
+    .await;
+    if loud {
+        let payload = direct.expect_err("loud auxiliary panic propagates");
+        assert_eq!(payload.downcast_ref::<&str>(), Some(&expected_message));
+    } else {
+        let error = direct
+            .expect("quiet containment does not unwind")
+            .expect_err("typed callback failure");
+        assert_eq!(
+            error.code.as_ref().unwrap().to_string(),
+            "lash:provider_panicked"
+        );
+        assert_eq!(error.message, expected_message);
+        assert!(!error.is_retryable());
+    }
+    let double = double(0x4142).await;
+    let backend = double.lash_backend();
+    let session_id = SessionId::from("auxiliary-panic-session");
+    let turn_id = TurnId::from("auxiliary-panic-turn");
+    let handler = double
+        .open_handler(AdmittedScope::turn(session_id.clone(), turn_id.clone()))
+        .await
+        .unwrap();
+    let controller = recording_controller(&handler);
+    let mut host = lash_core::facade_support::RuntimeHostConfig::new(
+        backend,
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    host.providers.provider_resolver = Arc::new(SingleProviderResolver::new(ProviderHandle::new(
+        ProviderComponents::new(Box::new(AuxiliaryPanicProvider { reconcile })),
+    )));
+    let mut runtime = Box::pin(
+        LashRuntime::builder(host, test_runtime_owner())
+            .with_session_id(session_id.to_string())
+            .with_policy(policy("panic-provider"))
+            .with_plugin_factories(vec![protocol_factory()])
+            .build(),
+    )
+    .await
+    .unwrap();
+    let result = std::panic::AssertUnwindSafe(runtime.drive_turn(
+        TurnInput::text("invoke auxiliary callback"),
+        lash_core::facade_support::TurnOptions::new(
+            CancellationToken::new(),
+            recording_turn_scope(&controller, &session_id, &turn_id),
+        ),
+    ))
+    .catch_unwind()
+    .await;
+    assert_eq!(
+        result.is_err(),
+        loud,
+        "only loud mode propagates after recording"
+    );
+    if !loud {
+        result.unwrap().expect("quiet turn settles");
+    }
+    assert_eq!(
+        controller.provider_panic_projection(),
+        (
+            Some("lash:provider_panicked".into()),
+            "provider call failed".into(),
+            "lash:provider_panicked".into()
+        ),
+        "the callback and task join retain the same typed failure"
+    );
+    lash_core::panic_containment::set_loud(false);
+    drop(controller);
+    handler.close().await.unwrap();
+}

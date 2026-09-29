@@ -2482,3 +2482,5 @@ fn receipt_reports_what_each_dialect_carried() {
 mod cache_emission_tests;
 
 mod epilogue;
+
+include!("failed_stream_metadata_tests.rs");

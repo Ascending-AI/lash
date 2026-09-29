@@ -999,3 +999,106 @@ mod instruction_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod attachment_acceptance_tests {
+    use super::*;
+    use crate::llm::types::{AttachmentSource, ProviderFileScope};
+    use crate::{AttachmentId, AttachmentRef, MediaType};
+
+    #[test]
+    fn attachment_acceptance_matches_source_mime_and_provider_scope() {
+        let mime_sources = [
+            AttachmentMimeSource::Inline,
+            AttachmentMimeSource::Stored,
+            AttachmentMimeSource::ExternalUrl,
+        ];
+        let sources = |mime: &str| {
+            let mime = MediaType::parse(mime).unwrap();
+            [
+                AttachmentSource::inline(mime.clone(), vec![1]),
+                AttachmentSource::stored(AttachmentRef::new(
+                    AttachmentId::parse("matrix").unwrap(),
+                    mime.clone(),
+                    1,
+                    None,
+                    None,
+                )),
+                AttachmentSource::external_url(mime, "https://example.test/image"),
+            ]
+        };
+        for (rule_index, source) in mime_sources.into_iter().enumerate() {
+            for (media_types, media_families, accepted) in [
+                (vec!["image/png".into()], vec![], [true, false, false]),
+                (vec![], vec!["image".into()], [true, true, false]),
+                (vec![], vec![], [false, false, false]),
+            ] {
+                let snapshot = AttachmentCapabilitySnapshot {
+                    revision: "matrix".into(),
+                    acceptors: vec![AttachmentAcceptor {
+                        provider: "route".into(),
+                        rules: vec![AttachmentAcceptanceRule::Mime {
+                            source,
+                            media_types,
+                            media_families,
+                        }],
+                    }],
+                };
+                for (mime_index, mime) in ["image/png", "image/jpeg", "application/pdf"]
+                    .into_iter()
+                    .enumerate()
+                {
+                    for (source_index, attachment) in sources(mime).into_iter().enumerate() {
+                        let expected = source_index == rule_index && accepted[mime_index];
+                        assert_eq!(
+                            snapshot.accepts("route", &attachment),
+                            expected,
+                            "rule={source:?} attachment={attachment:?}"
+                        );
+                        assert_eq!(
+                            snapshot.acceptors(&attachment),
+                            if expected { vec!["route"] } else { vec![] }
+                        );
+                        assert!(!snapshot.accepts("other-route", &attachment));
+                        assert!(
+                            !AttachmentCapabilitySnapshot::default().accepts("route", &attachment)
+                        );
+                    }
+                }
+                for provider in ["vendor", "VENDOR", "other"] {
+                    for mime in [None, Some(MediaType::parse("image/png").unwrap())] {
+                        let attachment = AttachmentSource::provider_file(
+                            ProviderFileScope::new(provider, "account"),
+                            "file",
+                            mime,
+                        );
+                        assert!(!snapshot.accepts("route", &attachment));
+                    }
+                }
+            }
+        }
+        let snapshot = AttachmentCapabilitySnapshot {
+            revision: "matrix".into(),
+            acceptors: vec![AttachmentAcceptor {
+                provider: "route".into(),
+                rules: vec![AttachmentAcceptanceRule::ProviderFile {
+                    provider: "vendor".into(),
+                }],
+            }],
+        };
+        for provider in ["vendor", "VENDOR", "other"] {
+            for mime in [None, Some(MediaType::parse("application/pdf").unwrap())] {
+                let attachment = AttachmentSource::provider_file(
+                    ProviderFileScope::new(provider, "account"),
+                    "file",
+                    mime,
+                );
+                assert_eq!(snapshot.accepts("route", &attachment), provider != "other");
+                assert!(!snapshot.accepts("other-route", &attachment));
+            }
+        }
+        for attachment in sources("image/png") {
+            assert!(!snapshot.accepts("route", &attachment));
+        }
+    }
+}

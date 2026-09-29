@@ -21,3 +21,6 @@ mod file_attachment_store_tests;
 pub mod fused_artifact_store;
 #[cfg(test)]
 mod live_replay_store_tests;
+
+#[cfg(test)]
+mod host_admission_tests;

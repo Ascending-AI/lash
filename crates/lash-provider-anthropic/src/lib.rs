@@ -335,6 +335,8 @@ mod tests {
         );
     }
 
+    include!("failed_stream_metadata_tests.rs");
+
     #[tokio::test]
     async fn response_metadata_capture_respects_shared_allowlists() {
         let body = concat!(

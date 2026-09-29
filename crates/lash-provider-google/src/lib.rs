@@ -122,6 +122,8 @@ mod tests {
 
     mod passthrough_tests;
 
+    include!("failed_stream_metadata_tests.rs");
+
     #[tokio::test]
     async fn response_metadata_capture_respects_shared_allowlists() {
         let body = "data: {\"response\":{\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"done\"}]} }],\"billing\":{\"cost\":2},\"private\":\"hidden\"}}\n\n";

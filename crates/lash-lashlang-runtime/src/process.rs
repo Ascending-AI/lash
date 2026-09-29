@@ -406,7 +406,7 @@ pub async fn run_lashlang_process(
             .await
         {
             Ok(Some(artifact)) => artifact,
-            Ok(None) => {
+            Ok(None) | Err(lash_core::ArtifactStoreError::ArtifactMissing { .. }) => {
                 return Ok(process_lashlang_failure(
                     LashlangProcessFailureCode::ProcessModuleArtifactMissing,
                     format!("missing lashlang module artifact `{}`", input.module_ref),
@@ -419,7 +419,10 @@ pub async fn run_lashlang_process(
             // way on every attempt: the shared resume-refusal terminal, before
             // any effect, never a retried infrastructure fault. It names the
             // module ref it refused so a drain can find it.
-            Err(lash_core::ArtifactStoreError::Decode(message)) => {
+            Err(
+                lash_core::ArtifactStoreError::Decode(message)
+                | lash_core::ArtifactStoreError::StoredDataCorrupt { message, .. },
+            ) => {
                 tracing::warn!(
                     module_ref = %input.module_ref,
                     error = %message,

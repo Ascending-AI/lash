@@ -11,6 +11,7 @@
 //! — and the model would be shown that conflict in place of the tool's
 //! result.
 
+use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use serde_json::json;
 use std::sync::{Arc, Mutex};
 
@@ -132,4 +133,113 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
         )
         .await
         .expect("the live pass crashes and the redrive completes");
+}
+
+#[tokio::test]
+async fn presentation_step_failure_feeds_fallback_to_next_step() {
+    use lash_sansio::sync::MutexExt as _;
+    let double = crate::support::kernel_double(SEED, Default::default()).await;
+    let backend = double.lash_backend();
+    let calls = Arc::new(Mutex::new(Vec::<String>::new()));
+    let failing: crate::plugin::ToolPresentationStep = {
+        let calls = calls.clone();
+        Arc::new(move |input| {
+            calls.lock_recover().push("first".into());
+            assert!(!input.previous.parts.is_empty());
+            Box::pin(async {
+                Err(crate::PluginError::Session(
+                    "presentation fixture failed".into(),
+                ))
+            })
+        })
+    };
+    let replacing: crate::plugin::ToolPresentationStep = {
+        let calls = calls.clone();
+        Arc::new(move |input| {
+            calls.lock_recover().push("second".into());
+            assert_eq!(
+                input.previous.parts,
+                vec![crate::ModelToolReturnPart::text(
+                    "plugin session error: presentation fixture failed"
+                )]
+            );
+            assert_eq!(input.previous.tool_name, "slow");
+            Box::pin(async move {
+                Ok(crate::ModelToolReturn::text(
+                    input.context.tool_name,
+                    "replacement after fallback",
+                ))
+            })
+        })
+    };
+    let mut factories = crate::testing::test_code_protocol_factories();
+    factories.push(Arc::new(crate::plugin::StaticPluginFactory::new(
+        "fallback-chain",
+        crate::plugin::PluginSpec::new()
+            .with_presentation_step(failing)
+            .with_presentation_step(replacing),
+    )));
+    let live_return = Arc::new(Mutex::new(None));
+    let make_attempt = |crash: bool| -> lash_restate_test::HandlerAttempt {
+        let backend = backend.clone();
+        let factories = factories.clone();
+        let live_return = live_return.clone();
+        let calls = calls.clone();
+        Arc::new(move |scoped| {
+            let backend = backend.clone();
+            let factories = factories.clone();
+            let live_return = live_return.clone();
+            let calls = calls.clone();
+            Box::pin(async move {
+                let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+                    .session_id("presentation-session")
+                    .plugin_factories(factories)
+                    .borrowed_effect_controller(scoped)
+                    .build()
+                    .into_runtime();
+                let outcome = context
+                    .complete_tool_call(
+                        lash_core_execution::tool_dispatch::ToolCallIds {
+                            call_id: crate::ToolCallId::fixture(CALL_ID),
+                            provider_call_id: None,
+                        },
+                        crate::ToolId::new("timed"),
+                        None,
+                        settled(),
+                        "test:call",
+                        1,
+                    )
+                    .await
+                    .expect("presentation settles despite failed step");
+                assert_eq!(
+                    outcome.completed.model_return.parts,
+                    vec![crate::ModelToolReturnPart::text(
+                        "replacement after fallback"
+                    )]
+                );
+                assert_eq!(
+                    *calls.lock_recover(),
+                    vec!["first", "second"],
+                    "recorded replay skips both steps"
+                );
+                if crash {
+                    *live_return.lock_recover() = Some(outcome.completed.model_return);
+                    panic!("crash after recording presentation");
+                }
+                assert_eq!(
+                    Some(outcome.completed.model_return),
+                    *live_return.lock_recover()
+                );
+            })
+        })
+    };
+    double
+        .run_crashed_then_redriven(
+            crate::AdmittedScope::turn("presentation-session", "fallback-turn"),
+            make_attempt(true),
+            make_attempt(false),
+        )
+        .await
+        .unwrap();
+    assert_eq!(*calls.lock_recover(), vec!["first", "second"]);
 }

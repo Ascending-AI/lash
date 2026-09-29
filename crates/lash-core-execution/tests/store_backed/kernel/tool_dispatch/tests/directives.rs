@@ -1166,3 +1166,151 @@ async fn after_tool_terminal_conflict_has_bounded_identity_evidence() {
     drop(context);
     handler.close().await.expect("close the dispatch handler");
 }
+
+#[tokio::test]
+async fn stronger_later_directive_conflict_keeps_later_plugin_attribution() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let (event_tx, mut events) = mpsc::unbounded_channel();
+    let graph = Arc::new(RecordingSessionGraph::default());
+    let mut context =
+        dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await;
+    context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
+    context.session_graph = graph.clone();
+    let outcome = crate::tool_dispatch::apply_before_tool_directives(
+        &context,
+        json!({}),
+        vec![
+            crate::plugin::PluginOwned {
+                plugin_id: "early".into(),
+                value: successful_short_circuit(),
+            },
+            crate::plugin::PluginOwned {
+                plugin_id: "later".into(),
+                value: policy_denial(),
+            },
+            crate::plugin::PluginOwned {
+                plugin_id: "abort".into(),
+                value: abort_turn(),
+            },
+        ],
+    )
+    .await;
+    let output = outcome.short_circuit.unwrap();
+    assert_eq!(output.value_for_projection()["code"], "policy_denied");
+    assert_eq!(
+        output.value_for_projection()["message"],
+        "policy denied the call"
+    );
+    for (later, winner, ignored, kind) in [
+        ("later", "later", "early", "denied_short_circuit"),
+        ("abort", "abort", "later", "abort_turn"),
+    ] {
+        let crate::SessionStreamEvent::PluginEvent {
+            plugin_id,
+            event: crate::PluginRuntimeEvent::Custom { name, payload },
+        } = events.try_recv().unwrap()
+        else {
+            panic!("conflict event")
+        };
+        assert_eq!(plugin_id, later);
+        assert_eq!(name, "before_tool_call.directive_conflict");
+        assert_eq!(payload["winner_plugin_id"], winner);
+        assert_eq!(payload["ignored_plugin_id"], ignored);
+        assert_eq!(payload["winner_directive"], kind);
+    }
+    let trace = graph.events.lock_recover().clone();
+    assert_eq!(trace.len(), 2);
+    for (event, later) in trace.iter().zip(["later", "abort"]) {
+        let lash_trace::TraceEvent::Custom { name, .. } = event else {
+            panic!("custom trace")
+        };
+        assert_eq!(
+            name,
+            &format!("plugin.{later}.before_tool_call.directive_conflict")
+        );
+    }
+    drop(context);
+    handler.close().await.unwrap();
+}
+
+struct FailingDirectiveTrace;
+#[async_trait::async_trait]
+impl crate::plugin::SessionGraphService for FailingDirectiveTrace {
+    async fn emit_trace_event(
+        &self,
+        _: lash_trace::TraceContext,
+        _: lash_trace::TraceEvent,
+    ) -> Result<(), crate::PluginError> {
+        Err(crate::PluginError::Session("trace unavailable".into()))
+    }
+}
+
+#[tokio::test]
+async fn directive_trace_failure_does_not_stop_remaining_side_effects() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let (event_tx, mut events) = mpsc::unbounded_channel();
+    let mut context =
+        dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await;
+    context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
+    context.session_graph = Arc::new(FailingDirectiveTrace);
+    let outcome = crate::tool_dispatch::apply_before_tool_directives(
+        &context,
+        json!({}),
+        vec![
+            crate::plugin::PluginOwned {
+                plugin_id: "trace".into(),
+                value: crate::plugin::PluginDirective::emit_trace("fails", json!({})).into(),
+            },
+            crate::plugin::PluginOwned {
+                plugin_id: "abort".into(),
+                value: abort_turn(),
+            },
+            crate::plugin::PluginOwned {
+                plugin_id: "effects".into(),
+                value: crate::plugin::PluginDirective::emit_runtime_events(vec![
+                    crate::PluginRuntimeEvent::Custom {
+                        name: "still-runs".into(),
+                        payload: json!({"order": 1}),
+                    },
+                ])
+                .into(),
+            },
+            crate::plugin::PluginOwned {
+                plugin_id: "replace".into(),
+                value: crate::ReplaceToolArgsDirective {
+                    args: json!({"later": true}),
+                }
+                .into(),
+            },
+        ],
+    )
+    .await;
+    assert_eq!(outcome.args, json!({"later": true}));
+    let output = outcome.short_circuit.unwrap();
+    assert!(!output.is_success());
+    assert!(
+        output
+            .value_for_projection()
+            .to_string()
+            .contains("trace unavailable")
+    );
+    let mut observed = vec![];
+    while let Ok(crate::SessionStreamEvent::PluginEvent {
+        plugin_id,
+        event: crate::PluginRuntimeEvent::Custom { name, payload },
+    }) = events.try_recv()
+    {
+        observed.push((plugin_id, name, payload));
+    }
+    assert_eq!(
+        observed.last(),
+        Some(&("effects".into(), "still-runs".into(), json!({"order": 1})))
+    );
+    assert_eq!(
+        observed.len(),
+        2,
+        "conflict emission failure must still reach the runtime sink"
+    );
+    drop(context);
+    handler.close().await.unwrap();
+}
