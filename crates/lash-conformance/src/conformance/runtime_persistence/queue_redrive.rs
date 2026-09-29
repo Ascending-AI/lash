@@ -31,7 +31,7 @@ fn ids(batches: &[&QueuedWorkBatch]) -> Vec<String> {
     reason = "conformance-law fixture: the admission is established by the setup"
 )]
 async fn admitted_under(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &lash_core::store::DriveFence,
     root: &str,
     head: AdmittedHead,
@@ -51,7 +51,7 @@ async fn admitted_under(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session = SessionId::from("queued-membership");
     let exclusive = store
@@ -160,7 +160,7 @@ pub async fn queued_work_respects_membership_limits_exclusivity_and_sessions(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session = SessionId::from("queued-join");
     let first = store
@@ -262,9 +262,7 @@ pub async fn queued_work_join_groups_by_delivery_policy_and_merge_key(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_resumed_root_drives_exactly_its_recorded_admission(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_resumed_root_drives_exactly_its_recorded_admission(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("resumed-root-admission");
     let mut rows = Vec::new();
     for (source_key, label) in [
@@ -337,7 +335,7 @@ pub async fn a_resumed_root_drives_exactly_its_recorded_admission(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) {
+pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("wake-default-batch");
     let merged_wakes = [
         policy_test_wake(&session, &crate::ProcessId::fixture("process-a"), 1),
@@ -437,7 +435,7 @@ pub(super) fn policy_test_wake(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn RuntimePersistence>) {
+pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-completion-fence");
     let mut joined = Vec::new();
     for text in ["join one", "join two"] {
@@ -519,7 +517,7 @@ pub async fn queued_work_completion_is_fenced_and_root_keyed(store: Arc<dyn Runt
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn RuntimePersistence>) {
+pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("root");
     let input = store
         .enqueue_pending_turn_input(pending_next_turn_input_draft(

@@ -17,8 +17,8 @@ const RECONCILE_SQL_SAFE_MAX: u64 = u64::MAX;
 /// factory-wide root oracle and a real blob backend instead of substituting a
 /// test-only manifest.
 pub struct RuntimePersistenceStateMachineHandles {
-    pub(super) runtime: Arc<dyn RuntimePersistence>,
-    pub(super) session_factory: Arc<dyn crate::SessionStoreFactory>,
+    pub(super) runtime: Arc<dyn RuntimeStore>,
+    pub(super) session_factory: Arc<dyn crate::DeploymentStore>,
     pub(super) attachment_backend: Arc<dyn crate::AttachmentStore>,
     pub(super) process_owner_liveness_wired: bool,
 }
@@ -28,7 +28,7 @@ impl RuntimePersistenceStateMachineHandles {
     /// holds: the backend's own attachment store, or the byte backend the
     /// tier composes with a store that keeps none.
     pub async fn create(
-        session_factory: Arc<dyn crate::SessionStoreFactory>,
+        session_factory: Arc<dyn crate::DeploymentStore>,
         attachment_backend: Arc<dyn crate::AttachmentStore>,
         process_owner_liveness_wired: bool,
     ) -> Result<Self, crate::StoreError> {
@@ -483,7 +483,7 @@ fn expected_live_refs(model: &ReferenceModel) -> BTreeSet<crate::AttachmentId> {
 async fn open_session(
     handles: &RuntimePersistenceStateMachineHandles,
     session_id: &SessionId,
-) -> Result<Arc<dyn RuntimePersistence>, String> {
+) -> Result<Arc<dyn RuntimeStore>, String> {
     handles
         .session_factory
         .open_existing_store(&session_request(session_id))

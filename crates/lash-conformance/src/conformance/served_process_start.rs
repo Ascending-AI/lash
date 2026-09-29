@@ -207,7 +207,7 @@ impl SpawnWorld {
     async fn runtime(
         &self,
         session_id: &SessionId,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
         capabilities: Capabilities,
     ) -> crate::LashRuntime {
         let subagents = match capabilities {
@@ -269,7 +269,7 @@ fn attempt(
     world: &SpawnWorld,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     capabilities: Capabilities,
     answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
 ) -> crate::ConformanceTurnAttempt {
@@ -415,12 +415,7 @@ async fn cut_then_redrive(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     prefix: &str,
     cut: Cut,
-) -> (
-    SessionId,
-    TurnId,
-    Arc<dyn crate::RuntimePersistence>,
-    Answer,
-) {
+) -> (SessionId, TurnId, Arc<dyn crate::RuntimeStore>, Answer) {
     let turn_id = TurnId::from(format!("{prefix}-spawn-turn"));
     let session_id = SessionId::from(format!("{prefix}-{}-real", cut.label()));
     let store = crate::conformance::law_session_store(world.stores.as_ref(), &session_id).await;

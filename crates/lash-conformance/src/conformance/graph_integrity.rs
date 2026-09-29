@@ -20,7 +20,7 @@ pub trait GraphIntegrityInjector: Send + Sync {
 }
 
 pub struct GraphIntegrityHandles {
-    pub runtime: Arc<dyn crate::RuntimePersistence>,
+    pub runtime: Arc<dyn crate::RuntimeStore>,
     pub injector: Arc<dyn GraphIntegrityInjector>,
 }
 

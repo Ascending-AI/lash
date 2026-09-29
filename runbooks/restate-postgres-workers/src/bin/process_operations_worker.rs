@@ -6,10 +6,10 @@ use lash::persistence::{
 };
 use lash::process::{WakeDeliveryDriver, process_wake_source_key};
 use lash_core::{
-    ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType, ProcessIdentity,
-    ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
+    DeploymentStore as _, ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessIdentity, ProcessInput, ProcessProvenance, ProcessRegistration, ProcessValueSelector,
     ProcessWakeDelivery, ProcessWakeSpec, SessionRelation, SessionStoreCreateRequest,
-    SessionStoreFactory as _, WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
+    WakeDeliveryConfig, WakeDeliveryState, WakeDiscardReason,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::json;
@@ -238,7 +238,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     );
     let drive = WakeDeliveryDriver::drive_pending_once(
         Arc::clone(&registry),
-        Arc::new(factory) as Arc<dyn lash_core::SessionStoreFactory>,
+        Arc::new(factory) as Arc<dyn lash_core::DeploymentStore>,
         Arc::new(lash::runtime::NoSessionWork::new()),
         Arc::new(lash_core::facade_support::SystemClock),
         32,
@@ -379,7 +379,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
     let process_id = crash_recovery_process(registry.as_ref()).await?;
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
-        as Arc<dyn lash_core::SessionStoreFactory>;
+        as Arc<dyn lash_core::DeploymentStore>;
     let report = tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let report = WakeDeliveryDriver::drive_pending_once(

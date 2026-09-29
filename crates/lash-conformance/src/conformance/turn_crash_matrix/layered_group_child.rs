@@ -31,10 +31,10 @@ pub async fn a_host_layer_observes_its_group_childrens_effects<F, S>(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     let scenario = "layered-group-child";
-    let raw = make(scenario) as Arc<dyn RuntimePersistence>;
+    let raw = make(scenario) as Arc<dyn RuntimeStore>;
     let identity = ReferenceIdentity::for_scenario(scenario);
     seed_reference_ingress(&raw, &identity, scenario).await;
     let control = SeamControl::default();

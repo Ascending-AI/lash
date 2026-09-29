@@ -61,8 +61,8 @@ impl UnboundSessionAdmissionState {
 #[derive(Clone)]
 pub struct UnboundSessionResolutionHandles {
     pub backend_name: &'static str,
-    pub factory: Arc<dyn crate::SessionStoreFactory>,
-    pub open_unbound: Arc<dyn Fn() -> Arc<dyn RuntimePersistence> + Send + Sync>,
+    pub factory: Arc<dyn crate::DeploymentStore>,
+    pub open_unbound: Arc<dyn Fn() -> Arc<dyn RuntimeStore> + Send + Sync>,
 }
 
 /// Prove that an unbound session-metadata lookup refuses to choose between
@@ -247,8 +247,8 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
-    first: &dyn RuntimePersistence,
-    second: &dyn RuntimePersistence,
+    first: &dyn RuntimeStore,
+    second: &dyn RuntimeStore,
 ) {
     let session_id = "pending-turn-input-multi-store-mint";
     let first_input = first
@@ -284,7 +284,7 @@ pub(super) async fn pending_turn_input_mint_is_unique_across_store_instances(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_prompt_layer_round_trips_through_the_committed_head(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let expected_prompt =
         crate::PromptLayer::new().with_contribution(crate::PromptContribution::guidance(
@@ -328,7 +328,7 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_protocol_turn_options_round_trip_through_the_committed_head(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let expected = crate::ProtocolTurnOptions::from_payload(serde_json::json!({
         "dialect": "conformance-dialect",
@@ -373,7 +373,7 @@ pub async fn session_protocol_turn_options_round_trip_through_the_committed_head
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let mut state =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
@@ -439,7 +439,7 @@ pub async fn execution_state_replace_then_clear_removes_the_live_checkpoint_ref(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn RuntimeStore>) {
     const CONFIGURED_NODE_LIMIT: usize = 1;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -477,7 +477,7 @@ pub async fn commit_rejects_carried_nondefault_node_budget(store: Arc<dyn Runtim
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_carried_nondefault_byte_budget(store: Arc<dyn RuntimeStore>) {
     const CONFIGURED_BYTE_LIMIT: usize = 64;
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -525,7 +525,7 @@ pub(super) fn commit_budget_conformance_fixture(byte_limit: usize) -> RuntimeCom
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -559,7 +559,7 @@ pub async fn commit_rejects_follow_on_bytes_over_budget(store: Arc<dyn RuntimePe
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -588,7 +588,7 @@ pub async fn commit_rejects_agent_frame_bytes_over_budget(store: Arc<dyn Runtime
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -623,7 +623,7 @@ pub async fn commit_rejects_usage_delta_bytes_over_budget(store: Arc<dyn Runtime
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 2_048;
     let mut commit = commit_budget_conformance_fixture(BYTE_LIMIT);
     commit
@@ -652,9 +652,7 @@ pub async fn commit_rejects_turn_result_bytes_over_budget(store: Arc<dyn Runtime
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_with_every_payload_family_inside_budget_succeeds(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_with_every_payload_family_inside_budget_succeeds(store: Arc<dyn RuntimeStore>) {
     const BYTE_LIMIT: usize = 64 * 1024;
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -728,7 +726,7 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let state = seed_append_receipt_state(&store).await;
     let old_leaf = state.session_graph.leaf_node_id.clone().expect("seed leaf");
@@ -817,7 +815,7 @@ pub async fn head_retirement_gate_distinguishes_leaf_change_from_same_leaf(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -859,7 +857,7 @@ pub async fn load_retains_reasoning_only_usage(store: Arc<dyn RuntimePersistence
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -968,7 +966,7 @@ pub async fn load_retains_usage_dispositions_and_rebuilds_outstanding_attempts(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1020,7 +1018,7 @@ pub async fn load_rejects_token_usage_overflow(store: Arc<dyn RuntimePersistence
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let turn_index = usize::MAX - 16;
     let state = RuntimeSessionState {
@@ -1058,7 +1056,7 @@ pub async fn checkpoint_restore_rejects_turn_index_without_increment_headroom(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overflows(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let token_usage = crate::TokenUsage {
         input_tokens: i64::MAX,
@@ -1099,7 +1097,7 @@ pub async fn checkpoint_restore_rejects_token_usage_whose_prompt_subtotal_overfl
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimePersistence>) {
+pub async fn usage_delta_identity_is_idempotent_across_commits(store: Arc<dyn RuntimeStore>) {
     let usage = TokenLedgerEntry {
         source: "idempotent-republish".to_string(),
         model: "usage-model".to_string(),

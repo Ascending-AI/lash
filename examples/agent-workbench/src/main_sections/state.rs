@@ -20,7 +20,7 @@ pub(crate) struct AppState {
     /// `reclaim_unreferenced_attachments` an explicit root set — so the route
     /// names it rather than reaching into the core for a store it did not
     /// choose.
-    pub(crate) session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(crate) session_store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     pub(crate) trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     pub(crate) process_observer: lash::process::ProcessWorkObserver,
     pub(crate) sessions: WorkbenchSessions,

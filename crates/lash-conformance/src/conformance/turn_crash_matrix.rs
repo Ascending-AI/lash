@@ -1,6 +1,6 @@
 //! Trace-derived crash coverage for one real scripted runtime turn.
 //!
-//! This suite instruments only integrator-owned seams: [`RuntimePersistence`],
+//! This suite instruments only integrator-owned seams: [`RuntimeStore`],
 //! [`crate::Provider`], and [`RuntimeEffectController`]. The runtime turn loop
 //! has no test hooks or failpoints (ADR 0044). A reference turn containing
 //! next-turn input, queued work, active-turn input at `AfterWork`, a model tool
@@ -63,8 +63,8 @@ use crate::plugin::{PluginSpec, StaticPluginFactory};
 use crate::provider::{Provider, ProviderComponents, ProviderHandle};
 use crate::store::{PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt};
 use crate::{
-    DriveFence, PendingTurnInputDraft, RuntimeEffectController, RuntimePersistence,
-    SessionHeadMeta, StoreError,
+    DriveFence, PendingTurnInputDraft, RuntimeEffectController, RuntimeStore, SessionHeadMeta,
+    StoreError,
 };
 
 mod admission_crash_cells;
@@ -512,21 +512,18 @@ impl SeamControl {
 }
 
 struct SeamStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     control: SeamControl,
 }
 
 impl SeamStore {
-    fn wrap(
-        inner: Arc<dyn RuntimePersistence>,
-        control: SeamControl,
-    ) -> Arc<dyn RuntimePersistence> {
+    fn wrap(inner: Arc<dyn RuntimeStore>, control: SeamControl) -> Arc<dyn RuntimeStore> {
         Arc::new(Self { inner, control })
     }
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for SeamStore {
+impl crate::store::RuntimeStoreDecorator for SeamStore {
     async fn unfinished_root(
         &self,
         session_id: &SessionId,
@@ -550,7 +547,7 @@ impl crate::store::RuntimePersistenceDecorator for SeamStore {
             )
             .await
     }
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+    fn inner(&self) -> &(dyn RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -934,7 +931,7 @@ fn reference_turn_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
 
 async fn build_runtime(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
@@ -958,7 +955,7 @@ async fn build_runtime(
 )]
 async fn build_runtime_with_lease_timings(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
@@ -982,7 +979,7 @@ async fn build_runtime_with_lease_timings(
 /// panicking on it: session admission runs inside `build`.
 async fn try_build_runtime_with_lease_timings(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
@@ -1017,7 +1014,7 @@ async fn try_build_runtime_with_lease_timings(
 /// the turn's effects and turn-control resolutions on every tier.
 async fn try_build_runtime_on_host(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     seam: &SeamLayer,
     host: LawSeamHost,
     identity: &ReferenceIdentity,
@@ -1039,7 +1036,7 @@ async fn try_build_runtime_on_host(
 
 async fn try_build_runtime_over_host(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     control: SeamControl,
     effect_host: Arc<dyn crate::EffectHost>,
     identity: &ReferenceIdentity,
@@ -1079,7 +1076,7 @@ async fn try_build_runtime_over_host(
 }
 
 async fn seed_reference_ingress(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
     scenario: &str,
 ) {
@@ -1091,7 +1088,7 @@ async fn seed_reference_ingress(
 /// drive admits it as the root of that id and the active-turn input and any
 /// cancellation addressed to the turn reach the root (FIG-3600 ruling Q4).
 async fn seed_reference_ingress_for_drive(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
     scenario: &str,
 ) {
@@ -1103,7 +1100,7 @@ async fn seed_reference_ingress_for_drive(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn seed_reference_ingress_as(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     identity: &ReferenceIdentity,
     scenario: &str,
     root: Option<&TurnId>,
@@ -1262,11 +1259,11 @@ pub async fn turn_crash_trace_drift_check<F, S>(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let raw = make("trace-drift") as Arc<dyn RuntimePersistence>;
+    let raw = make("trace-drift") as Arc<dyn RuntimeStore>;
     let identity = ReferenceIdentity::for_scenario("trace-drift");
     seed_reference_ingress(&raw, &identity, "trace-drift").await;
     // The golden trace below is an exact ordering; pin the one seam whose
@@ -1371,7 +1368,7 @@ pub async fn turn_crash_matrix_level_1<F, S>(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     Box::pin(turn_crash_matrix_level_1_parking(
         stores,
@@ -1435,9 +1432,9 @@ pub async fn turn_crash_matrix_level_1_parking<F, S>(
     parked: &[ParkedTurnCrashPoint],
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     let host = LawSeamHost::over(host);
     let law = MatrixLaw {
         stores: &stores,
@@ -1465,7 +1462,7 @@ pub async fn turn_crash_matrix_level_1_parking<F, S>(
 /// What every case of a runner-driven crash-matrix law runs over.
 pub(super) struct MatrixLaw<'law> {
     pub(super) stores: &'law Arc<dyn crate::StoreSet>,
-    pub(super) make: &'law dyn Fn(&str) -> Arc<dyn RuntimePersistence>,
+    pub(super) make: &'law dyn Fn(&str) -> Arc<dyn RuntimeStore>,
     /// The law's one layered host over the tier's.
     pub(super) host: &'law LawSeamHost,
     pub(super) runner: &'law Arc<dyn crate::ConformanceTurnRunner>,

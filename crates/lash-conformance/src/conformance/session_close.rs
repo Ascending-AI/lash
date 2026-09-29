@@ -11,19 +11,19 @@ use lash_core::store::{
     RootTerminalKind, RootTerminalWrite, TurnCommitId, TurnParkWrite,
 };
 use lash_core::{
-    NoSessionWork, SessionAdministration, SessionDeleteContext, SessionDeleteExecution, SessionId,
-    SessionStoreFactory, StoreError, StoreSet, TurnId,
+    DeploymentStore, NoSessionWork, SessionAdministration, SessionDeleteContext,
+    SessionDeleteExecution, SessionId, StoreError, StoreSet, TurnId,
 };
 
 pub(super) struct CloseSink {
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     calls: Mutex<Vec<(ControlIntentId, Vec<TurnId>)>>,
     /// How many of the next closes fail.
     failures: AtomicUsize,
 }
 
 impl CloseSink {
-    pub(super) fn new(factory: Arc<dyn SessionStoreFactory>, failures: usize) -> Arc<Self> {
+    pub(super) fn new(factory: Arc<dyn DeploymentStore>, failures: usize) -> Arc<Self> {
         Arc::new(Self {
             factory,
             calls: Mutex::new(Vec::new()),
@@ -132,7 +132,7 @@ pub(super) async fn session(
     stores: &Arc<dyn StoreSet>,
     prefix: &str,
     law: &str,
-) -> (SessionId, Arc<dyn crate::RuntimePersistence>) {
+) -> (SessionId, Arc<dyn crate::RuntimeStore>) {
     let id = SessionId::from(format!("{prefix}-{law}"));
     let store = super::law_session_store(stores.as_ref(), &id).await;
     (id, store)
@@ -341,10 +341,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn pin_a_turn_cancel_closure(
-    store: &dyn crate::RuntimePersistence,
-    id: &SessionId,
-) {
+pub(super) async fn pin_a_turn_cancel_closure(store: &dyn crate::RuntimeStore, id: &SessionId) {
     let lease = store
         .seal_drive_epoch_for_test(
             id,

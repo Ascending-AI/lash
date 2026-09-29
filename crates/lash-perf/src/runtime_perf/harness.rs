@@ -182,7 +182,7 @@ pub(crate) struct BenchmarkRuntime {
     core: BenchmarkCore,
     session: Option<lash::LashSession>,
     store: Option<Arc<RuntimePerfStore>>,
-    persistence: Option<Arc<dyn lash::persistence::RuntimePersistence>>,
+    persistence: Option<Arc<dyn lash::persistence::RuntimeStore>>,
     store_metrics: Arc<RuntimePerfStoreMetrics>,
     provider_control: Option<Arc<BenchmarkProviderControl>>,
     settlement_control: Option<Arc<BenchmarkSettlementControl>>,
@@ -235,7 +235,7 @@ impl BenchmarkRuntime {
         clippy::expect_used,
         reason = "the persistence handle is installed by set_up before measurement begins; the accessor is the panicking half of the Option field"
     )]
-    pub(crate) fn persistence(&self) -> Arc<dyn lash::persistence::RuntimePersistence> {
+    pub(crate) fn persistence(&self) -> Arc<dyn lash::persistence::RuntimeStore> {
         Arc::clone(
             self.persistence
                 .as_ref()
@@ -1115,7 +1115,7 @@ pub(crate) fn durable_sqlite_session_store_factory_without_commit_measurement(
     sessions_root: PathBuf,
     process_registry_path: &std::path::Path,
 ) -> (
-    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
@@ -1131,7 +1131,7 @@ pub(crate) fn durable_sqlite_session_store_factory_without_commit_measurement(
 pub(crate) fn durable_postgres_session_store_factory_without_commit_measurement(
     postgres: &lash_postgres_store::PostgresStorage,
 ) -> (
-    Arc<dyn lash_core::SessionStoreFactory>,
+    Arc<dyn lash_core::DeploymentStore>,
     Arc<RuntimePerfStoreMetrics>,
 ) {
     let factory = RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
@@ -1157,7 +1157,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     );
     let restate = restate_backend_over(stores).await?;
     let (store_factory, store_metrics): (
-        Arc<dyn lash_core::SessionStoreFactory>,
+        Arc<dyn lash_core::DeploymentStore>,
         Arc<RuntimePerfStoreMetrics>,
     ) = if !wiring.measure_commit_bytes {
         // Store-reopen scenarios keep the backend's own catalog: they

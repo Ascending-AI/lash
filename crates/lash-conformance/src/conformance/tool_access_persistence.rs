@@ -68,7 +68,7 @@ fn assert_restricted_empty_catalog(access: crate::SessionToolAccess, session_id:
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_tool_access_durable_recovery(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let session_id = SessionId::from("explicit-tool-access-durable-recovery");
     let request = session_store_factory::session_store_request(

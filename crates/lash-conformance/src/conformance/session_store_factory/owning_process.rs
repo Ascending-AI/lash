@@ -10,7 +10,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance fixture: each result is established by the setup above"
 )]
 pub async fn session_meta_records_the_process_that_owns_it(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let owner = crate::ProcessId::fixture("session-owner");
     let owned_id = SessionId::from("session-meta-owned");

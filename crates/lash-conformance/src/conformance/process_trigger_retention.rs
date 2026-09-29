@@ -17,7 +17,7 @@ use crate::{
 pub struct ProcessTriggerRetentionHandles {
     pub registry: Arc<dyn ProcessRegistry>,
     pub triggers: Arc<dyn TriggerStore>,
-    pub sessions: Arc<dyn crate::SessionStoreFactory>,
+    pub sessions: Arc<dyn crate::DeploymentStore>,
 }
 
 pub async fn process_trigger_retention<F, Fut>(make: F)

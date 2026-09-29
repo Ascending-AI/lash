@@ -45,7 +45,7 @@ use model_agreement::{assert_model_agreement, terminal_outcome_under_standing_ca
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
     pub registry: Arc<dyn ProcessRegistry>,
-    pub runtime: Arc<dyn RuntimePersistence>,
+    pub runtime: Arc<dyn RuntimeStore>,
 }
 /// The generated operation alphabet shared by every durable store backend.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -1621,7 +1621,7 @@ async fn assert_wake_group_order_and_claim_ownership(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn assert_enqueued_wake_high_water_safety(
-    runtime: &Arc<dyn RuntimePersistence>,
+    runtime: &Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-high-water");
     let process = crate::ProcessId::fixture("law-high-water-process");
@@ -2222,7 +2222,7 @@ fn runtime_wake_for(
 }
 
 async fn consume_wake(
-    runtime: &dyn RuntimePersistence,
+    runtime: &dyn RuntimeStore,
     process_id: &ProcessId,
     sequence: u64,
     stale: bool,
@@ -2359,7 +2359,7 @@ async fn consume_wake(
 }
 
 async fn queued_batch_snapshot(
-    runtime: &dyn RuntimePersistence,
+    runtime: &dyn RuntimeStore,
     session_id: &SessionId,
     batch_id: &str,
 ) -> Result<Option<serde_json::Value>, String> {

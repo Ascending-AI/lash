@@ -296,7 +296,7 @@ async fn ordering_group_discard_case(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
     clock: Arc<TestClock>,
     process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -1122,7 +1122,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn missing_target_is_deferred_and_rearmed(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
 ) {
@@ -1223,7 +1223,7 @@ async fn missing_target_is_deferred_and_rearmed(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn sender_floor_lifetime(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
     clock: Arc<TestClock>,
 ) {
@@ -1332,7 +1332,7 @@ async fn sender_floor_lifetime(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn settle_queued_batch(
-    target: &Arc<dyn crate::RuntimePersistence>,
+    target: &Arc<dyn crate::RuntimeStore>,
     session_id: &SessionId,
     batch_id: &str,
 ) {
@@ -1418,10 +1418,10 @@ async fn complete_and_prune(registry: &Arc<dyn crate::ProcessRegistry>, process_
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn prune_reregister_sender_floor_delivers_through_driver(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
-    target: Arc<dyn crate::RuntimePersistence>,
+    target: Arc<dyn crate::RuntimeStore>,
     target_session_id: &SessionId,
 ) {
     clock.set(1_800_000_010_000);
@@ -1624,10 +1624,10 @@ async fn replay_and_same_millisecond_allocation_are_deterministic(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn mixed_era_floor_and_ordering(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
-    target: Arc<dyn crate::RuntimePersistence>,
+    target: Arc<dyn crate::RuntimeStore>,
     target_session_id: &SessionId,
 ) {
     clock.set(1_800_000_030_000);
@@ -1802,10 +1802,10 @@ async fn mixed_era_floor_and_ordering(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn rewound_fresh_delivery_is_discarded_without_blocking(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
-    target: Arc<dyn crate::RuntimePersistence>,
+    target: Arc<dyn crate::RuntimeStore>,
     target_session_id: &SessionId,
 ) {
     let wake_store_rewind_poison_record = registry
@@ -1949,7 +1949,7 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn target_gone_is_a_typed_discard(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
 ) {
@@ -2037,7 +2037,7 @@ async fn target_gone_is_a_typed_discard(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn expired_is_a_typed_discard(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     clock: Arc<TestClock>,
 ) {

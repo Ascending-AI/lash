@@ -22,10 +22,7 @@ struct DurableIngress {
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own reads"
 )]
-async fn durable_ingress(
-    store: &Arc<dyn RuntimePersistence>,
-    session: &SessionId,
-) -> DurableIngress {
+async fn durable_ingress(store: &Arc<dyn RuntimeStore>, session: &SessionId) -> DurableIngress {
     let ids = |batches: Vec<crate::QueuedWorkBatch>| {
         batches
             .into_iter()
@@ -66,7 +63,7 @@ async fn durable_ingress(
     reason = "conformance-law fixture: the store answers its own reads"
 )]
 async fn rows_bound_to(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session: &SessionId,
     root: &str,
 ) -> (Vec<crate::InputId>, Vec<crate::BatchId>) {
@@ -127,7 +124,7 @@ fn cancelled_stop() -> crate::TurnStop {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn RuntimePersistence>) {
+pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("no-bound-row-commit");
     for (case, stop) in [
         ("failed", Some(crate::TurnStop::ProviderError)),
@@ -261,9 +258,7 @@ pub async fn no_row_stays_bound_after_a_roots_terminal_commit(store: Arc<dyn Run
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("addressed-to-ended-root");
     for (case, disposition) in [
         ("defer", crate::TurnCancelDisposition::Defer),
@@ -457,7 +452,7 @@ pub async fn no_open_row_is_addressed_to_a_turn_of_an_ended_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimePersistence>) {
+pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("stale-fence-writes-nothing");
     let root = "stale-fence-root";
     let input = store
@@ -586,7 +581,7 @@ pub async fn a_stale_fence_writes_nothing(store: Arc<dyn RuntimePersistence>) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimePersistence>) {
+pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("command-lane-bindless");
     let fence = seal_drive_fence_for_test(&store, &session, "command-lane").await;
     let command_completion = |batch: &crate::QueuedWorkBatch| crate::QueuedWorkCompletion {
@@ -724,9 +719,7 @@ pub async fn the_command_lane_is_bindless(store: Arc<dyn RuntimePersistence>) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("command-behind-the-head");
     let fence = seal_drive_fence_for_test(&store, &session, "command-behind-the-head").await;
     let apply = |command: &crate::QueuedWorkBatch| {
@@ -867,7 +860,7 @@ pub async fn a_command_enqueued_behind_a_roots_head_never_starves_it(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimePersistence>) {
+pub async fn settlement_is_predicated_on_the_root(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("settlement-predicated-on-root");
     let root = "settlement-owner-root";
     let bound = store

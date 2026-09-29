@@ -215,7 +215,7 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         })
         .build()
         .into_handle();
-    let resumed_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let resumed_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let resumed_core = explicit_durable_test_facets_on(double.lash_backend())
         .provider(resumed_provider)

@@ -19,7 +19,7 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_metadata_round_trips(store: Arc<dyn RuntimeStore>) {
     let meta = SessionMeta {
         owning_process_id: None,
         pending_observer_intents: vec![
@@ -57,7 +57,7 @@ pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimeStore>) {
     // The fixture admitted this session as a root; claiming a parent for it is
     // the conflict `admit_and_bind_session` already refuses on a rebind.
     let recorded = SessionMeta {
@@ -226,9 +226,7 @@ pub async fn gc_blobs(factory: ReopenableRuntimePersistence) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_manifest_reference_tracking_and_gc_root_set(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn attachment_manifest_reference_tracking_and_gc_root_set(store: Arc<dyn RuntimeStore>) {
     let intent_id = AttachmentId::parse(format!("{:x}", sha256_of(b"intent-only")))
         .expect("valid attachment id");
     let committed_id =
@@ -522,7 +520,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let wake = root_process_wake(7);
     let malformed = QueuedWorkBatchDraft::new(
@@ -647,7 +645,7 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimePersistence>) {
+pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root");
     let queued = store
         .enqueue_queued_work(crate::process_wake_batch_draft(root_process_wake(7)))
@@ -707,7 +705,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimePersis
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -791,7 +789,7 @@ pub async fn final_commit_stamp_is_idempotent_and_conflicts_on_changed_hash(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePersistence>) {
+pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -865,7 +863,7 @@ pub async fn store_computed_hash_rejects_mutated_commit(store: Arc<dyn RuntimePe
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -906,7 +904,7 @@ pub async fn commit_rejects_non_derived_append_node_ids(store: Arc<dyn RuntimePe
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -980,7 +978,7 @@ pub async fn append_rejects_existing_node_id_collision(store: Arc<dyn RuntimePer
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1021,7 +1019,7 @@ pub async fn append_rejects_duplicate_batch_node_ids(store: Arc<dyn RuntimePersi
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -1065,7 +1063,7 @@ pub async fn committed_leaf_is_derived_from_the_terminal_appended_node(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimePersistence>) {
+pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1102,7 +1100,7 @@ pub async fn preserve_head_commit_reports_the_resident_leaf(store: Arc<dyn Runti
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimePersistence>) {
+pub async fn empty_append_cannot_move_the_head(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("empty-append-head-move"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))

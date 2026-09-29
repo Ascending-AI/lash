@@ -97,7 +97,7 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -364,7 +364,7 @@ async fn turn_cancel_test_state_with_ingress(
     admin_url: String,
     restate_ingress_url: String,
 ) -> AppState {
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -653,7 +653,7 @@ async fn stop_over_real_process_await_commits_cancelled_terminal_inner() {
     std::fs::create_dir_all(&data_dir).expect("create Stop-over-process data dir");
     let double = crate::tests::test_double_backend(0).await;
     let process_registry = double.engine_stores().process_registry();
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-stop-over-process-await")

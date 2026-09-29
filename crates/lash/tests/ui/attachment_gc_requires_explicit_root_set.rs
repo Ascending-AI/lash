@@ -2,35 +2,35 @@ use std::sync::Arc;
 
 use lash::SessionId;
 use lash::persistence::{
-    AttachmentReclamationPolicy, EmptyRootSetPolicy, FileAttachmentStore, RuntimePersistence,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError, TurnPark, ParkFeedCursor,
+    AttachmentReclamationPolicy, EmptyRootSetPolicy, FileAttachmentStore, RuntimeStore,
+    SessionStoreCreateRequest, DeploymentStore, StoreError, TurnPark, ParkFeedCursor,
     ParkFeedPage, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts, reclaim_unreferenced_attachments,
 };
 
 struct DelegatingFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for DelegatingFactory {
+impl DeploymentStore for DelegatingFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         self.inner.create_store(request).await
     }
 
     async fn open_existing_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, String> {
         self.inner.open_existing_store(request).await
     }
 
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, StoreError> {
         self.inner.open_existing_store_by_id(session_id).await
     }
 

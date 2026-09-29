@@ -105,7 +105,7 @@ async fn probe_session(
     provider_handle.set_options(options);
     let collector = CheckpointWriteCollector::default();
     let engine = crate::backend::SimEngine::new(seed).await?;
-    let store_factory: Arc<dyn SessionStoreFactory> =
+    let store_factory: Arc<dyn DeploymentStore> =
         lash::Backend::session_store_factory(&engine.backend());
     let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
         .observing(collector.clone())

@@ -99,7 +99,7 @@ async fn build_runtime(
     world: &World,
     shape: Shape,
     session_id: &SessionId,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     probe: Probe,
 ) -> crate::LashRuntime {
     let model = crate::testing::TestProvider::builder()
@@ -157,7 +157,7 @@ fn attempt(
     shape: Shape,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     probe: Probe,
     answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
 ) -> crate::ConformanceTurnAttempt {
@@ -189,7 +189,7 @@ async fn drive(
     shape: Shape,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     probe: Probe,
     scope: crate::ScopedEffectController<'_>,
 ) -> Result<crate::AssembledTurn, crate::RuntimeError> {
@@ -286,7 +286,7 @@ async fn cut_key(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn park_when(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &SessionId,
     ready: impl Fn(&crate::store::TurnPark) -> bool,
 ) -> crate::store::TurnPark {

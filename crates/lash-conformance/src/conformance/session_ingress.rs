@@ -16,7 +16,7 @@ pub const SESSION_INGRESS_SESSION_ID: &str = "session-ingress";
 /// drive-epoch store over the same database.
 #[derive(Clone)]
 pub struct SessionIngressHandles {
-    pub runtime: Arc<dyn crate::RuntimePersistence>,
+    pub runtime: Arc<dyn crate::RuntimeStore>,
     pub ingress: Arc<dyn DriveEpochStore>,
 }
 

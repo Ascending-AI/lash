@@ -22,7 +22,7 @@ pub async fn admitted_turn_input_visibility_survives_worker_crash<F, I>(
     make: F,
     make_invocation: I,
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
     I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
     let scenario = "held-turn-input-visibility";

@@ -14,7 +14,7 @@ use crate::runtime_perf::measurement::{
 };
 use crate::runtime_perf::scenarios::ScenarioPhaseContract;
 use lash_core::runtime::RuntimeTurnPhaseProbe;
-use lash_core::{SessionListFilter, SessionStoreFactory};
+use lash_core::{DeploymentStore, SessionListFilter};
 
 const STABLE_DURABLE_PHASES: [&str; 5] = [
     "prepared_turn",

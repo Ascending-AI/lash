@@ -1,4 +1,4 @@
-//! A `SessionStoreFactory` that never states its by-id answer must not compile.
+//! A `DeploymentStore` that never states its by-id answer must not compile.
 //!
 //! `open_existing_store_by_id` is the non-creating seam a Durable Session
 //! acquires through (ADR 0097), and its two negative answers mean opposite
@@ -12,12 +12,12 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
-    AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
+    AttachmentRootSet, RuntimeStore, SessionStoreCreateRequest, DeploymentStore,
     StoreError, TurnPark, ParkFeedCursor, ParkFeedPage, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
 };
 
 struct SilentByIdFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
 }
 
 #[async_trait::async_trait]
@@ -43,16 +43,16 @@ impl AttachmentRootSet for SilentByIdFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for SilentByIdFactory {
+impl DeploymentStore for SilentByIdFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         self.inner.create_store(request).await
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
+        DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(

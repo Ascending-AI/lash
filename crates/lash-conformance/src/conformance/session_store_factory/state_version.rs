@@ -12,7 +12,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_state_version_admission_contract(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let request = session_store_request(
         &SessionId::from("session-state-version-admission"),

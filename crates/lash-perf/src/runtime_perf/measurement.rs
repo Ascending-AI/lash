@@ -16,13 +16,13 @@ use lash_core::sansio::{
 };
 use lash_core::store::{AdmittedHead, GraphAppend, RootStore as _};
 use lash_core::{
-    AttachmentIntent, DriverAction, DriverContextView, Effect, ExecResponse, IngressStore,
-    LiveReplayOutcome, LiveReplayStore, LiveReplaySubscribeOutcome, Message, MessageRole, Part,
-    ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
-    SessionObservationEventPayload, SessionRevision, SessionStoreFactory, TokenUsage,
-    ToolCallOutput, ToolCancellation, ToolFailure, ToolFailureClass, TurnInput, TurnMachine,
-    TurnMachineConfig, facade_support::ModelToolReturn, facade_support::Response,
-    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::shared_parts,
+    AttachmentIntent, DeploymentStore, DriverAction, DriverContextView, Effect, ExecResponse,
+    IngressStore, LiveReplayOutcome, LiveReplayStore, LiveReplaySubscribeOutcome, Message,
+    MessageRole, Part, ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionCommitStore,
+    SessionObservationEventPayload, SessionRevision, TokenUsage, ToolCallOutput, ToolCancellation,
+    ToolFailure, ToolFailureClass, TurnInput, TurnMachine, TurnMachineConfig,
+    facade_support::ModelToolReturn, facade_support::Response, facade_support::TurnFinish,
+    facade_support::TurnOutcome, facade_support::shared_parts,
 };
 use lash_sansio::sync::MutexExt;
 use serde::Serialize;
@@ -48,7 +48,7 @@ use super::scenarios::RuntimePerfScenario;
 use super::store::{RuntimePerfStore, RuntimePerfStoreTiming};
 
 async fn seal_perf_drive(
-    store: &(impl lash_core::RuntimePersistence + ?Sized),
+    store: &(impl lash_core::RuntimeStore + ?Sized),
     session_id: &lash_sansio::SessionId,
 ) -> anyhow::Result<lash_core::store::DriveFence> {
     use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};

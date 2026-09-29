@@ -20,7 +20,7 @@ struct Control {
     /// The engine resumes the root, then its reply is lost: the admin call
     /// timed out after the server acted.
     lose_resume_reply: AtomicBool,
-    cancel_on_resume: Mutex<Option<(Arc<dyn crate::SessionStoreFactory>, RootIntentRequest)>>,
+    cancel_on_resume: Mutex<Option<(Arc<dyn crate::DeploymentStore>, RootIntentRequest)>>,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
 #[async_trait::async_trait]
@@ -126,7 +126,7 @@ impl crate::SessionWorkEngine for Work {
 }
 #[derive(Clone)]
 struct Close {
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     fail: Arc<AtomicBool>,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
@@ -192,7 +192,7 @@ impl crate::Clock for ShiftedClock {
 const LATER_MS: u64 = 3_600_000;
 struct Fixture {
     parts: DriveParts,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     stores: Arc<dyn crate::StoreSet>,
     /// The store set's `ControlIntent` obligation ledger.
     intents: Arc<dyn ObligationLedger>,
@@ -523,7 +523,7 @@ fn spawn_drive(
 /// re-decision at the park read keeps it suspended rather than burning the
 /// invocation's attempt budget, so the settle cannot lose the race.
 struct GateProbe {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     probed: AtomicUsize,
     probed_wake: tokio::sync::Notify,
     settled: tokio::sync::watch::Receiver<bool>,
@@ -545,8 +545,8 @@ impl GateProbe {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for GateProbe {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for GateProbe {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1670,7 +1670,7 @@ pub async fn a_send_racing_an_unsettled_redrive_is_refused_until_the_redrive_set
         probed_wake: tokio::sync::Notify::new(),
         settled: settled_rx,
     });
-    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimePersistence>;
+    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimeStore>;
     let mut racing = spawn_drive(&f, &runner, "racing");
     tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
         .await
@@ -1807,7 +1807,7 @@ pub async fn a_lost_redrive_ack_is_settled_by_reconcile_and_the_queued_send_is_a
         probed_wake: tokio::sync::Notify::new(),
         settled: settled_rx,
     });
-    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimePersistence>;
+    f.parts.store = Arc::clone(&probe) as Arc<dyn crate::RuntimeStore>;
     let mut racing = spawn_drive(&f, &runner, "racing");
     tokio::time::timeout(std::time::Duration::from_secs(30), probe.await_reads(1))
         .await

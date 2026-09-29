@@ -114,7 +114,7 @@ struct DriftWorld {
 async fn build_runtime(
     world: &DriftWorld,
     session_id: &SessionId,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     probe: Probe,
 ) -> crate::LashRuntime {
     let calls = Arc::clone(&world.model_calls);
@@ -182,7 +182,7 @@ fn attempt(
     world: &DriftWorld,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     probe: Probe,
     answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
 ) -> crate::ConformanceTurnAttempt {

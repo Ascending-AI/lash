@@ -16,9 +16,7 @@ const IDENTITY_REUSE_ROUNDS: usize = 20;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn delete_then_enqueue_never_reuses_ingress_sequences(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn delete_then_enqueue_never_reuses_ingress_sequences(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("root");
     let mut last_batch_seq = 0_u64;
     let mut last_input_seq = 0_u64;

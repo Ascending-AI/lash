@@ -75,7 +75,7 @@ fn consecutive(first: u64, count: usize) -> Vec<u64> {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("turn-input-batches");
     let spec = batch_spec("batched shape");
@@ -207,7 +207,7 @@ pub async fn a_turn_input_batch_enqueues_new_ids_contiguously_in_request_order(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the_rest(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("turn-input-batch-retries");
     let spec = batch_spec("retried shape");
@@ -295,7 +295,7 @@ pub async fn a_resent_turn_input_batch_answers_its_existing_ids_and_enqueues_the
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_conflict_or_a_repeated_id_refuses_the_whole_turn_input_batch(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("turn-input-batch-refusals");
     let spec = batch_spec("stored shape");

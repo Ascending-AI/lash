@@ -20,7 +20,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_attachment_gc_fence_state_machine(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     if crate::AttachmentRootSet::fence(&*factory) == crate::AttachmentGcFence::BestEffort {
         return;

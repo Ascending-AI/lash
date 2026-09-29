@@ -16,8 +16,8 @@ use lash::persistence::{
     MaintenanceFailure, MaintenanceRefusal, MaintenanceResult, OperationId, PendingFollowOn,
     PendingTurnInputBatch, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkEnqueueOutcome, RealizedNodeTimestamp, RootAdmission,
-    RootStore, RootTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
-    RuntimeSessionState, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    RootStore, RootTerminal, RuntimeCommit, RuntimeCommitReceipt, RuntimeSessionState,
+    RuntimeStore, RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SessionCheckpoint, SessionCommitStore, SessionHeadMeta, SessionHeadPayload, SessionMeta,
     SessionNodeRecord, StoreError, StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary,
     TurnInputIngress, TurnInputState, VacuumReport, commit_runtime_state_verified,
@@ -566,7 +566,7 @@ fn trigger_types_are_homed_in_triggers(
 }
 
 async fn persistence_load_helpers_are_nameable(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
 ) -> Result<Option<RuntimeSessionState>, StoreError> {
     load_persisted_session_state(store).await
 }
@@ -624,7 +624,7 @@ fn leaked_signature_types_are_homed(
     );
 }
 
-fn assert_store_object(_: Arc<dyn RuntimePersistence>) {}
+fn assert_store_object(_: Arc<dyn RuntimeStore>) {}
 
 fn main() {
     assert_store_object(Arc::new(FacadeStore));

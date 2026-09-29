@@ -107,7 +107,7 @@ pub async fn store_maintenance_unimplemented_levers_fail(
 )]
 pub async fn idle_store_reports_witnessed_nothing_to_do(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("maintenance-nothing-to-do"),
@@ -151,7 +151,7 @@ pub async fn idle_store_reports_witnessed_nothing_to_do(
 )]
 pub async fn superseded_checkpoint_is_a_witnessed_sweep(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("maintenance-swept"),
@@ -197,7 +197,7 @@ pub async fn superseded_checkpoint_is_a_witnessed_sweep(
 )]
 pub async fn empty_root_set_refusal_returns_its_partial_report(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     attachments: Arc<dyn crate::AttachmentStore>,
 ) {
     let request = session_store_request(
@@ -260,7 +260,7 @@ pub async fn empty_root_set_refusal_returns_its_partial_report(
 )]
 pub async fn sweep_failure_is_not_an_empty_report(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     fault: &dyn StoreMaintenanceFaultInjector,
 ) {
     let request = session_store_request(
@@ -299,7 +299,7 @@ pub async fn sweep_failure_is_not_an_empty_report(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_generation(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &SessionId,
     generation: u64,
     expected_head_revision: u64,

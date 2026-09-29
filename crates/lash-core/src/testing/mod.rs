@@ -174,7 +174,7 @@ pub(crate) async fn double_unbound_recording_store(
     double: &lash_restate_test::RestateTestBackend,
 ) -> runtime_helpers::RecordingStore {
     runtime_helpers::RecordingStore::over(
-        crate::SessionStoreFactory::open_unbound_store(
+        crate::DeploymentStore::open_unbound_store(
             crate::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
         )
         .await

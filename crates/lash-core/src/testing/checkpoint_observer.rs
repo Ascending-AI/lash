@@ -6,10 +6,10 @@ use lash_sansio::sync::MutexExt;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
-use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, StoreError};
+use crate::store::{RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, StoreError};
 use crate::{
-    AttachmentId, BlobRef, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
-    SessionStoreCreateRequest, SessionStoreFactory,
+    AttachmentId, BlobRef, DeploymentStore, ForkPoint, ForkSessionReceipt, ForkSessionRequest,
+    SessionStoreCreateRequest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -140,7 +140,7 @@ impl CheckpointWriteEvent {
 
 /// Shared sink used by every store handle created during one generated run.
 ///
-/// This observes commits made through decorated `SessionStoreFactory` handles.
+/// This observes commits made through decorated `DeploymentStore` handles.
 /// `DurableProcessWorker` task bodies run storeless reconstruction runtimes
 /// that commit no session state, so they are outside this collector's
 /// coverage; transcript consumers are warned at their emitter boundary too.
@@ -297,16 +297,16 @@ impl CheckpointWriteCollector {
 /// succeeds, which is what makes the resulting durable-write transcript lines real facts
 /// rather than harness-constructed ones.
 pub struct ObservedSessionStoreFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     collector: CheckpointWriteCollector,
 }
 
 impl ObservedSessionStoreFactory {
-    pub fn new(inner: Arc<dyn SessionStoreFactory>, collector: CheckpointWriteCollector) -> Self {
+    pub fn new(inner: Arc<dyn DeploymentStore>, collector: CheckpointWriteCollector) -> Self {
         Self { inner, collector }
     }
 
-    fn wrap(&self, inner: Arc<dyn RuntimePersistence>) -> Arc<dyn RuntimePersistence> {
+    fn wrap(&self, inner: Arc<dyn RuntimeStore>) -> Arc<dyn RuntimeStore> {
         Arc::new(ObservedSessionStore {
             inner,
             collector: self.collector.clone(),
@@ -317,9 +317,7 @@ impl ObservedSessionStoreFactory {
 /// Give conformance roles distinct outer handles over one in-memory substrate
 /// without adding `Clone` or shared-field semantics to the production store.
 #[cfg(any(test, feature = "testing"))]
-pub fn fresh_runtime_persistence_handle(
-    inner: Arc<dyn RuntimePersistence>,
-) -> Arc<dyn RuntimePersistence> {
+pub fn fresh_runtime_persistence_handle(inner: Arc<dyn RuntimeStore>) -> Arc<dyn RuntimeStore> {
     Arc::new(ObservedSessionStore {
         inner,
         collector: CheckpointWriteCollector::default(),
@@ -327,7 +325,7 @@ pub fn fresh_runtime_persistence_handle(
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for ObservedSessionStoreFactory {
+impl DeploymentStore for ObservedSessionStoreFactory {
     // The backend binds its host and artifact stores through whatever
     // factory it hands out; the observer passes both to the catalog it wraps.
     fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
@@ -376,14 +374,14 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         Ok(self.wrap(self.inner.create_store(request).await?))
     }
 
     async fn open_existing_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, String> {
         Ok(self
             .inner
             .open_existing_store(request)
@@ -396,7 +394,7 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, StoreError> {
         Ok(self
             .inner
             .open_existing_store_by_id(session_id)
@@ -406,7 +404,7 @@ impl SessionStoreFactory for ObservedSessionStoreFactory {
 
     // The unbound open forwards the same way; its store binds on its first
     // admitted session, and the wrapper still observes its commits.
-    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         Ok(self.wrap(self.inner.open_unbound_store().await?))
     }
 
@@ -563,13 +561,13 @@ impl crate::AttachmentRootSet for ObservedSessionStoreFactory {
 }
 
 struct ObservedSessionStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     collector: CheckpointWriteCollector,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for ObservedSessionStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for ObservedSessionStore {
+    fn inner(&self) -> &(dyn RuntimeStore + '_) {
         self.inner.as_ref()
     }
 

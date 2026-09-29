@@ -41,7 +41,7 @@ impl StoreRecoveryLeaseTiming {
 /// rather than one shared instance.
 pub async fn store_recovery_fresh_instances<F>(make: &F, label: &str)
 where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
     let first = make(label);
     let second = make(label);
@@ -77,7 +77,7 @@ fn queued_work(session_id: &SessionId, source: &str) -> crate::QueuedWorkBatchDr
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn seed_and_admit(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     source: &str,
     lease_ttl_ms: u64,
@@ -127,9 +127,9 @@ async fn acquire_successor<F>(
     session_id: &SessionId,
     source: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
-) -> (Arc<dyn RuntimePersistence>, crate::store::DriveFence)
+) -> (Arc<dyn RuntimeStore>, crate::store::DriveFence)
 where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
     let successor = owner(format!("{source}:owner-b"));
     lease_timing.expire_predecessor().await;
@@ -174,7 +174,7 @@ fn committed_state(session_id: &SessionId, marker: &str) -> crate::RuntimeSessio
 /// Resume `source`'s root under `fence`: the recorded admission reads back
 /// unchanged.
 async fn resume(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &crate::store::DriveFence,
     source: &str,
     recorded: &lash_core::store::RootAdmission,
@@ -191,7 +191,7 @@ async fn resume(
 /// While the root is unfinished no second root takes its rows: the session
 /// admits one root at a time, and a bound row is no other root's head.
 async fn assert_no_second_root(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &crate::store::DriveFence,
     admission: &lash_core::store::RootAdmission,
 ) {
@@ -215,10 +215,7 @@ async fn assert_no_second_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn assert_settled_once(
-    make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
-    session_id: &SessionId,
-) {
+async fn assert_settled_once(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, session_id: &SessionId) {
     let reader = make(session_id);
     bind_conformance_session(&reader, session_id).await;
     assert!(
@@ -240,7 +237,7 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
     prefix: &str,
     lease_timing: &StoreRecoveryLeaseTiming,
 ) where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
     let session_id = SessionId::from(format!("{prefix}:checkpoint-before-settlement"));
     let source = "checkpoint-before-settlement";
@@ -294,7 +291,7 @@ pub async fn checkpoint_survives_before_claim_settlement<F>(
 )]
 pub async fn a_commit_settles_admitted_rows_once<F>(make: &F, prefix: &str)
 where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
     let session_id = SessionId::from(format!("{prefix}:atomic-settlement"));
     let source = "atomic-settlement";
@@ -347,7 +344,7 @@ where
 )]
 pub async fn recorded_commit_replay_is_idempotent<F>(make: &F, prefix: &str)
 where
-    F: Fn(&str) -> Arc<dyn RuntimePersistence>,
+    F: Fn(&str) -> Arc<dyn RuntimeStore>,
 {
     let session_id = SessionId::from(format!("{prefix}:commit-replay"));
     let source = "commit-replay";

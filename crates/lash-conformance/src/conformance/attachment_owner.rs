@@ -17,7 +17,7 @@ pub type ReopenEffectController = Arc<dyn Fn() -> ReopenEffectControllerFuture +
 /// controllers must be independently opened over the same journal; the vector
 /// deliberately never calls `start_replay` on the first controller.
 pub struct AttachmentOwnerColdReplayBackend {
-    pub session_store_factory: Arc<dyn crate::SessionStoreFactory>,
+    pub session_store_factory: Arc<dyn crate::DeploymentStore>,
     pub process_registry: Arc<dyn crate::ProcessRegistry>,
     pub attachment_store: Arc<dyn crate::AttachmentStore>,
     pub first_effect_controller: Option<Arc<dyn crate::RuntimeEffectController>>,
@@ -535,7 +535,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn final_turn_commit(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &SessionId,
     turn_id: &TurnId,
     adopted_attachment_ids: Vec<crate::AttachmentId>,
@@ -561,7 +561,7 @@ async fn final_turn_commit(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_with_lease(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     commit: crate::RuntimeCommit,
     owner_id: &str,
 ) -> crate::store::RuntimeCommitReceipt {
@@ -639,7 +639,7 @@ async fn assert_blob(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn attachment_owner_degraded_proof(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
     use crate::store::MaintenanceReport;

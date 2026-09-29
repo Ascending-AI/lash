@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lash::persistence::{
-    AttachmentReclamationPolicy, AttachmentReclamationReport, EmptyRootSetPolicy, GcReport,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, VacuumReport,
+    AttachmentReclamationPolicy, AttachmentReclamationReport, DeploymentStore, EmptyRootSetPolicy,
+    GcReport, SessionRelation, SessionStoreCreateRequest, VacuumReport,
 };
 use lash::{TurnBudget, process::Processes, runtime::SessionPolicy};
 use lash_sqlite_store::SqliteSessionStoreFactory;

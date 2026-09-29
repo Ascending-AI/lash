@@ -147,13 +147,13 @@ impl AttachmentStore for CoordinatedFailingPutStore {
 }
 
 struct PausedCondemnationRoot {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     condemned: tokio::sync::Notify,
     resume: tokio::sync::Notify,
 }
 
 impl PausedCondemnationRoot {
-    fn new(inner: Arc<dyn SessionStoreFactory>) -> Self {
+    fn new(inner: Arc<dyn DeploymentStore>) -> Self {
         Self {
             inner,
             condemned: tokio::sync::Notify::new(),
@@ -248,7 +248,7 @@ fn with_image(state: &mut RuntimeSessionState, reference: &AttachmentRef) {
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePersistence> {
+async fn create(f: &Arc<dyn DeploymentStore>, id: &str) -> Arc<dyn RuntimeStore> {
     f.create_store(&session_store_request(
         &SessionId::from(id),
         "probe",
@@ -268,12 +268,12 @@ async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePe
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
-    initial_factory: Arc<dyn SessionStoreFactory>,
+    initial_factory: Arc<dyn DeploymentStore>,
     make_bytes: AttachmentBytesFactory,
     reopen: R,
 ) where
     R: FnOnce() -> Fut,
-    Fut: Future<Output = Arc<dyn SessionStoreFactory>>,
+    Fut: Future<Output = Arc<dyn DeploymentStore>>,
 {
     assert_eq!(
         initial_factory.fence(),
@@ -409,7 +409,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 async fn put(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     bytes: Arc<dyn AttachmentStore>,
     id: &str,
     n: u8,
@@ -426,7 +426,7 @@ async fn put(
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn sweep(f: &Arc<dyn SessionStoreFactory>, bytes: &Arc<dyn AttachmentStore>) -> usize {
+async fn sweep(f: &Arc<dyn DeploymentStore>, bytes: &Arc<dyn AttachmentStore>) -> usize {
     reclaim_unreferenced_attachments(
         f.as_ref(),
         bytes.as_ref(),
@@ -444,7 +444,7 @@ async fn sweep(f: &Arc<dyn SessionStoreFactory>, bytes: &Arc<dyn AttachmentStore
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 pub async fn cross_owner_attachment_adoption_conformance(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -524,7 +524,7 @@ pub async fn cross_owner_attachment_adoption_conformance(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionStoreFactory>) {
+pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("condemnation-list-owner-{namespace}"));
     let store = f
@@ -621,7 +621,7 @@ pub async fn attachment_condemnation_enumeration_conformance(f: Arc<dyn SessionS
 }
 
 struct StopBeforeCondemnationReclaim {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     reclaim_reached: tokio::sync::Notify,
 }
 
@@ -687,12 +687,12 @@ impl AttachmentRootSet for StopBeforeCondemnationReclaim {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, ReopenFuture>(
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     make_bytes: AttachmentBytesFactory,
     reopen: Reopen,
 ) where
     Reopen: FnOnce() -> ReopenFuture,
-    ReopenFuture: Future<Output = Arc<dyn SessionStoreFactory>>,
+    ReopenFuture: Future<Output = Arc<dyn DeploymentStore>>,
 {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("condemnation-crash-{namespace}"));
@@ -782,7 +782,7 @@ pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, R
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn out_of_band_absence_leaves_no_adoptable_evidence(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -815,7 +815,7 @@ async fn out_of_band_absence_leaves_no_adoptable_evidence(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn failed_delete_releases_the_digest_for_a_fresh_put(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -874,7 +874,7 @@ async fn failed_delete_releases_the_digest_for_a_fresh_put(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn failed_reput_restores_prior_phase(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -936,7 +936,7 @@ async fn failed_reput_restores_prior_phase(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn competing_writer_survives_failed_reput(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -1004,7 +1004,7 @@ async fn competing_writer_survives_failed_reput(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn sweep_cannot_overwrite_failed_reput_rollback(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -1059,7 +1059,7 @@ async fn sweep_cannot_overwrite_failed_reput_rollback(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionStoreFactory>) {
+async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-sweep-release-{namespace}"));
     let store = create(&f, &session_id).await;
@@ -1118,7 +1118,7 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -1236,7 +1236,7 @@ async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn SessionStoreFactory>) {
+async fn stale_writer_abort_cannot_clobber_a_newer_delete(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-writer-sweep-{namespace}"));
     let store = create(&f, &session_id).await;
@@ -1312,7 +1312,7 @@ enum CommittedRestoringSettlement {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn committed_restoring_settlement_preserves_root(
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     for settlement in [
@@ -1394,7 +1394,7 @@ async fn committed_restoring_settlement_preserves_root(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_turn_owned_intent(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     request: &SessionStoreCreateRequest,
     turn_id: &TurnId,
     attachment_id: &AttachmentId,
@@ -1445,7 +1445,7 @@ async fn commit_turn_owned_intent(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn committed_restoring_abort_survives_the_older_sweep(
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -1545,7 +1545,7 @@ fn image_meta() -> AttachmentCreateMeta {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn record_completed_write(store: &Arc<dyn RuntimePersistence>, intent: &AttachmentIntent) {
+async fn record_completed_write(store: &Arc<dyn RuntimeStore>, intent: &AttachmentIntent) {
     let AttachmentWriteFence::Granted(permit) = store
         .begin_attachment_write(intent.clone())
         .await
@@ -1579,7 +1579,7 @@ fn write_intent(session_id: &SessionId, attachment_id: &AttachmentId) -> Attachm
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn SessionStoreFactory>) {
+async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("unstamped-intent-{namespace}"));
     let store = create(&f, &session_id).await;
@@ -1647,7 +1647,7 @@ async fn failed_reput_leaves_the_intent_unstamped_and_unadoptable(f: Arc<dyn Ses
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) {
+async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("stale-permit-{namespace}"));
     let store = create(&f, &session_id).await;
@@ -1706,7 +1706,7 @@ async fn stale_permit_cannot_certify_an_upload(f: Arc<dyn SessionStoreFactory>) 
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStoreFactory>) {
+async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let uploader_id = SessionId::from(format!("evidence-uploader-{namespace}"));
     let adopter_id = SessionId::from(format!("evidence-adopter-{namespace}"));
@@ -1751,7 +1751,7 @@ async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStor
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn abort_after_a_foreign_adoption_preserves_that_root(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -1805,7 +1805,7 @@ async fn abort_after_a_foreign_adoption_preserves_that_root(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFactory>) {
+async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("duplicate-put-{namespace}"));
     let adopter_id = SessionId::from(format!("duplicate-put-adopter-{namespace}"));
@@ -1854,7 +1854,7 @@ async fn duplicate_put_preserves_stamp_and_commitment(f: Arc<dyn SessionStoreFac
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionStoreFactory>) {
+async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("batch-unknown-{namespace}"));
     let store = create(&f, &session_id).await;
@@ -1902,7 +1902,7 @@ async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionS
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn adoption_fence_and_rollback(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let session_id = SessionId::from(format!("fenced-adoption-{}", uuid::Uuid::new_v4()));
@@ -2007,7 +2007,7 @@ async fn adoption_fence_and_rollback(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn adoption_after_full_gc_and_release_is_refused(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -2101,7 +2101,7 @@ async fn adoption_after_full_gc_and_release_is_refused(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn reput_after_full_gc_allows_adoption(
-    f: Arc<dyn SessionStoreFactory>,
+    f: Arc<dyn DeploymentStore>,
     make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
@@ -2167,7 +2167,7 @@ const RACE_SCHEDULES: usize = 20;
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &AttachmentBytesFactory) {
+async fn sweep_adoption_race(f: Arc<dyn DeploymentStore>, make_bytes: &AttachmentBytesFactory) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
         let owner_id = format!("adoption-race-owner-{schedule}-{namespace}");
@@ -2241,7 +2241,7 @@ async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &Attac
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &AttachmentBytesFactory) {
+async fn sweep_reput_race(f: Arc<dyn DeploymentStore>, make_bytes: &AttachmentBytesFactory) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
         let owner_id = format!("reput-race-owner-{schedule}-{namespace}");
@@ -2311,7 +2311,7 @@ async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &Attachme
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn SessionStoreFactory>) {
+pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn DeploymentStore>) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = format!("owner-identity-{namespace}");
     let store = create(&f, &session_id).await;

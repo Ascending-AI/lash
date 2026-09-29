@@ -333,7 +333,7 @@ fn measure_hardening_identity_phases(
     reason = "the attachment id is synthesized from a session id and turn index, which the parse accepts, per the message"
 )]
 async fn measure_store_hardening_backend_turn(
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &SessionId,
     turn_index: usize,
     names: StoreHardeningPhaseNames,
@@ -527,7 +527,7 @@ async fn measure_process_prune(
 }
 
 async fn load_store_hardening_state(
-    store: &Arc<dyn lash_core::RuntimePersistence>,
+    store: &Arc<dyn lash_core::RuntimeStore>,
     session_id: &SessionId,
 ) -> anyhow::Result<RuntimeSessionState> {
     Ok(

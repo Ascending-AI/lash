@@ -27,7 +27,7 @@ use lash_core::store::{
     RootTerminal, StallReason,
 };
 use lash_core::{
-    Clock, ClockWallTime as _, SessionId, SessionStoreFactory as _, StoreError, StoreSet, TurnId,
+    Clock, ClockWallTime as _, DeploymentStore as _, SessionId, StoreError, StoreSet, TurnId,
 };
 
 use crate::clock::SimClock;
@@ -184,7 +184,7 @@ impl World {
         });
         let scope_close = Arc::new(lash_core::drive::ScopeCloseRelay::new(
             stores.obligation_ledger(ObligationKind::ScopeClose),
-            Arc::clone(&factory) as Arc<dyn lash_core::SessionStoreFactory>,
+            Arc::clone(&factory) as Arc<dyn lash_core::DeploymentStore>,
             Arc::clone(&close) as Arc<dyn ScopeCloseSink>,
         ));
         let relay = ControlIntentRelay::new(

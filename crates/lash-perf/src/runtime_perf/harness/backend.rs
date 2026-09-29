@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{Backend, SessionStoreFactory};
+use lash_core::{Backend, DeploymentStore};
 
 /// The seed of every in-process lane's server double. A perf run measures
 /// cost, not a schedule, so one fixed seed serves every scenario.
@@ -37,7 +37,7 @@ impl PerfBackend {
     }
 
     /// Serve sessions from `catalog`, the perf store decorator.
-    pub(super) fn with_catalog(self, catalog: Arc<dyn SessionStoreFactory>) -> Self {
+    pub(super) fn with_catalog(self, catalog: Arc<dyn DeploymentStore>) -> Self {
         Self {
             layered: self.layered.map_session_store_factory(|_| catalog),
         }

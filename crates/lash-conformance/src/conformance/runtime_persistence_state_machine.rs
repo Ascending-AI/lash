@@ -1,4 +1,4 @@
-//! Model-based [`RuntimePersistence`] laws for drive fences, root admission,
+//! Model-based [`RuntimeStore`] laws for drive fences, root admission,
 //! queues, inputs, commit CAS, and checkpoint components; process-scoped laws
 //! live in the sibling harness.
 //!
@@ -17,8 +17,8 @@ use crate::store::{
 use crate::{
     LeaseOwnerIdentity, PendingTurnInput, PendingTurnInputCancelOutcome, PendingTurnInputDraft,
     PluginNamespaceState, PluginState, QueuedWorkBatch, QueuedWorkBatchDraft, RuntimeCommit,
-    RuntimePersistence, RuntimeSessionState, RuntimeUsageDeltaIdentity, StoreError, ToolState,
-    TurnId, TurnInput, TurnInputIngress, facade_support::ToolStateFacadeOps,
+    RuntimeSessionState, RuntimeStore, RuntimeUsageDeltaIdentity, StoreError, ToolState, TurnId,
+    TurnInput, TurnInputIngress, facade_support::ToolStateFacadeOps,
 };
 use lash_core::testing::RuntimePersistenceTestDriveExt as _;
 use lash_core::testing::conformance_support::ToolStateConformanceAccess;
@@ -470,7 +470,7 @@ where
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn apply_operation(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     attachment_handles: Option<&RuntimePersistenceStateMachineHandles>,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
@@ -677,7 +677,7 @@ fn next_root(model: &mut ReferenceModel) -> TurnId {
 /// resume), and any other root is refused `UnfinishedRootConflict` without a
 /// write; otherwise a new root takes the head's prefix.
 async fn admit_from_head(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     head: AdmittedHead,
@@ -736,7 +736,7 @@ async fn admit_from_head(
 }
 
 async fn admit_work(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
@@ -800,7 +800,7 @@ async fn admit_work(
 }
 
 async fn admit_turn_inputs(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     max_inputs: usize,
@@ -840,7 +840,7 @@ async fn admit_turn_inputs(
 
 /// A superseded fence admits nothing: the store refuses it before any read.
 async fn admit_with_stale_fence(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     family: Family,
@@ -877,7 +877,7 @@ async fn admit_with_stale_fence(
 /// unfinished root holds answers `AlreadyAdmitted{root}` (a batch: nothing
 /// removed) and changes nothing.
 async fn cancel_admitted_row(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
@@ -917,7 +917,7 @@ async fn cancel_admitted_row(
 }
 
 async fn seal_fence(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     owner_index: u8,
@@ -942,7 +942,7 @@ async fn seal_fence(
 /// A worker dies after its admission committed: its fence is superseded and
 /// the unfinished root keeps every row it admitted.
 async fn crash_after_admission(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
@@ -964,7 +964,7 @@ async fn crash_after_admission(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_operation(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
@@ -1248,7 +1248,7 @@ fn check_component_ref(
 /// The root's settlement presented under a superseded fence (N4): refused
 /// `StaleDriveFence` before anything is written.
 async fn settle_under_stale_fence(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
@@ -1281,7 +1281,7 @@ async fn settle_under_stale_fence(
 /// A settlement naming an open row (N10): no root holds it, so the commit is
 /// refused `IngressRowNotAdmitted` and writes nothing.
 async fn settle_foreign_row(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
     seed: u64,
@@ -1520,7 +1520,7 @@ fn select_open_input(model: &ReferenceModel, selection: u8) -> Option<PendingTur
 /// subsumes a separate cardinality law, while the model's unfinished root
 /// defines the admitted remainder.
 async fn assert_model_agreement(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &ReferenceModel,
 ) -> Result<(), String> {
     let mut actual_work = store
@@ -1627,7 +1627,7 @@ async fn assert_model_agreement(
     Ok(())
 }
 
-async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::Value, String> {
+async fn session_snapshot(store: &dyn RuntimeStore) -> Result<serde_json::Value, String> {
     let loaded = store
         .load_session()
         .await
@@ -1657,7 +1657,7 @@ async fn session_snapshot(store: &dyn RuntimePersistence) -> Result<serde_json::
 }
 
 async fn assert_snapshot_unchanged(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     before: serde_json::Value,
     law: &str,
 ) -> Result<(), String> {

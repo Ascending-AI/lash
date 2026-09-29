@@ -168,7 +168,7 @@ impl LawRow {
     reason = "conformance-law fixture: each write is established by the setup"
 )]
 async fn enqueue_checkpoint_row(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &SessionId,
     row: CheckpointRow,
     follow_on: &TurnId,
@@ -228,7 +228,7 @@ async fn enqueue_checkpoint_row(
 /// the follow-on turn enqueues the law's row, runs one step, and answers the
 /// row its checkpoint delivered.
 fn first_execution_model(
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     session_id: SessionId,
     row: CheckpointRow,
     follow_on: TurnId,
@@ -299,14 +299,14 @@ fn settles(commit: &crate::store::RuntimeCommit, row: &str) -> bool {
 /// A worker that dies at the commit that would settle the law's row: the
 /// commit never reaches the store and the drive never returns.
 struct CrashAtSettlingCommit {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     row: Arc<LawRow>,
     crash: crate::ConformanceCrash,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for CrashAtSettlingCommit {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for CrashAtSettlingCommit {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -333,7 +333,7 @@ struct RowBinding {
 /// Every drive's store: it records each admission — a root's or a
 /// checkpoint's — that binds the law's row.
 struct RowWitness {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     session_id: SessionId,
     row: Arc<LawRow>,
     bindings: Mutex<Vec<RowBinding>>,
@@ -377,8 +377,8 @@ impl RowWitness {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for RowWitness {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for RowWitness {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -437,7 +437,7 @@ impl LawParts {
     )]
     async fn runtime(
         &self,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
         model: crate::ProviderHandle,
     ) -> crate::LashRuntime {
         let mut host =
@@ -469,7 +469,7 @@ impl LawParts {
     /// One drive of the session's next root on `store`, answered by `model`.
     fn drive(
         &self,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
         model: crate::ProviderHandle,
     ) -> crate::ConformanceTurnAttempt {
         let parts = self.clone();
@@ -500,7 +500,7 @@ impl LawParts {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn committed_mentions(store: &Arc<dyn crate::RuntimePersistence>, text: &str) -> usize {
+async fn committed_mentions(store: &Arc<dyn crate::RuntimeStore>, text: &str) -> usize {
     crate::load_persisted_session_state(store.as_ref())
         .await
         .expect("read the committed session")
@@ -520,7 +520,7 @@ async fn committed_mentions(store: &Arc<dyn crate::RuntimePersistence>, text: &s
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own reads"
 )]
-async fn has_work(store: &Arc<dyn crate::RuntimePersistence>, session_id: &SessionId) -> bool {
+async fn has_work(store: &Arc<dyn crate::RuntimeStore>, session_id: &SessionId) -> bool {
     !store
         .list_pending_turn_inputs(session_id)
         .await
@@ -565,7 +565,7 @@ async fn a_row_is_answered_only_by_its_root(
         row: Arc::clone(&law_row),
         bindings: Mutex::new(Vec::new()),
     });
-    let store = Arc::clone(&witness) as Arc<dyn crate::RuntimePersistence>;
+    let store = Arc::clone(&witness) as Arc<dyn crate::RuntimeStore>;
     let parts = LawParts {
         session_id: session_id.clone(),
         stores,
@@ -587,7 +587,7 @@ async fn a_row_is_answered_only_by_its_root(
 
     // 1. The first execution dies at the commit that would settle the row.
     let crash = crate::ConformanceCrash::new();
-    let dying: Arc<dyn crate::RuntimePersistence> = Arc::new(CrashAtSettlingCommit {
+    let dying: Arc<dyn crate::RuntimeStore> = Arc::new(CrashAtSettlingCommit {
         inner: Arc::clone(&store),
         row: Arc::clone(&law_row),
         crash: crash.clone(),

@@ -17,8 +17,8 @@ use lash_core::runtime::recovery_lease::RecoveryDuties;
 use lash_core::store::ingress_obligation::ingress_obligation_id;
 use lash_core::store::{ObligationKind, ObligationLedger, ObligationState, StallReason};
 use lash_core::{
-    InputId, RuntimePersistence, SessionDriver, SessionId, SessionStoreFactory as _,
-    SessionWorkEngine, StoreSet as _,
+    DeploymentStore as _, InputId, RuntimeStore, SessionDriver, SessionId, SessionWorkEngine,
+    StoreSet as _,
 };
 
 use crate::clock::SimClock;
@@ -87,7 +87,7 @@ struct World {
     relay: IngressRelay,
     ledger: Arc<dyn ObligationLedger>,
     ops: lash_core::facade_support::DurableSessionOps,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     session: SessionId,
 }
 

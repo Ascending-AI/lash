@@ -25,7 +25,7 @@ use super::session_delete_blob_reclaim::{
 /// against custom process registries and session-store backends.
 pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
@@ -67,7 +67,7 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
 )]
 pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     backend: &str,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
@@ -166,7 +166,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
 ) {
     const OWNER_SESSION_ID: &str = "prune-reclaim-outside-owner-session";
@@ -224,7 +224,7 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_prune_records_deletions_for_later_reclaim(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
 ) {
     const FORK_SESSION_ID: &str = "prune-recorded-fork-child-session";
@@ -273,10 +273,10 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
 }
 
 async fn create_store(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
     session_id: &SessionId,
     policy: &crate::SessionPolicy,
-) -> Arc<dyn crate::RuntimePersistence> {
+) -> Arc<dyn crate::RuntimeStore> {
     factory
         .create_store(&crate::SessionStoreCreateRequest {
             owning_process_id: None,
@@ -294,7 +294,7 @@ async fn create_store(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_root_node(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
     session_id: &SessionId,
     policy: &crate::SessionPolicy,
 ) -> String {
@@ -322,7 +322,7 @@ async fn commit_root_node(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn fork_and_advance(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
     node_id: &str,
     child_session_id: &SessionId,
     child_node_id: &str,

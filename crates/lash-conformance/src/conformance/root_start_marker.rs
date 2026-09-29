@@ -25,7 +25,7 @@ use pretty_assertions::assert_eq;
 struct MarkerParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 }
 
 impl MarkerParts {

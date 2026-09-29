@@ -615,7 +615,7 @@ pub async fn a_missing_definition_retries_unrecorded_until_it_is_deployed(
     reason = "conformance-law fixture: the session store admits the batch"
 )]
 async fn enqueue_batch(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &lash_sansio::SessionId,
     keys: &[&str],
     spec: &crate::RunSpec,

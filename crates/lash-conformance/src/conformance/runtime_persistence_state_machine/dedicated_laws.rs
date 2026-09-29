@@ -47,7 +47,7 @@ async fn assert_on_fresh_store<F, Fut, Law, LawFut>(
 where
     F: Fn(u64) -> Fut,
     Fut: Future<Output = RuntimePersistenceStateMachineHandles>,
-    Law: FnOnce(Arc<dyn RuntimePersistence>) -> LawFut,
+    Law: FnOnce(Arc<dyn RuntimeStore>) -> LawFut,
     LawFut: Future<Output = Result<(), TestCaseError>>,
 {
     // Structural guard: every dedicated law obtains its own backend here.
@@ -58,7 +58,7 @@ fn fail(error: impl std::fmt::Display) -> TestCaseError {
     TestCaseError::fail(error.to_string())
 }
 
-async fn seal(store: &Arc<dyn RuntimePersistence>, index: u8) -> Result<DriveFence, TestCaseError> {
+async fn seal(store: &Arc<dyn RuntimeStore>, index: u8) -> Result<DriveFence, TestCaseError> {
     store
         .seal_drive_epoch_for_test(
             &session_id(),
@@ -73,7 +73,7 @@ async fn seal(store: &Arc<dyn RuntimePersistence>, index: u8) -> Result<DriveFen
 }
 
 async fn admit(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &DriveFence,
     root: &str,
     head: AdmittedHead,
@@ -126,9 +126,7 @@ fn state_with_tool_generation(generation: u64) -> RuntimeSessionState {
 }
 
 /// N4 through the model: a superseded fence admits neither family.
-async fn law_stale_fences_admit_nothing(
-    store: Arc<dyn RuntimePersistence>,
-) -> Result<(), TestCaseError> {
+async fn law_stale_fences_admit_nothing(store: Arc<dyn RuntimeStore>) -> Result<(), TestCaseError> {
     let mut model = ReferenceModel::default();
     let mut shape = RunShape::default();
     let ops = [
@@ -163,7 +161,7 @@ async fn law_stale_fences_admit_nothing(
 /// from its receipt, and a distinct second settlement of the same rows is
 /// refused because no root holds them any more.
 async fn law_admitted_work_settles_exactly_once(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let batch = store
         .enqueue_queued_work(queued_draft(0, 0, false))
@@ -234,7 +232,7 @@ async fn law_admitted_work_settles_exactly_once(
 /// recorded one, the predecessor's settlement is refused whole without
 /// disturbing the successor's rows, and the successor settles them.
 async fn law_a_resumed_root_keeps_its_admission_across_fences(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let first = store
         .enqueue_queued_work(queued_draft(0, 0, true))
@@ -313,7 +311,7 @@ async fn law_a_resumed_root_keeps_its_admission_across_fences(
 /// settlement under the live fence but a stale head is refused whole, the
 /// winner's head standing and the root's rows still bound.
 async fn law_head_cas_serializes_competing_commits(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let input = store
         .enqueue_pending_turn_input(turn_input_draft(0, 0))
@@ -374,7 +372,7 @@ async fn law_head_cas_serializes_competing_commits(
 /// whole and cannot disturb the successor that resumed the root; the
 /// successor still settles every row.
 async fn law_stale_settlement_cannot_damage_successor(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let first = store
         .enqueue_queued_work(queued_draft(0, 0, true))
@@ -463,7 +461,7 @@ async fn law_stale_settlement_cannot_damage_successor(
 }
 
 async fn law_turn_inputs_apply_once_in_order(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let first = store
         .enqueue_pending_turn_input(turn_input_draft(0, 0))
@@ -519,7 +517,7 @@ async fn law_turn_inputs_apply_once_in_order(
 }
 
 async fn law_commit_atomicity_and_stale_head_non_mutation(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let mut model = ReferenceModel::default();
     let mut shape = RunShape::default();
@@ -578,7 +576,7 @@ async fn law_commit_atomicity_and_stale_head_non_mutation(
 }
 
 async fn law_checkpoint_refs_track_content(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<(), TestCaseError> {
     let mut model = ReferenceModel::default();
     let mut shape = RunShape::default();

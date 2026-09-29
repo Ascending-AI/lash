@@ -40,7 +40,7 @@ enum Head {
 struct AdmittedRoot {
     session_id: SessionId,
     root: TurnId,
-    store: Arc<dyn crate::store::RuntimePersistence>,
+    store: Arc<dyn crate::store::RuntimeStore>,
     lease: crate::store::DriveFence,
     admission: crate::store::RootAdmission,
 }

@@ -98,7 +98,7 @@ async fn store_maintenance_fixture(provider: ProviderHandle) -> StoreMaintenance
     // process-owned attachment intents instead of warning and failing safe, and
     // its attachment store holds the bytes the core writes.
     let double = crate::tests::test_double_backend(0).await;
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let attachment_store: Arc<dyn lash::persistence::AttachmentStore> =
         double.stores().attachment_store();

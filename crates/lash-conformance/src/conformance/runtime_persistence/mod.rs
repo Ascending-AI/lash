@@ -1,4 +1,4 @@
-//! [`RuntimePersistence`] conformance, organized by capability segment:
+//! [`RuntimeStore`] conformance, organized by capability segment:
 //! [`SessionCommitStore`](crate::SessionCommitStore) (head CAS, checkpoint
 //! hydration, metadata, attachment manifest, turn-commit stamps),
 //! [`RootStore`](crate::store::RootStore) (admission binding),

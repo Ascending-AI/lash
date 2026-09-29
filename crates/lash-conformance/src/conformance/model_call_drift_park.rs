@@ -49,7 +49,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicBeforeTurnCommit {
 struct DriftParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     /// What the registry offers for `tools.probe`, whose descriptor the
     /// model's prompt renders.
     probe: super::cell_binding_drift::Probe,

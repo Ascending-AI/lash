@@ -154,8 +154,8 @@ fn drain_area_witnesses() {
     let _ = lash::persistence::ChronologicalProjection::from_turn_view;
     // W0053: lash::persistence::ChronologicalProjection::into_entries [function]
     let _ = lash::persistence::ChronologicalProjection::into_entries;
-    // W0054: lash::persistence::SessionStoreFactory::has_claimable_queued_work [function]
-    fn meth_0054<T: lash::persistence::SessionStoreFactory>(_: &T) {
+    // W0054: lash::persistence::DeploymentStore::has_claimable_queued_work [function]
+    fn meth_0054<T: lash::persistence::DeploymentStore>(_: &T) {
         let _ = T::has_claimable_queued_work;
     }
     // W0055: lash::plugins::AppendSessionNodesRequest [struct]

@@ -7,7 +7,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let first = store
         .enqueue_pending_turn_input(
@@ -154,7 +154,7 @@ pub async fn pending_turn_inputs_source_keys_order_cancel_and_cross_session(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimePersistence>) {
+pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn RuntimeStore>) {
     let first = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("pending-bulk-cancel"), "bulk first")
@@ -346,7 +346,7 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimePersistence>) {
+pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("root");
     let first = store
         .enqueue_pending_turn_input(
@@ -490,7 +490,7 @@ pub async fn pending_turn_inputs_admit_settle_and_fence(store: Arc<dyn RuntimePe
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn RuntimePersistence>) {
+pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn RuntimeStore>) {
     const SESSION_ID: &str = "fig905-active-reacquire";
     const TURN_ID: &str = "fig905-active-reacquire:turn";
     const STEP: &str = "fig905-active-reacquire:turn:checkpoint";
@@ -570,7 +570,7 @@ pub async fn a_checkpoint_admission_rerun_returns_its_own_rows(store: Arc<dyn Ru
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_vacuumed(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     const SESSION_ID: &str = "fig1511-orphaned-accepted";
     const TURN_ID: &str = "fig1511-orphaned-accepted:turn";
@@ -678,7 +678,7 @@ pub async fn accepted_turn_input_released_by_its_root_terminal_is_cancelled_and_
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
@@ -794,7 +794,7 @@ pub async fn pending_turn_input_cancel_covers_active_and_deferred_states(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
@@ -991,9 +991,7 @@ pub async fn pending_active_turn_inputs_defer_unaccepted_once_on_interrupt(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("root");
     let dead_root = TurnId::from("fig1573-dead-root");
     let later_turn = lash_core::store::PhysicalTurn::derive_turn_id(&dead_root, 2);
@@ -1126,7 +1124,7 @@ pub async fn a_turn_that_cannot_commit_leaves_no_input_pinned_to_it(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimePersistence>) {
+pub async fn pending_turn_input_duplicate_input_id(store: Arc<dyn RuntimeStore>) {
     let first = store
         .enqueue_pending_turn_input(
             pending_next_turn_input_draft(&SessionId::from("root"), "first")
@@ -1249,7 +1247,7 @@ fn assert_source_key_conflict(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn identical_retry_after_defer_is_existing_not_conflict(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
     let authority = crate::TurnCancellationAuthority::new(
@@ -1400,7 +1398,7 @@ pub async fn identical_retry_after_defer_is_existing_not_conflict(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimePersistence>) {
+pub async fn changed_retry_is_typed_conflict(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root");
     let turn = "fig3544-conflict-turn";
     let key = "host:fig3544-conflict";

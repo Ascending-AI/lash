@@ -13,7 +13,7 @@ use super::*;
 use crate::facade_support::SessionGraphFacadeOps;
 use pretty_assertions::assert_eq;
 
-pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::DeploymentStore>) {
     Box::pin(session_graph_append_tolerates_an_advanced_head(&factory)).await;
     Box::pin(session_graph_service_append_tolerates_an_advanced_head(
         &factory,
@@ -38,7 +38,7 @@ pub async fn session_graph_append_branch_liveness(factory: Arc<dyn crate::Sessio
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_append_tolerates_an_advanced_head(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("append-advanced-head"),
@@ -90,7 +90,7 @@ async fn session_graph_append_tolerates_an_advanced_head(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_service_append_tolerates_an_advanced_head(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("service-append-advanced-head"),
@@ -146,7 +146,7 @@ async fn session_graph_service_append_tolerates_an_advanced_head(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_append_rejects_an_abandoned_branch(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let scenario = Box::pin(abandoned_branch_scenario(factory, "append-abandoned")).await;
     let mut runtime = append_conformance_runtime(&scenario.branch, &scenario.branch_request).await;
@@ -175,7 +175,7 @@ async fn session_graph_append_rejects_an_abandoned_branch(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_graph_service_append_rejects_an_abandoned_branch(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
 ) {
     let scenario = Box::pin(abandoned_branch_scenario(
         factory,
@@ -211,7 +211,7 @@ async fn session_graph_service_append_rejects_an_abandoned_branch(
 /// there, and let the descendants of that node belong to the old line only.
 struct AbandonedBranchScenario {
     branch_request: crate::SessionStoreCreateRequest,
-    branch: Arc<dyn crate::RuntimePersistence>,
+    branch: Arc<dyn crate::RuntimeStore>,
     abandoned_base: String,
 }
 
@@ -220,7 +220,7 @@ struct AbandonedBranchScenario {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn abandoned_branch_scenario(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
     prefix: &str,
 ) -> AbandonedBranchScenario {
     let source_request = session_store_request(
@@ -308,7 +308,7 @@ async fn abandoned_branch_scenario(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn assert_appended_onto_current_leaf(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     result: crate::AppendSessionNodesOutcome,
     observed_base: &str,
     advanced_leaf: &str,
@@ -382,7 +382,7 @@ async fn assert_appended_onto_current_leaf(
 }
 
 async fn assert_stale_branch_changed_nothing(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     result: crate::AppendSessionNodesOutcome,
     abandoned_base: &str,
     before: crate::store::PersistedSessionRead,
@@ -431,7 +431,7 @@ async fn assert_stale_branch_changed_nothing(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn append_conformance_runtime(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> crate::LashRuntime {
     let state = crate::store::load_persisted_session_state(store.as_ref())
@@ -479,7 +479,7 @@ async fn append_conformance_runtime(
 /// usage to the shared ledger and that the next natural commit persists it.
 ///
 /// Integrator class (ADR 0051): **conformance-suite embedders**.
-pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePersistence>) {
+pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimeStore>) {
     Box::pin(
         lash_core::testing::conformance_support::append_receipt_mixed_usage_envelope_conformance(
             crate::StoreLawBackend::new().into_backend(),
@@ -494,7 +494,7 @@ pub async fn append_receipt_mixed_usage_envelope(store: Arc<dyn crate::RuntimePe
 /// once. `arm_and_wait` arms the backend seam and resolves only after the
 /// background worker is paused; its result releases that worker.
 pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     arm_and_wait: A,
 ) where
     A: FnOnce() -> W,
@@ -522,7 +522,7 @@ pub async fn append_usage_cancellation_publishes_exactly_once<A, W, R>(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn old_format_append_receipt_returns_public_leaf<F, Fut>(
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     rewrite_receipt: F,
 ) where
     F: FnOnce() -> Fut,
@@ -621,9 +621,7 @@ async fn append_conformance_plugin_node(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn advance_durable_head_behind_the_runtime(
-    store: &Arc<dyn crate::RuntimePersistence>,
-) -> String {
+async fn advance_durable_head_behind_the_runtime(store: &Arc<dyn crate::RuntimeStore>) -> String {
     let mut state = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load state for the concurrent writer")
@@ -663,7 +661,7 @@ fn derived_append_request(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn read_conformance_session(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
 ) -> crate::store::PersistedSessionRead {
     store
         .load_session()

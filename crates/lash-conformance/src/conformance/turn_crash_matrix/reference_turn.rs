@@ -21,7 +21,7 @@ pub(super) struct ReferenceTurn {
     pub(super) stores: Arc<dyn crate::StoreSet>,
     /// The scenario's store, undecorated: each execution wraps it in its
     /// seam.
-    pub(super) store: Arc<dyn RuntimePersistence>,
+    pub(super) store: Arc<dyn RuntimeStore>,
     /// The law's one layered host (see [`LawSeamHost`]); each execution
     /// routes its layer to this turn's seam.
     pub(super) host: LawSeamHost,
@@ -40,7 +40,7 @@ impl ReferenceTurn {
     /// fresh seam counting into `executions`.
     pub(super) fn new(
         stores: &Arc<dyn crate::StoreSet>,
-        store: Arc<dyn RuntimePersistence>,
+        store: Arc<dyn RuntimeStore>,
         host: &LawSeamHost,
         identity: &ReferenceIdentity,
         control: SeamControl,

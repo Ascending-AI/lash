@@ -8,7 +8,7 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn session_admission_contract(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub(super) async fn session_admission_contract(factory: Arc<dyn crate::DeploymentStore>) {
     let request = session_store_request(
         &SessionId::from("admission-created"),
         "admission-model",

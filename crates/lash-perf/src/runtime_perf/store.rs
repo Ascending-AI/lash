@@ -11,27 +11,29 @@
 
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use lash_core::store::{RuntimeCommitReceipt, RuntimePersistenceDecorator};
+use lash_core::store::{RuntimeCommitReceipt, RuntimeStoreDecorator};
 use lash_core::{
-    RuntimeCommit, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    DeploymentStore, DeploymentStoreDecorator, RuntimeCommit, SessionStoreCreateRequest, StoreError,
 };
 
-/// A deployment's session store plus the one counter the perf report cannot
-/// obtain from the public persistence traits.
+/// One measured store for the catalog. Its node counter holds no identities.
+#[derive(Clone)]
 pub(crate) struct RuntimePerfStore {
-    inner: Arc<dyn RuntimePersistence>,
-    committed_node_ids: Arc<Mutex<HashSet<lash_core::NodeId>>>,
+    inner: Arc<dyn DeploymentStore>,
+    committed_nodes: Arc<AtomicU64>,
+    known_sessions: Arc<Mutex<HashSet<SessionId>>>,
     metrics: Arc<RuntimePerfStoreMetrics>,
     measure_commit_bytes: bool,
 }
 
 impl RuntimePerfStore {
     pub(crate) fn graph_node_count(&self) -> usize {
-        self.committed_node_ids.lock_recover().len()
+        self.committed_nodes.load(Ordering::Relaxed) as usize
     }
 }
 
@@ -184,9 +186,22 @@ impl RuntimePerfStoreMetrics {
 }
 
 #[async_trait::async_trait]
-impl RuntimePersistenceDecorator for RuntimePerfStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+impl RuntimeStoreDecorator for RuntimePerfStore {
+    type Inner = dyn DeploymentStore;
+
+    fn inner(&self) -> &Self::Inner {
         self.inner.as_ref()
+    }
+
+    async fn admit_session(
+        &self,
+        request: &SessionStoreCreateRequest,
+    ) -> Result<lash_core::SessionAdmission, StoreError> {
+        let admission = self.inner.admit_session(request).await?;
+        self.known_sessions
+            .lock_recover()
+            .insert(request.session_id.clone());
+        Ok(admission)
     }
 
     async fn commit_runtime_state(
@@ -196,12 +211,7 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
         if self.measure_commit_bytes {
             self.metrics.record_commit(&commit);
         }
-        let node_ids = commit
-            .graph
-            .nodes()
-            .iter()
-            .map(|node| node.node_id.clone())
-            .collect::<Vec<_>>();
+        let count = commit.graph.nodes().len() as u64;
         let observation = self.metrics.observe_call("commit_runtime_state");
         let started = observation.started_at;
         let receipt = self.inner.commit_runtime_state(commit).await;
@@ -209,48 +219,37 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
             .record_timing("store_transaction", started.elapsed());
         drop(observation);
         let receipt = receipt?;
-        self.committed_node_ids.lock_recover().extend(node_ids);
+        if !receipt.receipt_replayed {
+            self.committed_nodes.fetch_add(count, Ordering::Relaxed);
+        }
         Ok(receipt)
     }
 
-    async fn load_session(
+    async fn load_session_window(
         &self,
-    ) -> Result<Option<lash_core::store::PersistedSessionRead>, StoreError> {
-        let _observation = self.metrics.observe_call("load_session");
-        self.inner.load_session().await
+        session_id: &SessionId,
+        selector: lash_core::store::WindowSelector,
+    ) -> Result<Option<lash_core::store::SessionWindowRead>, StoreError> {
+        let _observation = self.metrics.observe_call("load_session_window");
+        self.inner.load_session_window(session_id, selector).await
+    }
+
+    async fn load_ancestors(
+        &self,
+        session_id: &SessionId,
+        anchor: lash_core::store::HistoryAnchor,
+        budget: lash_core::store::HistoryBudget,
+    ) -> Result<lash_core::store::HistoryPage, StoreError> {
+        let _observation = self.metrics.observe_call("load_ancestors");
+        self.inner.load_ancestors(session_id, anchor, budget).await
     }
 
     async fn load_session_head_meta(
         &self,
+        session_id: &SessionId,
     ) -> Result<Option<lash_core::store::SessionHeadMeta>, StoreError> {
         let _observation = self.metrics.observe_call("load_session_head_meta");
-        self.inner.load_session_head_meta().await
-    }
-
-    async fn load_node(
-        &self,
-        node_id: &str,
-    ) -> Result<Option<lash_core::SessionNodeRecord>, StoreError> {
-        let _observation = self.metrics.observe_call("load_node");
-        self.inner.load_node(node_id).await
-    }
-
-    async fn admit_and_bind_session(
-        &self,
-        binding: &lash_core::SessionBinding,
-    ) -> Result<lash_core::SessionAdmission, StoreError> {
-        let _observation = self.metrics.observe_call("admit_and_bind_session");
-        self.inner.admit_and_bind_session(binding).await
-    }
-
-    async fn save_session_meta(&self, meta: lash_core::SessionMeta) -> Result<(), StoreError> {
-        let _observation = self.metrics.observe_call("save_session_meta");
-        self.inner.save_session_meta(meta).await
-    }
-
-    async fn load_session_meta(&self) -> Result<Option<lash_core::SessionMeta>, StoreError> {
-        let _observation = self.metrics.observe_call("load_session_meta");
-        self.inner.load_session_meta().await
+        self.inner.load_session_head_meta(session_id).await
     }
 
     async fn enqueue_pending_turn_inputs(
@@ -306,37 +305,29 @@ impl RuntimePersistenceDecorator for RuntimePerfStore {
     }
 }
 
-/// A deployment's session catalog, decorated: every store it opens is a
-/// [`RuntimePerfStore`] feeding one metrics sink.
-///
-/// Stores of one session share their committed-node set, so a session's
-/// node count survives the runtime reopening its store.
-#[derive(Clone)]
-pub(crate) struct RuntimePerfStoreFactory {
-    inner: Arc<dyn SessionStoreFactory>,
-    sessions: Arc<Mutex<HashMap<SessionId, Arc<RuntimePerfStore>>>>,
-    metrics: Arc<RuntimePerfStoreMetrics>,
-    measure_commit_bytes: bool,
-}
+impl DeploymentStoreDecorator for RuntimePerfStore {}
 
-impl RuntimePerfStoreFactory {
-    pub(crate) fn decorating(inner: Arc<dyn SessionStoreFactory>) -> Self {
+/// The harness keeps this name for its catalog handle. It is the same
+/// decorated store across every session of a benchmark catalog.
+pub(crate) type RuntimePerfStoreFactory = RuntimePerfStore;
+
+impl RuntimePerfStore {
+    pub(crate) fn decorating(inner: Arc<dyn DeploymentStore>) -> Self {
         Self::decorating_with_commit_measurement(inner, true)
     }
 
-    pub(crate) fn decorating_without_commit_measurement(
-        inner: Arc<dyn SessionStoreFactory>,
-    ) -> Self {
+    pub(crate) fn decorating_without_commit_measurement(inner: Arc<dyn DeploymentStore>) -> Self {
         Self::decorating_with_commit_measurement(inner, false)
     }
 
     fn decorating_with_commit_measurement(
-        inner: Arc<dyn SessionStoreFactory>,
+        inner: Arc<dyn DeploymentStore>,
         measure_commit_bytes: bool,
     ) -> Self {
         Self {
             inner,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            committed_nodes: Arc::new(AtomicU64::new(0)),
+            known_sessions: Arc::new(Mutex::new(HashSet::new())),
             metrics: Arc::new(RuntimePerfStoreMetrics::default()),
             measure_commit_bytes,
         }
@@ -346,13 +337,13 @@ impl RuntimePerfStoreFactory {
         Arc::clone(&self.metrics)
     }
 
-    /// The decorated store this factory last opened for `session_id`.
     pub(crate) fn session_store(&self, session_id: &SessionId) -> Option<Arc<RuntimePerfStore>> {
-        self.sessions.lock_recover().get(session_id).cloned()
+        self.known_sessions
+            .lock_recover()
+            .contains(session_id)
+            .then(|| Arc::new(self.clone()))
     }
 
-    /// Create (or reopen) the root session `session_id` and return its
-    /// decorated store.
     pub(crate) async fn root_store(
         &self,
         session_id: &SessionId,
@@ -364,199 +355,8 @@ impl RuntimePerfStoreFactory {
             relation: lash_core::SessionRelation::Root,
             policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
         };
-        let store = self.inner.create_store(&request).await?;
-        Ok(self.wrap(session_id, store))
-    }
-
-    fn wrap(
-        &self,
-        session_id: &SessionId,
-        inner: Arc<dyn RuntimePersistence>,
-    ) -> Arc<RuntimePerfStore> {
-        let mut sessions = self.sessions.lock_recover();
-        let committed_node_ids = sessions
-            .get(session_id)
-            .map(|store| Arc::clone(&store.committed_node_ids))
-            .unwrap_or_default();
-        let store = Arc::new(RuntimePerfStore {
-            inner,
-            committed_node_ids,
-            metrics: Arc::clone(&self.metrics),
-            measure_commit_bytes: self.measure_commit_bytes,
-        });
-        sessions.insert(session_id.clone(), Arc::clone(&store));
-        store
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::AttachmentRootSet for RuntimePerfStoreFactory {
-    async fn live_attachment_refs(
-        &self,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<std::collections::BTreeSet<lash_core::AttachmentId>, StoreError> {
-        self.inner
-            .live_attachment_refs(intent_grace_cutoff_epoch_ms)
-            .await
-    }
-
-    async fn has_live_attachment_ref(
-        &self,
-        id: &lash_core::AttachmentId,
-        intent_grace_cutoff_epoch_ms: u64,
-    ) -> Result<bool, StoreError> {
-        self.inner
-            .has_live_attachment_ref(id, intent_grace_cutoff_epoch_ms)
-            .await
-    }
-}
-
-#[async_trait::async_trait]
-impl SessionStoreFactory for RuntimePerfStoreFactory {
-    async fn create_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
-        let store = self.inner.create_store(request).await?;
-        Ok(self.wrap(&request.session_id, store) as Arc<dyn RuntimePersistence>)
-    }
-
-    async fn open_existing_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
-        let store = self.inner.open_existing_store(request).await?;
-        Ok(store.map(|store| self.wrap(&request.session_id, store) as Arc<dyn RuntimePersistence>))
-    }
-
-    async fn open_existing_store_by_id(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
-        let store = self.inner.open_existing_store_by_id(session_id).await?;
-        Ok(store.map(|store| self.wrap(session_id, store) as Arc<dyn RuntimePersistence>))
-    }
-
-    // The unbound store has no session id to key a `RuntimePerfStore` under;
-    // it binds on its first admitted session.
-    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
-        self.inner.open_unbound_store().await
-    }
-
-    async fn read_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<Option<lash_core::SessionReadView>, StoreError> {
-        self.inner.read_session(session_id).await
-    }
-
-    async fn has_claimable_queued_work(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<bool>, StoreError> {
-        self.inner.has_claimable_queued_work(request).await
-    }
-
-    async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        self.inner.session_was_deleted(session_id).await
-    }
-
-    async fn delete_session(
-        &self,
-        session_id: &SessionId,
-    ) -> lash_core::MaintenanceResult<lash_core::SessionBlobReclaimReport> {
-        self.inner.delete_session(session_id).await
-    }
-
-    async fn list_sessions(
-        &self,
-        filter: &lash_core::SessionListFilter,
-    ) -> Result<Vec<lash_core::SessionSummary>, StoreError> {
-        SessionStoreFactory::list_sessions(self.inner.as_ref(), filter).await
-    }
-
-    async fn count_unsettled_turns(
-        &self,
-    ) -> Result<lash_core::store::UnsettledTurnCounts, StoreError> {
-        self.inner.count_unsettled_turns().await
-    }
-
-    async fn list_turn_parks(
-        &self,
-        query: &lash_core::store::TurnParkQuery,
-    ) -> Result<Vec<lash_core::store::TurnPark>, StoreError> {
-        self.inner.list_turn_parks(query).await
-    }
-
-    async fn turn_park_feed(
-        &self,
-        after: lash_core::store::ParkFeedCursor,
-        limit: std::num::NonZeroUsize,
-    ) -> Result<lash_core::store::ParkFeedPage<lash_core::store::TurnParkTarget>, StoreError> {
-        self.inner.turn_park_feed(after, limit).await
-    }
-
-    async fn root_terminal(
-        &self,
-        session_id: &lash_core::SessionId,
-        root: &lash_core::TurnId,
-    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, StoreError> {
-        self.inner.root_terminal(session_id, root).await
-    }
-
-    async fn compact_turn_park_feed(
-        &self,
-        through: lash_core::store::ParkFeedCursor,
-    ) -> Result<(), StoreError> {
-        self.inner.compact_turn_park_feed(through).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core::store::ControlIntentStore for RuntimePerfStoreFactory {
-    async fn begin_session_close(
-        &self,
-        session_id: &SessionId,
-        at_ms: u64,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        self.inner.begin_session_close(session_id, at_ms).await
-    }
-
-    async fn claim_intent_application(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentApplication, StoreError> {
-        self.inner.claim_intent_application(id, at_ms).await
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        self.inner.acknowledge_intent(id, claim, at_ms).await
-    }
-
-    async fn record_intent_failure(
-        &self,
-        id: lash_core::store::ControlIntentId,
-        claim: &lash_core::store::ClaimToken,
-        error: &str,
-        retryable: bool,
-        at_ms: u64,
-    ) -> std::result::Result<lash_core::store::IntentSettle, StoreError> {
-        self.inner
-            .record_intent_failure(id, claim, error, retryable, at_ms)
-            .await
-    }
-
-    async fn load_intent(
-        &self,
-        id: lash_core::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core::store::ControlIntent>, StoreError> {
-        self.inner.load_intent(id).await
+        self.admit_session(&request).await?;
+        Ok(Arc::new(self.clone()))
     }
 }
 

@@ -1,4 +1,4 @@
-//! A `SessionStoreFactory` that never states its unsettled-turn count must
+//! A `DeploymentStore` that never states its unsettled-turn count must
 //! not compile.
 //!
 //! `LashCore::drain_status` counts the deployment's parked and in-flight turns
@@ -14,12 +14,12 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
-    AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
+    AttachmentRootSet, RuntimeStore, SessionStoreCreateRequest, DeploymentStore,
     StoreError,
 };
 
 struct UncountedFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
 }
 
 #[async_trait::async_trait]
@@ -45,23 +45,23 @@ impl AttachmentRootSet for UncountedFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for UncountedFactory {
+impl DeploymentStore for UncountedFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         self.inner.create_store(request).await
     }
 
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, StoreError> {
         self.inner.open_existing_store_by_id(session_id).await
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id).await
+        DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id).await
     }
 
     async fn delete_session(

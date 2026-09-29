@@ -5,9 +5,7 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_increments_head_and_round_trips_agent_frames(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn commit_increments_head_and_round_trips_agent_frames(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         policy: SessionPolicy {
@@ -80,7 +78,7 @@ pub async fn commit_increments_head_and_round_trips_agent_frames(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimePersistence>) {
+pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn RuntimeStore>) {
     let session_id = "concurrent-head-cas";
     let _lease = seal_drive_fence_for_test(&store, &SessionId::from(session_id), "cas-owner").await;
     let make_commit = |node_id: &str| {
@@ -164,7 +162,7 @@ pub async fn concurrent_head_revision_cas_applies_exactly_once(store: Arc<dyn Ru
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimeStore>) {
     let alpha = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -196,7 +194,7 @@ pub async fn commit_rejects_a_different_session_id(store: Arc<dyn RuntimePersist
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistence>) {
+pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("hydrated"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -247,7 +245,7 @@ pub async fn load_hydrates_checkpoint_and_usage(store: Arc<dyn RuntimePersistenc
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimePersistence>) {
+pub async fn session_read_loads_persisted_history(store: Arc<dyn RuntimeStore>) {
     let root = sample_session_node(&SessionId::from("branchy"), "root-node", None);
     let root_node_id = root.node_id.clone();
     let graph = crate::SessionGraph::from_nodes(

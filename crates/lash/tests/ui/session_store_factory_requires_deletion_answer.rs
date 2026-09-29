@@ -1,4 +1,4 @@
-//! A `SessionStoreFactory` that never states its tombstone answer must not
+//! A `DeploymentStore` that never states its tombstone answer must not
 //! compile.
 //!
 //! `session_was_deleted` decides whether a resume hands back the caller's
@@ -12,12 +12,12 @@ use std::sync::Arc;
 use lash::SessionId;
 use lash::attachments::AttachmentId;
 use lash::persistence::{
-    AttachmentRootSet, RuntimePersistence, SessionStoreCreateRequest, SessionStoreFactory,
+    AttachmentRootSet, RuntimeStore, SessionStoreCreateRequest, DeploymentStore,
     StoreError, TurnPark, ParkFeedCursor, ParkFeedPage, TurnParkQuery, TurnParkTarget, UnsettledTurnCounts,
 };
 
 struct SilentFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
 }
 
 #[async_trait::async_trait]
@@ -43,11 +43,11 @@ impl AttachmentRootSet for SilentFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for SilentFactory {
+impl DeploymentStore for SilentFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         self.inner.create_store(request).await
     }
 

@@ -39,7 +39,7 @@ pub(super) fn text_response(text: &str) -> crate::LlmResponse {
 }
 
 pub(super) async fn acceptance_runtime(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -59,7 +59,7 @@ pub(super) async fn acceptance_runtime(
 /// [`acceptance_runtime`] over an explicit session id.
 pub(super) async fn acceptance_runtime_for_session(
     session_id: &str,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -83,7 +83,7 @@ pub(super) async fn acceptance_runtime_for_session(
 )]
 async fn acceptance_runtime_with_batching(
     session_id: &str,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     backend: &crate::Backend,
     provider: crate::ProviderHandle,
     plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
@@ -146,7 +146,7 @@ pub(super) fn direct_input(turn_id: &TurnId, text: &str) -> crate::TurnInput {
 pub async fn direct_turn_accepts_before_driving(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-accept-before-drive"));
     let probe = Arc::new(std::sync::Mutex::new(None));
@@ -274,7 +274,7 @@ pub async fn direct_turn_accepts_before_driving(
 pub async fn direct_turn_acceptance_mints_no_idempotency_key(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let seen = Arc::new(AtomicUsize::new(0));
     let provider = {
@@ -436,12 +436,12 @@ impl crate::testing::EffectLayer for JournalLayer {
 /// redrive runtime sees no persisted session. It also counts every read a drive
 /// could make of pending rows, so a replay can prove it made none.
 struct RedriveStore {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     pending_row_reads: Arc<AtomicUsize>,
 }
 
 impl RedriveStore {
-    fn wrap(inner: &Arc<dyn crate::RuntimePersistence>) -> (Arc<Self>, Arc<AtomicUsize>) {
+    fn wrap(inner: &Arc<dyn crate::RuntimeStore>) -> (Arc<Self>, Arc<AtomicUsize>) {
         let reads = Arc::new(AtomicUsize::new(0));
         (
             Arc::new(Self {
@@ -454,8 +454,8 @@ impl RedriveStore {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for RedriveStore {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for RedriveStore {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -522,7 +522,7 @@ impl Journal {
     /// Run the direct turn `turn_id` against `store` on a fresh runtime.
     pub(super) async fn run(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &Arc<dyn crate::RuntimeStore>,
         provider: crate::ProviderHandle,
         turn_id: &TurnId,
         text: &str,
@@ -539,7 +539,7 @@ impl Journal {
     )]
     pub(super) async fn crash_before_commit(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &Arc<dyn crate::RuntimeStore>,
         provider: crate::ProviderHandle,
         turn_id: &TurnId,
         text: &str,
@@ -577,7 +577,7 @@ impl Journal {
     )]
     pub(super) async fn run_with_plugins(
         &self,
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &Arc<dyn crate::RuntimeStore>,
         provider: crate::ProviderHandle,
         plugin_factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
         turn_id: &TurnId,
@@ -629,7 +629,7 @@ pub(super) fn crash_before_commit_plugin(
 /// it there, and wait for the dropped lease guard's best-effort release, so a
 /// successor worker can take the lane.
 pub(super) async fn crash_turn<T>(
-    _store: &Arc<dyn crate::RuntimePersistence>,
+    _store: &Arc<dyn crate::RuntimeStore>,
     died: &tokio::sync::Notify,
     turn: impl std::future::Future<Output = T>,
 ) {
@@ -680,7 +680,7 @@ pub(super) fn recording_provider(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn vacuum(store: &Arc<dyn crate::RuntimePersistence>) {
+async fn vacuum(store: &Arc<dyn crate::RuntimeStore>) {
     crate::store::StoreMaintenance::vacuum(store.as_ref())
         .await
         .expect("vacuum the session's terminal rows");
@@ -690,9 +690,7 @@ async fn vacuum(store: &Arc<dyn crate::RuntimePersistence>) {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn pending_input_ids(
-    store: &Arc<dyn crate::RuntimePersistence>,
-) -> Vec<crate::InputId> {
+pub(super) async fn pending_input_ids(store: &Arc<dyn crate::RuntimeStore>) -> Vec<crate::InputId> {
     store
         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
@@ -707,7 +705,7 @@ pub(super) async fn pending_input_ids(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn applications(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
 ) -> Vec<crate::TurnInputApplication> {
     store
         .list_turn_input_applications(&SessionId::from(SESSION_ID))
@@ -720,7 +718,7 @@ pub(super) async fn applications(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn enqueue_next_turn(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     text: &str,
 ) -> crate::PendingTurnInput {
     store
@@ -741,7 +739,7 @@ pub(super) async fn enqueue_next_turn(
 )]
 async fn assert_nothing_left_to_answer(
     prefix: &str,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     journal: &Journal,
 ) {
     let answered = Arc::new(AtomicUsize::new(0));
@@ -799,7 +797,7 @@ async fn assert_nothing_left_to_answer(
 pub async fn vacuum_then_redrive_replays_receipt_single_row(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-single"));
     let journal = Journal::new(&backend);
@@ -817,7 +815,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
 
     vacuum(&store).await;
     let (redrive_store, _) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
+    let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     let replayed = journal
         .run(&redrive_store, provider, &turn_id, "deploy staging")
         .await
@@ -856,7 +854,7 @@ pub async fn vacuum_then_redrive_replays_receipt_single_row(
 pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-vacuum-redrive-absorbed"));
     enqueue_next_turn(&store, "queued first").await;
@@ -884,7 +882,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
 
     vacuum(&store).await;
     let (redrive_store, _) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
+    let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     journal
         .run(&redrive_store, provider, &turn_id, "direct third")
         .await
@@ -912,7 +910,7 @@ pub async fn vacuum_then_redrive_replays_receipt_absorbed_rows(
 pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-cancelled-vacuumed"));
     let journal = Journal::new(&backend);
@@ -938,7 +936,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
     vacuum(&store).await;
 
     let (redrive_store, _) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
+    let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     let error = journal
         .run(&redrive_store, provider, &turn_id, "withdrawn later")
         .await
@@ -979,7 +977,7 @@ pub async fn cancelled_vacuumed_acceptance_is_not_resurrected(
 pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-uncommitted-redrive"));
     let journal = Journal::new(&backend);
@@ -994,7 +992,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
     let late = enqueue_next_turn(&store, "admitted after the crash").await;
 
     let (redrive_store, reads) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
+    let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     journal
         .run(&redrive_store, provider, &turn_id, "the accepted words")
         .await
@@ -1046,7 +1044,7 @@ pub async fn uncommitted_redrive_drives_journaled_set_not_live_claim(
 pub async fn drive_effect_refusal_is_journaled(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-refused-drive"));
     let journal = Journal::new(&backend);
@@ -1054,7 +1052,7 @@ pub async fn drive_effect_refusal_is_journaled(
 
     // The acceptance mints its id inside the effect, so the withdrawal targets
     // the only open row in the session, which is the accepted one.
-    let withdrawing: Arc<dyn crate::RuntimePersistence> = Arc::new(WithdrawBeforeClaim {
+    let withdrawing: Arc<dyn crate::RuntimeStore> = Arc::new(WithdrawBeforeClaim {
         inner: Arc::clone(&store),
     });
     let refused = journal
@@ -1082,7 +1080,7 @@ pub async fn drive_effect_refusal_is_journaled(
     );
 
     let (redrive_store, reads) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
+    let redrive_store: Arc<dyn crate::RuntimeStore> = redrive_store;
     let replayed = journal
         .run(&redrive_store, provider, &turn_id, "withdrawn in flight")
         .await
@@ -1102,12 +1100,12 @@ pub async fn drive_effect_refusal_is_journaled(
 
 /// Withdraws the session's open next-turn row right before the first claim.
 struct WithdrawBeforeClaim {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for WithdrawBeforeClaim {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1140,7 +1138,7 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
 pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-queued-direct-turn"));
     let first = enqueue_next_turn(&store, "earliest admission").await;
@@ -1209,7 +1207,7 @@ pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
 pub async fn accept_turn_input_redrive_after_store_commit_admits_one_row(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let turn_id = TurnId::from(format!("{prefix}-acceptance-lost-outcome"));
     let journal = Journal::new(&backend);

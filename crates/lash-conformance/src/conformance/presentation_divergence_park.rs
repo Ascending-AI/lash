@@ -82,7 +82,7 @@ struct Parts {
     session_id: SessionId,
     turn_id: TurnId,
     host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     pass: Arc<AtomicUsize>,
 }
 

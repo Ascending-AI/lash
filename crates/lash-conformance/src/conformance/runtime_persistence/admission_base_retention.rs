@@ -19,7 +19,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_generation(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     head_revision: u64,
     generation: u64,
@@ -48,7 +48,7 @@ async fn commit_generation(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn admitted_on(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     receipt: &crate::store::RuntimeCommitReceipt,
 ) -> crate::store::SessionHeadRef {
     crate::store::SessionHeadRef {
@@ -68,7 +68,7 @@ async fn admitted_on(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn admit_on(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     base: &crate::store::SessionHeadRef,
 ) {

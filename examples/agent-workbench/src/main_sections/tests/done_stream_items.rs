@@ -14,9 +14,9 @@ async fn done_stream_items_are_transient_and_not_snapshotted() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> = session_store_factory;
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("transient done test should not call the provider")
@@ -85,7 +85,7 @@ async fn trigger_dispatch_done_does_not_clear_an_active_turn() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-trigger-dispatch-done-test")

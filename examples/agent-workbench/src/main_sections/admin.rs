@@ -476,7 +476,7 @@ pub(crate) async fn vacuum_session_store(
         relation: lash::persistence::SessionRelation::Root,
         policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
     };
-    let store = lash::persistence::SessionStoreFactory::open_existing_store(
+    let store = lash::persistence::DeploymentStore::open_existing_store(
         state.session_store_factory.as_ref(),
         &request,
     )
@@ -497,7 +497,7 @@ pub(crate) async fn vacuum_session_store(
 /// that binding and refuses an unbound handle rather than widening into a
 /// catalog-wide sweep, so the binding is what the caller has to get right.
 pub(crate) async fn vacuum_bound_store(
-    store: &dyn lash::persistence::RuntimePersistence,
+    store: &dyn lash::persistence::RuntimeStore,
 ) -> Result<lash::persistence::VacuumReport, AppError> {
     lash::persistence::StoreMaintenance::vacuum(store)
         .await

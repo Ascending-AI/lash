@@ -88,7 +88,7 @@ struct SuspendingTurn {
     resolution_at: u64,
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    store_factory: Arc<dyn DeploymentStore>,
 }
 
 /// What the durable-content oracle needs from a suspend session after its
@@ -98,7 +98,7 @@ struct FinishedSuspend {
     transport: Arc<ScriptedLlmHttpTransport>,
     scripts: Vec<ProviderWireScript>,
     tool_result: crate::content_oracle::ToolResultContent,
-    store_factory: Arc<dyn SessionStoreFactory>,
+    store_factory: Arc<dyn DeploymentStore>,
 }
 
 struct GeneratedRuntimeSession {
@@ -106,7 +106,7 @@ struct GeneratedRuntimeSession {
     /// The session's own engine: its core's drive runs every turn of it.
     engine: crate::backend::SimEngine,
     /// The engine's session factory, for reading the session back.
-    reopen_factory: Arc<dyn SessionStoreFactory>,
+    reopen_factory: Arc<dyn DeploymentStore>,
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_schedule: ScriptedTransportSchedule,
@@ -202,7 +202,7 @@ impl GeneratedRuntimeWorld {
         (
             crate::backend::SimEngine,
             lash::Backend,
-            Arc<dyn SessionStoreFactory>,
+            Arc<dyn DeploymentStore>,
         ),
         FixedScriptRunnerError,
     > {
@@ -1301,7 +1301,7 @@ pub(super) async fn session_content(
     scripts: &[ProviderWireScript],
     emitted_tool_results: Vec<crate::content_oracle::ToolResultContent>,
     writes: &[CheckpointWriteEvent],
-    reopen: &dyn SessionStoreFactory,
+    reopen: &dyn DeploymentStore,
 ) -> Result<crate::content_oracle::SessionContent, FixedScriptRunnerError> {
     let exchanged = transport.exchanges()?.len();
     let emitted_attempts = scripts

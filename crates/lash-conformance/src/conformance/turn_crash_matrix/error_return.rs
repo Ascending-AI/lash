@@ -174,9 +174,9 @@ pub async fn turn_crash_matrix_error_return_fail_stop<F, S>(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     let host = LawSeamHost::over(host);
     let law = MatrixLaw {
         stores: &stores,

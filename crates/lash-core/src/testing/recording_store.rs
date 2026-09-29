@@ -18,15 +18,15 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use lash_sansio::sync::MutexExt;
 
 use crate::store::{
-    PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence,
-    RuntimePersistenceDecorator, StoreError,
+    PersistedSessionRead, RuntimeCommit, RuntimeCommitReceipt, RuntimeStore, RuntimeStoreDecorator,
+    StoreError,
 };
-use crate::{SessionId, SessionStoreCreateRequest, SessionStoreFactory};
+use crate::{DeploymentStore, SessionId, SessionStoreCreateRequest};
 
 /// A session store with call counters and one-shot faults over the store it
 /// wraps. See the module documentation.
 pub struct RecordingStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     /// Runtime commits the wrapped store applied; an attempt it answered from
     /// an earlier commit's durable receipt is not one.
     pub runtime_commit_count: Mutex<usize>,
@@ -52,7 +52,7 @@ pub type AdmissionHook = Arc<dyn Fn() + Send + Sync>;
 
 impl RecordingStore {
     /// Record over `inner`, a store the test's backend opened.
-    pub fn over(inner: Arc<dyn RuntimePersistence>) -> Self {
+    pub fn over(inner: Arc<dyn RuntimeStore>) -> Self {
         Self {
             inner,
             runtime_commit_count: Mutex::new(0),
@@ -116,7 +116,7 @@ impl RecordingStore {
     }
 
     /// The store this one records over.
-    pub fn inner(&self) -> &Arc<dyn RuntimePersistence> {
+    pub fn inner(&self) -> &Arc<dyn RuntimeStore> {
         &self.inner
     }
 
@@ -164,7 +164,7 @@ impl RecordingStore {
 }
 
 #[async_trait::async_trait]
-impl RuntimePersistenceDecorator for RecordingStore {
+impl RuntimeStoreDecorator for RecordingStore {
     async fn admit_root(
         &self,
         request: &crate::store::AdmitRootRequest,
@@ -181,7 +181,7 @@ impl RuntimePersistenceDecorator for RecordingStore {
         self.inner.admit_at_checkpoint(request).await
     }
 
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+    fn inner(&self) -> &(dyn RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -296,7 +296,7 @@ impl RuntimePersistenceDecorator for RecordingStore {
 /// [`Self::store_for`] reaches whichever runtime holds the session.
 #[derive(Clone)]
 pub struct RecordingSessionStoreFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     stores: Arc<Mutex<WrappedStores>>,
     fail_next_delete: Arc<Mutex<Option<DeleteFailure>>>,
 }
@@ -309,7 +309,7 @@ type WrappedStores = Vec<(SessionId, Arc<RecordingStore>)>;
 
 impl RecordingSessionStoreFactory {
     /// Record over `inner`, a backend's session catalog.
-    pub fn over(inner: Arc<dyn SessionStoreFactory>) -> Self {
+    pub fn over(inner: Arc<dyn DeploymentStore>) -> Self {
         Self {
             inner,
             stores: Arc::new(Mutex::new(Vec::new())),
@@ -345,11 +345,11 @@ impl RecordingSessionStoreFactory {
     fn record(
         &self,
         session_id: &SessionId,
-        store: Arc<dyn RuntimePersistence>,
-    ) -> Arc<dyn RuntimePersistence> {
+        store: Arc<dyn RuntimeStore>,
+    ) -> Arc<dyn RuntimeStore> {
         let mut stores = self.stores.lock_recover();
         if let Some((_, recorded)) = stores.iter().find(|(id, _)| id == session_id) {
-            return Arc::clone(recorded) as Arc<dyn RuntimePersistence>;
+            return Arc::clone(recorded) as Arc<dyn RuntimeStore>;
         }
         let recorded = Arc::new(RecordingStore::over(store));
         stores.push((session_id.clone(), Arc::clone(&recorded)));
@@ -381,7 +381,7 @@ impl crate::AttachmentRootSet for RecordingSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for RecordingSessionStoreFactory {
+impl DeploymentStore for RecordingSessionStoreFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn crate::EffectHost>) {
         self.inner.bind_effect_host(effect_host);
     }
@@ -462,7 +462,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn create_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    ) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         let store = self.inner.create_store(request).await?;
         Ok(self.record(&request.session_id, store))
     }
@@ -470,7 +470,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn open_existing_store(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, String> {
         Ok(self
             .inner
             .open_existing_store(request)
@@ -481,7 +481,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn RuntimePersistence>>, StoreError> {
+    ) -> Result<Option<Arc<dyn RuntimeStore>>, StoreError> {
         Ok(self
             .inner
             .open_existing_store_by_id(session_id)
@@ -491,7 +491,7 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
 
     // The unbound store has no session id to record under; the caller that
     // wants it recorded wraps it, as the storage-only twins do.
-    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimeStore>, StoreError> {
         self.inner.open_unbound_store().await
     }
 

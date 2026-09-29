@@ -901,12 +901,12 @@ async fn an_ambiguous_delete_attach_failure_never_claims_the_session_remains_liv
 #[derive(Clone)]
 struct TombstoneThenFailDeleteIngress {
     pub(super) session_id: SessionId,
-    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) store_factory: Arc<dyn lash::persistence::DeploymentStore>,
 }
 
 async fn spawn_tombstone_then_fail_session_delete_restate(
     session_id: SessionId,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
 ) -> String {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

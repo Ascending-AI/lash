@@ -56,7 +56,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use lash_core::SessionStoreFactory;
+use lash_core::DeploymentStore;
 use lash_protocol_standard::{BuiltinToolOutputRenderer, ToolOutputRenderer, ToolRenderParams};
 use lash_sansio::SessionId;
 use serde::Serialize;
@@ -452,7 +452,7 @@ fn is_reported(row: &Value) -> bool {
 
 /// Read `session_id` back through a fresh handle from `factory`.
 pub async fn reopen_session(
-    factory: &dyn SessionStoreFactory,
+    factory: &dyn DeploymentStore,
     session_id: &str,
 ) -> Result<Option<ReopenedSession>, String> {
     let request = lash_core::SessionStoreCreateRequest {

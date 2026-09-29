@@ -29,7 +29,7 @@ pub trait FenceIntegrityInjector: Send + Sync {
 }
 
 pub struct FenceIntegrityHandles {
-    pub runtime: Arc<dyn crate::RuntimePersistence>,
+    pub runtime: Arc<dyn crate::RuntimeStore>,
     pub triggers: Arc<dyn crate::TriggerStore>,
     pub injector: Arc<dyn FenceIntegrityInjector>,
 }

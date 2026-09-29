@@ -190,10 +190,7 @@ impl DecoratedBackend {
 
     /// Serve sessions from `catalog`, a test's recording or fault-injecting
     /// decorator over (or stand-in for) the backend's own catalog.
-    pub(crate) fn with_catalog(
-        self,
-        catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
-    ) -> Self {
+    pub(crate) fn with_catalog(self, catalog: Arc<dyn lash::persistence::DeploymentStore>) -> Self {
         Self {
             layered: self.layered.map_session_store_factory(|_| catalog),
         }

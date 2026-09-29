@@ -41,7 +41,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterFirstCommit {
 struct RedriveParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 }
 
 #[expect(

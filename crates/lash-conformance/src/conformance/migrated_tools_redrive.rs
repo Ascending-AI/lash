@@ -118,7 +118,7 @@ struct MigratedRuntimeParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     process_work: crate::ProcessWorkWiring,
 }

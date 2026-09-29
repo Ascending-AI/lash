@@ -107,7 +107,7 @@ impl RelayWorld {
 async fn build_runtime(
     world: &RelayWorld,
     session_id: &SessionId,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) -> crate::LashRuntime {
     let calls = Arc::clone(&world.model_calls);
     let model = crate::testing::TestProvider::builder()
@@ -175,7 +175,7 @@ fn attempt(
     world: &RelayWorld,
     session_id: &SessionId,
     turn_id: &TurnId,
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     answers: Option<tokio::sync::mpsc::UnboundedSender<Answer>>,
 ) -> crate::ConformanceTurnAttempt {
     let world = world.clone();

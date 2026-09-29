@@ -10,7 +10,7 @@ use pretty_assertions::assert_eq;
 
 /// Admit `root` on `head` under `fence`, which must reach its head.
 pub(super) async fn admitted_on(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &DriveFence,
     session_id: &SessionId,
     root: &str,
@@ -40,7 +40,7 @@ fn refused_as_admitted(
     reason = "conformance fixture fails at the violated durable ownership invariant"
 )]
 pub async fn an_unfinished_roots_input_survives_host_cancellation_after_lane_rotation(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let input_session = SessionId::from("root-admission-input-cancel-fence");
     let input = store
@@ -102,7 +102,7 @@ pub async fn an_unfinished_roots_input_survives_host_cancellation_after_lane_rot
     reason = "conformance fixture fails at the violated durable ownership invariant"
 )]
 pub async fn an_unfinished_roots_batch_survives_host_cancellation_after_lane_rotation(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let batch_session = SessionId::from("root-admission-batch-cancel-fence");
     let batch = store
@@ -146,7 +146,7 @@ pub async fn an_unfinished_roots_batch_survives_host_cancellation_after_lane_rot
     reason = "conformance fixture fails at the violated durable ownership invariant"
 )]
 pub async fn an_admitted_row_is_not_withdrawable_until_its_root_releases_it(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session = SessionId::from("admitted-row-withdrawal");
     let input = store

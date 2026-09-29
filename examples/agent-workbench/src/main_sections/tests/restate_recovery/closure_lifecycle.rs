@@ -12,11 +12,11 @@ async fn authorize_restate_completion_closure(
     session: &str,
     physical_scope: &lash::runtime::ExecutionScope,
 ) -> (
-    Arc<dyn lash::persistence::RuntimePersistence>,
+    Arc<dyn lash::persistence::RuntimeStore>,
     lash::persistence::DriveFence,
     lash::TurnCancelClosureAuthorization,
 ) {
-    use lash::persistence::SessionStoreFactory as _;
+    use lash::persistence::DeploymentStore as _;
 
     let address = lash::TurnAddress::new(session, "turn");
     let store = factory
@@ -92,7 +92,7 @@ async fn authorize_restate_completion_closure(
 /// The owner's teardown commit: it consumes `authorization`'s closure under
 /// `lease` and re-defers the turn's undelivered input.
 async fn consume_closure_by_commit(
-    store: &dyn lash::persistence::RuntimePersistence,
+    store: &dyn lash::persistence::RuntimeStore,
     lease: &lash::persistence::DriveFence,
     authorization: &lash::TurnCancelClosureAuthorization,
     settlement: lash::TurnCancelClosureSettlement,
@@ -118,11 +118,11 @@ async fn settle_and_release_restate_completion_closure(
     effect_host: Arc<dyn lash::durability::EffectHost>,
     factory: &lash_sqlite_store::SqliteSessionStoreFactory,
     scope: &lash::runtime::ExecutionScope,
-    store: Arc<dyn lash::persistence::RuntimePersistence>,
+    store: Arc<dyn lash::persistence::RuntimeStore>,
     lease: lash::persistence::DriveFence,
     authorization: lash::TurnCancelClosureAuthorization,
 ) {
-    use lash::persistence::SessionStoreFactory as _;
+    use lash::persistence::DeploymentStore as _;
 
     let authority = lash::durability::TurnCancellationAuthority::new(
         effect_host.turn_control_binding_id(),
@@ -233,7 +233,7 @@ fn live_restate_participant_host(ingress_url: String) -> Arc<lash_restate::Resta
 #[ignore = "spawned and killed by the live Restate participant lifecycle law"]
 fn live_restate_participant_protocol_crash_child() {
     run_async_test_on_stack_budget_multi_thread("workbench-participant-crash-child", 2, || async {
-        use lash::persistence::SessionStoreFactory as _;
+        use lash::persistence::DeploymentStore as _;
 
         let ingress_url = std::env::var("RESTATE_INGRESS_URL").expect("child Restate ingress");
         let catalog =
@@ -332,7 +332,7 @@ async fn prove_live_restate_participant_crash_windows(
     effect_host: &Arc<dyn lash::durability::EffectHost>,
     data_dir: &std::path::Path,
 ) {
-    use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
+    use lash::{durability::EffectHost as _, persistence::DeploymentStore as _};
 
     let register_scenario = "register";
     let register_catalog = data_dir.join("participant-crash-register-catalog");
@@ -449,7 +449,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
         "workbench-closure-lifecycle-e2e",
         4,
         || async {
-            use lash::{durability::EffectHost as _, persistence::SessionStoreFactory as _};
+            use lash::{durability::EffectHost as _, persistence::DeploymentStore as _};
 
             let ingress_url = std::env::var("RESTATE_INGRESS_URL")
                 .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");

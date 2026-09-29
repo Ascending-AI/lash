@@ -16,7 +16,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_same_start_key_successor_after_prune_owns_fresh_session_stores(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     _effect_host: Arc<dyn crate::EffectHost>,
 ) {

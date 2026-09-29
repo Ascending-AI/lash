@@ -501,7 +501,7 @@ async fn state_snapshot_cursor_attaches_to_the_live_incarnation_without_a_gap_in
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-snapshot-cursor-test")
@@ -650,9 +650,9 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> = session_store_factory;
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
         .complete_error("cancel route test should not call the provider")
@@ -904,9 +904,9 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> = session_store_factory;
     let mail_world = mail::MailWorld::new();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -1063,7 +1063,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
     let backend = double.lash_backend();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")

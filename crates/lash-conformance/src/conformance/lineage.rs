@@ -3,8 +3,8 @@ use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
 use crate::{
-    ForkSessionRequest, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    DeploymentStore, ForkSessionRequest, RuntimeCommit, RuntimeSessionState, RuntimeStore,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 
 pub use lash_core::testing::lineage::*;
@@ -36,7 +36,7 @@ async fn assert_plan_matches_edge_walk(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn assert_readability_equals_edge_reachability(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     injector: &Arc<dyn LineageConformanceInjector>,
     session_id: &SessionId,
 ) {
@@ -86,10 +86,10 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn seed(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     plugins: usize,
-) -> (Arc<dyn RuntimePersistence>, Vec<lash_core::NodeId>) {
+) -> (Arc<dyn RuntimeStore>, Vec<lash_core::NodeId>) {
     let store = factory
         .create_store(&request(session_id))
         .await
@@ -129,10 +129,10 @@ async fn seed(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn fork(
-    factory: &Arc<dyn SessionStoreFactory>,
+    factory: &Arc<dyn DeploymentStore>,
     session_id: &SessionId,
     node_id: &str,
-) -> Arc<dyn RuntimePersistence> {
+) -> Arc<dyn RuntimeStore> {
     factory
         .fork_at(&ForkSessionRequest {
             pending_observer_intents: Vec::new(),
@@ -154,7 +154,7 @@ async fn fork(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn append(store: &Arc<dyn RuntimePersistence>, count: usize) -> Vec<lash_core::NodeId> {
+async fn append(store: &Arc<dyn RuntimeStore>, count: usize) -> Vec<lash_core::NodeId> {
     let mut state = crate::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load lineage append state")

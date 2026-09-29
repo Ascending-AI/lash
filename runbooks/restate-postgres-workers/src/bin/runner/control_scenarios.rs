@@ -314,7 +314,7 @@ async fn assert_repeat_requests_preserve_the_accepted_policy(
     address: &TurnAddress,
     accepted_request_id: &str,
 ) -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
+    use lash_core::DeploymentStore as _;
 
     let store = storage
         .session_store_factory()
@@ -394,7 +394,7 @@ async fn assert_late_cancel_is_noop(
     terminal: &TurnTerminal,
     request_id: &str,
 ) -> Result<()> {
-    use lash_core::SessionStoreFactory as _;
+    use lash_core::DeploymentStore as _;
 
     let store = storage
         .session_store_factory()

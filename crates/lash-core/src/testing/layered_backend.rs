@@ -11,9 +11,10 @@ use std::sync::Arc;
 
 use crate::engine::BuildGeneration;
 use crate::{
-    AttachmentStore, Backend, Clock, EffectEngine, EffectHost, ModuleArtifactStore,
-    ProcessContinuationStore, ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry,
-    ProcessWorkWiring, SessionStoreFactory, StoreBindingId, StoreSet, TriggerStore,
+    AttachmentStore, Backend, Clock, DeploymentStore, EffectEngine, EffectHost,
+    ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
+    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, StoreBindingId, StoreSet,
+    TriggerStore,
 };
 
 /// A decorator of one obligation kind's ledger.
@@ -32,7 +33,7 @@ type ObligationLedgerLayer = Arc<
 pub struct LayeredBackend {
     inner: Backend,
     clock: Arc<dyn Clock>,
-    session_store_factory: Arc<dyn SessionStoreFactory>,
+    session_store_factory: Arc<dyn DeploymentStore>,
     effect_host: Arc<dyn EffectHost>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
@@ -74,7 +75,7 @@ impl LayeredBackend {
     /// Replace the session-store factory with `layer` over it.
     pub fn map_session_store_factory(
         mut self,
-        layer: impl FnOnce(Arc<dyn SessionStoreFactory>) -> Arc<dyn SessionStoreFactory>,
+        layer: impl FnOnce(Arc<dyn DeploymentStore>) -> Arc<dyn DeploymentStore>,
     ) -> Self {
         self.session_store_factory = layer(self.session_store_factory);
         self
@@ -267,7 +268,7 @@ impl LayeredStores {
     /// Replace the session-store factory with `layer` over it.
     pub fn map_session_store_factory(
         mut self,
-        layer: impl FnOnce(Arc<dyn SessionStoreFactory>) -> Arc<dyn SessionStoreFactory>,
+        layer: impl FnOnce(Arc<dyn DeploymentStore>) -> Arc<dyn DeploymentStore>,
     ) -> Self {
         self.0.session_store_factory = layer(self.0.session_store_factory);
         self
@@ -370,7 +371,7 @@ struct LayeredStoreSet {
     inner: Arc<dyn StoreSet>,
     binding: StoreBindingId,
     clock: Arc<dyn Clock>,
-    session_store_factory: Arc<dyn SessionStoreFactory>,
+    session_store_factory: Arc<dyn DeploymentStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     process_definitions: Arc<dyn ProcessDefinitionRegistry>,
@@ -389,7 +390,7 @@ impl StoreSet for LayeredStoreSet {
         Arc::clone(&self.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+    fn session_store_factory(&self) -> Arc<dyn DeploymentStore> {
         Arc::clone(&self.session_store_factory)
     }
 

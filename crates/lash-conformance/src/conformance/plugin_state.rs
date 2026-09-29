@@ -110,7 +110,7 @@ impl MockPlugin {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn commit(store: &Arc<dyn RuntimePersistence>, state: &mut RuntimeSessionState) {
+async fn commit(store: &Arc<dyn RuntimeStore>, state: &mut RuntimeSessionState) {
     let receipt = crate::testing::store_fixtures::commit_runtime_state_for_test(
         store,
         RuntimeCommit::persisted_state_for_test(state, &[]),
@@ -121,10 +121,7 @@ async fn commit(store: &Arc<dyn RuntimePersistence>, state: &mut RuntimeSessionS
     state.apply_persisted_commit_result(receipt);
 }
 
-pub async fn plugin_state_boundary(
-    make: impl Fn(&str) -> Arc<dyn RuntimePersistence>,
-    label: &str,
-) {
+pub async fn plugin_state_boundary(make: impl Fn(&str) -> Arc<dyn RuntimeStore>, label: &str) {
     let register_remove = format!("{label}-register-remove");
     registration_state_law(
         make(&register_remove),
@@ -154,9 +151,9 @@ pub async fn plugin_state_boundary(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn plugin_state_boundary_trace(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     parent_id: &str,
-    child_store: Arc<dyn RuntimePersistence>,
+    child_store: Arc<dyn RuntimeStore>,
     child_id: &str,
 ) -> Vec<lash_core::PluginState> {
     let fixture = MockPlugin::default();
@@ -294,7 +291,7 @@ pub async fn plugin_state_boundary_trace(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
+async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimeStore>) {
     let id = "plugin-state-lifecycle";
     let fixture = MockPlugin {
         writes_on_ready: true,
@@ -421,7 +418,7 @@ async fn runtime_plugin_state_park_law(store: Arc<dyn RuntimePersistence>) {
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
 async fn registration_state_law(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     id: &str,
     registration: Registration,
 ) {

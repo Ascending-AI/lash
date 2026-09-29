@@ -9,8 +9,8 @@ use crate::backend_fault::{
     BackendFaultArm, BackendFaultKind, BackendFaultLane, BackendFaultObservation, BackendFaultPoint,
 };
 use lash_core::{
-    OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -980,9 +980,9 @@ fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
 
 async fn create_store(
     backend: BackendFaultKind,
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     session_id: &SessionId,
-) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
+) -> Result<Arc<dyn RuntimeStore>, ScenarioFailure> {
     factory
         .create_store(&request(session_id))
         .await
@@ -991,9 +991,9 @@ async fn create_store(
 
 async fn open_store(
     backend: BackendFaultKind,
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     session_id: &SessionId,
-) -> Result<Arc<dyn RuntimePersistence>, ScenarioFailure> {
+) -> Result<Arc<dyn RuntimeStore>, ScenarioFailure> {
     factory
         .open_existing_store(&request(session_id))
         .await

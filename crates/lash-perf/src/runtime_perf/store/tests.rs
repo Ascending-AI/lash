@@ -23,7 +23,9 @@ async fn memory_factory() -> RuntimePerfStoreFactory {
     let stores = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("open a SQLite memory store set");
-    RuntimePerfStoreFactory::decorating_without_commit_measurement(stores.session_store_factory())
+    RuntimePerfStoreFactory::decorating_without_commit_measurement(Arc::new(
+        stores.open_store().await.expect("open the SQLite catalog"),
+    ))
 }
 
 #[tokio::test]
@@ -37,18 +39,12 @@ async fn perf_factory_reopens_created_root_session_by_id() {
         .expect("create benchmark root session store");
 
     assert!(
-        factory
-            .open_existing_store_by_id(&session_id)
-            .await
-            .expect("reopen benchmark root session store")
-            .is_some(),
-        "turn cancellation must resolve the benchmark session through the decorated factory"
+        factory.session_store(&session_id).is_some(),
+        "the benchmark catalog must retain its admitted session"
     );
     assert!(
         factory
-            .open_existing_store_by_id(&SessionId::from("runtime-perf-never-created"))
-            .await
-            .expect("look up an unknown benchmark session")
+            .session_store(&SessionId::from("runtime-perf-never-created"))
             .is_none(),
         "the perf decorator must not alias an unknown id to its root store"
     );
@@ -68,10 +64,16 @@ async fn successful_commits_are_counted_after_the_inner_store_accepts_them() {
     let expected_node_count = commit.graph.nodes().len();
     assert!(expected_node_count > 0, "fixture must commit graph nodes");
 
-    SessionCommitStore::commit_runtime_state(store.as_ref(), commit)
+    let first = SessionCommitStore::commit_runtime_state(store.as_ref(), commit.clone())
         .await
         .expect("SQLite memory commit succeeds");
+    assert!(!first.receipt_replayed);
 
+    assert_eq!(store.graph_node_count(), expected_node_count);
+    let replay = SessionCommitStore::commit_runtime_state(store.as_ref(), commit)
+        .await
+        .expect("replayed commit succeeds");
+    assert!(replay.receipt_replayed);
     assert_eq!(store.graph_node_count(), expected_node_count);
 }
 
@@ -82,17 +84,16 @@ async fn rejected_commits_do_not_change_the_instrumentation_counter() {
         .root_store(&SessionId::from("root"))
         .await
         .expect("create the root session store");
-    // A commit for another session reaches the root-bound store and is
-    // refused by its session binding.
-    let commit = RuntimeCommit::persisted_state_for_test(
-        &state_with_one_pending_node(&SessionId::from("other-session")),
+    let mut commit = RuntimeCommit::persisted_state_for_test(
+        &state_with_one_pending_node(&SessionId::from("root")),
         &[],
     );
+    commit.expected_head_revision = 99;
 
     let error = SessionCommitStore::commit_runtime_state(store.as_ref(), commit)
         .await
-        .expect_err("a cross-session commit must be rejected");
+        .expect_err("a stale head revision must be rejected");
 
-    assert!(matches!(error, StoreError::SessionBindingMismatch { .. }));
+    assert!(matches!(error, StoreError::HeadRevisionConflict { .. }));
     assert_eq!(store.graph_node_count(), 0);
 }

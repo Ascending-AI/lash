@@ -30,13 +30,13 @@ use super::drive_admission::{DriveParts, admitted, driver_scope, on_tier};
 /// evidence was durable when it was called, and refuses the first close
 /// when asked to.
 struct RecordingScopeClose {
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     fail_next: AtomicBool,
     closes: Mutex<Vec<(TurnId, bool)>>,
 }
 
 impl RecordingScopeClose {
-    fn new(store: Arc<dyn crate::RuntimePersistence>, fail_first: bool) -> Arc<Self> {
+    fn new(store: Arc<dyn crate::RuntimeStore>, fail_first: bool) -> Arc<Self> {
         Arc::new(Self {
             store,
             fail_next: AtomicBool::new(fail_first),
@@ -338,7 +338,7 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
 /// was durable by then.
 struct CrashingRegistryScopeClose {
     registry: crate::RegistryScopeClose,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     crash: crate::ConformanceCrash,
     armed: AtomicBool,
     closes: Mutex<Vec<(TurnId, bool)>>,

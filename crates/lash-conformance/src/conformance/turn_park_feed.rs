@@ -57,9 +57,9 @@ fn drift(message: &str) -> crate::store::ParkReason {
     reason = "conformance-law fixture: a fresh factory creates its session"
 )]
 async fn create_bound_store(
-    factory: &Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: &Arc<dyn crate::store::ConformanceDeployment>,
     session_id: &SessionId,
-) -> Arc<dyn RuntimePersistence> {
+) -> Arc<dyn RuntimeStore> {
     factory
         .create_store(&session_store_request(
             session_id,
@@ -71,7 +71,7 @@ async fn create_bound_store(
 }
 
 async fn commit_turn(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     turn_id: &str,
     head_revision: u64,
@@ -97,7 +97,7 @@ async fn commit_turn(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let session_a = SessionId::from("park-list-a");
     let session_b = SessionId::from("park-list-b");
@@ -273,7 +273,7 @@ pub async fn parked_turns_list_by_since_with_filters_and_keyset_pages(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let session_id = SessionId::from("park-supersede");
     let store = create_bound_store(&factory, &session_id).await;
@@ -404,7 +404,7 @@ pub async fn re_park_keeps_since_and_counts_attempts_and_another_turn_supersedes
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn every_park_transition_writes_exactly_one_feed_event(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     // The parked turn's own commit settles the park.
     let commit_session = SessionId::from("park-feed-own-commit");
@@ -648,7 +648,7 @@ pub async fn every_park_transition_writes_exactly_one_feed_event(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_rolled_back_commit_leaves_park_and_feed_unchanged(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let session_id = SessionId::from("park-feed-rolled-back");
     let store = create_bound_store(&factory, &session_id).await;
@@ -694,7 +694,7 @@ pub async fn a_rolled_back_commit_leaves_park_and_feed_unchanged(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_compacted_feed_cursor_is_refused_typed(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let session_id = SessionId::from("park-feed-compacted");
     let store = create_bound_store(&factory, &session_id).await;
@@ -826,9 +826,7 @@ pub async fn a_compacted_feed_cursor_is_refused_typed(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn summary_agrees_with_list(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
-) {
+pub async fn summary_agrees_with_list(factory: Arc<dyn crate::store::ConformanceDeployment>) {
     let empty = factory
         .count_unsettled_turns()
         .await

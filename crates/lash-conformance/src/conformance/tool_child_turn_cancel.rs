@@ -38,7 +38,7 @@ const RETRY_AFTER_MS: u64 = 3_000;
 struct TurnParts {
     host: Arc<dyn EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     session_id: SessionId,
     plugin: Arc<dyn crate::facade_support::PluginFactory>,
     model: crate::testing::TestProvider,

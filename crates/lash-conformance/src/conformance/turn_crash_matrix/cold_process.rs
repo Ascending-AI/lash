@@ -238,7 +238,7 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn recover_turn_cancel_closure(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
@@ -454,7 +454,7 @@ async fn recover_turn_cancel_closure(
 )]
 pub async fn cold_process_real_turn_driver(
     stores: Arc<dyn crate::StoreSet>,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     effect_controller: Arc<dyn RuntimeEffectController>,
     scenario: &str,
     action: &str,

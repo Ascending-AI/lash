@@ -414,10 +414,10 @@ mod tests {
 
     use lash_core::store::RuntimeCommit;
     use lash_core::{
-        PluginState, ProcessAwaitOutput, ProcessCompletionAuthority, ProcessEventAppendRequest,
-        ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
-        ProjectionWatermark, RuntimeSessionState, SessionRelation, SessionStoreCreateRequest,
-        SessionStoreFactory as _, ToolState,
+        DeploymentStore as _, PluginState, ProcessAwaitOutput, ProcessCompletionAuthority,
+        ProcessEventAppendRequest, ProcessEventSemanticsSpec, ProcessEventType,
+        ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark, RuntimeSessionState,
+        SessionRelation, SessionStoreCreateRequest, ToolState,
     };
 
     use super::*;

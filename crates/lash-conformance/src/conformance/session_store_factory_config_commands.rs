@@ -6,14 +6,14 @@ use pretty_assertions::assert_eq;
 use std::future::Future;
 
 struct PausedConfigSettlementStore {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     pause_after_enqueue: std::sync::atomic::AtomicBool,
     before_settlement_read: tokio::sync::Notify,
     release_settlement_read: tokio::sync::Notify,
 }
 
 impl PausedConfigSettlementStore {
-    fn new(inner: Arc<dyn crate::RuntimePersistence>) -> Self {
+    fn new(inner: Arc<dyn crate::RuntimeStore>) -> Self {
         Self {
             inner,
             pause_after_enqueue: std::sync::atomic::AtomicBool::new(false),
@@ -24,8 +24,8 @@ impl PausedConfigSettlementStore {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for PausedConfigSettlementStore {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for PausedConfigSettlementStore {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -61,7 +61,7 @@ impl crate::store::RuntimePersistenceDecorator for PausedConfigSettlementStore {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_coalesces_config_command_claims(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("config-command-coalescing"),
@@ -145,7 +145,7 @@ pub(super) async fn session_store_factory_coalesces_config_command_claims(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_bounds_config_command_claims(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("config-command-claim-bound"),
@@ -220,7 +220,7 @@ pub(super) async fn session_store_factory_bounds_config_command_claims(
 }
 
 async fn commit_session_command_claim(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
     run: Vec<crate::QueuedWorkBatch>,
@@ -235,7 +235,7 @@ async fn commit_session_command_claim(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_session_command_claim_with(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
     request: &crate::SessionStoreCreateRequest,
     fence: &crate::store::DriveFence,
     run: Vec<crate::QueuedWorkBatch>,
@@ -399,7 +399,7 @@ fn config_settlement_clock_wall_clock_faces_agree() {
 async fn config_settlement_store<M, Fut>(
     make: &M,
     request: &crate::SessionStoreCreateRequest,
-) -> (crate::Backend, Arc<dyn crate::RuntimePersistence>)
+) -> (crate::Backend, Arc<dyn crate::RuntimeStore>)
 where
     M: Fn() -> Fut,
     Fut: Future<Output = crate::Backend>,
@@ -419,7 +419,7 @@ where
 )]
 async fn runtime_for_config_settlement(
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
     clock: Arc<ConfigSettlementClock>,
 ) -> crate::LashRuntime {
@@ -479,10 +479,7 @@ async fn runtime_for_config_settlement(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn hold_config_settlement_lease(
-    store: &dyn crate::RuntimePersistence,
-    session_id: &SessionId,
-) {
+async fn hold_config_settlement_lease(store: &dyn crate::RuntimeStore, session_id: &SessionId) {
     let owner = crate::LeaseOwnerIdentity::opaque("config-blocker", "config-blocker:incarnation");
     store
         .seal_drive_epoch_for_test(session_id, &owner, "config-blocker", 600_000)
@@ -574,7 +571,7 @@ where
     let paused_store = Arc::new(PausedConfigSettlementStore::new(Arc::clone(&store)));
     let runtime = runtime_for_config_settlement(
         backend.clone(),
-        Arc::clone(&paused_store) as Arc<dyn crate::RuntimePersistence>,
+        Arc::clone(&paused_store) as Arc<dyn crate::RuntimeStore>,
         &request,
         Arc::clone(&clock),
     )

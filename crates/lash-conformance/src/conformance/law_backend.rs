@@ -114,7 +114,7 @@ impl crate::EffectEngine for HostOverStores {
 pub(crate) async fn law_session_store(
     stores: &dyn crate::StoreSet,
     session_id: &crate::SessionId,
-) -> Arc<dyn crate::RuntimePersistence> {
+) -> Arc<dyn crate::RuntimeStore> {
     stores
         .session_store_factory()
         .create_store(&crate::SessionStoreCreateRequest {
@@ -239,7 +239,7 @@ impl crate::StoreSet for StoreLawStores {
         Arc::clone(&self.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn crate::SessionStoreFactory> {
+    fn session_store_factory(&self) -> Arc<dyn crate::DeploymentStore> {
         Self::no_second_substrate("session catalog")
     }
 

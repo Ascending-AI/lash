@@ -10,8 +10,8 @@ use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use lash_core::{
-    OperationId, RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    DeploymentStore, OperationId, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use lash_postgres_store::testing::{PostgresFaultArm, PostgresFaultInjector, PostgresFaultPoint};
 use lash_sqlite_store::testing::{SqliteFaultArm, SqliteFaultInjector, SqliteFaultPoint};
@@ -297,11 +297,11 @@ impl BackendFaultLane {
     pub fn armed_factory(
         &self,
         case_root: &std::path::Path,
-    ) -> (Arc<dyn SessionStoreFactory>, BackendFaultInjector) {
+    ) -> (Arc<dyn DeploymentStore>, BackendFaultInjector) {
         match self.kind {
             BackendFaultKind::Sqlite => {
                 let injector = SqliteFaultInjector::default();
-                let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+                let factory: Arc<dyn DeploymentStore> = Arc::new(
                     lash_sqlite_store::SqliteSessionStoreFactory::new(case_root.join("store"))
                         .with_fault_injector(injector.clone()),
                 );
@@ -313,7 +313,7 @@ impl BackendFaultLane {
                     .as_ref()
                     .expect("a PostgreSQL lane always opens its database");
                 let injector = PostgresFaultInjector::default();
-                let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+                let factory: Arc<dyn DeploymentStore> = Arc::new(
                     lash_postgres_store::PostgresSessionStoreFactory::new(&lane.storage)
                         .with_fault_injector(injector.clone()),
                 );
@@ -326,7 +326,7 @@ impl BackendFaultLane {
 pub(crate) struct GeneratedBackendFaultHarness {
     attempts_by_session_operation: BTreeMap<(String, String), usize>,
     _root: tempfile::TempDir,
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     injector: SqliteFaultInjector,
     injector_enabled: bool,
 }
@@ -345,7 +345,7 @@ impl GeneratedBackendFaultHarness {
     fn new(injector_enabled: bool) -> Self {
         let root = tempfile::tempdir().expect("create generated SQLite fault root");
         let injector = SqliteFaultInjector::default();
-        let factory: Arc<dyn SessionStoreFactory> = Arc::new(
+        let factory: Arc<dyn DeploymentStore> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(root.path().join("store"))
                 .with_fault_injector(injector.clone()),
         );
@@ -491,7 +491,7 @@ impl GeneratedBackendFaultHarness {
     async fn create_store(
         &self,
         session_id: &SessionId,
-    ) -> Result<Arc<dyn RuntimePersistence>, FixedScriptRunnerError> {
+    ) -> Result<Arc<dyn RuntimeStore>, FixedScriptRunnerError> {
         self.factory
             .create_store(&SessionStoreCreateRequest {
                 owning_process_id: None,

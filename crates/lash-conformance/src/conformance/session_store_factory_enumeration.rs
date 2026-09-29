@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tombstones(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     assert!(
         factory

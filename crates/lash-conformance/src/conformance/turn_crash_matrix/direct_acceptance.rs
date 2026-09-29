@@ -15,13 +15,13 @@ const DIRECT_INPUT: &str = "direct accepted input";
 /// Counts acceptance bodies: the acceptance executor's store write is the one
 /// `enqueue_pending_turn_input` a direct turn makes.
 struct CountingAcceptanceStore {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     enqueues: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for CountingAcceptanceStore {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for CountingAcceptanceStore {
+    fn inner(&self) -> &(dyn RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -48,9 +48,9 @@ impl crate::store::RuntimePersistenceDecorator for CountingAcceptanceStore {
 }
 
 fn counted(
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     enqueues: &Arc<std::sync::atomic::AtomicUsize>,
-) -> Arc<dyn RuntimePersistence> {
+) -> Arc<dyn RuntimeStore> {
     Arc::new(CountingAcceptanceStore {
         inner,
         enqueues: Arc::clone(enqueues),
@@ -79,14 +79,14 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     // One layered host for the whole law: a runtime installs its tool-child
     // host get-or-init, so a host layered afresh per execution would strand
     // every later execution's group children (see `LawSeamHost`).
     let host = LawSeamHost::over(host);
     let scenario = "direct-acceptance-after-store-commit";
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     let identity = ReferenceIdentity::for_scenario(scenario);
     let point = TurnCrashPoint {
         operation: TurnSeamOperation::Effect(EffectOperation::AcceptTurnInput),

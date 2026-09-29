@@ -23,7 +23,7 @@
 use std::sync::{Arc, Mutex};
 
 use lash_core::sync::MutexExt as _;
-use lash_core::{SessionDriver, SessionId, SessionStoreFactory, SessionWorkEngine};
+use lash_core::{DeploymentStore, SessionDriver, SessionId, SessionWorkEngine};
 use tokio::sync::watch;
 
 /// A crash that fired: where, and when on the server's virtual clock.
@@ -125,7 +125,7 @@ pub enum HostSite {
     ReleaseRootAfter,
     /// `ControlIntentStore::acknowledge_intent`, before it writes.
     AcknowledgeIntentBefore,
-    /// `SessionStoreFactory::delete_session`, before the physical delete.
+    /// `DeploymentStore::delete_session`, before the physical delete.
     DeleteStorageBefore,
     /// `ProcessWorkSubstrate::deliver_cancel`, before the engine sees it.
     DeliverCancelBefore,
@@ -544,13 +544,13 @@ impl lash_core::engine::SessionControlEngine for CrashControl {
 /// The deployment's session catalog with [`HostFaults`] on the writes a seam
 /// cuts between: the intent acknowledgement and the physical delete.
 pub struct CrashSessionFactory {
-    inner: Arc<dyn SessionStoreFactory>,
+    inner: Arc<dyn DeploymentStore>,
     faults: Arc<HostFaults>,
 }
 
 impl CrashSessionFactory {
     #[must_use]
-    pub fn new(inner: Arc<dyn SessionStoreFactory>, faults: Arc<HostFaults>) -> Self {
+    pub fn new(inner: Arc<dyn DeploymentStore>, faults: Arc<HostFaults>) -> Self {
         Self { inner, faults }
     }
 }
@@ -558,7 +558,7 @@ impl CrashSessionFactory {
 type StoreResult<T> = Result<T, lash_core::StoreError>;
 
 #[async_trait::async_trait]
-impl SessionStoreFactory for CrashSessionFactory {
+impl DeploymentStore for CrashSessionFactory {
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core::EffectHost>) {
         self.inner.bind_effect_host(effect_host);
     }
@@ -575,18 +575,18 @@ impl SessionStoreFactory for CrashSessionFactory {
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> StoreResult<Arc<dyn lash_core::RuntimePersistence>> {
+    ) -> StoreResult<Arc<dyn lash_core::RuntimeStore>> {
         self.inner.create_store(request).await
     }
 
     async fn open_existing_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn lash_core::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn lash_core::RuntimeStore>>, String> {
         self.inner.open_existing_store(request).await
     }
 
-    async fn open_unbound_store(&self) -> StoreResult<Arc<dyn lash_core::RuntimePersistence>> {
+    async fn open_unbound_store(&self) -> StoreResult<Arc<dyn lash_core::RuntimeStore>> {
         self.inner.open_unbound_store().await
     }
 
@@ -665,7 +665,7 @@ impl SessionStoreFactory for CrashSessionFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> StoreResult<Option<Arc<dyn lash_core::RuntimePersistence>>> {
+    ) -> StoreResult<Option<Arc<dyn lash_core::RuntimeStore>>> {
         self.inner.open_existing_store_by_id(session_id).await
     }
 

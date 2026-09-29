@@ -19,7 +19,7 @@ pub(crate) use lash_core::testing::store_fixtures::{
     reason = "conformance-law fixture: the admission is established by the setup"
 )]
 pub(crate) async fn admitted_root(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &DriveFence,
     root: &str,
     head: AdmittedHead,
@@ -37,7 +37,7 @@ pub(crate) async fn admitted_root(
     reason = "conformance-law fixture: the admission is established by the setup"
 )]
 pub(crate) async fn admitted_root_with_policy(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &DriveFence,
     root: &str,
     head: AdmittedHead,
@@ -141,7 +141,7 @@ pub(crate) fn batch_row(batch: &crate::QueuedWorkBatch) -> IngressRowId {
     reason = "conformance-law fixture: the store answers its own head read"
 )]
 pub(crate) async fn head_commit(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     session_id: &crate::SessionId,
 ) -> crate::RuntimeCommit {
     let revision = store
@@ -160,7 +160,7 @@ pub(crate) async fn head_commit(
 /// Land `root`'s final commit settling `settlement` under `fence`, over the
 /// current head.
 pub(crate) async fn try_end_root(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &DriveFence,
     settlement: IngressSettlement,
 ) -> Result<crate::store::RuntimeCommitReceipt, crate::StoreError> {
@@ -176,7 +176,7 @@ pub(crate) async fn try_end_root(
     reason = "conformance-law fixture: the final commit is established by the setup"
 )]
 pub(crate) async fn end_root(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &DriveFence,
     settlement: IngressSettlement,
 ) -> crate::store::RuntimeCommitReceipt {
@@ -188,7 +188,7 @@ pub(crate) async fn end_root(
 /// Admit `root` headed by `head` and end it completing everything it took;
 /// returns the admission.
 pub(crate) async fn drive_root_to_end(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &DriveFence,
     root: &str,
     head: AdmittedHead,

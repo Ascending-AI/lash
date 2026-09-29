@@ -16,9 +16,9 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         session_store_factory.clone();
     let process_registry = double.engine_stores().process_registry();
     let trigger_store = double.stores().trigger_store();

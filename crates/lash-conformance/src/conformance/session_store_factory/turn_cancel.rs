@@ -51,7 +51,7 @@ fn closure_key(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn authorize_closure(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     fence: &crate::store::DriveFence,
     address: &crate::TurnAddress,
     observed: crate::TurnCancelIntentSnapshot,
@@ -144,7 +144,7 @@ fn closure_authorization_under(
 /// predicated on `observed`, and consumes `settlement` in the same
 /// transaction. Returns the input outcome the commit recorded.
 pub(super) async fn commit_teardown(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
     fence: &crate::store::DriveFence,
     turn: &TurnId,
     observed: &crate::TurnCancelIntentSnapshot,
@@ -190,7 +190,7 @@ fn settled_closure(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authorization(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-exact-replay-preserves-new-authorization"),
@@ -304,7 +304,7 @@ pub(super) async fn turn_cancel_exact_replay_preserves_different_pending_authori
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritable(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-closure-authorization"),
@@ -695,14 +695,14 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reopen(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn claim(
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &Arc<dyn crate::RuntimeStore>,
         session_id: &SessionId,
         owner: &str,
     ) -> crate::store::DriveFence {
@@ -812,18 +812,18 @@ pub(super) async fn turn_cancel_repair_preserves_base_across_escalation_and_reop
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn prepared(
-        factory: &Arc<dyn crate::SessionStoreFactory>,
+        factory: &Arc<dyn crate::DeploymentStore>,
         suffix: &str,
         scope: crate::ExecutionScope,
     ) -> (
-        Arc<dyn crate::RuntimePersistence>,
+        Arc<dyn crate::RuntimeStore>,
         crate::store::DriveFence,
         crate::TurnCancelClosureAuthorization,
     ) {
@@ -977,9 +977,7 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
 /// observation from repair. The reopened repair applies the requested policy
 /// only to the undelivered active-turn row, records its payload in the durable
 /// cancel outcome, and leaves already-next-turn work untouched.
-pub(super) async fn turn_cancel_disposition_crash_matrix(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
+pub(super) async fn turn_cancel_disposition_crash_matrix(factory: Arc<dyn crate::DeploymentStore>) {
     #[derive(Clone, Copy, Debug)]
     enum RepairPath {
         Commit,
@@ -1010,7 +1008,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn turn_cancel_disposition_crash_cell(
-        factory: Arc<dyn crate::SessionStoreFactory>,
+        factory: Arc<dyn crate::DeploymentStore>,
         mode: crate::TurnCancelMode,
         disposition: crate::TurnCancelDisposition,
         path: RepairPath,
@@ -1282,7 +1280,7 @@ pub(super) async fn turn_cancel_disposition_crash_matrix(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_request_escalation_advances_intent_without_replacing_base(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-escalation"),
@@ -1523,14 +1521,14 @@ pub(super) async fn turn_cancel_request_escalation_advances_intent_without_repla
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn lease(
-        store: &Arc<dyn crate::RuntimePersistence>,
+        store: &Arc<dyn crate::RuntimeStore>,
         session_id: &SessionId,
         owner: &str,
     ) -> crate::store::DriveFence {
@@ -1806,7 +1804,7 @@ pub(super) async fn turn_cancel_repair_orders_intent_and_ordinary_redefer(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-final-cas"),
@@ -2005,7 +2003,7 @@ pub(super) async fn turn_cancel_final_commit_intent_cas_is_atomic(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-conflicting-repeat"),
@@ -2144,7 +2142,7 @@ pub(super) async fn turn_cancel_conflicting_repeat_leaves_no_durable_trace(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("turn-cancel-concurrent-opposing"),
@@ -2261,7 +2259,7 @@ pub(super) async fn turn_cancel_concurrent_opposing_requests_converge(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
     const OTHER_BINDING_ID: &str = "lash-conformance-turn-cancel-v1-impostor";

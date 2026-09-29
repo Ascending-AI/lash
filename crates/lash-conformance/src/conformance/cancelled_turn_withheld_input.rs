@@ -46,7 +46,7 @@ enum Stop {
 /// active-turn input: the admission is taken and withheld, and the Stop lands
 /// before the turn commits.
 struct StopAfterTerminalClaim {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     effect_host: Arc<dyn crate::EffectHost>,
     armed: Mutex<Option<Stop>>,
     withheld_inputs: Mutex<Vec<crate::InputId>>,
@@ -59,8 +59,8 @@ struct StopAfterTerminalClaim {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for StopAfterTerminalClaim {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -162,7 +162,7 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
 }
 
 struct Harness {
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     decorated: Arc<StopAfterTerminalClaim>,
     effect_host: Arc<dyn crate::EffectHost>,
     runtime: crate::LashRuntime,
@@ -429,7 +429,7 @@ async fn withheld_cancel_case(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimePersistence>) -> Harness {
+async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimeStore>) -> Harness {
     let effect_host = backend.effect_host();
     let decorated = Arc::new(StopAfterTerminalClaim {
         inner: Arc::clone(&store),
@@ -440,7 +440,7 @@ async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimePersisten
         arriving_wake: Mutex::new(None),
         arrived_wake: Mutex::new(None),
     });
-    let runtime_store: Arc<dyn crate::RuntimePersistence> = decorated.clone();
+    let runtime_store: Arc<dyn crate::RuntimeStore> = decorated.clone();
     let requests = Arc::new(Mutex::new(Vec::<crate::LlmRequest>::new()));
     let provider = {
         let requests = Arc::clone(&requests);
@@ -482,7 +482,7 @@ async fn harness(backend: crate::Backend, store: Arc<dyn crate::RuntimePersisten
 pub async fn immediate_cancel_defers_withheld_inject_now_input(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let mut harness = harness(backend, store).await;
 
@@ -720,7 +720,7 @@ async fn withheld_wake_case(
 pub async fn immediate_cancel_defers_withheld_process_wakes(
     prefix: &str,
     backend: crate::Backend,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) {
     let mut harness = harness(backend, store).await;
 

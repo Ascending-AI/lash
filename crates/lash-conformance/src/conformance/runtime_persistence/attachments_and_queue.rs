@@ -5,9 +5,7 @@ use pretty_assertions::assert_eq;
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn attachment_manifest_records_intent_and_commit_stamps(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn attachment_manifest_records_intent_and_commit_stamps(store: Arc<dyn RuntimeStore>) {
     let committed_by_runtime = AttachmentId::parse("runtime-commit").expect("valid attachment id");
     let committed_out_of_band = AttachmentId::parse("manual-commit").expect("valid attachment id");
     let orphan = AttachmentId::parse("orphan").expect("valid attachment id");
@@ -72,7 +70,7 @@ pub async fn attachment_manifest_records_intent_and_commit_stamps(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let attachment = AttachmentId::parse("same-content").expect("valid attachment id");
     for session_id in ["committed-owner", "orphan-owner"] {
@@ -139,9 +137,7 @@ pub async fn attachment_manifest_keeps_same_content_ownership_per_session(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(store: Arc<dyn RuntimeStore>) {
     let first = store
         .enqueue_queued_work(keyed_queued_draft(
             &SessionId::from("root"),
@@ -206,7 +202,7 @@ pub async fn queued_work_source_keys_are_idempotent_and_list_ordered(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_one_existing(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let draft = || {
         keyed_queued_draft(
@@ -260,7 +256,7 @@ pub async fn concurrent_queued_work_source_key_enqueues_report_one_inserted_and_
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let store = crate::testing::checkpoint_observer::fresh_runtime_persistence_handle(store);
     let draft = || {
@@ -298,7 +294,7 @@ pub async fn decorated_queued_work_source_key_replay_reports_absorbed(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_session_work_ordering_agrees_across_ingress_families(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = "pending-work-ordering-tie";
     store
@@ -427,7 +423,7 @@ fn admitted_by(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("concurrent-queue-input");
     let batch = store
@@ -556,7 +552,7 @@ pub async fn concurrent_admissions_bind_every_row_to_at_most_one_root(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn RuntimePersistence>) {
+pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-work-cancel");
     let cancellable = store
         .enqueue_queued_work(queued_draft(
@@ -658,9 +654,7 @@ pub async fn queued_work_cancel_removes_only_open_batches(store: Arc<dyn Runtime
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_work_classes_gate_command_and_turn_admissions(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn queued_work_classes_gate_command_and_turn_admissions(store: Arc<dyn RuntimeStore>) {
     let session = SessionId::from("queued-work-classes");
     let fence = seal_drive_fence_for_test(&store, &session, "turn-owner").await;
     for (case, command_first) in [("command-first", true), ("turn-first", false)] {
@@ -757,7 +751,7 @@ pub async fn queued_work_classes_gate_command_and_turn_admissions(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn queued_work_admission_respects_boundaries_and_stale_completion(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session = SessionId::from("queued-work-boundaries");
     let after_commit = store

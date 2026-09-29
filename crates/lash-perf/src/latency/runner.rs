@@ -545,7 +545,7 @@ async fn run_lane(
 struct SampleCtx<'a> {
     spec: &'a CaseSpec,
     session: &'a LaneSession,
-    poll_store: &'a Arc<dyn lash::persistence::RuntimePersistence>,
+    poll_store: &'a Arc<dyn lash::persistence::RuntimeStore>,
     session_id: &'a SessionId,
     timing: &'a Arc<ProviderTiming>,
 }
@@ -685,7 +685,7 @@ fn status_name(status: &lash::TurnStatus) -> String {
 /// follower resolves with, so the poller never decodes the session's commit
 /// history.
 async fn poll_marks(
-    store: Arc<dyn lash::persistence::RuntimePersistence>,
+    store: Arc<dyn lash::persistence::RuntimeStore>,
     session_id: SessionId,
     input_id: lash_core::InputId,
     t_request: Instant,
@@ -1022,7 +1022,7 @@ pub(crate) fn build_report(
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use lash_core::SessionStoreFactory;
+    use lash_core::DeploymentStore;
 
     use super::*;
 
@@ -1033,7 +1033,7 @@ mod tests {
     /// full-history receipt decode the poller issued every tick before, is
     /// armed to panic: reaching it at all is the regression.
     struct PollProbeStore {
-        inner: Arc<dyn lash::persistence::RuntimePersistence>,
+        inner: Arc<dyn lash::persistence::RuntimeStore>,
         row: lash::PendingTurnInput,
         root: lash_core::TurnId,
         terminal: lash::persistence::RootTerminal,
@@ -1045,7 +1045,7 @@ mod tests {
 
     impl PollProbeStore {
         fn over(
-            inner: Arc<dyn lash::persistence::RuntimePersistence>,
+            inner: Arc<dyn lash::persistence::RuntimeStore>,
             session_id: &SessionId,
             input_id: &lash_core::InputId,
             root: &lash_core::TurnId,
@@ -1084,8 +1084,8 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl lash::persistence::RuntimePersistenceDecorator for PollProbeStore {
-        fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
+    impl lash::persistence::RuntimeStoreDecorator for PollProbeStore {
+        fn inner(&self) -> &(dyn lash::persistence::RuntimeStore + '_) {
             self.inner.as_ref()
         }
 
@@ -1160,7 +1160,7 @@ mod tests {
             .await
             .expect("create the probe's inner store");
         let probe = Arc::new(PollProbeStore::over(inner, &session_id, &input_id, &root));
-        let store: Arc<dyn lash::persistence::RuntimePersistence> = probe.clone();
+        let store: Arc<dyn lash::persistence::RuntimeStore> = probe.clone();
 
         let marks = poll_marks(store, session_id, input_id, Instant::now()).await;
 

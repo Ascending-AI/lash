@@ -118,7 +118,7 @@ async fn crash_then_redrive(
 /// The law's matrix view of the tier's fixture.
 fn matrix_law<'law>(
     stores: &'law Arc<dyn crate::StoreSet>,
-    make: &'law dyn Fn(&str) -> Arc<dyn RuntimePersistence>,
+    make: &'law dyn Fn(&str) -> Arc<dyn RuntimeStore>,
     host: &'law LawSeamHost,
     runner: &'law Arc<dyn crate::ConformanceTurnRunner>,
 ) -> MatrixLaw<'law> {
@@ -148,9 +148,9 @@ pub async fn a_final_commit_whose_reply_was_lost_replays_its_receipt_and_settles
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     let host = LawSeamHost::over(host);
     let law = matrix_law(&stores, &make, &host, &runner);
     let scenario = "final-commit-reply-lost";
@@ -264,9 +264,9 @@ pub async fn a_checkpoint_admission_crashed_before_its_record_redelivers_its_row
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     let host = LawSeamHost::over(host);
     let law = matrix_law(&stores, &make, &host, &runner);
     let scenario = "checkpoint-admission-crash";

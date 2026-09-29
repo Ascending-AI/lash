@@ -452,7 +452,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     context_window_tokens: usize,
     live_replay_store: Option<Arc<dyn lash::observe::LiveReplayStore>>,
 ) -> AppState {

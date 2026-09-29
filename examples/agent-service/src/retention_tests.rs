@@ -4,8 +4,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use lash::persistence::{
-    AttachmentReclamationPolicy, AttachmentStore, EmptyRootSetPolicy, PendingTurnInputDraft,
-    SessionRelation, SessionStoreCreateRequest, SessionStoreFactory, TurnInputIngress,
+    AttachmentReclamationPolicy, AttachmentStore, DeploymentStore, EmptyRootSetPolicy,
+    PendingTurnInputDraft, SessionRelation, SessionStoreCreateRequest, TurnInputIngress,
     TurnInputStateKind,
 };
 use lash::{TurnBudget, TurnInput, runtime::SessionPolicy};

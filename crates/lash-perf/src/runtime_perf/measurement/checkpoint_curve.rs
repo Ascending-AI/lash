@@ -127,7 +127,7 @@ struct DurableCheckpointCurveFixture {
     point: CheckpointCurvePoint,
     fixture: lash_protocol_rlm::RlmCheckpointPerfFixture,
     runtime_state: RuntimeSessionState,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: Arc<dyn lash_core::RuntimeStore>,
 }
 
 #[expect(

@@ -616,7 +616,7 @@ async fn deleting_a_trigger_cancels_its_cron_without_opening_a_contended_session
     let double = crate::tests::test_double_backend(0).await;
     let mut state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         &double,
-        Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
+        Arc::clone(&store_factory) as Arc<dyn lash::persistence::DeploymentStore>,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;
@@ -934,14 +934,14 @@ struct MetaLossSessionStoreFactory {
 }
 
 struct ContendedRuntimePersistence {
-    inner: Arc<dyn lash::persistence::RuntimePersistence>,
+    inner: Arc<dyn lash::persistence::RuntimeStore>,
     contend: Arc<std::sync::atomic::AtomicBool>,
     contended_attempts: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::RuntimePersistenceDecorator for ContendedRuntimePersistence {
-    fn inner(&self) -> &(dyn lash::persistence::RuntimePersistence + '_) {
+impl lash::persistence::RuntimeStoreDecorator for ContendedRuntimePersistence {
+    fn inner(&self) -> &(dyn lash::persistence::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1015,16 +1015,16 @@ impl lash::persistence::AttachmentRootSet for ContendedSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
+impl lash::persistence::DeploymentStore for ContendedSessionStoreFactory {
     // A decorator forwards the non-creating by-id seam, keeping the
     // contention wrapper on the store it hands back.
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, lash::persistence::StoreError>
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, lash::persistence::StoreError>
     {
         Ok(
-            lash::persistence::SessionStoreFactory::open_existing_store_by_id(
+            lash::persistence::DeploymentStore::open_existing_store_by_id(
                 self.inner.as_ref(),
                 session_id,
             )
@@ -1034,7 +1034,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
                     inner,
                     contend: Arc::clone(&self.contend),
                     contended_attempts: Arc::clone(&self.contended_attempts),
-                }) as Arc<dyn lash::persistence::RuntimePersistence>
+                }) as Arc<dyn lash::persistence::RuntimeStore>
             }),
         )
     }
@@ -1042,10 +1042,9 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     async fn create_store(
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
+    ) -> Result<Arc<dyn lash::persistence::RuntimeStore>, lash::persistence::StoreError> {
         let inner =
-            lash::persistence::SessionStoreFactory::create_store(self.inner.as_ref(), request)
-                .await?;
+            lash::persistence::DeploymentStore::create_store(self.inner.as_ref(), request).await?;
         Ok(Arc::new(ContendedRuntimePersistence {
             inner,
             contend: Arc::clone(&self.contend),
@@ -1054,7 +1053,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id)
+        lash::persistence::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id)
             .await
     }
 
@@ -1062,22 +1061,21 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::SessionStoreFactory::delete_session(self.inner.as_ref(), session_id)
-            .await
+        lash::persistence::DeploymentStore::delete_session(self.inner.as_ref(), session_id).await
     }
 
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
+        lash::persistence::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
     }
 
     async fn list_turn_parks(
         &self,
         query: &lash::persistence::TurnParkQuery,
     ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::list_turn_parks(self.inner.as_ref(), query).await
+        lash::persistence::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
     }
 
     async fn turn_park_feed(
@@ -1088,8 +1086,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         lash::persistence::ParkFeedPage<lash::persistence::TurnParkTarget>,
         lash::persistence::StoreError,
     > {
-        lash::persistence::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit)
-            .await
+        lash::persistence::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
     }
 
     async fn root_terminal(
@@ -1098,7 +1095,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         root: &lash::TurnId,
     ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
     {
-        lash::persistence::SessionStoreFactory::root_terminal(self.inner.as_ref(), session_id, root)
+        lash::persistence::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root)
             .await
     }
 
@@ -1106,7 +1103,7 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
         &self,
         through: lash::persistence::ParkFeedCursor,
     ) -> Result<(), lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
+        lash::persistence::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through)
             .await
     }
 }
@@ -1229,18 +1226,18 @@ impl lash::persistence::AttachmentRootSet for MetaLossSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
+impl lash::persistence::DeploymentStore for MetaLossSessionStoreFactory {
     async fn create_store(
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn lash::persistence::RuntimePersistence>, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::create_store(self.inner.as_ref(), request).await
+    ) -> Result<Arc<dyn lash::persistence::RuntimeStore>, lash::persistence::StoreError> {
+        lash::persistence::DeploymentStore::create_store(self.inner.as_ref(), request).await
     }
 
     async fn open_existing_store(
         &self,
         request: &lash::persistence::SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, String> {
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, String> {
         if self
             .absent_session_ids
             .lock_recover()
@@ -1248,8 +1245,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         {
             return Ok(None);
         }
-        lash::persistence::SessionStoreFactory::open_existing_store(self.inner.as_ref(), request)
-            .await
+        lash::persistence::DeploymentStore::open_existing_store(self.inner.as_ref(), request).await
     }
 
     // A Durable Session acquires by id; the fixture's meta loss must be
@@ -1258,12 +1254,12 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     async fn open_existing_store_by_id(
         &self,
         session_id: &SessionId,
-    ) -> Result<Option<Arc<dyn lash::persistence::RuntimePersistence>>, lash::persistence::StoreError>
+    ) -> Result<Option<Arc<dyn lash::persistence::RuntimeStore>>, lash::persistence::StoreError>
     {
         if self.absent_session_ids.lock_recover().contains(session_id) {
             return Ok(None);
         }
-        lash::persistence::SessionStoreFactory::open_existing_store_by_id(
+        lash::persistence::DeploymentStore::open_existing_store_by_id(
             self.inner.as_ref(),
             session_id,
         )
@@ -1271,7 +1267,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     }
 
     async fn session_was_deleted(&self, session_id: &SessionId) -> Result<bool, String> {
-        lash::persistence::SessionStoreFactory::session_was_deleted(self.inner.as_ref(), session_id)
+        lash::persistence::DeploymentStore::session_was_deleted(self.inner.as_ref(), session_id)
             .await
     }
 
@@ -1279,22 +1275,21 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         &self,
         session_id: &SessionId,
     ) -> lash::persistence::MaintenanceResult<lash::persistence::SessionBlobReclaimReport> {
-        lash::persistence::SessionStoreFactory::delete_session(self.inner.as_ref(), session_id)
-            .await
+        lash::persistence::DeploymentStore::delete_session(self.inner.as_ref(), session_id).await
     }
 
     // A decorator forwards the deployment turn count to the catalog it wraps.
     async fn count_unsettled_turns(
         &self,
     ) -> Result<lash::persistence::UnsettledTurnCounts, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::count_unsettled_turns(self.inner.as_ref()).await
+        lash::persistence::DeploymentStore::count_unsettled_turns(self.inner.as_ref()).await
     }
 
     async fn list_turn_parks(
         &self,
         query: &lash::persistence::TurnParkQuery,
     ) -> Result<Vec<lash::persistence::TurnPark>, lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::list_turn_parks(self.inner.as_ref(), query).await
+        lash::persistence::DeploymentStore::list_turn_parks(self.inner.as_ref(), query).await
     }
 
     async fn turn_park_feed(
@@ -1305,8 +1300,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         lash::persistence::ParkFeedPage<lash::persistence::TurnParkTarget>,
         lash::persistence::StoreError,
     > {
-        lash::persistence::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit)
-            .await
+        lash::persistence::DeploymentStore::turn_park_feed(self.inner.as_ref(), after, limit).await
     }
 
     async fn root_terminal(
@@ -1315,7 +1309,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         root: &lash::TurnId,
     ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
     {
-        lash::persistence::SessionStoreFactory::root_terminal(self.inner.as_ref(), session_id, root)
+        lash::persistence::DeploymentStore::root_terminal(self.inner.as_ref(), session_id, root)
             .await
     }
 
@@ -1323,7 +1317,7 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         &self,
         through: lash::persistence::ParkFeedCursor,
     ) -> Result<(), lash::persistence::StoreError> {
-        lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
+        lash::persistence::DeploymentStore::compact_turn_park_feed(self.inner.as_ref(), through)
             .await
     }
 }
@@ -1745,7 +1739,7 @@ async fn cron_session_disposition_is_unknown_when_store_meta_is_absent_without_a
     let double = crate::tests::test_double_backend(0).await;
     let state = crate::tests::recoverable_chat_test_state_with_store_factory_and_trigger_store(
         &double,
-        Arc::clone(&store_factory) as Arc<dyn lash::persistence::SessionStoreFactory>,
+        Arc::clone(&store_factory) as Arc<dyn lash::persistence::DeploymentStore>,
         Arc::clone(&trigger_store) as Arc<dyn lash::triggers::TriggerStore>,
     )
     .await;

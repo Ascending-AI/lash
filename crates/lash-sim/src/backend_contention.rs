@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core::{
-    RuntimeCommit, RuntimePersistence, RuntimeSessionState, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, StoreError,
+    DeploymentStore, RuntimeCommit, RuntimeSessionState, RuntimeStore, SessionPolicy,
+    SessionRelation, SessionStoreCreateRequest, StoreError,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -72,7 +72,7 @@ pub async fn run_backend_contention_report_against(
     let mut scenarios = Vec::new();
 
     let sqlite_root = artifact_root.join("sqlite-store");
-    let sqlite_factory: Arc<dyn SessionStoreFactory> = Arc::new(
+    let sqlite_factory: Arc<dyn DeploymentStore> = Arc::new(
         lash_sqlite_store::SqliteSessionStoreFactory::new(&sqlite_root),
     );
     scenarios.push(
@@ -91,7 +91,7 @@ pub async fn run_backend_contention_report_against(
                     .await
                     .map_err(|err| format!("connect postgres contention store: {err}"))?,
             );
-            let postgres_factory: Arc<dyn SessionStoreFactory> =
+            let postgres_factory: Arc<dyn DeploymentStore> =
                 Arc::new(lash_postgres_store::PostgresSessionStoreFactory::new(
                     &storage,
                 ));
@@ -139,7 +139,7 @@ pub async fn run_backend_contention_report_against(
             passed,
             skipped,
             failed,
-            production_api: "DriveEpochStore::seal_drive_epoch and SessionCommitStore::commit_runtime_state through SessionStoreFactory handles",
+            production_api: "DriveEpochStore::seal_drive_epoch and SessionCommitStore::commit_runtime_state through DeploymentStore handles",
             semantics: "Competing drive seals from the same epoch admit one winner; session commits preserve idempotent retry and reject stale head revisions and changed retries.",
         },
         report_path: report_path.clone(),
@@ -155,7 +155,7 @@ pub async fn run_backend_contention_report_against(
 async fn run_factory_contention_scenario(
     backend: &str,
     store_factory: &str,
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
 ) -> Result<BackendContentionScenario, String> {
     let session_id = SessionId::from(format!("lash-sim-backend-contention-{backend}"));
     factory
@@ -184,9 +184,9 @@ async fn run_factory_contention_scenario(
 }
 
 async fn create_store(
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     session_id: &SessionId,
-) -> Result<Arc<dyn RuntimePersistence>, String> {
+) -> Result<Arc<dyn RuntimeStore>, String> {
     factory
         .create_store(&store_request(session_id))
         .await
@@ -194,9 +194,9 @@ async fn create_store(
 }
 
 async fn open_store(
-    factory: Arc<dyn SessionStoreFactory>,
+    factory: Arc<dyn DeploymentStore>,
     session_id: &SessionId,
-) -> Result<Arc<dyn RuntimePersistence>, String> {
+) -> Result<Arc<dyn RuntimeStore>, String> {
     match factory
         .open_existing_store(&store_request(session_id))
         .await
@@ -219,8 +219,8 @@ fn store_request(session_id: &SessionId) -> SessionStoreCreateRequest {
 
 async fn competing_drive_seals(
     session_id: &SessionId,
-    left_store: Arc<dyn RuntimePersistence>,
-    right_store: Arc<dyn RuntimePersistence>,
+    left_store: Arc<dyn RuntimeStore>,
+    right_store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
     use lash_core::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
     let observed = left_store
@@ -281,7 +281,7 @@ async fn competing_drive_seals(
 )]
 async fn stale_head_transaction_is_rejected(
     session_id: &SessionId,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
     let expected_head_revision = store
         .load_session()
@@ -334,7 +334,7 @@ async fn stale_head_transaction_is_rejected(
 )]
 async fn final_commit_retry_and_conflict_are_fenced(
     session_id: &SessionId,
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) -> Result<BackendContentionOperation, String> {
     let state = RuntimeSessionState {
         session_id: SessionId::from(session_id.to_string()),

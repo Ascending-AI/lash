@@ -290,7 +290,7 @@ pub(super) async fn run_once_high_traffic(
         "wait.arrival_pacing_lateness.observable".to_string(),
         u64::from(config.arrival_rate > 0),
     );
-    // RuntimePersistence exposes a complete store round trip, not the pool
+    // RuntimeStore exposes a complete store round trip, not the pool
     // checkout subspan. Keep the key explicit and mark it unavailable instead
     // of manufacturing a pool number from the transaction proxy.
     extra_counters.insert("wait.pool.micros".to_string(), 0);

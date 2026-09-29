@@ -32,7 +32,7 @@ async fn await_work_route_returns_terminal_outcome_and_reconciled_events_inner()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -224,7 +224,7 @@ async fn work_api_keeps_orphaned_process_visible_and_routes_cancel_globally_inne
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
     let process_registry = double.engine_stores().process_registry();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -991,7 +991,7 @@ async fn session_delete_reclaims_the_deleted_sessions_terminal_work_inner() {
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
     let process_registry = double.engine_stores().process_registry();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")
@@ -1244,7 +1244,7 @@ async fn work_rail_keeps_a_nonterminal_process_past_the_retirement_window_inner(
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
     let process_registry = double.engine_stores().process_registry();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-test")

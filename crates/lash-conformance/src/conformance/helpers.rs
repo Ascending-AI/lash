@@ -33,7 +33,7 @@ pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(crate) async fn record_completed_attachment_write(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     intent: crate::AttachmentIntent,
 ) {
     let crate::AttachmentWriteFence::Granted(permit) = store
@@ -87,12 +87,12 @@ pub struct ReopenableProcessRegistry {
     pub reopen: Arc<dyn crate::ConformanceProcessRegistry>,
 }
 
-/// A pair of [`RuntimePersistence`] handles opened against the same durable
+/// A pair of [`RuntimeStore`] handles opened against the same durable
 /// backing store, and the effect host of the same substrate: the owner of the
 /// turn-control promises a closure authorization names.
 pub struct ReopenableRuntimePersistence {
-    pub open: Arc<dyn RuntimePersistence>,
-    pub reopen: Arc<dyn RuntimePersistence>,
+    pub open: Arc<dyn RuntimeStore>,
+    pub reopen: Arc<dyn RuntimeStore>,
     pub effect_host: Arc<dyn crate::EffectHost>,
 }
 

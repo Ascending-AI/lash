@@ -44,7 +44,7 @@ async fn an_open_that_lost_a_tool_renders_the_loss_to_the_user() {
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
     let session_id = lash::SessionId::from("workbench-tool-loss");
 

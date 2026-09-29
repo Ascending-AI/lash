@@ -68,7 +68,7 @@ fn ends(root: &str, ordinal: u32, stop: Option<crate::TurnStop>) -> RootTerminal
     reason = "conformance-law fixture: the store answers its own read"
 )]
 async fn terminal_of(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     root: &str,
 ) -> Option<lash_core::store::RootTerminal> {
@@ -82,7 +82,7 @@ async fn terminal_of(
     clippy::expect_used,
     reason = "conformance-law fixture: the store answers its own read"
 )]
-async fn head_revision(store: &Arc<dyn RuntimePersistence>) -> u64 {
+async fn head_revision(store: &Arc<dyn RuntimeStore>) -> u64 {
     store
         .load_session_head_meta()
         .await
@@ -99,9 +99,7 @@ async fn head_revision(store: &Arc<dyn RuntimePersistence>) -> u64 {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn root_terminal_evidence_commits_in_the_head_transaction(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn root_terminal_evidence_commits_in_the_head_transaction(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root-terminal-head");
     let state = state(&session_id);
     assert_eq!(terminal_of(&store, &session_id, "r").await, None);
@@ -183,9 +181,7 @@ pub async fn root_terminal_evidence_commits_in_the_head_transaction(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root-terminal-fence");
     let state = state(&session_id);
     store
@@ -258,9 +254,7 @@ pub async fn a_commit_sealed_under_a_superseded_admission_is_refused(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_queued_headed_root_writes_its_terminal_like_any_root(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("root-terminal-queued");
     let batch = store
         .enqueue_queued_work(checkpoint_admissions::queued_draft(

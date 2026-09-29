@@ -32,7 +32,7 @@ use crate::admit;
 pub(super) struct DriveParts {
     pub(super) session_id: SessionId,
     pub(super) host: crate::RuntimeHostConfig,
-    pub(super) store: Arc<dyn crate::RuntimePersistence>,
+    pub(super) store: Arc<dyn crate::RuntimeStore>,
     calls: Arc<AtomicUsize>,
 }
 
@@ -93,7 +93,7 @@ impl DriveParts {
     )]
     pub(super) async fn runtime_over(
         &self,
-        store: Arc<dyn crate::RuntimePersistence>,
+        store: Arc<dyn crate::RuntimeStore>,
     ) -> crate::LashRuntime {
         let state = self.initial_state();
         let policy = state.policy.clone();
@@ -1234,7 +1234,7 @@ enum AdmissionFault {
 /// A session store whose root admission faults once, at [`AdmissionFault`], with a
 /// transient contention the next attempt does not meet.
 struct AdmissionFaultsOnce {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     fault: AdmissionFault,
     fired: AtomicUsize,
 }
@@ -1244,14 +1244,14 @@ struct AdmissionFaultsOnce {
 /// (FIG-3840). It keeps every admission it returned, with the drive
 /// epoch that asked for it.
 struct CrashAfterAdmission {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     fired: AtomicUsize,
     results: std::sync::Mutex<Vec<(u64, crate::store::RootAdmission)>>,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for CrashAfterAdmission {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for CrashAfterAdmission {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1300,7 +1300,7 @@ pub async fn a_root_admission_survives_a_worker_crash_without_widening(
         fired: AtomicUsize::new(0),
         results: std::sync::Mutex::new(Vec::new()),
     });
-    parts.store = Arc::clone(&crash) as Arc<dyn crate::RuntimePersistence>;
+    parts.store = Arc::clone(&crash) as Arc<dyn crate::RuntimeStore>;
     let first = parts.enqueue("first", Some("admission-commit-root")).await;
     let second = parts.enqueue("second", None).await;
     let request = parts.request("admission-commit-drive");
@@ -1390,14 +1390,14 @@ pub async fn a_root_admission_survives_a_worker_crash_without_widening(
 }
 
 struct NoReplayRepairRead {
-    inner: Arc<dyn crate::RuntimePersistence>,
+    inner: Arc<dyn crate::RuntimeStore>,
     after_first: AtomicUsize,
     replay_reads: AtomicUsize,
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for NoReplayRepairRead {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for NoReplayRepairRead {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1437,7 +1437,7 @@ pub async fn a_committed_root_replays_its_recorded_repair(
         after_first: AtomicUsize::new(0),
         replay_reads: AtomicUsize::new(0),
     });
-    parts.store = Arc::clone(&read_guard) as Arc<dyn crate::RuntimePersistence>;
+    parts.store = Arc::clone(&read_guard) as Arc<dyn crate::RuntimeStore>;
     parts
         .enqueue("one answer", Some("recorded-head-root"))
         .await;
@@ -1511,8 +1511,8 @@ impl AdmissionFaultsOnce {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for AdmissionFaultsOnce {
-    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for AdmissionFaultsOnce {
+    fn inner(&self) -> &(dyn crate::RuntimeStore + '_) {
         self.inner.as_ref()
     }
 
@@ -1557,7 +1557,7 @@ pub async fn a_store_fault_at_the_root_admission_is_retried_not_recorded(
             fault,
             fired: AtomicUsize::new(0),
         });
-        parts.store = Arc::clone(&faults) as Arc<dyn crate::RuntimePersistence>;
+        parts.store = Arc::clone(&faults) as Arc<dyn crate::RuntimeStore>;
         let input = parts
             .enqueue("ask once", Some("admission-fault-root"))
             .await;

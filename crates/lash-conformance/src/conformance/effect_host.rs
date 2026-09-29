@@ -258,7 +258,7 @@ mod recording_effect_host_tests {
 /// a static scoped controller must preserve the same scope metadata. It does
 /// not assert durability; that remains a property of each implementation.
 /// Substrate-native hosts such as Restate complete the in-flight contract at
-/// this effect-host/controller boundary; [`RuntimePersistence`] remains the
+/// this effect-host/controller boundary; [`RuntimeStore`] remains the
 /// committed-state store contract, not a workflow-history contract.
 pub async fn effect_host<F>(make: F)
 where

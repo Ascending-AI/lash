@@ -1,5 +1,5 @@
 //! Vacuum/retention conformance for
-//! [`SessionStoreFactory`](crate::SessionStoreFactory) backends.
+//! [`DeploymentStore`](crate::DeploymentStore) backends.
 //!
 //! Split out of `session_store_factory.rs` to keep it under the file-size
 //! budget; these cases are driven from that module's suite entry.
@@ -14,7 +14,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("retained-tombstone-source"),
@@ -96,7 +96,7 @@ pub(super) async fn session_store_factory_vacuums_organic_retained_tombstone(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     // 1. Live sessions: scope agreement over pending turn input tombstones
     let req_a = session_store_request(
@@ -310,7 +310,7 @@ pub(super) async fn session_store_factory_vacuum_is_scoped_to_bound_session(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn session_store_factory_vacuum_agrees_on_unpin_before_delete(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("vacuum-unpin-before-delete"),

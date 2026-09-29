@@ -71,7 +71,7 @@ fn follow_on(frame_id: crate::FrameNodeId) -> crate::store::PendingFollowOn {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_switch(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
 ) -> (RuntimeSessionState, crate::store::PendingFollowOn) {
     let mut state = RuntimeSessionState {
         session_id: session(),
@@ -96,7 +96,7 @@ async fn commit_switch(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_terminal(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let (state, owed) = commit_switch(&store).await;
     assert_eq!(state.pending_follow_on.as_deref(), Some(&owed));
@@ -128,9 +128,7 @@ pub async fn pending_follow_on_is_written_by_its_switch_and_cleared_by_its_termi
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_follow_on_blocks_every_admission_but_its_own(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn pending_follow_on_blocks_every_admission_but_its_own(store: Arc<dyn RuntimeStore>) {
     let (_, owed) = commit_switch(&store).await;
     // The wake is accepted before the host input: a checkpoint never takes
     // queued work past an earlier next-turn input (ADR 0101 §5).
@@ -228,7 +226,7 @@ pub async fn pending_follow_on_blocks_every_admission_but_its_own(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let (state, owed) = commit_switch(&store).await;
 
@@ -269,9 +267,7 @@ pub async fn pending_follow_on_refuses_every_other_commit_that_would_drop_it(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn pending_follow_on_frame_is_current_on_every_head_write(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn pending_follow_on_frame_is_current_on_every_head_write(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: session(),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -298,7 +294,7 @@ pub async fn pending_follow_on_frame_is_current_on_every_head_write(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn pending_follow_on_recovery_raise_is_fenced_and_never_resets(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let (state, owed) = commit_switch(&store).await;
     let revision = state.head_revision;

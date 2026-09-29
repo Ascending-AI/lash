@@ -5,9 +5,9 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         std::env::temp_dir().join(format!("agent-workbench-reset-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
     let double = crate::tests::test_double_backend(0).await;
-    let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+    let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
         double.stores().session_store_factory();
-    let core_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = session_store_factory;
+    let core_store_factory: Arc<dyn lash::persistence::DeploymentStore> = session_store_factory;
     let process_registry = double.engine_stores().process_registry();
     let provider = trigger_registration_provider();
     let model = test_model();

@@ -1,4 +1,4 @@
-//! [`SessionStoreFactory`](crate::SessionStoreFactory) conformance: create,
+//! [`DeploymentStore`](crate::DeploymentStore) conformance: create,
 //! reopen, delete, and session metadata.
 
 use super::session_store_factory_enumeration::session_store_factory_enumeration_is_read_only_and_keeps_tombstones;
@@ -36,7 +36,7 @@ mod turn_cancel;
 /// submodule; these are the names the registration macro sees.
 macro_rules! turn_cancel_law {
     ($($name:ident: $what:literal,)*) => {$(
-        pub async fn $name(factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>) {
+        pub async fn $name(factory: Arc<dyn crate::store::ConformanceDeployment>) {
             turn_cancel::$name(factory).await;
         }
     )*};
@@ -69,7 +69,7 @@ turn_cancel_law! {
 /// that could carry it across. The settle phase runs on `effect_host`'s
 /// resolver, which owns turn cancellation for the substrate.
 pub async fn turn_cancel_wrong_binding_is_refused_at_every_phase(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
     turn_cancel::turn_cancel_wrong_binding_is_refused_at_every_phase(factory, effect_host).await;
@@ -97,9 +97,9 @@ pub async fn session_store_factory<F, A>(
     make: F,
     make_attached: A,
 ) where
-    F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    F: Fn() -> Arc<dyn crate::store::ConformanceDeployment>,
     A: Fn() -> (
-        Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+        Arc<dyn crate::store::ConformanceDeployment>,
         Arc<dyn crate::AttachmentStore>,
     ),
 {
@@ -155,7 +155,7 @@ pub async fn session_store_factory<F, A>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub async fn session_store_factory_read_session(factory: Arc<dyn crate::DeploymentStore>) {
     const SESSION_ID: &str = "read-only-session-view";
     let expected_relation = crate::SessionRelation::Child {
         parent_session_id: SessionId::from("read-only-session-parent"),
@@ -309,7 +309,7 @@ pub async fn session_store_factory_read_session(factory: Arc<dyn crate::SessionS
 )]
 pub async fn fresh_session_admission_returns_created<F>(make: F)
 where
-    F: FnOnce(&str) -> Arc<dyn crate::RuntimePersistence>,
+    F: FnOnce(&str) -> Arc<dyn crate::RuntimeStore>,
 {
     let binding = crate::SessionBinding {
         session_id: SessionId::from("fresh-admission-created"),
@@ -336,7 +336,7 @@ where
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_claimable_queued_work_peek(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("claimable-queued-work-peek"),
@@ -517,7 +517,7 @@ async fn session_store_factory_claimable_queued_work_peek(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn session_store_factory_delete_fences_stale_handles(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
 ) {
     let request = session_store_request(
         &SessionId::from("delete-fence-stale-handle"),
@@ -695,7 +695,7 @@ pub async fn session_store_factory_delete_fences_stale_handles(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_prune_deletes_owned_session_stores(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
@@ -949,7 +949,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn attachment_reference_lifecycle_with_store(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
     let a_request = session_store_request(
@@ -1111,7 +1111,7 @@ fn assert_meta_matches_request(meta: &SessionMeta, request: &crate::SessionStore
 )]
 async fn session_store_binding_is_catalog_cardinality_independent<F>(make: &F)
 where
-    F: Fn() -> Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    F: Fn() -> Arc<dyn crate::store::ConformanceDeployment>,
 {
     let empty_factory = make();
     let missing = session_store_request(
@@ -1176,9 +1176,7 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_never_used_delete_is_noop(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
+async fn session_store_factory_never_used_delete_is_noop(factory: Arc<dyn crate::DeploymentStore>) {
     let request = session_store_request(
         &SessionId::from("never-used-delete"),
         "never-used-model",
@@ -1199,7 +1197,7 @@ async fn session_store_factory_never_used_delete_is_noop(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_rejects_writes_after_delete(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("write-after-delete"),
@@ -1322,9 +1320,7 @@ fn assert_deleted_write<T>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_open_missing_returns_none(
-    factory: Arc<dyn crate::SessionStoreFactory>,
-) {
+async fn session_store_factory_open_missing_returns_none(factory: Arc<dyn crate::DeploymentStore>) {
     let request = session_store_request(
         &SessionId::from("missing-session"),
         "missing-model",
@@ -1345,7 +1341,7 @@ async fn session_store_factory_open_missing_returns_none(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_create_seeds_and_reopens_meta(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let relation = crate::SessionRelation::Child {
         parent_session_id: SessionId::from("parent-session"),
@@ -1382,7 +1378,7 @@ async fn session_store_factory_create_seeds_and_reopens_meta(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_round_trips_every_relation_shape(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let child = |caused_by| crate::SessionRelation::Child {
         parent_session_id: SessionId::from("roundtrip-parent"),
@@ -1560,7 +1556,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::SessionStoreFactory>) {
+async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::DeploymentStore>) {
     // The relation is declared at creation: a later `save_session_meta` may
     // not move a recorded lineage (FIG-3045).
     let initial = session_store_request(
@@ -1602,7 +1598,7 @@ async fn session_store_factory_create_is_idempotent(factory: Arc<dyn crate::Sess
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_rejects_cross_session_graph_parents(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let first_request = session_store_request(
         &SessionId::from("graph-parent-owner"),
@@ -1714,7 +1710,7 @@ async fn session_store_factory_rejects_cross_session_graph_parents(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionStoreFactory>) {
+async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::DeploymentStore>) {
     let source_request = session_store_request(
         &SessionId::from("fork-source"),
         "fork-model",
@@ -2017,7 +2013,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_delete_removes_store_and_is_idempotent(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("delete-session"),
@@ -2173,7 +2169,7 @@ fn assert_session_id_was_used_and_deleted(error: crate::StoreError, session_id: 
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
-    factory: Arc<dyn crate::store::ConformanceSessionStoreFactory>,
+    factory: Arc<dyn crate::store::ConformanceDeployment>,
     backend: Arc<dyn crate::AttachmentStore>,
 ) {
     let request = session_store_request(
@@ -2262,7 +2258,7 @@ async fn session_store_factory_fenced_sweep_collects_and_records_reclaimed(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn session_store_factory_attachment_large_cutoff_conformance(
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
 ) {
     let request = session_store_request(
         &SessionId::from("attachment-large-cutoff-session"),

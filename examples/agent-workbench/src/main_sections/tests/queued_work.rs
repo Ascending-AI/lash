@@ -58,7 +58,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create queued-work controls dir");
         let double = crate::tests::test_double_backend(0).await;
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies(
             &double,
@@ -171,7 +171,7 @@ fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create targeted wake dir");
         let double = crate::tests::test_double_backend(0).await;
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
             &double,
@@ -522,7 +522,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create wake single-reply dir");
         let double = crate::tests::test_double_backend(0).await;
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let state = recoverable_chat_test_state_with_dependencies_and_context(
             &double,
@@ -676,7 +676,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         ));
         std::fs::create_dir_all(&data_dir).expect("create wake keeps-previous dir");
         let double = crate::tests::test_double_backend(0).await;
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let state = recoverable_chat_test_state_with_dependencies_and_context(

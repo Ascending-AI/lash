@@ -221,7 +221,7 @@ finish(result);
         );
 
         let process_registry = double.engine_stores().process_registry();
-        let session_store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let session_store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let state = AppState {
             unknown_turn_terminals: UnknownTurnTerminals::default(),

@@ -19,7 +19,7 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn complete_runtime_checkpoint_component_set_survives_cold_reopens<F>(make: F)
 where
-    F: Fn() -> Arc<dyn RuntimePersistence>,
+    F: Fn() -> Arc<dyn RuntimeStore>,
 {
     let open = make();
     let open_identity = Arc::downgrade(&open);
@@ -264,7 +264,7 @@ where
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePersistence>) {
+pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("checkpoint-unknown-ref"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -303,7 +303,7 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimePersistence>) {
+pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("missing-frame-root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -346,7 +346,7 @@ pub async fn commit_rejects_leaf_without_frame_open_ancestor(store: Arc<dyn Runt
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn turn_input_application_identity_survives_pending_tombstone_vacuum(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = "turn-input-application";
     let fence = seal_drive_fence_for_test(
@@ -473,7 +473,7 @@ fn admitted_batch_ids(admission: &lash_core::store::CheckpointAdmission) -> Vec<
 /// Admit what `turn`'s checkpoint `kind` takes at `step`, `turn` being its
 /// own root.
 async fn at_checkpoint(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     fence: &lash_core::store::DriveFence,
     turn: &TurnId,
     kind: crate::CheckpointKind,
@@ -490,7 +490,7 @@ async fn at_checkpoint(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn RuntimePersistence>) {
+pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-work");
     let turn_id = crate::TurnId::from("checkpoint-turn");
     let input = store
@@ -557,9 +557,7 @@ pub async fn checkpoint_admission_takes_both_families_once(store: Arc<dyn Runtim
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn checkpoint_admission_is_idempotent_by_root_and_step(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-step-idempotence");
     let turn_id = crate::TurnId::from("checkpoint-step-idempotence:turn");
     let step = "checkpoint-step-idempotence:step";
@@ -675,7 +673,7 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("checkpoint-min-boundary");
     let turn_id = crate::TurnId::from("checkpoint-min-boundary:turn");
@@ -779,9 +777,7 @@ pub async fn checkpoint_claims_honor_min_boundary_at_every_checkpoint(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn checkpoint_budget_refusal_preserves_active_turn_input(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("checkpoint-budget-atomicity");
     let turn_id = crate::TurnId::from("checkpoint-budget-atomicity:turn");
     let input = store
@@ -853,7 +849,7 @@ pub async fn checkpoint_budget_refusal_preserves_active_turn_input(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn checkpoint_admission_probe_transaction_counts(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     counts: impl Fn() -> (usize, usize),
 ) {

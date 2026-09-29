@@ -37,7 +37,7 @@ async fn a_unit_test_turn_runs_in_an_open_handler_on_the_double() {
             }),
         }]),
         test_host_config(&backend),
-        store as Arc<dyn crate::RuntimePersistence>,
+        store as Arc<dyn crate::RuntimeStore>,
     )
     .await;
     let session_id = runtime.session_id().to_string();
@@ -70,7 +70,7 @@ async fn a_unit_test_turn_runs_in_an_open_handler_on_the_double() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
     struct FaultedUnboundOpen {
-        inner: Arc<dyn crate::SessionStoreFactory>,
+        inner: Arc<dyn crate::DeploymentStore>,
     }
 
     #[async_trait::async_trait]
@@ -96,11 +96,11 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
     }
 
     #[async_trait::async_trait]
-    impl crate::SessionStoreFactory for FaultedUnboundOpen {
+    impl crate::DeploymentStore for FaultedUnboundOpen {
         async fn create_store(
             &self,
             request: &crate::SessionStoreCreateRequest,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
+        ) -> Result<Arc<dyn crate::RuntimeStore>, crate::StoreError> {
             self.inner.create_store(request).await
         }
 
@@ -144,7 +144,7 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
         async fn open_existing_store_by_id(
             &self,
             session_id: &crate::SessionId,
-        ) -> Result<Option<Arc<dyn crate::RuntimePersistence>>, crate::StoreError> {
+        ) -> Result<Option<Arc<dyn crate::RuntimeStore>>, crate::StoreError> {
             self.inner.open_existing_store_by_id(session_id).await
         }
 
@@ -161,7 +161,7 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
 
         async fn open_unbound_store(
             &self,
-        ) -> Result<Arc<dyn crate::RuntimePersistence>, crate::StoreError> {
+        ) -> Result<Arc<dyn crate::RuntimeStore>, crate::StoreError> {
             Err(crate::StoreError::Backend(
                 "injected unbound-open failure".to_string(),
             ))
@@ -222,7 +222,7 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
         |stores| {
             super::runtime_helpers::LayeredStores::over(stores)
                 .map_session_store_factory(|inner| {
-                    Arc::new(FaultedUnboundOpen { inner }) as Arc<dyn crate::SessionStoreFactory>
+                    Arc::new(FaultedUnboundOpen { inner }) as Arc<dyn crate::DeploymentStore>
                 })
                 .into_store_set()
         },
@@ -231,7 +231,7 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
     .expect("build the double over the faulted store set");
 
     // The decorated set — the one the engine runs over — faults the open.
-    let error = crate::SessionStoreFactory::open_unbound_store(
+    let error = crate::DeploymentStore::open_unbound_store(
         double.engine_stores().session_store_factory().as_ref(),
     )
     .await

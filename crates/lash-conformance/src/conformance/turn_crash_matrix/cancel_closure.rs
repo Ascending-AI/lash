@@ -29,13 +29,13 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) where
     F: Fn(&str) -> Arc<S>,
-    S: RuntimePersistence + crate::store::StoreTestSupport + 'static,
+    S: RuntimeStore + crate::store::StoreTestSupport + 'static,
 {
     // One layered host for the whole law: a runtime installs its tool-child
     // host get-or-init, so a host layered afresh per execution would strand
     // every later execution's group children (see `LawSeamHost`).
     let host = LawSeamHost::over(host);
-    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimePersistence>;
+    let make = |scenario: &str| make(scenario) as Arc<dyn RuntimeStore>;
     for action in cold_process::ColdProcessTurnAction::CANCEL_CRASH_ACTIONS {
         let point = action
             .point()

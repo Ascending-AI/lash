@@ -10,7 +10,7 @@ use crate::store::{
 use crate::{
     AgentFrameAssignment, AgentFrameReason, ForkSessionRequest, FrameKey, FrameNodeId, NodeId,
     OperationId, ProtocolTurnOptions, RuntimeCommit, RuntimeSessionState, SessionId, SessionPolicy,
-    SessionRelation, StoreError, TurnBudget,
+    SessionRelation, StoreError, TokenLedgerEntry, TokenUsage, TurnBudget,
 };
 
 fn budget(nodes: u32, bytes: u64) -> HistoryBudget {
@@ -37,13 +37,32 @@ async fn admit(store: &dyn ConformanceDeployment, session_id: &SessionId) {
 }
 
 async fn commit(store: &dyn ConformanceDeployment, state: &mut RuntimeSessionState) {
+    commit_entries(store, state, &[]).await;
+}
+
+async fn commit_entries(
+    store: &dyn ConformanceDeployment,
+    state: &mut RuntimeSessionState,
+    entries: &[TokenLedgerEntry],
+) {
+    commit_with_evidence(store, state, entries, Vec::new()).await;
+}
+
+async fn commit_with_evidence(
+    store: &dyn ConformanceDeployment,
+    state: &mut RuntimeSessionState,
+    entries: &[TokenLedgerEntry],
+    failure_evidence: Vec<crate::TurnFailureEvidence>,
+) {
     let operation = OperationId::turn(
         &state.session_id,
         format!("history-{}", state.head_revision),
         "commit",
     );
-    let (commit, new_ids) = RuntimeCommit::persisted_state_with_operation(state, &[], operation)
-        .expect("prepare history commit");
+    let (mut commit, new_ids) =
+        RuntimeCommit::persisted_state_with_operation(state, entries, operation)
+            .expect("prepare history commit");
+    commit.failure_evidence = failure_evidence;
     let receipt = store
         .commit_runtime_state(commit)
         .await
@@ -98,6 +117,55 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
     state.ensure_agent_frame_initialized();
     append_nodes(&mut state, 40);
     commit(store.as_ref(), &mut state).await;
+    let reported = (0..500)
+        .map(|_| {
+            TokenLedgerEntry::reported(
+                "turn",
+                "history-model",
+                TokenUsage {
+                    input_tokens: 1,
+                    ..TokenUsage::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
+    for entries in reported.chunks(100) {
+        commit_entries(store.as_ref(), &mut state, entries).await;
+    }
+    let hole = TokenLedgerEntry {
+        source: "turn".to_string(),
+        model: "history-model".to_string(),
+        usage: TokenUsage::default(),
+        usage_disposition: crate::LedgerUsageDisposition::unreported((0..3).map(|ordinal| {
+            crate::UnreportedLedgerAttempt {
+                call_id: format!("history-call-{ordinal}"),
+                attempt_ordinal: 0,
+                generation_id: Some(format!("history-generation-{ordinal}")),
+            }
+        })),
+    };
+    commit_entries(store.as_ref(), &mut state, &[hole]).await;
+    for ordinal in 0..50 {
+        commit_with_evidence(
+            store.as_ref(),
+            &mut state,
+            &[],
+            vec![crate::TurnFailureEvidence {
+                partial_output: Some(crate::TurnFailurePartialOutput::Complete {
+                    text: format!("failed generation {ordinal}"),
+                }),
+                billed_usage: crate::llm::types::LlmUsage::default(),
+                refusal: crate::ChargeSafetyRefusalEvidence {
+                    code: "history-fixture".to_string(),
+                    denial_reason: crate::ChargeSafetyDenialReason::GuaranteeRequired,
+                    protocol_position: crate::ProtocolPosition::OutputStarted,
+                    attempt_number: 1,
+                    attempt_count: 1,
+                },
+            }],
+        )
+        .await;
+    }
     open_frame(&mut state, "history-middle-frame");
     append_nodes(&mut state, 30);
     commit(store.as_ref(), &mut state).await;
@@ -112,11 +180,28 @@ pub async fn history_window_is_frame_bounded(store: Arc<dyn ConformanceDeploymen
     assert_eq!(read.window.nodes.len(), 12);
     assert_eq!(after.graph_node_bodies - before.graph_node_bodies, 12);
     assert_eq!(after.usage_rows - before.usage_rows, 0);
+    assert_eq!(after.usage_holes - before.usage_holes, 3);
     assert_eq!(after.turn_receipt_bodies - before.turn_receipt_bodies, 0);
     assert_eq!(
         read.window.anchor().expect("anchored window").generation,
         72
     );
+    assert_eq!(read.usage.outstanding.len(), 3);
+    assert_eq!(read.usage.rows.len(), 1);
+    assert_eq!(read.usage.rows[0].usage.input_tokens, 500);
+
+    let ledger = store
+        .load_usage_ledger_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
+        .await
+        .expect("first usage ledger page");
+    assert_eq!(ledger.rows.len(), 7);
+    assert!(ledger.next.is_some());
+    let failures = store
+        .load_failure_evidence_page(&state.session_id, None, NonZeroU32::new(7).expect("limit"))
+        .await
+        .expect("first failure evidence page");
+    assert_eq!(failures.settlements.len(), 7);
+    assert!(failures.next.is_some());
 }
 
 /// Node and byte limits take exact prefixes, and a cursor remains pinned after an append.
@@ -216,6 +301,17 @@ pub async fn history_pages_are_bounded_and_pinned(store: Arc<dyn ConformanceDepl
         .expect("exact first-node byte budget succeeds");
     assert_eq!(exact.nodes.len(), 1);
     assert_eq!(exact.stop, HistoryStop::ByteBudget);
+
+    let one = store
+        .load_ancestors(
+            &state.session_id,
+            HistoryAnchor::Node(exact.nodes[0].record.node_id.clone()),
+            budget(1, required),
+        )
+        .await
+        .expect("one-node history lookup");
+    assert_eq!(one.nodes.len(), 1);
+    assert_eq!(one.nodes[0].record.node_id, exact.nodes[0].record.node_id);
 }
 
 /// A corrupt pointer or row never turns a window read into a shorter answer.
@@ -225,9 +321,11 @@ where
     Fut: std::future::Future<Output = Arc<dyn ConformanceDeployment>>,
 {
     for case in [
+        "base-not-frame",
         "foreign-pointer",
         "middle-row",
-        "missing-parent",
+        "gen0-parent",
+        "base-no-parent",
         "bad-size",
         "head-pointer",
     ] {
@@ -237,8 +335,21 @@ where
         state.ensure_agent_frame_initialized();
         let ids = append_nodes(&mut state, 3);
         commit(store.as_ref(), &mut state).await;
-        let frame = state.current_frame_node_id.clone().expect("initial frame");
+        if case == "base-no-parent" {
+            open_frame(&mut state, "history-corrupt-second-frame");
+            append_nodes(&mut state, 1);
+            commit(store.as_ref(), &mut state).await;
+        }
+        let frame = state.current_frame_node_id.clone().expect("current frame");
         match case {
+            "base-not-frame" => {
+                store
+                    .corrupt_graph_row_for_testing(
+                        &frame.clone().into_inner().into(),
+                        GraphRowCorruption::SetPayloadKindToPlugin,
+                    )
+                    .await
+            }
             "foreign-pointer" => {
                 store
                     .corrupt_graph_row_for_testing(
@@ -252,11 +363,19 @@ where
                     .corrupt_graph_row_for_testing(&ids[1], GraphRowCorruption::DeleteRow)
                     .await
             }
-            "missing-parent" => {
+            "gen0-parent" => {
                 store
                     .corrupt_graph_row_for_testing(
                         &frame.clone().into_inner().into(),
                         GraphRowCorruption::SetParent(Some(NodeId::from("missing-parent"))),
+                    )
+                    .await
+            }
+            "base-no-parent" => {
+                store
+                    .corrupt_graph_row_for_testing(
+                        &frame.clone().into_inner().into(),
+                        GraphRowCorruption::SetParent(None),
                     )
                     .await
             }
@@ -282,10 +401,12 @@ where
             .expect_err("corrupt window must fail");
         match case {
             "head-pointer" => assert!(matches!(error, StoreError::CurrentFrameNodeMismatch { .. })),
-            "foreign-pointer" | "missing-parent" => assert!(matches!(
-                error,
-                StoreError::InvalidWindowAnchor { .. } | StoreError::StoredDataCorrupt { .. }
-            )),
+            "base-not-frame" | "foreign-pointer" | "gen0-parent" | "base-no-parent" => {
+                assert!(matches!(
+                    error,
+                    StoreError::InvalidWindowAnchor { .. } | StoreError::StoredDataCorrupt { .. }
+                ))
+            }
             _ => assert!(matches!(
                 error,
                 StoreError::StoredDataCorrupt { .. } | StoreError::InvalidWindowAnchor { .. }

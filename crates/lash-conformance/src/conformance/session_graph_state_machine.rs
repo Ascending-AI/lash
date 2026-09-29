@@ -2,7 +2,7 @@
 //!
 //! The operation language and reference model live in `lash-core` so every
 //! backend executes the same cases. Backend tests provide only a fresh
-//! [`SessionStoreFactory`](crate::SessionStoreFactory) for each case.
+//! [`DeploymentStore`](crate::DeploymentStore) for each case.
 
 use crate::facade_support::SessionGraphFacadeOps;
 use lash_core::testing::RuntimePersistenceTestDriveExt as _;
@@ -103,14 +103,14 @@ struct ReferenceModel {
 
 struct LiveSession {
     request: crate::SessionStoreCreateRequest,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 }
 
 struct SessionGraphScenario {
     seed: u64,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     live: BTreeMap<u8, LiveSession>,
-    handles_by_physical_id: BTreeMap<String, Arc<dyn crate::RuntimePersistence>>,
+    handles_by_physical_id: BTreeMap<String, Arc<dyn crate::RuntimeStore>>,
     model: ReferenceModel,
     shape: RunShape,
 }
@@ -185,7 +185,7 @@ type RunShapeTotals = run_shape::RunShapeTotals<RunShapeCounter>;
 pub async fn session_graph_state_machine<F, Fut>(backend: &'static str, make: F)
 where
     F: Fn(u64) -> Fut + Send + Sync + Clone + 'static,
-    Fut: Future<Output = Arc<dyn crate::SessionStoreFactory>> + Send + 'static,
+    Fut: Future<Output = Arc<dyn crate::DeploymentStore>> + Send + 'static,
 {
     let first = make(u64::MAX - 1).await;
     let second = make(u64::MAX - 1).await;
@@ -376,7 +376,7 @@ fn operation() -> impl Strategy<Value = SessionGraphContractOp> {
 
 async fn replay_case(
     seed: u64,
-    factory: Arc<dyn crate::SessionStoreFactory>,
+    factory: Arc<dyn crate::DeploymentStore>,
     operations: &[SessionGraphContractOp],
 ) -> Result<RunShape, TestCaseError> {
     let mut scenario = SessionGraphScenario::new(seed, factory);
@@ -396,7 +396,7 @@ async fn replay_case(
 }
 
 impl SessionGraphScenario {
-    fn new(seed: u64, factory: Arc<dyn crate::SessionStoreFactory>) -> Self {
+    fn new(seed: u64, factory: Arc<dyn crate::DeploymentStore>) -> Self {
         Self {
             seed,
             factory,
@@ -1360,7 +1360,7 @@ impl SessionGraphScenario {
 }
 
 async fn property_runtime(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     request: &crate::SessionStoreCreateRequest,
 ) -> Result<crate::LashRuntime, String> {
     let state = crate::store::load_persisted_session_state(store.as_ref())
@@ -1403,7 +1403,7 @@ async fn property_runtime(
 }
 
 async fn commit_runtime_state_for_property(
-    store: &Arc<dyn crate::RuntimePersistence>,
+    store: &Arc<dyn crate::RuntimeStore>,
     commit: crate::RuntimeCommit,
     owner_suffix: &str,
 ) -> Result<crate::RuntimeCommitReceipt, crate::StoreError> {
@@ -1602,7 +1602,7 @@ fn graph_path_ids(graph: &crate::SessionGraph) -> Result<Vec<lash_core::NodeId>,
 }
 
 async fn persisted_projection(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
 ) -> Result<serde_json::Value, String> {
     let read = store
         .load_session()
@@ -1625,7 +1625,7 @@ async fn persisted_projection(
 async fn assert_dedicated_laws<F, Fut>(make: &F, seed: u64) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn crate::SessionStoreFactory>>,
+    Fut: Future<Output = Arc<dyn crate::DeploymentStore>>,
 {
     assert_on_fresh_factory(make, seed, |factory| async move {
         let operations = generated_prefix();
@@ -1682,8 +1682,8 @@ async fn assert_on_fresh_factory<F, Fut, Law, LawFut>(
 ) -> Result<(), TestCaseError>
 where
     F: Fn(u64) -> Fut,
-    Fut: Future<Output = Arc<dyn crate::SessionStoreFactory>>,
-    Law: FnOnce(Arc<dyn crate::SessionStoreFactory>) -> LawFut,
+    Fut: Future<Output = Arc<dyn crate::DeploymentStore>>,
+    Law: FnOnce(Arc<dyn crate::DeploymentStore>) -> LawFut,
     LawFut: Future<Output = Result<(), TestCaseError>>,
 {
     law(make(seed).await).await

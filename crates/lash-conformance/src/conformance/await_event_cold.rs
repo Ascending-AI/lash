@@ -21,9 +21,9 @@ pub const COLD_INSTANCE_AWAIT_EVENT_VECTOR_COUNT: usize = 10;
 async fn catalog_with_sessions<C>(
     make_catalog: &C,
     session_ids: &[&str],
-) -> Arc<dyn crate::SessionStoreFactory>
+) -> Arc<dyn crate::DeploymentStore>
 where
-    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    C: Fn() -> Arc<dyn crate::DeploymentStore>,
 {
     let factory = make_catalog();
     for session_id in session_ids {
@@ -50,7 +50,7 @@ pub async fn effect_host_await_events_cold_instance_with_active_wait_witness<F, 
     witness: W,
 ) where
     F: Fn() -> Arc<dyn EffectHost>,
-    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    C: Fn() -> Arc<dyn crate::DeploymentStore>,
     W: FnOnce(Arc<dyn EffectHost>, super::effect_host::ActiveWaitRetirementAssertion) -> WFut,
     WFut: std::future::Future<Output = ()>,
 {
@@ -241,7 +241,7 @@ where
 async fn cold_first_writer_wins<F, C>(make: &F, make_catalog: &C, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
-    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    C: Fn() -> Arc<dyn crate::DeploymentStore>,
 {
     let address = durable_turn_address(
         format!("{prefix}-race-session"),
@@ -552,7 +552,7 @@ where
 async fn cold_terminal_attach_both_orders<F, C>(make: &F, make_catalog: &C, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
-    C: Fn() -> Arc<dyn crate::SessionStoreFactory>,
+    C: Fn() -> Arc<dyn crate::DeploymentStore>,
 {
     let after = durable_turn_address(
         format!("{prefix}-attach-after-session"),

@@ -766,7 +766,7 @@ struct DurableContentionSamples {
 }
 
 async fn settle_durable_contention_root(
-    store: &(dyn lash_core::RuntimePersistence + '_),
+    store: &(dyn lash_core::RuntimeStore + '_),
     fence: &lash_core::store::DriveFence,
     root: &lash_core::TurnId,
     admission: &lash_core::store::RootAdmission,
@@ -864,7 +864,7 @@ async fn run_durable_contention_worker(
     worker: usize,
     target_completions: u64,
     session_id: SessionId,
-    store: Arc<dyn lash_core::RuntimePersistence>,
+    store: Arc<dyn lash_core::RuntimeStore>,
     session_fence: lash_core::store::DriveFence,
     counters: Arc<DurableContentionCounters>,
     samples: Arc<DurableContentionSamples>,

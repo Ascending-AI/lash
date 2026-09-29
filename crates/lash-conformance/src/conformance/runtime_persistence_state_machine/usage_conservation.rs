@@ -1,7 +1,7 @@
 //! Conservation checks for pending and durable runtime usage.
 //!
 //! The durable comparison is intentionally aggregate-by-source/model because
-//! `RuntimePersistence::load_session` exposes the merged token ledger, not its row identities.
+//! `RuntimeStore::load_session` exposes the merged token ledger, not its row identities.
 //! Confirmation is a differential mutation oracle: its expected snapshot states which returned
 //! identities may disappear, then checks the production retain.
 
@@ -165,7 +165,7 @@ pub(super) fn confirm_usage(
 }
 
 pub(super) async fn replay_usage_receipt(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &mut ReferenceModel,
     shape: &mut RunShape,
 ) -> Result<(), String> {
@@ -292,7 +292,7 @@ pub(super) fn register_committed_usage(
 }
 
 pub(super) async fn assert_usage_conservation(
-    store: &dyn RuntimePersistence,
+    store: &dyn RuntimeStore,
     model: &ReferenceModel,
 ) -> Result<(), String> {
     let pending = pending_usage_snapshot(model);

@@ -369,7 +369,7 @@ pub struct EmptyTools;
 /// head yet), apply `change`, and commit it as the next revision.
 /// Returns the head that commit wrote.
 pub async fn advance_session_head(
-    store: &dyn crate::RuntimePersistence,
+    store: &dyn crate::RuntimeStore,
     usage_deltas: &[crate::TokenLedgerEntry],
     change: impl FnOnce(&mut RuntimeSessionState),
 ) -> crate::SessionHeadMeta {
@@ -471,7 +471,7 @@ pub struct TestRuntime {
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
-    store: Option<Arc<dyn crate::RuntimePersistence>>,
+    store: Option<Arc<dyn crate::RuntimeStore>>,
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
     session_id: Option<SessionId>,
 }
@@ -520,7 +520,7 @@ impl TestRuntime {
         self
     }
 
-    pub fn store(mut self, store: Arc<dyn crate::RuntimePersistence>) -> Self {
+    pub fn store(mut self, store: Arc<dyn crate::RuntimeStore>) -> Self {
         self.store = Some(store);
         self
     }
@@ -744,7 +744,7 @@ pub async fn runtime_with_plugins_and_tools_and_host_and_store(
     tools: Arc<dyn crate::ToolProvider>,
     transport: TestProvider,
     host: EmbeddedRuntimeHost,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
 ) -> LashRuntime {
     let backend = host.core.backend().clone();
     TestRuntime::new(&backend, transport)

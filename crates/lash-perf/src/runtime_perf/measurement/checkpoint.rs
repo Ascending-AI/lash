@@ -246,7 +246,10 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
         let (loaded_execution_state, phase) =
             measure_runtime_perf_async_phase("checkpoint_state.component_load", async {
                 let persisted = store
-                    .load_session()
+                    .load_session_window(
+                        &runtime_state.session_id,
+                        lash_core::store::WindowSelector::Current,
+                    )
                     .await?
                     .ok_or_else(|| anyhow::anyhow!("checkpoint-state commit was not loadable"))?;
                 execution_state_from_checkpoint(

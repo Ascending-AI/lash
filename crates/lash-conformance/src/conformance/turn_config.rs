@@ -27,7 +27,7 @@ const SECOND_MODEL: &str = "turn-config-second-model";
 struct ConfigParts {
     session_id: SessionId,
     host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     /// Plugins the law adds to the standard protocol.
     tools: Vec<Arc<dyn crate::plugin::PluginFactory>>,
 }

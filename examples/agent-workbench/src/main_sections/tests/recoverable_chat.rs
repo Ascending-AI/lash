@@ -72,7 +72,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies(
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
 ) -> AppState {
     recoverable_chat_test_state_with_dependencies_and_context(
         double,
@@ -91,7 +91,7 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
     channel_capacity: usize,
     provider: ProviderHandle,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     context_window_tokens: usize,
 ) -> AppState {
     recoverable_chat_test_state_with_replay_store(
@@ -108,12 +108,12 @@ pub(crate) async fn recoverable_chat_test_state_with_dependencies_and_context(
 
 struct RetiringSubscriptionListTriggerStore {
     pub(super) inner: Arc<lash_sqlite_store::SqliteTriggerStore>,
-    pub(super) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    pub(super) store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     pub(super) session_to_retire: Mutex<Option<String>>,
 }
 
 impl RetiringSubscriptionListTriggerStore {
-    pub(super) fn new(store_factory: Arc<dyn lash::persistence::SessionStoreFactory>) -> Self {
+    pub(super) fn new(store_factory: Arc<dyn lash::persistence::DeploymentStore>) -> Self {
         Self {
             inner: crate::tests::memory_trigger_store(),
             store_factory,
@@ -341,7 +341,7 @@ fn reset_cron_cancellation_preserves_a_retired_session_refusal() {
 fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
     run_async_test_on_stack_budget("retired-session-reset-cron-close-test", || async {
         let double = crate::tests::test_double_backend(0).await;
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
+        let store_factory: Arc<dyn lash::persistence::DeploymentStore> =
             double.stores().session_store_factory();
         let trigger_store = Arc::new(RetiringSubscriptionListTriggerStore::new(Arc::clone(
             &store_factory,
@@ -2355,7 +2355,7 @@ async fn product_event_identity_deduplicates_real_live_and_canonical_turn_output
 
 pub(crate) async fn recoverable_chat_test_state_with_store_factory_and_trigger_store(
     double: &lash_restate_test::RestateTestBackend,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
 ) -> AppState {
     let provider = lash::testing::TestProvider::builder()

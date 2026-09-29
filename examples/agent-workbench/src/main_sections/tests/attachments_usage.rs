@@ -356,7 +356,7 @@ fn attachment_usage_gate_core(
 fn attachment_usage_gate_state(
     core: LashCore,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
-    store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
+    store_factory: Arc<dyn lash::persistence::DeploymentStore>,
     sessions: WorkbenchSessions,
 ) -> AppState {
     let process_observer = core

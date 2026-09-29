@@ -34,9 +34,7 @@ fn spec_with_provider(provider_id: &str) -> crate::RunSpec {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn run_specs_join_the_submission_digest_and_intern_once(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn run_specs_join_the_submission_digest_and_intern_once(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("run-specs");
     let draft = |text: &str, key: &str| {
         pending_next_turn_input_draft(&session_id, text).with_source_key(key)
@@ -138,7 +136,7 @@ pub async fn run_specs_join_the_submission_digest_and_intern_once(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimePersistence>) {
+pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("run-spec-claims");
     let a = spec_with_prompt("shape a");
     let mut enqueued = Vec::new();
@@ -203,7 +201,7 @@ pub async fn a_next_turn_admission_never_mixes_run_specs(store: Arc<dyn RuntimeP
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_steering_spec_that_differs_from_its_running_turn_is_refused(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("run-spec-steering");
     let turn = TurnId::from("run-spec-steered-turn");
@@ -297,7 +295,7 @@ fn steering_commit(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn commit_switch_owing(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
     session_id: &SessionId,
     switching_turn: &str,
     resolved_run: Option<Box<crate::ResolvedRun>>,
@@ -338,9 +336,7 @@ async fn commit_switch_owing(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(store: Arc<dyn RuntimeStore>) {
     // The fact carries the shape the parent root recorded: steering joins it,
     // a differing spec — even the parent input's own — is refused.
     let session_id = SessionId::from("run-spec-follow-on-steering");
@@ -415,7 +411,7 @@ pub async fn a_steering_spec_must_match_a_pending_follow_ons_shape(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("run-spec-follow-on-legacy");
     let parent_shape = spec_with_prompt("the parent input's shape");
@@ -459,7 +455,7 @@ pub async fn a_steering_spec_must_match_a_legacy_follow_ons_parent_shape(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn a_steering_spec_must_match_a_queued_headed_roots_default_shape(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let session_id = SessionId::from("run-spec-queued-steering");
     let batch = store

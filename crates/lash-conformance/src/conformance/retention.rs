@@ -9,7 +9,7 @@ use pretty_assertions::assert_eq;
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn retention_conformance(factory: Arc<dyn crate::SessionStoreFactory>) {
+pub async fn retention_conformance(factory: Arc<dyn crate::DeploymentStore>) {
     let request = session_store_request(
         &SessionId::from("retention-terminal"),
         "retention-model",

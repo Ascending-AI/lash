@@ -6,7 +6,7 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let usage = |input_tokens| TokenLedgerEntry {
         source: "ordinal-reuse".to_string(),
@@ -123,7 +123,7 @@ pub async fn usage_ordinal_reuse_with_different_payload_survives_receipt_replay(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn committed_turn_receipt_answers_the_parent_end_recovery_read(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let committed = crate::TurnId::from("parent-end-committed-turn");
     let interrupted = crate::TurnId::from("parent-end-interrupted-turn");
@@ -223,9 +223,7 @@ pub(super) fn append_request_commit(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn loaded_conformance_state(
-    store: &Arc<dyn RuntimePersistence>,
-) -> RuntimeSessionState {
+pub(super) async fn loaded_conformance_state(store: &Arc<dyn RuntimeStore>) -> RuntimeSessionState {
     crate::store::load_persisted_session_state(store.as_ref())
         .await
         .expect("load conformance append state")
@@ -237,7 +235,7 @@ pub(super) async fn loaded_conformance_state(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn seed_append_receipt_state(
-    store: &Arc<dyn RuntimePersistence>,
+    store: &Arc<dyn RuntimeStore>,
 ) -> RuntimeSessionState {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
@@ -258,7 +256,7 @@ pub(super) async fn seed_append_receipt_state(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let required = state.session_graph.leaf_node_id.clone().expect("seed leaf");
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -331,7 +329,7 @@ pub async fn append_request_receipt_replays_after_head_advance(store: Arc<dyn Ru
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_request_receipt_rejects_changed_content(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_request_receipt_rejects_changed_content(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let original_nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
@@ -383,9 +381,7 @@ pub async fn append_request_receipt_rejects_changed_content(store: Arc<dyn Runti
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_request_exact_hash_rejects_changed_ancestor(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn append_request_exact_hash_rejects_changed_ancestor(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let required = state.session_graph.leaf_node_id.clone().expect("seed leaf");
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -428,7 +424,7 @@ pub async fn append_request_exact_hash_rejects_changed_ancestor(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_request_receipt_rejects_corrupt_node_count(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
@@ -496,9 +492,7 @@ pub(super) fn semantic_boundary_commit(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn semantic_boundary_receipt_replays_after_head_advance(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn semantic_boundary_receipt_replays_after_head_advance(store: Arc<dyn RuntimeStore>) {
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
         let state = loaded_conformance_state(&store).await;
@@ -547,7 +541,7 @@ pub async fn semantic_boundary_receipt_replays_after_head_advance(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn RuntimePersistence>) {
+pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn RuntimeStore>) {
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
         let state = loaded_conformance_state(&store).await;
@@ -600,9 +594,7 @@ pub async fn semantic_boundary_receipt_rejects_changed_content(store: Arc<dyn Ru
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(store: Arc<dyn RuntimeStore>) {
     seed_append_receipt_state(&store).await;
     for (key, boundary) in SEMANTIC_BOUNDARY_OPERATIONS {
         // An Append-labeled identity on a semantic-boundary operation is refused.
@@ -722,7 +714,7 @@ pub async fn semantic_boundary_receipt_rejects_mislabeled_identity(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn append_receipt_corrupt_identity_encoding_version_is_refused<F, Fut>(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     corrupt: F,
 ) where
     F: FnOnce() -> Fut,
@@ -760,9 +752,7 @@ pub async fn append_receipt_corrupt_identity_encoding_version_is_refused<F, Fut>
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn concurrent_same_append_operation_applies_exactly_once(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn concurrent_same_append_operation_applies_exactly_once(store: Arc<dyn RuntimeStore>) {
     let state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -822,7 +812,7 @@ pub async fn concurrent_same_append_operation_applies_exactly_once(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     supersede: F,
 ) where
     F: FnOnce(lash_core::NodeId) -> Fut,
@@ -874,7 +864,7 @@ pub async fn append_request_receipt_replays_after_ancestor_superseded<F, Fut>(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
     supersede: F,
 ) where
     F: FnOnce(lash_core::NodeId) -> Fut,
@@ -921,10 +911,8 @@ pub async fn inactive_append_ancestor_precedes_stale_head<F, Fut>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(
-    store: Arc<dyn RuntimePersistence>,
-    tombstone: F,
-) where
+pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(store: Arc<dyn RuntimeStore>, tombstone: F)
+where
     F: FnOnce(lash_core::NodeId) -> Fut,
     Fut: std::future::Future<Output = ()>,
 {
@@ -956,7 +944,7 @@ pub async fn tombstoned_old_leaf_is_rejected<F, Fut>(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn legacy_append_receipt_keeps_exact_hash_semantics(store: Arc<dyn RuntimePersistence>) {
+pub async fn legacy_append_receipt_keeps_exact_hash_semantics(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let nodes = vec![crate::SessionAppendNode::plugin(
         "append-receipt",
@@ -991,7 +979,7 @@ pub async fn legacy_append_receipt_keeps_exact_hash_semantics(store: Arc<dyn Run
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics(
-    store: Arc<dyn RuntimePersistence>,
+    store: Arc<dyn RuntimeStore>,
 ) {
     let mut state = seed_append_receipt_state(&store).await;
     let nodes = vec![crate::SessionAppendNode::plugin(
@@ -1041,7 +1029,7 @@ pub async fn append_receipt_encoding_version_mismatch_keeps_exact_hash_semantics
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePersistence>) {
+pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimeStore>) {
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -1090,9 +1078,7 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn fresh_append_receipt_enforces_ancestor_precondition(
-    store: Arc<dyn RuntimePersistence>,
-) {
+pub async fn fresh_append_receipt_enforces_ancestor_precondition(store: Arc<dyn RuntimeStore>) {
     let mut state = seed_append_receipt_state(&store).await;
     let before = store
         .load_session()

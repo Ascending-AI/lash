@@ -99,7 +99,7 @@ mod floor_tests {
         let handles = StoreContractHandles {
             registry: backend.process_registry() as Arc<dyn crate::ProcessRegistry>,
             runtime: Arc::new(backend.open_store().await.expect("durable-core store"))
-                as Arc<dyn crate::RuntimePersistence>,
+                as Arc<dyn crate::RuntimeStore>,
         };
         (backend, handles)
     }

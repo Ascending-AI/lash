@@ -1,5 +1,5 @@
 use super::*;
-use crate::SessionStoreFactory as _;
+use crate::DeploymentStore as _;
 use pretty_assertions::assert_eq;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -13,7 +13,7 @@ enum Listing {
 /// A store whose next listing of one kind omits its first batch: the seam
 /// fault the model-agreement oracle must attribute.
 struct DroppingQueueListing {
-    inner: Arc<dyn RuntimePersistence>,
+    inner: Arc<dyn RuntimeStore>,
     listing: Listing,
     armed: AtomicBool,
 }
@@ -39,8 +39,8 @@ impl DroppingQueueListing {
 }
 
 #[async_trait::async_trait]
-impl crate::store::RuntimePersistenceDecorator for DroppingQueueListing {
-    fn inner(&self) -> &(dyn RuntimePersistence + '_) {
+impl crate::store::RuntimeStoreDecorator for DroppingQueueListing {
+    fn inner(&self) -> &(dyn RuntimeStore + '_) {
         self.inner.as_ref()
     }
 

@@ -31,7 +31,7 @@ fn park(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimePersistence>) {
+pub async fn turn_park_lives_while_its_turn_holds_work(store: Arc<dyn RuntimeStore>) {
     let session_id = SessionId::from("turn-parks");
     let parked_turn = TurnId::from("parked-direct-turn");
     assert_eq!(

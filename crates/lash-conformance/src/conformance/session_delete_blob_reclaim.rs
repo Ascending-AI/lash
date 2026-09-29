@@ -58,7 +58,7 @@ pub struct SessionDeleteBlobHandles {
     ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
     /// handle for their backend.
-    pub factory: Arc<dyn crate::SessionStoreFactory>,
+    pub factory: Arc<dyn crate::DeploymentStore>,
     /// Backend-specific exact-blob observation and fault handle.
     ///
     /// Integrator class (ADR 0051): **conformance-suite embedders** supply this
@@ -70,7 +70,7 @@ pub struct SessionDeleteBlobHandles {
 
 struct CommittedCheckpoint {
     request: crate::SessionStoreCreateRequest,
-    store: Arc<dyn crate::RuntimePersistence>,
+    store: Arc<dyn crate::RuntimeStore>,
     checkpoint_ref: crate::BlobRef,
     manifest: crate::SessionCheckpoint,
     component_refs: Vec<crate::BlobRef>,
@@ -82,7 +82,7 @@ struct CommittedCheckpoint {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn committed_checkpoint(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
     session_id: &SessionId,
 ) -> CommittedCheckpoint {
     let request = session_store_request(
@@ -152,7 +152,7 @@ fn encoded_checkpoint_manifest(manifest: &crate::SessionCheckpoint) -> Vec<u8> {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn commit_content_aliased_checkpoint_roots(
-    factory: &Arc<dyn crate::SessionStoreFactory>,
+    factory: &Arc<dyn crate::DeploymentStore>,
     dependent_session_id: &SessionId,
     aliased_session_id: &SessionId,
 ) -> ContentAliasedCheckpointRoots {
