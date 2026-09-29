@@ -44,10 +44,24 @@ pub struct Call<T> {
 }
 
 impl<T> Call<T> {
-    /// A request from this build: it reads every version of [`RESTATE_WIRE`].
+    /// A request from this build through ingress: it reads every version of
+    /// [`RESTATE_WIRE`]. An ingress request is in no caller's journal.
     pub fn new(body: T) -> Self {
         Self {
             wire: RESTATE_WIRE,
+            body,
+        }
+    }
+
+    /// A request a lash handler sends from its journal.
+    ///
+    /// The call's bytes are journaled, and a shared handler's journal is
+    /// replayed by whichever build resumes it (ADR 0115 §3.5), so they
+    /// cannot depend on the build: it states only the wire version the
+    /// deployment's fleet epoch selects ([`DeploymentWire::journaled`]).
+    pub(crate) fn journaled(body: T) -> Self {
+        Self {
+            wire: DeploymentWire::current().journaled(),
             body,
         }
     }
@@ -57,6 +71,54 @@ impl<T> Call<T> {
     /// reads or writes any state.
     pub fn select(&self) -> Option<u32> {
         RESTATE_WIRE.select(self.wire)
+    }
+}
+
+/// The wire a deployment's lash handlers speak: every version it reads, and
+/// the one version its fleet epoch selects for what it writes (ADR 0115
+/// §3.1, §3.3). Every build of a compatibility window selects the same
+/// version under one `F`: N+1 writes N's until finalize.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DeploymentWire {
+    pub(crate) reads: VersionRange,
+    pub(crate) writes: u32,
+}
+
+tokio::task_local! {
+    /// The wire of the deployment whose handler is running.
+    static DEPLOYMENT_WIRE: DeploymentWire;
+}
+
+impl DeploymentWire {
+    /// A deployment reading `reads` under `fleet`.
+    pub(crate) fn speaking(reads: VersionRange, fleet: lash_core::FleetFormat) -> Self {
+        let writes = fleet
+            .writer_version(lash_core::surface_format!(RESTATE_WIRE_VERSION))
+            .clamp(reads.min(), reads.max());
+        Self { reads, writes }
+    }
+
+    /// The wire of the deployment whose handler runs this task. A host's
+    /// own handler that runs lash code runs under no deployment of lash's,
+    /// and speaks this build's wire under its own `F`.
+    pub(crate) fn current() -> Self {
+        DEPLOYMENT_WIRE
+            .try_with(|wire| *wire)
+            .unwrap_or_else(|_| Self::speaking(RESTATE_WIRE, lash_core::FleetFormat::current()))
+    }
+
+    /// Run `handler` under this wire.
+    pub(crate) async fn scope<F: std::future::Future>(self, handler: F) -> F::Output {
+        DEPLOYMENT_WIRE.scope(self, handler).await
+    }
+
+    /// The range a journaled call states: only the version its fleet epoch
+    /// selects, which every build of the window selects alike. Its reply
+    /// comes back at that version, which the caller reads because it writes
+    /// it. The caller's full range stays out of the journal: a build reading
+    /// a wider range replays the same bytes.
+    pub(crate) fn journaled(self) -> VersionRange {
+        VersionRange::exactly(self.writes)
     }
 }
 
@@ -135,6 +197,24 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&compat).expect("encode"),
             r#"{"format":1,"min_reader":1,"min_writer":1}"#
+        );
+    }
+
+    /// RT0016 (FIG-3805): a journaled call's bytes are the same whatever
+    /// range the calling build reads, so a shared journal replays on another
+    /// build of the window. N+1 states N's version until finalize moves `F`.
+    #[test]
+    fn a_journaled_call_states_the_fleet_selected_wire_whatever_the_build_reads() {
+        let n_epoch = lash_core::FleetFormat::from_version(1);
+        let n = super::DeploymentWire::speaking(VersionRange::exactly(1), n_epoch);
+        let wider =
+            super::DeploymentWire::speaking(VersionRange::new(1, 2).expect("range"), n_epoch);
+        assert_eq!(n.journaled(), VersionRange::exactly(1));
+        assert_eq!(wider.journaled(), n.journaled());
+        assert_eq!(
+            super::DeploymentWire::speaking(RESTATE_WIRE, n_epoch).journaled(),
+            VersionRange::exactly(1),
+            "this build states N's wire while F is N's epoch"
         );
     }
 

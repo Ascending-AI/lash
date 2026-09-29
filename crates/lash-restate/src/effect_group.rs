@@ -1308,7 +1308,7 @@ impl EffectGroupState for EffectGroupStateImpl {
                             group_key.clone(),
                             "run",
                         ),
-                        Call::new(EffectGroupDispatchRequest {
+                        Call::journaled(EffectGroupDispatchRequest {
                             group_key: group_key.clone(),
                         }),
                     )

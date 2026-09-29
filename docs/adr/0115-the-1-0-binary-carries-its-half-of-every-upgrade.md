@@ -547,6 +547,12 @@ pub struct Reply<T> { pub wire: u32, pub body: T }
 - **Requests** are encoded at the caller's `F`-selected wire version, so any
   build in the window can read them. `wire` states every version the caller
   reads.
+- **A call a handler journals** states only the version its fleet epoch
+  selects, `[v, v]` for `v = F.writer_version(RESTATE_WIRE_VERSION)`. Its
+  bytes sit in the caller's journal, which another build of the window may
+  replay (§3.5), so they never carry the caller's own range: every build
+  selects the same `v` under one `F`. Ingress requests journal nothing and
+  state the full range.
 - **The handler** selects `RESTATE_WIRE.select(call.wire)` before it reads
   or writes any state. A disjoint range is a terminal
   `lash.wire_unsupported` error that carries both ranges, with nothing

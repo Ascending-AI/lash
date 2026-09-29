@@ -10,7 +10,7 @@
 //! hands its open wait to a successor segment on N+1, and the successor
 //! waits on the same wait again.
 
-use super::effect_group_generation_routing::{RunLog, build_endpoint};
+use super::effect_group_generation_routing::{RunLog, build_endpoint, build_endpoint_reading};
 use super::*;
 use lash_restate_test::{
     DeploymentHooks, Refusal, RestateTestServer, ResumeDeployment, ServerConfig,
@@ -41,6 +41,12 @@ struct Roll {
 
 impl Roll {
     async fn start(seed: u64) -> Self {
+        Self::start_reading(seed, crate::RESTATE_WIRE).await
+    }
+
+    /// [`start`](Self::start) with an N+1 that reads the wire versions
+    /// `next_reads`, as the next release does.
+    async fn start_reading(seed: u64, next_reads: crate::VersionRange) -> Self {
         // Every await suspends, so each shared invocation below is suspended
         // on N when N+1 arrives, and wakes by a fresh dispatch; a refused
         // wake pauses after two attempts.
@@ -54,7 +60,8 @@ impl Roll {
             .expect("open the shared store set");
         let log = RunLog::default();
         let (_, endpoint_n) = build_endpoint(&connection, &stores, "N", &log).await;
-        let (host_next, endpoint_next) = build_endpoint(&connection, &stores, "N+1", &log).await;
+        let (host_next, endpoint_next) =
+            build_endpoint_reading(&connection, &stores, "N+1", &log, next_reads).await;
         let retiring = Arc::new(AtomicBool::new(false));
         let refusing = Arc::clone(&retiring);
         let deployment_n = server
@@ -297,6 +304,49 @@ async fn l10_shared_wait_journals_suspended_on_n_resume_on_n_plus_1() {
     }
     roll.server.settle().await;
     roll.remove_n();
+}
+
+/// L10W (FIG-3805): a shared journal N recorded replays on an N+1 whose
+/// build reads a wider wire, as the next release's does (ADR 0115 §3.1,
+/// §3.5). The `await_resolution` suspended on N journaled its call to the
+/// wait index; resumed on N+1, the call it makes again must be the same
+/// bytes, so a journaled call states the wire the fleet epoch selects, never
+/// the caller's range. The wait returns its one resolution on N+1.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn l10w_a_shared_journal_replays_on_a_build_reading_a_wider_wire() {
+    let wider = crate::VersionRange::new(1, 2).expect("a range");
+    let mut roll = Roll::start_reading(0x3805_0010, wider).await;
+    let key = roll.wait_key("fig-3805-l10w-wait");
+    let workflow_key = crate::RestateDurableWaitAddress::for_key(&key).workflow_key;
+    let waiter = roll.await_resolution(&key);
+    let wait_target = format!("{WAIT_WORKFLOW}/{workflow_key}/await_resolution");
+    roll.wait_for(&wait_target, "suspended").await;
+    roll.server.settle().await;
+    assert_eq!(
+        roll.view(&wait_target).pinned_deployment_id,
+        roll.deployment_n.as_str(),
+        "the wait started on N"
+    );
+
+    let next = roll.register_next().await;
+    roll.retire_n();
+    let resolution = Resolution::Ok(serde_json::json!({ "resolved": "on the wider build" }));
+    assert_eq!(
+        roll.host_next
+            .resolve_await_event(&key, resolution.clone())
+            .await
+            .expect("resolve the wait suspended on N"),
+        ResolveOutcome::Accepted
+    );
+    roll.drain_n_until(|| waiter.is_finished()).await;
+    assert_eq!(joined(waiter, "the moved wait").await, resolution);
+    let view = roll.view(&wait_target);
+    assert_eq!(view.status, "completed", "the wait completed");
+    assert_eq!(
+        view.pinned_deployment_id,
+        next.as_str(),
+        "the wait resumed on the wider build"
+    );
 }
 
 /// The process the L3 segments run: it waits for the signal `go` and ends
