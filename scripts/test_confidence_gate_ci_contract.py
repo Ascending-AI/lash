@@ -86,7 +86,7 @@ def store_suite_branches(suite: str) -> tuple[str, str]:
     the Cargo half.
 
     This runs the script with `bazel` and `cargo` stubbed to echo their argv,
-    rather than splitting the arm's text on `else`. Five of the suites are now
+    rather than splitting the arm's text on `else`. Uniform suites are
     rendered from one table instead of written twice, so there is no `else` to
     split on -- and reading what the script actually invokes is the stronger
     check for the three shaped arms too: `pg-store` and `s3-store` expand a
@@ -2471,9 +2471,8 @@ derive_mutation_jobs() {{
         `--test-threads=1`) written as a comment. Parity was hand-asserted for
         three arms and "both halves non-empty" for the rest.
 
-        The counts the audit quoted -- nine suites, six uniform -- counted the
-        `case`'s own `*)` arm. The tree has eight suites: five uniform, and
-        three that keep explicit arms because their shape varies
+        Every workflow suite participates, including newly registered suites.
+        Three keep explicit arms because their shape varies
         (`pg-catalog-compatibility` runs two invocations; `pg-store` and
         `s3-store` take a generated label file rather than one label).
         """
@@ -2491,12 +2490,11 @@ derive_mutation_jobs() {{
             re.findall(r"bash scripts/ci/store-tests\.sh ([a-z0-9-]+)", workflow)
         )
 
-        self.assertEqual(5, len(uniform), sorted(uniform))
+        self.assertTrue(uniform)
         self.assertEqual(
             {"pg-catalog-compatibility", "pg-store", "s3-store"}, shaped
         )
         self.assertEqual(suites, dispatched)
-        self.assertEqual(8, len(suites), sorted(suites))
         # A suite cannot be in both halves, or the table would be shadowed.
         self.assertEqual(set(), set(uniform) & shaped)
 
@@ -2543,6 +2541,16 @@ derive_mutation_jobs() {{
                         cargo,
                     )
                 for flag in filter(None, flags.split(",")):
+                    if flag.startswith("skip="):
+                        skipped_filter = flag.removeprefix("skip=")
+                        self.assertTrue(skipped_filter)
+                        self.assertIn(
+                            f"--test_arg=--skip --test_arg={skipped_filter}",
+                            bazel,
+                        )
+                        self.assertEqual("cargo-test", runner)
+                        self.assertIn(f"--skip {skipped_filter}", cargo)
+                        continue
                     bazel_spelling, cargo_spellings = flag_dialects[flag]
                     self.assertIn(bazel_spelling, bazel, flag)
                     self.assertTrue(
