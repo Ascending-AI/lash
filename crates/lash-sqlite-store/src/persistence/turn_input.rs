@@ -584,30 +584,38 @@ impl IngressStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
+        // Open and admitted rows, and the rows a checkpoint accepted into a
+        // running root, read in one snapshot and listed in `enqueue_seq`
+        // order (FIG-4044).
         self.conn
-            .call(move |conn| {
+            .read(move |tx| {
                 let outcome: Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> =
                     (|| {
-                        let rows = {
-                            let mut stmt = conn
-                                .prepare(
-                                    crate::turn_ingress::turn_ingress_sql()
-                                        .pending_inputs
-                                        .list_undelivered
-                                        .sql(),
-                                )
-                                .map_err(sqlite_error)?;
-                            let rows = stmt
+                        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+                        let mut rows = Vec::new();
+                        for sql in [
+                            statements.list_undelivered.sql(),
+                            statements.list_accepted.sql(),
+                        ] {
+                            let mut stmt = tx.prepare(sql).map_err(sqlite_error)?;
+                            let listed = stmt
                                 .query_map(
                                     params![session_id.as_str()],
                                     pending_turn_input_row_from_sql,
                                 )
                                 .map_err(sqlite_error)?;
-                            rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)?
-                        };
-                        rows.into_iter()
+                            rows.extend(
+                                listed
+                                    .collect::<Result<Vec<_>, _>>()
+                                    .map_err(sqlite_error)?,
+                            );
+                        }
+                        let mut reads = rows
+                            .into_iter()
                             .map(pending_turn_input_read_from_row)
-                            .collect()
+                            .collect::<Result<Vec<_>, StoreError>>()?;
+                        reads.sort_by_key(|read| read.input.enqueue_seq);
+                        Ok(reads)
                     })();
                 Ok(outcome)
             })

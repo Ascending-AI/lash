@@ -633,24 +633,34 @@ impl IngressStore for PostgresSessionStore {
     ) -> Result<Vec<lash_core_execution::PendingTurnInputRead>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        // Open and admitted rows, and the rows a checkpoint accepted into a
+        // running root, read in one snapshot and listed in `enqueue_seq`
+        // order (FIG-4044). The isolation level must precede every other
+        // statement in the transaction.
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
         #[cfg(any(test, feature = "testing"))]
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
-        let rows = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .pending_inputs
-                .list_undelivered
-                .sql(),
-        )
-        .bind(session_id.as_str())
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let inputs = rows
-            .into_iter()
-            .map(pending_turn_input_read_from_row)
-            .collect::<Result<Vec<_>, StoreError>>()?;
+        let statements = &crate::turn_ingress::turn_ingress_sql().pending_inputs;
+        let mut inputs = Vec::new();
+        for sql in [
+            statements.list_undelivered.sql(),
+            statements.list_accepted.sql(),
+        ] {
+            let rows = sqlx::query(sql)
+                .bind(session_id.as_str())
+                .fetch_all(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            for row in rows {
+                inputs.push(pending_turn_input_read_from_row(row)?);
+            }
+        }
         tx.commit().await.map_err(store_sqlx_error)?;
+        inputs.sort_by_key(|read| read.input.enqueue_seq);
         Ok(inputs)
     }
 

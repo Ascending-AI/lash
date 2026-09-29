@@ -396,7 +396,9 @@ pub trait RootStore: Send + Sync {
     /// own checkpoint), composes the addressed active-turn inputs the
     /// checkpoint's boundary admits and the queued work the boundary admits,
     /// binds them to the root with `admitted_by = request.step`, and delivers
-    /// their obligations.
+    /// their obligations. A stale fence is refused
+    /// [`StoreError::StaleDriveFence`] before anything is read, whatever the
+    /// request's caps and whatever the checkpoint has pending (FIG-3927 N4).
     async fn admit_at_checkpoint(
         &self,
         _request: &CheckpointAdmissionRequest,

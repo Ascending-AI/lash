@@ -164,6 +164,8 @@ macro_rules! runtime_persistence_tests {
             (checkpoint_admission_is_idempotent_by_root_and_step, "checkpoint-step-idempotence"),
             (checkpoint_budget_refusal_preserves_active_turn_input, "checkpoint-budget-atomicity"),
             (checkpoint_claims_honor_min_boundary_at_every_checkpoint, "checkpoint-min-boundary"),
+            (a_checkpoint_refuses_a_stale_fence_whatever_its_caps, "checkpoint-stale-fence-caps"),
+            (a_checkpoint_admitted_input_is_listed_admitted_to_its_root, "checkpoint-admitted-listing"),
             (queued_work_cancel_removes_only_open_batches, "queued-work-cancel"),
             (queued_work_classes_gate_command_and_turn_admissions, "queued-work-classes"),
             (queued_work_admission_respects_boundaries_and_stale_completion, "queued-work-boundaries"),

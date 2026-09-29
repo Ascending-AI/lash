@@ -787,6 +787,173 @@ pub async fn checkpoint_admission_is_idempotent_by_root_and_step(
     );
 }
 
+/// FIG-3927 N4 at a checkpoint (FIG-4044): a stale fence is refused
+/// `StaleDriveFence` whatever the request's caps and whatever the checkpoint
+/// has pending, and the step's read-back does not depend on the caps either.
+/// A checkpoint whose caps are zero is still a checkpoint of a root that may
+/// have been superseded, and a re-execution of its step still reads back the
+/// rows the step bound.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_checkpoint_refuses_a_stale_fence_whatever_its_caps(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("checkpoint-stale-fence-caps");
+    let turn_id = crate::TurnId::from("checkpoint-stale-fence-caps:turn");
+    let idle_turn = crate::TurnId::from("checkpoint-stale-fence-caps:idle-turn");
+    let step = "checkpoint-stale-fence-caps:step";
+    let input = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "input a stale checkpoint must not take",
+        ))
+        .await
+        .expect("enqueue checkpoint input");
+    let stale = seal_drive_fence_for_test(&store, &session_id, "checkpoint-stale-caps-a").await;
+    let live = seal_drive_fence_for_test(&store, &session_id, "checkpoint-stale-caps-b").await;
+    assert!(live.epoch() > stale.epoch(), "the later seal supersedes");
+
+    for turn in [&turn_id, &idle_turn] {
+        for (max_inputs, max_rows) in [(10, 10), (0, 0), (0, 10), (10, 0)] {
+            let refused = at_checkpoint(
+                &store,
+                &stale,
+                turn,
+                crate::CheckpointKind::AfterWork,
+                step,
+                max_inputs,
+                crate::testing::queued_work_admission_policy(max_rows),
+            )
+            .await;
+            assert!(
+                matches!(refused, Err(StoreError::StaleDriveFence { .. })),
+                "turn `{turn}`, caps ({max_inputs}, {max_rows}): a stale fence is refused, got \
+                 {refused:?}"
+            );
+        }
+    }
+
+    let admitted = at_checkpoint(
+        &store,
+        &live,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        step,
+        10,
+        crate::testing::queued_work_admission_policy(10),
+    )
+    .await
+    .expect("the live fence admits");
+    assert_eq!(
+        admitted_input_ids(&admitted),
+        vec![input.input_id.to_string()],
+        "no stale attempt took the input"
+    );
+    let reread = at_checkpoint(
+        &store,
+        &live,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        step,
+        0,
+        crate::testing::queued_work_admission_policy(0),
+    )
+    .await
+    .expect("a re-execution with zero caps");
+    assert_eq!(
+        serde_json::to_value(&reread).expect("encode the re-execution"),
+        serde_json::to_value(&admitted).expect("encode the admission"),
+        "a re-execution reads back the step's rows whatever its caps"
+    );
+}
+
+/// FIG-4044: an input a checkpoint admitted is `accepted` into the running
+/// turn and bound to its root, so the pending read reports it
+/// `Admitted { root }` in its `enqueue_seq` place, exactly as it reports a row
+/// the root's own admission took, until the root settles or releases it.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_checkpoint_admitted_input_is_listed_admitted_to_its_root(
+    store: Arc<dyn RuntimePersistence>,
+) {
+    let session_id = SessionId::from("checkpoint-admitted-listing");
+    let turn_id = crate::TurnId::from("checkpoint-admitted-listing:turn");
+    let before = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            &session_id,
+            "next-turn input before",
+        ))
+        .await
+        .expect("enqueue the earlier next-turn input");
+    let accepted = store
+        .enqueue_pending_turn_input(pending_active_turn_input_draft(
+            &session_id,
+            &turn_id,
+            crate::TurnInputCheckpointBoundary::AfterWork,
+            "checkpoint input",
+        ))
+        .await
+        .expect("enqueue the checkpoint input");
+    let after = store
+        .enqueue_pending_turn_input(pending_next_turn_input_draft(
+            &session_id,
+            "next-turn input after",
+        ))
+        .await
+        .expect("enqueue the later next-turn input");
+    let fence = seal_drive_fence_for_test(&store, &session_id, "checkpoint-admitted-listing").await;
+    let admitted = at_checkpoint(
+        &store,
+        &fence,
+        &turn_id,
+        crate::CheckpointKind::AfterWork,
+        "checkpoint-admitted-listing:step",
+        10,
+        crate::testing::queued_work_admission_policy(10),
+    )
+    .await
+    .expect("the checkpoint admits its input");
+    assert_eq!(
+        admitted_input_ids(&admitted),
+        vec![accepted.input_id.to_string()]
+    );
+
+    let listed = store
+        .list_pending_turn_inputs(&session_id)
+        .await
+        .expect("list pending inputs")
+        .into_iter()
+        .map(|read| (read.input.input_id, read.input.state.kind(), read.status))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        listed,
+        vec![
+            (
+                before.input_id,
+                crate::TurnInputStateKind::DeferredNextTurn,
+                crate::PendingTurnInputReadStatus::Open,
+            ),
+            (
+                accepted.input_id,
+                crate::TurnInputStateKind::Accepted,
+                crate::PendingTurnInputReadStatus::Admitted { root: turn_id },
+            ),
+            (
+                after.input_id,
+                crate::TurnInputStateKind::DeferredNextTurn,
+                crate::PendingTurnInputReadStatus::Open,
+            ),
+        ],
+        "the accepted input is listed admitted to its root, in enqueue order"
+    );
+}
+
 /// `TurnInputIngress::ActiveTurn { min_boundary }` must be honored at every
 /// checkpoint a backend can be asked about: `BeforeCompletion` ingress is
 /// withheld at `AfterWork` and admitted at `BeforeCompletion`; `AfterWork`

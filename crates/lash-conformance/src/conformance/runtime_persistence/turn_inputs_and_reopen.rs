@@ -334,7 +334,9 @@ pub async fn pending_turn_input_bulk_and_suffix_cancellation(store: Arc<dyn Runt
             .iter()
             .map(|read| read.input.input_id.as_str())
             .collect::<Vec<_>>(),
-        vec![second.input_id.as_str()]
+        // The input the checkpoint accepted stays listed, bound to its root,
+        // until that root settles or releases it (FIG-4044).
+        vec![second.input_id.as_str(), active_claimed.input_id.as_str()]
     );
 }
 
