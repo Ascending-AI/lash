@@ -1808,6 +1808,7 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
             "seed": "not_requested",
             "stop_sequences": "not_requested",
             "cache": "omitted_unsupported",
+            "passthrough": "not_requested",
         }),
         "the trace stream must carry the completed attempt's generation disposition",
     );

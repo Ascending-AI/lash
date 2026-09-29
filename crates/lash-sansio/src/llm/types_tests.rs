@@ -371,6 +371,7 @@ fn only_requested_options_can_be_omitted() {
             "parallel_tool_calls": "applied",
             "thinking_summary": "not_requested",
             "thinking_visibility": "applied",
+            "passthrough": "not_requested",
         })
     );
     // The removed sampling-pinned disposition is refused: pinning now refuses
