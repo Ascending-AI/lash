@@ -1,11 +1,11 @@
 use compact_str::ToCompactString;
 use lashlang::{
-    AbilityOp, AbilityOutcome, AssignTarget, Declaration, ExecutionHost, ExecutionHostError, Expr,
-    FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp, JavaScriptLogicalOp,
-    JavaScriptUnaryOp, LASH_PROCESS_NAME_KEY, LashlangAbilities, LashlangHostCatalog,
-    LashlangHostEnvironment, LinkedModule, ListValue, Program, ProjectedBindings,
-    ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse, ProjectedValue, Record,
-    State, TypeExpr, TypeField, Value, from_json,
+    AbilityOp, AbilityOutcome, AssignTarget, Declaration, ExecutionHost, ExecutionHostError,
+    ExecutionMode, Expr, FunctionExpr, HostDescriptor, ImageValue, JavaScriptBinaryOp,
+    JavaScriptLogicalOp, JavaScriptUnaryOp, LASH_PROCESS_NAME_KEY, LashlangAbilities,
+    LashlangHostCatalog, LashlangHostEnvironment, LinkedModule, ListValue, Program,
+    ProjectedBindings, ProjectedHostDescriptor, ProjectedReadRequest, ProjectedReadResponse,
+    ProjectedValue, Record, State, TypeExpr, TypeField, Value, from_json,
 };
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -95,6 +95,23 @@ scenarios! {
         Map256 => "function_map_256",
         Map1024 => "function_map_1024",
         FrameHeavy => "function_frame_heavy",
+    }
+}
+
+#[allow(dead_code)]
+pub struct FrameHost;
+
+impl ExecutionHost for FrameHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityOutcome, ExecutionHostError> {
+        match op {
+            AbilityOp::Sleep(_) => Ok(AbilityOutcome::Value(Value::Null)),
+            AbilityOp::Finish(value) => Ok(AbilityOutcome::Value(value)),
+            _ => Err(ExecutionHostError::new("unexpected frame benchmark effect")),
+        }
+    }
+
+    fn execution_mode(&self) -> ExecutionMode {
+        ExecutionMode::Process
     }
 }
 
@@ -194,7 +211,11 @@ pub fn function_benchmark_program(scenario: FunctionScenario) -> Program {
         ]),
         FunctionScenario::DeepRecursion | FunctionScenario::FrameHeavy => {
             let terminal = if matches!(scenario, FunctionScenario::FrameHeavy) {
-                Expr::List(vec![Expr::Number(0.0); 8])
+                Expr::Block(vec![
+                    ast_assign("payload", Expr::List(vec![Expr::Number(0.0); 8])),
+                    Expr::SleepFor(Box::new(Expr::Number(0.0))),
+                    ast_variable("payload"),
+                ])
             } else {
                 Expr::Number(0.0)
             };

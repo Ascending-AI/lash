@@ -4,9 +4,10 @@ mod bench_support;
 use std::collections::BTreeMap;
 
 use bench_support::{
-    BenchHost, Scenario, linked_benchmark_program, projected_bindings, seeded_state_for,
+    BenchHost, FrameHost, FunctionScenario, Scenario, function_benchmark_program,
+    linked_benchmark_program, projected_bindings, seeded_state_for,
 };
-use lashlang::{ExecutionEnvironment, ExecutionOutcome, Value, execute};
+use lashlang::{ExecutionEnvironment, ExecutionOutcome, State, Value, Vm, VmRunOutcome, execute};
 
 #[tokio::test(flavor = "current_thread")]
 async fn benchmark_scenarios_have_golden_outputs() {
@@ -45,4 +46,35 @@ async fn benchmark_scenarios_have_golden_outputs() {
 )]
 fn stable_json(value: Value) -> serde_json::Value {
     serde_json::to_value(value).expect("benchmark output should be JSON serializable")
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn frame_heavy_function_benchmark_captures_recursive_frames_and_resumes() {
+    let program = function_benchmark_program(FunctionScenario::FrameHeavy);
+    let compiled = lashlang::testing::harness::compile_program(&program);
+    let mut state = State::new();
+    let mut vm = Vm::from_state(&compiled, &mut state, &FrameHost).expect("frame benchmark VM");
+
+    assert_eq!(
+        vm.run_process_until_effect()
+            .await
+            .expect("frame benchmark effect"),
+        VmRunOutcome::EffectCompleted
+    );
+    let continuation = vm.suspend().expect("frame benchmark continuation");
+    assert_eq!(continuation.frame_depth(), 513);
+    assert!(continuation.heap.allocation_counter() > 0);
+    assert!(continuation.heap.live_logical_bytes() > 0);
+
+    let mut resumed =
+        Vm::resume_from(continuation, &compiled, &FrameHost).expect("frame benchmark resumes");
+    assert_eq!(
+        resumed
+            .run_process_until_effect()
+            .await
+            .expect("frame benchmark finishes"),
+        VmRunOutcome::Complete(ExecutionOutcome::Finished(Value::List(
+            vec![Value::Number(0.0); 8].into()
+        )))
+    );
 }
