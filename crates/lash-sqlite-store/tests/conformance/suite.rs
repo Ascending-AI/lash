@@ -757,7 +757,8 @@ lash_conformance::checkpoint_component_reopen_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
     (backend, move || {
-        reopen.blocking_store() as Arc<dyn RuntimeStore>
+        let reopen = reopen.clone();
+        sync_await(async move { reopen.reopen().await }).blocking_store() as Arc<dyn RuntimeStore>
     })
 });
 

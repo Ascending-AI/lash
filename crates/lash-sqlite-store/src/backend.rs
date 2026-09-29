@@ -205,7 +205,7 @@ impl SqliteStoreSet {
             None,
             lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
-            None,
+            options.fault_injector.clone(),
         )
         .await?;
         // The durable-core store opens first so its admitted `F` stamps the
