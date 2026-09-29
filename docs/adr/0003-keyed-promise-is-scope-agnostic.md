@@ -1,5 +1,9 @@
 # Durable Waits are scoped and resolved by the EffectHost
 
+Amended 2026-09-29 (FIG-4123): a wait key is a deterministic identity, not a
+capability; resolution authority belongs to host ingress (ADR 0014, ADR 0046
+§3).
+
 A turn and a Runtime Process suspend on the same primitive: a one-shot durable
 keyed promise (`AwaitEvent { key }` plus a resolve seam), resolved purely by
 key. The key is derived from the Execution Scope, while the requirements needed
@@ -44,16 +48,6 @@ replay, wait keys, cancellation, tracing, and environment binding.
   accepted, duplicate delivery reports the already-recorded terminal result, and
   unknown or revoked keys are distinguishable without being treated as runtime
   failures.
-- The key doubles as a bearer capability, so it must be unguessable:
-  `durable_wait_key = HMAC(scope_secret, ordinal)`. The `scope_secret` is
-  host-delegable — supplied optionally at scope creation, persisted per scope —
-  but is not a field on `ExecutionScope`; the scope is the lookup identity, and
-  secret material is host/effect-owned state keyed by that identity. This gives
-  the host issuance, validation, and revocation (drop the secret to void a
-  scope's outstanding waits) without core understanding the host's auth model.
-  The derivation stays in core for replay determinism; the effect host supplies
-  the default secret when the host abstains. No token↔key map is introduced (one
-  secret per scope, key still derived).
 - The process-event/signal resolver ports onto EffectHost `AwaitEvent` as the
   only path; the process-scoped `AwaitEvent` resolver is deleted, not kept
   alongside.

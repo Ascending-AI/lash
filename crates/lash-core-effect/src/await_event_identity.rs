@@ -1,4 +1,4 @@
-//! Stable AwaitEvent key identity and authentication material.
+//! Stable AwaitEvent key identity.
 //!
 //! These bytes are shared by effect hosts. The family version and golden
 //! preimages are preserved across the engine cutover.
@@ -85,27 +85,6 @@ pub fn derive_key_id(
         AWAIT_EVENT_FAMILY_VERSION,
         &preimage,
     ))
-}
-
-/// Canonical bytes authenticated by HMAC-backed durable AwaitEvent adapters.
-///
-/// The key id remains in the signed material even though it is derived from
-/// `scope` and `wait`: authenticating all three serialized key fields prevents
-/// backends from accidentally accepting a key whose visible identity and
-/// routing identity disagree.
-pub fn sign_material(
-    scope: &ExecutionScope,
-    wait: &AwaitEventWaitIdentity,
-    key_id: &str,
-) -> Vec<u8> {
-    let key_preimage = promise_key_preimage(scope, wait);
-    let mut material = crate::stable_identity::IdentityEncoder::new(
-        "lash.await-event-auth",
-        AWAIT_EVENT_FAMILY_VERSION,
-    );
-    material.bytes(&key_preimage);
-    material.string(key_id);
-    material.finish()
 }
 
 /// The typed refusal a completion delivered after its owning group child's
@@ -227,14 +206,13 @@ mod tests {
     }
 
     #[test]
-    fn signing_material_is_the_stable_framed_key_projection() {
+    fn key_derivation_is_the_stable_public_hash() {
         let scope = ExecutionScope::turn("session", "turn");
         let wait = AwaitEventWaitIdentity::tool_completion("call");
-        let key_id = derive_key_id(&scope, &wait).expect("derive key id");
 
         assert_eq!(
-            hex(&sign_material(&scope, &wait, &key_id)),
-            "6c6173682d737461626c652d6964656e74697479020300000000000000156c6173682e61776169742d6576656e742d6175746800000000000000576c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e7401000000000000000773657373696f6e00000000000000047475726e01000000000000000463616c6c000000000000005661776169742d6576656e743a76333a626c616b65333a62346431376539636237613735616539663963663237656361343665646263656462626138353136396333653961663166383436353237623739323765653965"
+            derive_key_id(&scope, &wait).expect("derive key id"),
+            "await-event:v3:blake3:b4d17e9cb7a75ae9f9cf27eca46edbcedbba85169c3e9af1f846527b7927ee9e"
         );
     }
 
