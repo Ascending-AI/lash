@@ -618,6 +618,39 @@ mod tests {
         state
     }
 
+    /// ADR 0112 §14.7: the turn editor opens on the resident state's read
+    /// model itself, so its base shares the state's `Arc`s and a rope over
+    /// that base is settled by identity, without walking the history.
+    #[test]
+    fn the_turn_editor_opens_on_the_states_own_read_model() {
+        let state = seeded_state(&SessionId::from("draft-shared-base"));
+        let model = state.read_model();
+        let draft = TurnCommitDraft::from_state_with_clock(
+            state,
+            Arc::new(crate::SystemClock),
+            "draft-shared-base",
+        );
+        let base = draft.graph.read_model();
+        assert!(Arc::ptr_eq(&model.messages, &base.messages));
+        assert!(Arc::ptr_eq(&model.active_events, &base.active_events));
+
+        let next = MessageSequence::from_base_and_delta(
+            Arc::clone(&model.messages),
+            vec![text_message("turn", "this turn")],
+        );
+        let delta = draft
+            .graph
+            .message_delta_if_current_preserved(&next)
+            .expect("a rope over the state's own messages preserves its prefix");
+        assert_eq!(
+            delta
+                .iter()
+                .map(|message| message.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["turn"]
+        );
+    }
+
     #[test]
     fn recorded_appends_answer_like_durable_appends() {
         let state = seeded_state(&SessionId::from("draft-answers"));

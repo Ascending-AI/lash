@@ -539,22 +539,24 @@ mod tests {
         use crate::testing::behavior_transcript::{Actor, Entry, Transcript, Usage};
 
         let collector = CheckpointWriteCollector::default();
-        let factory = ObservedSessionStoreFactory::new(
+        let factory: Arc<dyn DeploymentStore> = Arc::new(ObservedSessionStoreFactory::new(
             crate::testing::memory_store_set()
                 .await
                 .session_store_factory(),
             collector.clone(),
-        );
-        let store = factory
-            .create_store(&SessionStoreCreateRequest {
+        ));
+        let store = crate::runtime::admit_session_view(
+            &factory,
+            &crate::SessionStoreCreateRequest {
                 owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("observed-usage"),
                 relation: crate::SessionRelation::Root,
                 policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create observed store");
+            },
+        )
+        .await
+        .expect("create observed store");
         let pending = Arc::new(Mutex::new(Vec::new()));
         let recorded = crate::TokenUsage {
             input_tokens: 11,

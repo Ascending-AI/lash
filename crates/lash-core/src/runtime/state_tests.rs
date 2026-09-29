@@ -67,6 +67,12 @@ async fn corrupt_commit_result_cannot_forge_discarded_execution_state_residency(
     let store = crate::testing::unbound_recording_store().await;
     let mut generation_a =
         RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    crate::store::SessionCatalogStore::admit_session(
+        &store,
+        &crate::testing::store_fixtures::root_session_request(&generation_a.session_id),
+    )
+    .await
+    .expect("admit the session");
     let mut snapshot_a = crate::plugin::ExecutionStateSnapshot::from_root(Some(
         br#"{"generation":"a","leaves":["execution_state/leaf-a","execution_state/leaf-b"]}"#
             .as_slice()

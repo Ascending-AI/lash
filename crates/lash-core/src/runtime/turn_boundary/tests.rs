@@ -461,9 +461,14 @@ fn agent_frame_switch_seeds_the_new_frame_without_a_tool_call_event() {
     let current_read = state.session_graph.read_model();
     assert_eq!(current_read.messages.len(), 1);
     assert_eq!(current_read.messages[0].parts[0].content(), "seed message");
-    let previous_read = state.session_graph.read_model();
-    assert_eq!(previous_read.messages.len(), 1);
-    assert_eq!(previous_read.messages[0].parts[0].content(), "old frame");
+    // Only the current frame is resident: the previous frame's messages
+    // leave the read model.
+    assert!(
+        !current_read
+            .messages
+            .iter()
+            .any(|message| message.parts[0].content() == "old frame")
+    );
 }
 #[test]
 fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
@@ -541,11 +546,13 @@ fn open_agent_frame_seeds_compaction_frame_and_is_replay_idempotent() {
         Some(crate::MessageOrigin::Plugin { plugin_id, .. }) if plugin_id == "standard_compaction"
     ));
 
-    let previous_read = state.session_graph.read_model();
-    assert_eq!(previous_read.messages.len(), 1);
-    assert_eq!(
-        previous_read.messages[0].parts[0].content(),
-        "old durable frame"
+    // Only the current frame is resident: the previous frame's messages
+    // leave the read model.
+    assert!(
+        !current_read
+            .messages
+            .iter()
+            .any(|message| message.parts[0].content() == "old durable frame")
     );
 
     let replay = super::super::open_agent_frame_in_state_with_clock(
@@ -797,7 +804,8 @@ async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
     // Exactly one frame was opened by this commit, and it is the recorded
     // author's: the outcome's `continue_as` never overwrote the reason the
     // plugin was answered with.
-    assert_eq!(state.agent_frames.len(), 2);
+    // Only the current frame is resident, so its record is the one record.
+    assert_eq!(state.agent_frames.len(), 1);
     let current = state.current_agent_frame().expect("current frame");
     assert_eq!(current.reason.as_str(), crate::AgentFrameReason::COMPACTION);
     assert_eq!(
