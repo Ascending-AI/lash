@@ -2059,3 +2059,35 @@ mod frame_open {
         )
     });
 }
+
+#[tokio::test]
+async fn fenced_process_and_trigger_registration_stays_typed() {
+    let Some(url) = database_url() else {
+        return;
+    };
+    let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
+    let storage = PostgresStorage::connect(database.url())
+        .await
+        .expect("open older writer");
+    lash_postgres_store::testing::finalize_fleet_epoch(storage.pool(), 2)
+        .await
+        .expect("finalize newer fleet format");
+    lash_conformance::fenced_process_and_trigger_registration_stays_typed(
+        Arc::new(storage.process_registry()),
+        Arc::new(storage.trigger_store()),
+    )
+    .await;
+    for table in [
+        "lash_processes",
+        "lash_process_events",
+        "lash_trigger_subscriptions",
+        "lash_trigger_mutation_receipts",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT count(*) FROM {table}"))
+            .fetch_one(storage.pool())
+            .await
+            .expect("count rows");
+        assert_eq!(count, 0, "fenced writer added rows to {table}");
+    }
+    storage.pool().close().await;
+}

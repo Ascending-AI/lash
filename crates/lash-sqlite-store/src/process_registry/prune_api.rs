@@ -76,7 +76,7 @@ pub(super) async fn prune_terminal_processes(
                 pruned_at_ms as u64,
             )
             .await
-            .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
+            .map_err(lash_core_execution::PluginError::from)?;
         }
     }
     registry

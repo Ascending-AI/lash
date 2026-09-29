@@ -68,7 +68,7 @@ fn decode_process_wake_delivery(
         window.newest(),
         &mut value,
     )
-    .map_err(|error| PluginError::Session(error.to_string()))?;
+    .map_err(PluginError::from)?;
     serde_json::from_value(value).map_err(registry_row_decode_error)
 }
 

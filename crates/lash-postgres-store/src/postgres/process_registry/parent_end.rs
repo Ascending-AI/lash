@@ -131,7 +131,7 @@ pub(crate) async fn record_tx(
         crate::obligation_ledger::DUE_AT_ONCE_MS,
     )
     .await
-    .map_err(|error| PluginError::Session(error.to_string()))?;
+    .map_err(PluginError::from)?;
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused, so no redrive needs the row pinned.

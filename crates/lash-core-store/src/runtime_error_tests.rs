@@ -93,7 +93,7 @@ fn runtime_error_code_classification_is_exhaustive_and_disjoint() {
     // iteration stays complete; `ForeignCode` is the one variant outside it.
     assert_eq!(
         RuntimeErrorCode::ALL_FIRST_PARTY.len(),
-        171,
+        173,
         "a new first-party variant must be added to ALL_FIRST_PARTY"
     );
 
@@ -590,4 +590,50 @@ fn session_retirement_never_takes_derivation_retry_authority() {
         EffectErrorJournalDisposition::RetryUncommittedResponseDerivation,
         "a live fault is still the attempt's, never the step's outcome"
     );
+}
+
+#[test]
+fn store_refusals_keep_their_codes_and_fields_across_runtime_boundaries() {
+    use crate::compat::{CompatRefusal, VersionRange};
+    use crate::runtime_error::{
+        RuntimeEffectControllerError, RuntimeErrorCause, runtime_error_from_store_commit,
+    };
+    use crate::store::StoreRefusal;
+    for refusal in [
+        StoreRefusal::WriterFenced {
+            recorded: 2,
+            writable: VersionRange::exactly(1),
+        },
+        StoreRefusal::Incompatible {
+            refusal: CompatRefusal::Unstamped {
+                component: "sqlite-registry".into(),
+                writing_release: None,
+            },
+        },
+    ] {
+        let code = refusal.code();
+        let controller = RuntimeEffectControllerError::from(refusal.clone().into_store_error());
+        assert_eq!(controller.code, code);
+        assert!(controller.is_terminal());
+        let runtime = controller.into_runtime_error();
+        let committed = runtime_error_from_store_commit(refusal.clone().into_store_error());
+        let admitted = crate::runtime_error::runtime_error_from_turn_input_admission(
+            refusal.clone().into_store_error(),
+        );
+        for runtime in [runtime, committed, admitted] {
+            assert_eq!(runtime.code, code);
+            assert!(runtime.is_terminal());
+            assert!(!runtime.is_retryable());
+            let decoded: RuntimeError =
+                serde_json::from_value(serde_json::to_value(&runtime).expect("serialize refusal"))
+                    .expect("decode refusal");
+            assert_eq!(decoded.code, code);
+            assert_eq!(
+                decoded.cause,
+                Some(RuntimeErrorCause::StoreRefusal {
+                    refusal: Box::new(refusal.clone())
+                })
+            );
+        }
+    }
 }

@@ -112,6 +112,9 @@ pub enum PluginError {
     },
     #[error("plugin session error: {0}")]
     Session(String),
+    /// A store compatibility refusal, preserved through plugin-facing ports.
+    #[error(transparent)]
+    StoreRefusal(#[from] crate::store::StoreRefusal),
     /// A `ParentFork` creation request carried no captured init payload.
     /// The capture is taken once at spawn; materialization never reads a live
     /// parent session, so there is nothing to fall back to.
@@ -270,6 +273,24 @@ pub enum PluginError {
     ProcessRegistryCursorBackendMismatch { expected: String, actual: String },
 }
 
+impl<R> From<crate::MaintenanceFailure<R>> for PluginError {
+    fn from(error: crate::MaintenanceFailure<R>) -> Self {
+        match error.stop {
+            crate::MaintenanceStop::Failed(error) => Self::from(error),
+            crate::MaintenanceStop::Refused(refusal) => Self::Session(refusal.to_string()),
+        }
+    }
+}
+
+impl From<crate::StoreError> for PluginError {
+    fn from(error: crate::StoreError) -> Self {
+        match crate::store::StoreRefusal::of_store_error(&error) {
+            Some(refusal) => Self::StoreRefusal(refusal),
+            None => Self::Session(error.to_string()),
+        }
+    }
+}
+
 impl PluginError {
     /// Settles a plugin hook's failure by its cause (FIG-3575).
     ///
@@ -284,15 +305,29 @@ impl PluginError {
     /// spelled as `refusal`, recorded or settled once instead of retried.
     pub fn into_turn_failure(self, refusal: crate::RuntimeErrorCode) -> crate::RuntimeError {
         match self {
+            Self::StoreRefusal(error) => {
+                crate::RuntimeEffectControllerError::from(error.into_store_error())
+                    .into_runtime_error()
+            }
             Self::Runtime(error)
                 if error.turn_failure_cause().aborts_invocation()
-                    || error.is_session_retirement() =>
+                    || error.is_session_retirement()
+                    || matches!(
+                        error.code,
+                        crate::RuntimeErrorCode::WriterFenced
+                            | crate::RuntimeErrorCode::StoreIncompatible
+                    ) =>
             {
                 error
             }
             Self::RuntimeEffectController(error)
                 if error.turn_failure_cause().aborts_invocation()
-                    || error.is_session_retirement() =>
+                    || error.is_session_retirement()
+                    || matches!(
+                        error.code,
+                        crate::RuntimeErrorCode::WriterFenced
+                            | crate::RuntimeErrorCode::StoreIncompatible
+                    ) =>
             {
                 error.into_runtime_error()
             }
@@ -377,6 +412,7 @@ impl PluginError {
     /// changing durable state, configuration, or wiring.
     pub fn is_terminal(&self) -> bool {
         match self {
+            Self::StoreRefusal(_) => true,
             Self::Runtime(error) => error.is_terminal(),
             Self::RuntimeEffectController(error) => error.is_terminal(),
             Self::BeforeToolCallReplacementConflict { .. }
@@ -411,6 +447,48 @@ impl PluginError {
 #[cfg(test)]
 mod classification_tests {
     use super::*;
+
+    #[test]
+    fn store_refusals_survive_plugin_journaling_and_turn_failure_mapping() {
+        use crate::compat::{CompatRefusal, VersionRange};
+        use crate::store::StoreRefusal;
+        for refusal in [
+            StoreRefusal::WriterFenced {
+                recorded: 2,
+                writable: VersionRange::exactly(1),
+            },
+            StoreRefusal::Incompatible {
+                refusal: CompatRefusal::Unstamped {
+                    component: "postgres".into(),
+                    writing_release: None,
+                },
+            },
+        ] {
+            let plugin = PluginError::from(refusal.clone().into_store_error());
+            let encoded = serde_json::to_vec(&plugin).expect("encode plugin journal");
+            let plugin: PluginError =
+                serde_json::from_slice(&encoded).expect("replay plugin journal");
+            assert!(matches!(&plugin, PluginError::StoreRefusal(found) if *found == refusal));
+            assert!(plugin.is_terminal());
+            assert!(!plugin.is_retryable());
+            let controller = crate::RuntimeEffectControllerError::from(plugin.clone());
+            assert_eq!(controller.code, refusal.code());
+            for plugin in [
+                plugin,
+                PluginError::RuntimeEffectController(controller.clone()),
+                PluginError::Runtime(controller.clone().into_runtime_error()),
+            ] {
+                let runtime = plugin.into_turn_failure(crate::RuntimeErrorCode::Plugin);
+                assert_eq!(runtime.code, refusal.code());
+                assert_eq!(runtime.cause, controller.cause);
+                assert!(runtime.is_terminal());
+            }
+            let artifact = crate::ArtifactStoreError::from(refusal.clone().into_store_error());
+            assert!(
+                matches!(PluginError::from(artifact), PluginError::StoreRefusal(found) if found == refusal)
+            );
+        }
+    }
 
     #[test]
     fn deterministic_corrupt_state_is_terminal_but_opaque_infrastructure_is_unknown() {

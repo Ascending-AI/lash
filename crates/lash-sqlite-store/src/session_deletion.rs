@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_sql::session_sql;
+use lash_core_execution::FleetFormat;
 
 pub(super) fn warn_process_registry_not_wired(path: &'static str) {
     tracing::warn!(
@@ -27,11 +28,13 @@ pub(super) async fn delete_session_from_catalog(
                 lash_core_execution::StoreError::Backend(err.to_string()),
             )
         })?;
-    ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
-        .await
-        .map_err(|err| {
-            lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
-        })?;
+    conn.install(SqliteDatabase::DurableCore, FleetFormat::writable(), |tx| {
+        crate::compat::fence(tx, SqliteDatabase::DurableCore, FleetFormat::writable())
+    })
+    .await
+    .map_err(|err| {
+        lash_core_execution::MaintenanceFailure::failed_before_any_work(sqlite_error(err))
+    })?;
     conn.write_flow(move |tx| {
         let mut report = lash_core_execution::SessionBlobReclaimReport::default();
         let outcome: Result<
@@ -361,16 +364,20 @@ pub(super) async fn delete_wake_allocation_floors_from_process_registry(
     process_registry: &DatabaseTarget,
     target_session_id: &SessionId,
     policy: SqliteConnectionPolicy,
-) -> Result<(), String> {
+) -> Result<(), StoreError> {
     if !process_registry.exists() {
         return Ok(());
     }
     let conn = SqliteConnection::open_with_policy(process_registry, policy)
         .await
-        .map_err(|err| err.to_string())?;
-    ensure_versioned_schema(&conn, SqliteDatabase::ProcessRegistry)
-        .await
-        .map_err(|err| err.to_string())?;
+        .map_err(sqlite_async_error)?;
+    conn.install(
+        SqliteDatabase::ProcessRegistry,
+        FleetFormat::writable(),
+        |tx| crate::compat::fence(tx, SqliteDatabase::ProcessRegistry, FleetFormat::writable()),
+    )
+    .await
+    .map_err(sqlite_error)?;
     let target_session_id = SessionId::from(target_session_id.to_string());
     conn.write_flow(move |tx| {
         let outcome = tx
@@ -389,6 +396,5 @@ pub(super) async fn delete_wake_allocation_floors_from_process_registry(
         })
     })
     .await
-    .map_err(|err| err.to_string())?
-    .map_err(|err| err.to_string())
+    .map_err(sqlite_error)?
 }

@@ -2334,3 +2334,46 @@ async fn bind_fixture_process(
         .expect("bind the delivery's process");
     process_id
 }
+
+/// Both plugin-facing writers keep the refusal after a newer fleet format
+/// was finalized while their handles remained open.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the finalized epoch must refuse both older writers"
+)]
+pub async fn fenced_process_and_trigger_registration_stays_typed(
+    registry: Arc<dyn crate::ProcessRegistry>,
+    triggers: Arc<dyn crate::TriggerStore>,
+) {
+    let process = registry
+        .register_process(crate::ProcessRegistration::new(
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::ProcessProvenance::host(),
+            crate::Lifetime::Detached,
+        ))
+        .await
+        .expect_err("the older process writer is fenced");
+    let session = SessionId::from("fenced-registration");
+    let trigger = triggers
+        .execute_command(
+            "fenced-registration",
+            register_command(
+                &session,
+                sample_draft(&session, "fenced", "fenced", "fenced"),
+            ),
+        )
+        .await
+        .expect_err("the older trigger writer is fenced");
+    for (port, error) in [("process registry", process), ("trigger store", trigger)] {
+        assert!(
+            matches!(&error, crate::PluginError::StoreRefusal(crate::store::StoreRefusal::WriterFenced { recorded: 2, writable }) if *writable == crate::FleetFormat::writable()),
+            "{port} erased the store refusal: {error:?}"
+        );
+        let controller = crate::RuntimeEffectControllerError::from(error);
+        assert_eq!(controller.code.as_str(), "writer_fenced", "{port}");
+        assert!(controller.is_terminal(), "{port}");
+        assert!(!controller.code.is_retryable(), "{port}");
+    }
+}

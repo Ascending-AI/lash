@@ -81,7 +81,7 @@ pub(super) fn record_conn(
         },
         ended_at_ms,
     )
-    .map_err(|error| PluginError::Session(error.to_string()))?;
+    .map_err(PluginError::from)?;
     // The close ends every wait the scope's calls still hold (ADR 0116
     // §3.6): an abandoned call leaks no hold, and a late start under the
     // closed scope is refused above, so no redrive needs the row pinned.

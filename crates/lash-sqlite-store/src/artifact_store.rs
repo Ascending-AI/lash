@@ -204,8 +204,13 @@ impl SqliteStore {
                     crate::obligation_ledger::arm_cleanup_tx(tx, &cleanup, now_ms, "core")
                         .map_err(sqlite_conversion_error)?;
                 }
-                let blob_ref =
-                    Self::insert_artifact_blob_conn(tx, descriptor, &bytes, blob_profile)?;
+                let blob_ref = Self::insert_artifact_blob_conn(
+                    tx,
+                    descriptor,
+                    &bytes,
+                    blob_profile,
+                    tx.fleet(),
+                )?;
                 crate::conn::cached_execute(
                     tx,
                     artifact_sql().refs.insert_pointer.sql(),

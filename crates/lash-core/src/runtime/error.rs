@@ -16,7 +16,9 @@ pub(super) fn session_commit_error(
     source: crate::store::StoreError,
 ) -> SessionError {
     match source {
-        source @ (crate::store::StoreError::Contended
+        source @ (crate::store::StoreError::WriterFenced { .. }
+        | crate::store::StoreError::Incompatible { .. }
+        | crate::store::StoreError::Contended
         | crate::store::StoreError::SessionDeleted { .. }
         | crate::store::StoreError::SessionStateVersionNewerThanRuntime { .. }
         | crate::store::StoreError::SessionStateVersionUnsupported { .. }

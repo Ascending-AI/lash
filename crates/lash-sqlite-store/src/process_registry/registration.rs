@@ -116,9 +116,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             &lash_core_execution::store::process_start_obligation_id(&record.id),
                             crate::obligation_ledger::DUE_AT_ONCE_MS,
                         )
-                        .map_err(|error| {
-                            lash_core_execution::PluginError::Session(error.to_string())
-                        })?;
+                        .map_err(lash_core_execution::PluginError::from)?;
                     }
                     let mut record = record;
                     let process_id = record.id.clone();

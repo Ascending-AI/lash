@@ -495,7 +495,7 @@ fn clamp_sequence_bound(value: impl TryInto<i64>) -> i64 {
 }
 
 fn process_sqlite_error(err: rusqlite::Error) -> lash_core_execution::PluginError {
-    lash_core_execution::PluginError::Session(err.to_string())
+    lash_core_execution::PluginError::from(sqlite_error(err))
 }
 
 fn process_decode_error(err: serde_json::Error) -> lash_core_execution::PluginError {

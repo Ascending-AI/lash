@@ -18,13 +18,9 @@
 //! 2. After finalize, a writer of every mutation class the store set's ports
 //!    carry (§2.2) fails `WriterFenced`, and every table's row count is
 //!    unchanged.
-//! 3. On PostgreSQL, a commit a build that writes `[1,2]` encoded under the
-//!    old epoch meets the finalized one at its fence and is encoded again
-//!    under N+1's `F`. SQLite's straddling commit is proven by lane L3's own
-//!    `sqlite_fence_observes_a_writable_move_of_f`: in process, a SQLite store
-//!    stood up on a wider writable range still admits its blob reads against
-//!    the build's own range (`compat::recorded_or_current`), so this leg
-//!    cannot stand in for N+1 there.
+//! 3. On each backend, a commit a build that writes `[1,2]` encoded under
+//!    the old epoch meets the finalized one at its fence and is encoded again
+//!    under N+1's `F`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -39,11 +35,11 @@ use lash_core::{
     FleetFormat, FleetFormatStore as _, SessionCatalogStore as _, SessionCommitStore as _,
     SessionId, SessionMeta, SessionRelation, StoreError, StoreSet,
 };
+use lash_postgres_store::testing::IsolatedDatabase;
 use lash_postgres_store::testing::{AfterFence, HeldFinalize};
 use lash_postgres_store::{MigrationPhase, PostgresStorage, PostgresStoreConfig, PostgresStoreSet};
 use lash_sqlite_store::testing::{SqliteFaultInjector, SqliteFaultPoint, finalize_fleet_format};
 use lash_sqlite_store::{SqliteDatabase, SqliteStoreSet, SqliteStoreSetOptions};
-use lash_upgrade_harness::harness::Services;
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -108,20 +104,25 @@ fn store_outcome<T>(outcome: Result<T, StoreError>) -> (Result<(), String>, bool
     }
 }
 
-/// A port whose own error carries the store's refusal as text: the fence,
-/// or, where a maintenance pass admits `F` before it writes (SQLite's session
-/// delete), the same epoch refused at admission.
-fn text_outcome<T, E: std::fmt::Display>(outcome: Result<T, E>) -> (Result<(), String>, bool) {
+fn plugin_outcome<T>(outcome: Result<T, lash_core::PluginError>) -> (Result<(), String>, bool) {
     match outcome {
         Ok(_) => (Ok(()), false),
         Err(error) => {
-            let error = error.to_string();
-            let fenced = error.contains("writer fenced")
-                || error.contains(&format!(
-                    "fleet epoch {NEXT_EPOCH}, outside this build's writable range"
-                ));
-            (Err(error), fenced)
+            let fenced = matches!(&error, lash_core::PluginError::StoreRefusal(
+                lash_core::store::StoreRefusal::WriterFenced { recorded: NEXT_EPOCH, writable }
+            ) if *writable == FleetFormat::writable());
+            (Err(error.to_string()), fenced)
         }
+    }
+}
+
+fn maintenance_outcome<T>(outcome: lash_core::MaintenanceResult<T>) -> (Result<(), String>, bool) {
+    match outcome {
+        Ok(_) => (Ok(()), false),
+        Err(error) => match error.stop {
+            lash_core::MaintenanceStop::Failed(error) => store_outcome::<()>(Err(error)),
+            lash_core::MaintenanceStop::Refused(error) => (Err(error.to_string()), false),
+        },
     }
 }
 
@@ -188,25 +189,25 @@ async fn every_writer_is_fenced(stores: &dyn StoreSet, label: &str) -> Result<Ve
         .trigger_store()
         .prune_mutation_receipts(u64::MAX)
         .await;
-    expect("trigger write", text_outcome(pruned))?;
+    expect("trigger write", plugin_outcome(pruned))?;
 
     let process = lash_core::process_id_for_test("finalize-races");
     let released = stores
         .process_registry()
         .release_consumer_hold(&process, "finalize-races-hold")
         .await;
-    expect("process registry write", text_outcome(released))?;
+    expect("process registry write", plugin_outcome(released))?;
 
     let handovers = stores
         .process_continuations()
         .delete_segment_handovers(&process)
         .await;
-    expect("process continuation write", text_outcome(handovers))?;
+    expect("process continuation write", plugin_outcome(handovers))?;
 
     let deleted = factory
         .delete_session(&SessionId::from(format!("{label}-delete").as_str()))
         .await;
-    expect("session delete", text_outcome(deleted))?;
+    expect("session delete", maintenance_outcome(deleted))?;
     Ok(refused)
 }
 
@@ -275,12 +276,11 @@ async fn recorded_postgres_epoch(pool: &PgPool) -> Result<i32> {
     )
 }
 
-async fn postgres_leg(services: &Services, scratch: &Path) -> Result<BackendEvidence> {
+async fn postgres_leg(url: &str, scratch: &Path) -> Result<BackendEvidence> {
     let mut evidence = BackendEvidence::default();
-    let url = services.postgres_url.clone();
-    PostgresStorage::migrate(&url, MigrationPhase::Expand).await?;
+    PostgresStorage::migrate(url, MigrationPhase::Expand).await?;
     let seam = AfterFence::new();
-    let storage = PostgresStorage::connect(&url)
+    let storage = PostgresStorage::connect(url)
         .await?
         .with_after_fence_for_testing(seam.clone());
     let pool = storage.pool().clone();
@@ -350,7 +350,7 @@ async fn postgres_leg(services: &Services, scratch: &Path) -> Result<BackendEvid
         .execute(&pool)
         .await?;
     let next = PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
-        PgPool::connect(&url).await?,
+        PgPool::connect(url).await?,
         PostgresStoreConfig::default(),
         VersionRange::between(N_EPOCH, NEXT_EPOCH),
     )
@@ -492,13 +492,67 @@ async fn sqlite_leg(scratch: &Path) -> Result<BackendEvidence> {
     drop(factory);
     drop(stores);
 
+    for database in SQLITE_DATABASES {
+        rusqlite::Connection::open(root.join(database.file_name()))?.execute(
+            "UPDATE lash_compat SET fleet_format = 1 WHERE singleton = 1",
+            [],
+        )?;
+    }
+    const PINNED: u32 = 7;
+    let store = lash_sqlite_store::SqliteStore::open_with_fleet_writable_range_for_testing(
+        &root.join(SqliteDatabase::DurableCore.file_name()),
+        VersionRange::between(N_EPOCH, NEXT_EPOCH),
+    )
+    .await?
+    .with_fleet_format_for_testing(FleetFormat::from_version(N_EPOCH).with_writer_pins(&[
+        lash_core::WriterPin {
+            constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
+            generation: N_EPOCH,
+            version: PINNED,
+        },
+    ]));
+    let session = SessionId::from("sqlite-reencoded");
+    store
+        .admit_session(&lash_core::testing::store_fixtures::root_session_request(
+            &session,
+        ))
+        .await?;
+    finalize_fleet_format(&location, NEXT_EPOCH)?;
+    let receipt = store
+        .commit_runtime_state(persisted_commit(&session))
+        .await
+        .context("the straddling SQLite commit re-encodes and lands")?;
+    ensure!(
+        receipt.schema_version != PINNED,
+        "the receipt kept epoch 1's pin"
+    );
+    let stored: String =
+        rusqlite::Connection::open(root.join(SqliteDatabase::DurableCore.file_name()))?.query_row(
+            "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
+            [session.as_str()],
+            |row| row.get(0),
+        )?;
+    let stored: serde_json::Value = serde_json::from_str(&stored)?;
+    ensure!(
+        stored["schema_version"] != serde_json::json!(PINNED),
+        "the stored SQLite receipt kept epoch 1's pin"
+    );
+    let reencoded = store.fleet_format().version();
+    ensure!(
+        reencoded == NEXT_EPOCH,
+        "the SQLite commit landed under epoch {reencoded}"
+    );
+    evidence.reencoded_commit_epoch = Some(reencoded);
+
     Ok(evidence)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs PostgreSQL and the services `just phase-a` exports: `just phase-a` runs it"]
+#[ignore = "needs PostgreSQL: `just phase-a` runs it"]
 async fn finalize_races_every_writer() -> Result<()> {
-    let services = Services::from_env()?.isolated("finalize_races").await?;
+    let url = std::env::var("LASH_POSTGRES_DATABASE_URL")
+        .context("LASH_POSTGRES_DATABASE_URL is required")?;
+    let database = IsolatedDatabase::create(&url).await;
     let temporary = tempfile::tempdir()?;
     let scratch = std::env::var_os(ARTIFACT_DIR_ENV)
         .map(std::path::PathBuf::from)
@@ -506,7 +560,7 @@ async fn finalize_races_every_writer() -> Result<()> {
         .join("finalize_races_every_writer");
     std::fs::create_dir_all(&scratch)?;
     let evidence = Evidence {
-        postgres: postgres_leg(&services, &scratch).await?,
+        postgres: postgres_leg(database.url(), &scratch).await?,
         sqlite: sqlite_leg(&scratch).await?,
     };
     let path = scratch.join("finalize-races.json");

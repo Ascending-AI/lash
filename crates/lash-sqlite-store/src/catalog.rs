@@ -177,11 +177,8 @@ impl lash_core_execution::SessionCatalogStore for SqliteStore {
                 self.options.connection_policy,
             )
             .await
-            .map_err(|message| {
-                lash_core_execution::MaintenanceFailure::failed(
-                    StoreError::Backend(message),
-                    report.clone(),
-                )
+            .map_err(|error| {
+                lash_core_execution::MaintenanceFailure::failed(error, report.clone())
             })?;
         }
         Ok(report)

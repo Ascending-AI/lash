@@ -284,7 +284,7 @@ pub(crate) fn plugin_sqlx_error(err: sqlx::Error) -> PluginError {
 /// A store refusal met by a registry-facing write, the writer fence's
 /// included, as the registry's error.
 pub(crate) fn plugin_store_error(err: StoreError) -> PluginError {
-    PluginError::Session(err.to_string())
+    PluginError::from(err)
 }
 
 pub(crate) fn process_decode_error(err: serde_json::Error) -> PluginError {

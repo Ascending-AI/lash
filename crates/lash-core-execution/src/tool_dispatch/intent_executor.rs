@@ -840,6 +840,7 @@ async fn register_recorded_trigger(
 
 fn error_code(error: &crate::PluginError) -> String {
     match error {
+        crate::PluginError::StoreRefusal(error) => error.code().as_str().to_string(),
         crate::PluginError::RuntimeEffectController(error) => error.code.as_str().to_string(),
         crate::PluginError::ProcessNotVisible { .. } => "process_not_visible".to_string(),
         crate::PluginError::ProcessAlreadyTerminal { .. } => "process_already_terminal".to_string(),
@@ -862,6 +863,30 @@ fn error_message(error: &crate::PluginError) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn store_refusal_intents_report_typed_codes() {
+        for (error, expected) in [
+            (
+                crate::StoreError::WriterFenced {
+                    recorded: 2,
+                    writable: crate::compat::VersionRange::exactly(1),
+                },
+                "writer_fenced",
+            ),
+            (
+                crate::StoreError::Incompatible {
+                    refusal: crate::compat::CompatRefusal::Unstamped {
+                        component: "postgres".into(),
+                        writing_release: None,
+                    },
+                },
+                "store_incompatible",
+            ),
+        ] {
+            assert_eq!(super::error_code(&error.into()), expected);
+        }
+    }
+
     use super::*;
 
     fn signal(session_id: &SessionId, payload: serde_json::Value) -> crate::ToolIntent {

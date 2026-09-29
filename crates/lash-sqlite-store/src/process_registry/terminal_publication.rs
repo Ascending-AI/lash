@@ -35,7 +35,7 @@ pub(super) fn arm_conn(conn: &Connection, record: &ProcessRecord) -> Result<(), 
         record.updated_at_ms,
     )
     .map(|_| ())
-    .map_err(|error| PluginError::Session(error.to_string()))
+    .map_err(PluginError::from)
 }
 
 pub(super) async fn settle(
@@ -83,8 +83,7 @@ pub(super) async fn get(
     row.map(|(id, state)| {
         Ok(ProcessTerminalPublication {
             id: ObligationId::new(id),
-            state: ObligationState::from_label(&state)
-                .map_err(|error| PluginError::Session(error.to_string()))?,
+            state: ObligationState::from_label(&state).map_err(PluginError::from)?,
         })
     })
     .transpose()

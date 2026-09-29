@@ -42,7 +42,7 @@ pub(crate) async fn arm_tx(
     )
     .await
     .map(|_| ())
-    .map_err(|error| PluginError::Session(error.to_string()))
+    .map_err(PluginError::from)
 }
 
 pub(super) async fn settle(
@@ -81,8 +81,7 @@ pub(super) async fn get(
         let state: String = row.try_get(1).map_err(plugin_sqlx_error)?;
         Ok(ProcessTerminalPublication {
             id: ObligationId::new(id),
-            state: ObligationState::from_label(&state)
-                .map_err(|error| PluginError::Session(error.to_string()))?,
+            state: ObligationState::from_label(&state).map_err(PluginError::from)?,
         })
     })
     .transpose()

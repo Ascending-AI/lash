@@ -163,7 +163,7 @@ impl ArtifactReferrerPorts {
             .arm_cleanup(cleanup, self.clock.timestamp_ms())
             .await
             .map(|_| ())
-            .map_err(|error| crate::PluginError::Session(error.to_string()))
+            .map_err(crate::PluginError::from)
     }
 
     /// End `referrer` now: its `Ended` record with no carries and no gate.

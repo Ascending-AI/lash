@@ -368,7 +368,9 @@ impl EmbedError {
 fn store_error_is_terminal(error: &lash_core::StoreError) -> bool {
     matches!(
         error,
-        lash_core::StoreError::SessionDeleted { .. }
+        lash_core::StoreError::WriterFenced { .. }
+            | lash_core::StoreError::Incompatible { .. }
+            | lash_core::StoreError::SessionDeleted { .. }
             | lash_core::StoreError::SessionRelationMismatch { .. }
             | lash_core::StoreError::CommitNodeBudgetExceeded { .. }
             | lash_core::StoreError::CommitByteBudgetExceeded { .. }

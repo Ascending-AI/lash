@@ -400,7 +400,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 crate::obligation_ledger::DUE_AT_ONCE_MS,
             )
             .await
-            .map_err(|error| PluginError::Session(error.to_string()))?;
+            .map_err(PluginError::from)?;
         }
         let process_id = record.id.clone();
         for session_id in observers {

@@ -11,6 +11,7 @@
 
 use super::*;
 use crate::artifact_store::artifact_sql;
+use lash_core_execution::FleetFormat;
 
 lash_store_sql::statements! {
     /// `blobs` statements only SQLite issues.
@@ -140,8 +141,9 @@ impl SqliteStore {
         descriptor: BlobArtifactDescriptor,
         content: &[u8],
         profile: BuiltinBlobProfile,
+        fleet: FleetFormat,
     ) -> rusqlite::Result<BlobRef> {
-        Self::insert_artifact_blob_conn_typed(conn, descriptor, content, profile)
+        Self::insert_artifact_blob_conn_typed(conn, descriptor, content, profile, fleet)
             .map_err(sqlite_conversion_error)
     }
 
@@ -150,10 +152,11 @@ impl SqliteStore {
         descriptor: BlobArtifactDescriptor,
         content: &[u8],
         profile: BuiltinBlobProfile,
+        fleet: FleetFormat,
     ) -> Result<BlobRef, StoreError> {
         let blob_ref = BlobRef(blob_content_hash(content));
         Self::insert_artifact_blob_conn_typed_with_ref(
-            conn, descriptor, content, profile, &blob_ref,
+            conn, descriptor, content, profile, &blob_ref, fleet,
         )?;
         Ok(blob_ref)
     }
@@ -164,8 +167,8 @@ impl SqliteStore {
         content: &[u8],
         profile: BuiltinBlobProfile,
         blob_ref: &BlobRef,
+        fleet: FleetFormat,
     ) -> Result<(), StoreError> {
-        let fleet = crate::compat::recorded_or_current(conn).map_err(sqlite_error)?;
         let version = fleet.writer_version(lash_core_execution::surface_format!(
             SQLITE_BLOB_ENVELOPE_VERSION
         ));
@@ -184,9 +187,10 @@ impl SqliteStore {
         descriptor: BlobArtifactDescriptor,
         value: &T,
         profile: BuiltinBlobProfile,
+        fleet: FleetFormat,
     ) -> Result<BlobRef, StoreError> {
         let bytes = encode_msgpack(value, "SQLite typed artifact blob")?;
-        Self::insert_artifact_blob_conn_typed(conn, descriptor, &bytes, profile)
+        Self::insert_artifact_blob_conn_typed(conn, descriptor, &bytes, profile, fleet)
     }
 
     /// Seed an intentionally unrooted artifact for GC and failure-path tests.
@@ -199,7 +203,9 @@ impl SqliteStore {
         let content = content.to_vec();
         let profile = self.options.blob_profile;
         self.conn
-            .write(move |tx| Self::insert_artifact_blob_conn(tx, descriptor, &content, profile))
+            .write(move |tx| {
+                Self::insert_artifact_blob_conn(tx, descriptor, &content, profile, tx.fleet())
+            })
             .await
             .map_err(sqlite_error)
     }
@@ -232,6 +238,7 @@ impl SqliteStore {
                     body,
                     profile,
                     body_ref,
+                    fleet_format,
                 )?;
                 lash_core_execution::store::ensure_checkpoint_component_hash_agreement(
                     key,
@@ -244,6 +251,7 @@ impl SqliteStore {
                     BlobArtifactDescriptor::checkpoint_component(),
                     body,
                     profile,
+                    fleet_format,
                 )?;
                 #[cfg(feature = "perf-witness")]
                 lash_core_execution::perf_witness::record_hash_pass(body.len());
@@ -259,6 +267,7 @@ impl SqliteStore {
             BlobArtifactDescriptor::checkpoint_manifest(),
             &manifest,
             profile,
+            fleet_format,
         )?;
         let component_refs_json = encode_json(
             &manifest

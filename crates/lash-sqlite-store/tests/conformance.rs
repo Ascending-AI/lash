@@ -167,3 +167,48 @@ fn trigger_subscription_owner_filter_is_pushed_down() {
         lash_sqlite_store::testing::trigger_subscription_list_sql,
     );
 }
+
+#[cfg(feature = "testing")]
+#[tokio::test]
+async fn fenced_process_and_trigger_registration_stays_typed() {
+    let root = tempfile::tempdir().expect("store root");
+    let stores = lash_sqlite_store::SqliteStoreSet::open(root.path())
+        .await
+        .expect("open older writer");
+    lash_sqlite_store::testing::finalize_fleet_format(stores.location(), 2)
+        .expect("finalize newer fleet format");
+    let snapshot = || {
+        let mut rows = std::collections::BTreeMap::new();
+        for database in [
+            lash_sqlite_store::SqliteDatabase::DurableCore,
+            lash_sqlite_store::SqliteDatabase::ProcessRegistry,
+            lash_sqlite_store::SqliteDatabase::Triggers,
+        ] {
+            let connection = rusqlite::Connection::open(root.path().join(database.file_name()))
+                .expect("open snapshot");
+            let tables: Vec<String> = connection
+                .prepare("SELECT name FROM sqlite_schema WHERE type = 'table'")
+                .expect("list tables")
+                .query_map([], |row| row.get(0))
+                .expect("query tables")
+                .collect::<rusqlite::Result<_>>()
+                .expect("table names");
+            for table in tables {
+                let count: i64 = connection
+                    .query_row(&format!("SELECT count(*) FROM \"{table}\""), [], |row| {
+                        row.get(0)
+                    })
+                    .expect("count rows");
+                rows.insert(format!("{}.{table}", database.name()), count);
+            }
+        }
+        rows
+    };
+    let before = snapshot();
+    lash_conformance::fenced_process_and_trigger_registration_stays_typed(
+        stores.process_registry(),
+        stores.trigger_store(),
+    )
+    .await;
+    assert_eq!(snapshot(), before, "fenced writers changed rows");
+}

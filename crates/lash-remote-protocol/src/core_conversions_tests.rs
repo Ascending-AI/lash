@@ -2476,3 +2476,21 @@ fn tool_call_completed_turn_event_conversion_encodes_output_properly() {
         other => panic!("unexpected event: {other:?}"),
     }
 }
+
+#[test]
+fn store_refusal_remote_codes_round_trip_as_first_party_codes() {
+    for code in [
+        lash_core::RuntimeErrorCode::WriterFenced,
+        lash_core::RuntimeErrorCode::StoreIncompatible,
+    ] {
+        let remote = crate::RemoteFailureCode::from(&code);
+        let json = serde_json::to_value(&remote).expect("serialize remote refusal");
+        assert_eq!(json, format!("lash:{}", code.as_str()));
+        let decoded: crate::RemoteFailureCode =
+            serde_json::from_value(json).expect("decode remote refusal");
+        assert_eq!(
+            lash_core::RuntimeErrorCode::from_wire_code(decoded.spelling()),
+            code
+        );
+    }
+}

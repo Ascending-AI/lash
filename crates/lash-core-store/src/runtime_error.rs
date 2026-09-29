@@ -377,6 +377,10 @@ pub enum RuntimeErrorCode {
     RuntimeEffectWrongOutcome,
     /// Process-local; repaired by restart, not by same-process retry.
     RuntimeEffectControllerTaskClosed,
+    /// A newer fleet epoch excludes this deployment's writable range.
+    WriterFenced,
+    /// The store's compatibility stamp or fleet format cannot be admitted.
+    StoreIncompatible,
     RuntimeStore,
     /// Durable state is corrupt or an authoritative monotonic counter has
     /// exhausted its representable domain. Retrying unchanged cannot heal it.
@@ -431,6 +435,10 @@ pub enum RuntimeErrorCode {
 /// failure.
 pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        err @ (crate::store::StoreError::WriterFenced { .. }
+        | crate::store::StoreError::Incompatible { .. }) => {
+            RuntimeEffectControllerError::from(err).into_runtime_error()
+        }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
@@ -448,6 +456,10 @@ pub fn runtime_error_from_turn_input_admission(err: crate::store::StoreError) ->
 
 pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> RuntimeError {
     match err {
+        err @ (crate::store::StoreError::WriterFenced { .. }
+        | crate::store::StoreError::Incompatible { .. }) => {
+            RuntimeEffectControllerError::from(err).into_runtime_error()
+        }
         err @ (crate::store::StoreError::PendingTurnInputSourceKeyConflict { .. }
         | crate::store::StoreError::PendingTurnInputIdConflict { .. }
         | crate::store::StoreError::PendingTurnInputBatchDuplicate { .. }
@@ -716,6 +728,8 @@ impl RuntimeErrorCode {
             Self::RuntimeEffectToolSettlementVersion => "runtime_effect_tool_settlement_version",
             Self::RuntimeEffectWrongOutcome => "runtime_effect_wrong_outcome",
             Self::RuntimeEffectControllerTaskClosed => "runtime_effect_controller_task_closed",
+            Self::WriterFenced => "writer_fenced",
+            Self::StoreIncompatible => "store_incompatible",
             Self::RuntimeStore => "runtime_store",
             Self::RuntimeStoreCorrupt => "runtime_store_corrupt",
             Self::SessionCommandClaim => "session_command_claim",
@@ -929,6 +943,8 @@ impl RuntimeErrorCode {
         Self::RuntimeEffectToolSettlementVersion,
         Self::RuntimeEffectWrongOutcome,
         Self::RuntimeEffectControllerTaskClosed,
+        Self::WriterFenced,
+        Self::StoreIncompatible,
         Self::RuntimeStore,
         Self::RuntimeStoreCorrupt,
         Self::SessionCommandClaim,
@@ -1142,6 +1158,8 @@ impl RuntimeErrorCode {
             "runtime_effect_tool_settlement_version" => Self::RuntimeEffectToolSettlementVersion,
             "runtime_effect_wrong_outcome" => Self::RuntimeEffectWrongOutcome,
             "runtime_effect_controller_task_closed" => Self::RuntimeEffectControllerTaskClosed,
+            "writer_fenced" => Self::WriterFenced,
+            "store_incompatible" => Self::StoreIncompatible,
             "runtime_store" => Self::RuntimeStore,
             "runtime_store_corrupt" => Self::RuntimeStoreCorrupt,
             "session_command_claim" => Self::SessionCommandClaim,
@@ -1232,6 +1250,9 @@ impl<'de> serde::Deserialize<'de> for RuntimeErrorCode {
 #[serde(tag = "kind", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum RuntimeErrorCause {
+    StoreRefusal {
+        refusal: Box<crate::store::StoreRefusal>,
+    },
     SessionDeleted {
         session_id: SessionId,
     },
@@ -1454,7 +1475,8 @@ impl RuntimeError {
     pub fn deleted_session_id(&self) -> Option<&str> {
         match self.cause.as_ref()? {
             RuntimeErrorCause::SessionDeleted { session_id } => Some(session_id),
-            RuntimeErrorCause::ArtifactReferrerEnded { .. } => None,
+            RuntimeErrorCause::ArtifactReferrerEnded { .. }
+            | RuntimeErrorCause::StoreRefusal { .. } => None,
         }
     }
 
@@ -1797,6 +1819,7 @@ impl From<lash_sansio::EffectIdentityError> for RuntimeEffectControllerError {
 
 impl From<crate::StoreError> for RuntimeEffectControllerError {
     fn from(err: crate::StoreError) -> Self {
+        let refusal = crate::store::StoreRefusal::of_store_error(&err);
         let cause = match &err {
             crate::StoreError::SessionDeleted { session_id } => {
                 Some(crate::RuntimeErrorCause::SessionDeleted {
@@ -1810,7 +1833,15 @@ impl From<crate::StoreError> for RuntimeEffectControllerError {
             }
             _ => None,
         };
+        let cause = refusal
+            .as_ref()
+            .map(|refusal| RuntimeErrorCause::StoreRefusal {
+                refusal: Box::new(refusal.clone()),
+            })
+            .or(cause);
         let code = match &err {
+            crate::StoreError::WriterFenced { .. } => RuntimeErrorCode::WriterFenced,
+            crate::StoreError::Incompatible { .. } => RuntimeErrorCode::StoreIncompatible,
             crate::StoreError::StoredDataCorrupt { .. }
             | crate::StoreError::MonotonicCounterOverflow { .. } => {
                 crate::RuntimeErrorCode::RuntimeStoreCorrupt

@@ -205,7 +205,7 @@ fn prune_process_rows_conn(
             u64::try_from(pruned_at_ms).unwrap_or(0),
             "registry",
         )
-        .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))?;
+        .map_err(lash_core_execution::PluginError::from)?;
     }
 
     let sql = process_sql();

@@ -27,6 +27,64 @@ pub enum AnchorUnavailable {
     Tombstoned,
 }
 
+/// A compatibility refusal with the same fields as its store error.
+/// Plugin errors are cloned and journaled, so this representation carries
+/// only the terminal refusals rather than backend failures and sources.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum StoreRefusal {
+    Incompatible {
+        refusal: crate::compat::CompatRefusal,
+    },
+    WriterFenced {
+        recorded: u32,
+        writable: crate::compat::VersionRange,
+    },
+}
+
+impl StoreRefusal {
+    /// Copy the structured refusal, if this store error is one.
+    pub fn of_store_error(error: &StoreError) -> Option<Self> {
+        match error {
+            StoreError::Incompatible { refusal } => Some(Self::Incompatible {
+                refusal: refusal.clone(),
+            }),
+            StoreError::WriterFenced { recorded, writable } => Some(Self::WriterFenced {
+                recorded: *recorded,
+                writable: *writable,
+            }),
+            _ => None,
+        }
+    }
+
+    /// The runtime and remote code for this refusal.
+    pub fn code(&self) -> crate::RuntimeErrorCode {
+        match self {
+            Self::Incompatible { .. } => crate::RuntimeErrorCode::StoreIncompatible,
+            Self::WriterFenced { .. } => crate::RuntimeErrorCode::WriterFenced,
+        }
+    }
+
+    /// Recover the exact store error this refusal represents.
+    pub fn into_store_error(self) -> StoreError {
+        match self {
+            Self::Incompatible { refusal } => StoreError::Incompatible { refusal },
+            Self::WriterFenced { recorded, writable } => {
+                StoreError::WriterFenced { recorded, writable }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for StoreRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.clone().into_store_error(), formatter)
+    }
+}
+
+impl std::error::Error for StoreRefusal {}
+
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StoreError {

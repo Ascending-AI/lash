@@ -329,7 +329,7 @@ impl Processes {
     ) -> Result<lash_core::ProcessEffectOutcome> {
         self.execute_command(command, scoped_effect_controller)
             .await
-            .map_err(|err| EmbedError::Plugin(lash_core::PluginError::Session(err.to_string())))
+            .map_err(|err| EmbedError::Plugin(err.into()))
     }
 
     async fn execute_command(

@@ -361,6 +361,7 @@ impl RuntimeErrorCode {
             // the process-local controller task closed; a restart repairs it.
             Self::RuntimeEffectControllerTaskClosed => Redrivable,
             // store I/O failed.
+            Self::WriterFenced | Self::StoreIncompatible => Terminal,
             Self::RuntimeStore => Retryable,
             // durable state is corrupt or a counter is exhausted.
             Self::RuntimeStoreCorrupt => Terminal,

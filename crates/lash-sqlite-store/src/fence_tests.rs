@@ -439,3 +439,90 @@ async fn sqlite_fence_observes_a_writable_move_of_f() {
         "the handle answers the epoch its last fence read"
     );
 }
+
+#[tokio::test]
+async fn sqlite_session_delete_after_finalize_stays_writer_fenced() {
+    use lash_core_execution::SessionCatalogStore as _;
+    let (_root, set) = file_set().await;
+    let factory = set.session_store_factory();
+    let session = SessionId::from("fenced-delete");
+    factory
+        .save_session_meta(session_meta(session.as_str()))
+        .await
+        .expect("save session");
+    crate::testing::finalize_fleet_format(set.location(), 2).expect("finalize");
+    let error = factory
+        .delete_session(&session)
+        .await
+        .expect_err("delete fenced");
+    assert!(
+        matches!(
+            error.stop,
+            lash_core_execution::MaintenanceStop::Failed(StoreError::WriterFenced {
+                recorded: 2,
+                ..
+            })
+        ),
+        "{error:?}"
+    );
+    assert_eq!(
+        count(set.location(), SqliteDatabase::DurableCore, "session_meta"),
+        1
+    );
+}
+
+#[tokio::test]
+async fn sqlite_fence_encodes_again_when_f_moves() {
+    use lash_core_execution::{SessionCatalogStore as _, SessionCommitStore as _};
+    let (_root, set) = file_set().await;
+    let path = set
+        .location()
+        .target(SqliteDatabase::DurableCore)
+        .file_path()
+        .expect("core file")
+        .to_owned();
+    let store = crate::SqliteStore::open_with_fleet_writable_range_for_testing(
+        &path,
+        VersionRange::between(1, 2),
+    )
+    .await
+    .expect("open with next writer range")
+    .with_fleet_format_for_testing(FleetFormat::from_version(1).with_writer_pins(&[
+        lash_core_execution::WriterPin {
+            constant: "RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION",
+            generation: 1,
+            version: 7,
+        },
+    ]));
+    let session = SessionId::from("reencoded");
+    store
+        .admit_session(
+            &lash_core_execution::testing::store_fixtures::root_session_request(&session),
+        )
+        .await
+        .expect("admit under old epoch");
+    crate::testing::finalize_fleet_format(set.location(), 2).expect("finalize");
+    let state = lash_core_execution::RuntimeSessionState {
+        session_id: session.clone(),
+        ..lash_core_execution::RuntimeSessionState::new(lash_core_execution::SessionPolicy::new(
+            lash_core_execution::TurnBudget::Unbounded,
+        ))
+    };
+    let receipt = store
+        .commit_runtime_state(
+            lash_core_execution::RuntimeCommit::persisted_state_for_test(&state, &[]),
+        )
+        .await
+        .expect("commit re-encodes under writable epoch");
+    assert_ne!(receipt.schema_version, 7);
+    let stored: String = raw(set.location(), SqliteDatabase::DurableCore)
+        .query_row(
+            "SELECT result_json FROM runtime_turn_commits WHERE session_id = ?1",
+            [session.as_str()],
+            |row| row.get(0),
+        )
+        .expect("stored receipt");
+    let stored: serde_json::Value = serde_json::from_str(&stored).expect("decode receipt");
+    assert_ne!(stored["schema_version"], serde_json::json!(7));
+    assert_eq!(store.fleet_format().version(), 2);
+}

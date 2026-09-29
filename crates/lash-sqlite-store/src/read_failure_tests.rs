@@ -1,5 +1,6 @@
 use super::*;
 use crate::artifact_store::MODULE_ARTIFACT_NAMESPACE;
+use lash_core_execution::FleetFormat;
 use lash_core_execution::store::WindowSelector;
 use lash_core_execution::{
     ModuleArtifactStore, QueuedWorkStore as _, SessionCatalogStore as _, SessionHistoryStore as _,
@@ -278,6 +279,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
                 BlobArtifactDescriptor::checkpoint_component(),
                 b"raw",
                 BuiltinBlobProfile::LowLatency,
+                FleetFormat::current(),
             )
         })
         .await
@@ -292,6 +294,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
                 BlobArtifactDescriptor::checkpoint_component(),
                 &42_u64,
                 BuiltinBlobProfile::LowLatency,
+                FleetFormat::current(),
             )
             .map_err(sqlite_conversion_error)
         })

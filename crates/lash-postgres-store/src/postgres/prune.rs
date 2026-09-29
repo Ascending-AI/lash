@@ -63,7 +63,7 @@ pub(super) async fn prune_process_rows_tx(
             cleanup_due_at_ms,
         )
         .await
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+        .map_err(PluginError::from)?;
     }
 
     Ok(ProcessPruneReport {

@@ -62,6 +62,8 @@ pub enum ArtifactStoreError {
     Incompatible {
         refusal: crate::compat::CompatRefusal,
     },
+    #[error(transparent)]
+    StoreRefusal(crate::store::StoreRefusal),
     #[error("artifact store backend error: {0}")]
     Backend(String),
 }
@@ -86,7 +88,10 @@ impl From<crate::StoreError> for ArtifactStoreError {
                 message,
             },
             crate::StoreError::Incompatible { refusal } => Self::Incompatible { refusal },
-            other => Self::Backend(other.to_string()),
+            other => match crate::store::StoreRefusal::of_store_error(&other) {
+                Some(refusal) => Self::StoreRefusal(refusal),
+                None => Self::Backend(other.to_string()),
+            },
         }
     }
 }
@@ -109,8 +114,9 @@ impl From<ArtifactStoreError> for crate::PluginError {
                     error.to_string(),
                 ))
             }
-            ArtifactStoreError::Incompatible { .. } => {
-                crate::PluginError::Invoke(error.to_string())
+            ArtifactStoreError::StoreRefusal(refusal) => crate::PluginError::StoreRefusal(refusal),
+            ArtifactStoreError::Incompatible { refusal } => {
+                crate::StoreError::Incompatible { refusal }.into()
             }
             // The store did not answer: a fact about this attempt.
             ArtifactStoreError::Backend(_) => crate::PluginError::Session(error.to_string()),
