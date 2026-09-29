@@ -18,7 +18,7 @@ use crate::session_roots::{
 /// between its read and its compare-and-set before it reports contention.
 const INTENT_WRITE_ATTEMPTS: usize = 8;
 
-impl PostgresSessionStoreFactory {
+impl PostgresStore {
     /// Settle intent `id`'s engine half under obligation claim `claim`:
     /// read it, compare the claim, decide, and compare-and-set the decision
     /// in one transaction, re-reading when another writer moved the row
@@ -44,7 +44,7 @@ impl PostgresSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl ControlIntentStore for PostgresSessionStoreFactory {
+impl ControlIntentStore for PostgresStore {
     async fn open_root_intent(
         &self,
         request: &lash_core_execution::store::RootIntentRequest,

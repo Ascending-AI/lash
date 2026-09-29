@@ -2,18 +2,18 @@ use super::*;
 use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
-impl SessionCommitStore for PostgresSessionStore {
+impl SessionCommitStore for PostgresStore {
     async fn committed_turn_exists(
         &self,
+        session_id: &SessionId,
         turn_id: &lash_core_execution::TurnId,
     ) -> Result<bool, StoreError> {
         let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
-            &self.session_id,
-            turn_id,
+            session_id, turn_id,
         )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
-            .bind(self.session_id.as_str())
+            .bind(session_id.as_str())
             .bind(&key)
             .fetch_one(connection.as_mut())
             .await
@@ -21,14 +21,17 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(exists)
     }
 
-    async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError> {
+    async fn drain_end_exists(
+        &self,
+        session_id: &SessionId,
+        drain_id: &str,
+    ) -> Result<bool, StoreError> {
         let key = lash_core_execution::store_backend_support::drain_end_receipt_storage_key(
-            &self.session_id,
-            drain_id,
+            session_id, drain_id,
         )?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let exists: bool = sqlx::query_scalar(session_sql().turn_commits.exists_for_turn.sql())
-            .bind(self.session_id.as_str())
+            .bind(session_id.as_str())
             .bind(&key)
             .fetch_one(connection.as_mut())
             .await
@@ -36,12 +39,11 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(exists)
     }
 
-    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
+    async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         let version =
-            read_session_state_version_tx(&mut tx, &self.session_id, false, self.fleet_format)
-                .await?;
+            read_session_state_version_tx(&mut tx, session_id, false, self.fleet_format).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(version)
     }
@@ -65,21 +67,6 @@ impl SessionCommitStore for PostgresSessionStore {
             version,
             drive_epoch: fence.epoch(),
         })
-    }
-
-    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        self.load_session_read(None).await
-    }
-
-    async fn load_session_at(
-        &self,
-        base: &lash_core_execution::store::SessionHeadRef,
-    ) -> Result<PersistedSessionRead, StoreError> {
-        self.load_session_read(Some(base))
-            .await?
-            .ok_or(StoreError::TurnBaseNotRetained {
-                revision: base.revision,
-            })
     }
 
     async fn retain_admission_base(
@@ -142,136 +129,16 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(raised)
     }
 
-    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        self.read_session_state_version().await?;
+    async fn load_session_head_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.read_session_state_version(session_id).await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let meta =
-            load_session_head_meta_tx(&mut tx, &self.session_id, false, self.fleet_format).await?;
+        let meta = load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(meta)
-    }
-
-    /// FIG-653: fork-lineage visibility is graph membership, not authorization.
-    async fn load_node(&self, node_id: &str) -> Result<Option<SessionNodeRecord>, StoreError> {
-        let session_id = &self.session_id;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .begin_repeatable_read_read_only
-                .sql(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        let row = sqlx::query(session_sql().graph_postgres.select_lookup.sql())
-            .bind(node_id)
-            .bind(session_id.as_str())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let Some(row) = row else {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        };
-        let candidate_id: String = row.get(0);
-        let parent_node_id: Option<String> = row.get(1);
-        let json: String = row.get(2);
-        let owner: String = row.get(3);
-        let candidate_generation: i64 = row.get(4);
-        if owner != *session_id {
-            let rows = sqlx::query(session_sql().head.select_readable_range.sql())
-                .bind(session_id.as_str())
-                .bind(candidate_generation)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            let Some(first) = rows.first() else {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            };
-            let head_id: Option<String> = first.get(0);
-            let Some(head_id) = head_id else {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            };
-            let head_generation: Option<i64> = first.get(1);
-            let head_tombstoned: Option<bool> = first.get(2);
-            let (Some(head_generation), Some(head_tombstoned)) = (head_generation, head_tombstoned)
-            else {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph",
-                    message: "head leaf is missing".to_string(),
-                });
-            };
-            if head_tombstoned {
-                return Err(StoreError::StoredDataCorrupt {
-                    record_kind: "SessionGraph",
-                    message: "head leaf is tombstoned".to_string(),
-                });
-            }
-            if candidate_generation < 0 || candidate_generation > head_generation {
-                tx.commit().await.map_err(store_sqlx_error)?;
-                return Ok(None);
-            }
-            let mut range = std::collections::HashMap::new();
-            for row in rows {
-                let node_id: Option<String> = row.get(3);
-                let generation: Option<i64> = row.get(5);
-                let tombstoned: Option<bool> = row.get(6);
-                if let (Some(node_id), Some(generation), Some(tombstoned)) =
-                    (node_id, generation, tombstoned)
-                {
-                    range.insert(
-                        node_id,
-                        (row.get::<Option<String>, _>(4), generation, tombstoned),
-                    );
-                }
-            }
-            let mut current_id = head_id;
-            let mut current_generation = head_generation;
-            loop {
-                let Some((parent_id, generation, tombstoned)) = range.get(&current_id) else {
-                    return Err(StoreError::StoredDataCorrupt {
-                        record_kind: "SessionGraph",
-                        message: "readable generation range omits an edge-path node".to_string(),
-                    });
-                };
-                if *tombstoned || *generation != current_generation {
-                    return Err(StoreError::StoredDataCorrupt {
-                        record_kind: "SessionGraph",
-                        message: "parent edge crosses a tombstone or generation gap".to_string(),
-                    });
-                }
-                if current_generation == candidate_generation {
-                    if current_id != candidate_id {
-                        tx.commit().await.map_err(store_sqlx_error)?;
-                        return Ok(None);
-                    }
-                    break;
-                }
-                current_id = parent_id
-                    .clone()
-                    .ok_or_else(|| StoreError::StoredDataCorrupt {
-                        record_kind: "SessionGraph",
-                        message: "parent edge ended before the candidate generation".to_string(),
-                    })?;
-                current_generation -= 1;
-            }
-        }
-        let node = SessionNodeRecord::decode_storage_body_for_fleet(
-            candidate_id,
-            parent_node_id,
-            &json,
-            self.fleet_format,
-        )
-        .map_err(|err| StoreError::StoredDataCorrupt {
-            record_kind: "SessionGraph node",
-            message: err.to_string(),
-        })?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(node))
     }
 
     async fn commit_runtime_state(
@@ -281,7 +148,6 @@ impl SessionCommitStore for PostgresSessionStore {
         let planner =
             lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format)?;
         let commit = planner.commit();
-        self.bind_session_id(&commit.session_id)?;
         let now = self.clock.timestamp_ms();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -310,7 +176,6 @@ impl SessionCommitStore for PostgresSessionStore {
         let existing =
             load_session_head_meta_tx(&mut tx, &commit.session_id, false, self.fleet_format)
                 .await?;
-        planner.validate_session_binding(existing.as_ref().map(|meta| &meta.session_id))?;
         let direct_meta = SessionMeta {
             owning_process_id: None,
             session_id: commit.session_id.clone(),
@@ -887,57 +752,7 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(result)
     }
 
-    async fn admit_and_bind_session(
-        &self,
-        binding: &lash_core_execution::SessionBinding,
-    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
-        binding.validate()?;
-        let session_id = &binding.session_id;
-        let meta = SessionMeta {
-            owning_process_id: None,
-            session_id: SessionId::from(session_id.to_string()),
-            relation: binding.relation.clone(),
-            pending_observer_intents: Vec::new(),
-        };
-        let created_at_ms = self.clock.timestamp_ms();
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        #[cfg(any(test, feature = "testing"))]
-        self.set_transaction_lease_clock_for_testing(&mut tx)
-            .await?;
-        // The tombstone outranks the handle's own binding: a bound handle
-        // asked to admit a deleted session answers SessionDeleted, not
-        // SessionBindingMismatch (FIG-1282).
-        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
-        self.bind_session_id(session_id)?;
-        let inserted = crate::session_meta::write_session_meta_tx(
-            &mut tx,
-            &meta,
-            crate::session_meta::SessionMetaWrite::Insert,
-            created_at_ms,
-            self.fleet_format,
-        )
-        .await?;
-        if inserted {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(lash_core_execution::SessionAdmission::Created);
-        }
-        let recorded = crate::session_meta::load_recorded_lineage_tx(&mut tx, session_id)
-            .await?
-            .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
-                session_id: SessionId::from(session_id.to_string()),
-            })?;
-        lash_core_execution::store_backend_support::guard_rebind_lineage(
-            session_id,
-            &recorded,
-            &binding.relation,
-        )?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::SessionAdmission::Rebound)
-    }
-
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.bind_session_id(&meta.session_id)?;
         let created_at_ms = self.clock.timestamp_ms();
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
@@ -965,23 +780,28 @@ impl SessionCommitStore for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)
     }
 
-    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        crate::session_meta::load_session_meta(&self.pool, Some(&self.session_id)).await
+    async fn load_session_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        crate::session_meta::load_session_meta(&self.pool, Some(session_id)).await
     }
 
-    async fn load_session_meta_for_commit(&self) -> Result<Option<SessionMeta>, StoreError> {
+    async fn load_session_meta_for_commit(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        ensure_session_not_deleted_tx(&mut tx, &self.session_id).await?;
+        ensure_session_not_deleted_tx(&mut tx, session_id).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        self.load_session_meta().await
+        self.load_session_meta(session_id).await
     }
 
     async fn record_turn_park(
         &self,
         park: &lash_core_execution::store::TurnParkWrite,
     ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
-        self.bind_session_id(&park.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
@@ -1007,130 +827,5 @@ impl SessionCommitStore for PostgresSessionStore {
         .as_ref()
         .map(super::turn_park::decode_turn_park_row)
         .transpose()
-    }
-}
-
-impl PostgresSessionStore {
-    /// The live session (`base: None`), or the session as it stood at the head
-    /// one of its turns was admitted on (FIG-3682).
-    ///
-    /// A base read takes the graph along the base leaf and the base
-    /// checkpoint, and the frame nearest the base leaf with that frame's
-    /// configuration when the live head has since moved to another frame. A
-    /// base checkpoint the store no longer holds is
-    /// [`StoreError::TurnBaseNotRetained`], never another head.
-    async fn load_session_read(
-        &self,
-        base: Option<&lash_core_execution::store::SessionHeadRef>,
-    ) -> Result<Option<PersistedSessionRead>, StoreError> {
-        let session_id = &self.session_id;
-        let mut connection = acquire_runtime_connection(&self.pool).await?;
-        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .begin_repeatable_read_read_only
-                .sql(),
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        read_session_state_version_tx(&mut tx, session_id, false, self.fleet_format).await?;
-        let Some(meta) =
-            load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format).await?
-        else {
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(None);
-        };
-        let (head_revision, leaf_node_id, checkpoint_ref) = match base {
-            None => (
-                meta.head_revision,
-                meta.leaf_node_id.clone(),
-                meta.checkpoint_ref.clone(),
-            ),
-            Some(base) => (base.revision, base.leaf.clone(), base.checkpoint.clone()),
-        };
-        let graph = load_graph_tx(
-            &mut tx,
-            session_id,
-            leaf_node_id
-                .clone()
-                .map(lash_core_execution::NodeId::into_inner),
-            self.fleet_format,
-        )
-        .await?;
-        let checkpoint = match checkpoint_ref.as_ref() {
-            Some(blob_ref) => {
-                match get_checkpoint_tx(&mut tx, blob_ref, self.fleet_format).await? {
-                    None if base.is_some() => {
-                        return Err(StoreError::TurnBaseNotRetained {
-                            revision: head_revision,
-                        });
-                    }
-                    checkpoint => checkpoint,
-                }
-            }
-            None => None,
-        };
-        // A turn is admitted only while the head owes no follow-on (ADR 0101
-        // §3), so an admitted base never carries one.
-        let pending_follow_on = if base.is_some() {
-            None
-        } else {
-            meta.pending_follow_on.clone()
-        };
-        let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
-            Some(leaf) if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) => {
-                let frame = super::nearest_frame_node_id_tx(&mut tx, leaf.as_str())
-                    .await?
-                    .and_then(|frame| lash_core_execution::FrameNodeId::new(frame).ok());
-                let frame_config = frame
-                    .as_ref()
-                    .filter(|frame| meta.current_frame_node_id.as_ref() != Some(*frame))
-                    .and_then(|frame| graph.find_node(frame.as_str()))
-                    .and_then(lash_core_execution::SessionNodeRecord::frame_config);
-                (frame, frame_config.unwrap_or(meta.config))
-            }
-            _ => (meta.current_frame_node_id, meta.config),
-        };
-        let token_ledger = lash_core_execution::store::merge_token_ledger_entries_checked(
-            load_usage_deltas_tx(&mut tx, session_id).await?,
-        )?;
-        let turn_failure_rows =
-            sqlx::query(session_sql().turn_commits.select_failure_settlements.sql())
-                .bind(session_id.as_str())
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-        let mut turn_failure_settlements = Vec::new();
-        for row in turn_failure_rows {
-            let turn_id = row.get::<String, _>("turn_id");
-            let result_json = row.get::<String, _>("result_json");
-            let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
-                session_id,
-                &turn_id,
-                &result_json,
-                self.fleet_format,
-            )?;
-            if !receipt.failure_evidence.is_empty() {
-                turn_failure_settlements.push(lash_core_execution::TurnFailureSettlement {
-                    turn_id,
-                    evidence: receipt.failure_evidence,
-                });
-            }
-        }
-        let read = PersistedSessionRead {
-            session_id: meta.session_id,
-            head_revision,
-            config,
-            current_frame_node_id,
-            pending_follow_on,
-            graph,
-            checkpoint_ref,
-            checkpoint,
-            token_ledger,
-            turn_failure_settlements,
-        };
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Some(read))
     }
 }

@@ -298,7 +298,7 @@ pub(crate) async fn recover_abandoned_attachment_write(
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for PostgresSessionStore {
+impl AttachmentManifest for PostgresStore {
     /// The writer half of the GC fence: the condemnation read, the claim, and
     /// the intent upsert are one transaction, so a sweeper's condemn CAS either
     /// runs before all of it or fails against the intent it wrote.

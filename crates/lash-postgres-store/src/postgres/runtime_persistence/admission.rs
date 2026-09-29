@@ -38,7 +38,7 @@ async fn follow_on_blocks_admission_tx(
 ///
 /// [`RootStore::admit_root`]: lash_core_execution::store::RootStore::admit_root
 pub(crate) async fn admit_root_postgres(
-    store: &crate::PostgresSessionStore,
+    store: &crate::PostgresStore,
     request: &lash_core_execution::store::AdmitRootRequest,
 ) -> Result<Option<RootAdmission>, StoreError> {
     let session_id = request.session_id();
@@ -172,7 +172,7 @@ pub(crate) async fn admit_root_postgres(
 ///
 /// [`RootStore::admit_at_checkpoint`]: lash_core_execution::store::RootStore::admit_at_checkpoint
 pub(crate) async fn admit_at_checkpoint_postgres(
-    store: &crate::PostgresSessionStore,
+    store: &crate::PostgresStore,
     request: &CheckpointAdmissionRequest,
 ) -> Result<CheckpointAdmission, StoreError> {
     #[cfg(test)]
@@ -268,7 +268,7 @@ pub(crate) async fn admit_at_checkpoint_postgres(
 /// the commit that applies the run settles it, predicated on each row still
 /// being open.
 pub(crate) async fn open_session_command_run_postgres(
-    store: &crate::PostgresSessionStore,
+    store: &crate::PostgresStore,
     fence: &lash_core_execution::store::DriveFence,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let session_id = fence.session();

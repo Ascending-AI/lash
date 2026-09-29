@@ -11,7 +11,7 @@ use lash_core_execution::{AttachmentStore, Clock};
 
 use crate::{
     PostgresLashlangArtifactStore, PostgresProcessDefinitionRegistry, PostgresProcessRegistry,
-    PostgresSessionStoreFactory, PostgresStorage, PostgresTriggerStore,
+    PostgresStorage, PostgresStore, PostgresTriggerStore,
 };
 
 /// Every persistence port of one PostgreSQL database: the
@@ -30,7 +30,7 @@ struct StoreParts {
     /// `postgres:<database>.<schema>`, the catalog this store set is over.
     binding: lash_core_execution::StoreBindingId,
     clock: Arc<dyn Clock>,
-    session_store_factory: Arc<PostgresSessionStoreFactory>,
+    session_store_factory: Arc<PostgresStore>,
     process_registry: Arc<PostgresProcessRegistry>,
     trigger_store: Arc<PostgresTriggerStore>,
     process_definitions: Arc<PostgresProcessDefinitionRegistry>,
@@ -94,7 +94,7 @@ impl PostgresStoreSet {
 
     /// The factory every session of this store set is created and reopened
     /// through.
-    pub fn session_store_factory(&self) -> Arc<PostgresSessionStoreFactory> {
+    pub fn session_store_factory(&self) -> Arc<PostgresStore> {
         Arc::clone(&self.inner.session_store_factory)
     }
 

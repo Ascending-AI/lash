@@ -1,10 +1,10 @@
-//! The queued-work half of [`IngressStore`] for [`PostgresSessionStore`], as
+//! The queued-work half of [`IngressStore`] for [`PostgresStore`], as
 //! inherent methods the trait implementation forwards to: enqueue, host
 //! withdrawal, the completion marker, and the open-work reads.
 
 use super::*;
 
-impl PostgresSessionStore {
+impl PostgresStore {
     pub(super) async fn enqueue_queued_work_pg(
         &self,
         batch: QueuedWorkBatchDraft,

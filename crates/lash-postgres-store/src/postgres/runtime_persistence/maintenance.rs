@@ -2,9 +2,12 @@ use super::*;
 use crate::session_sql::session_sql;
 
 #[async_trait::async_trait]
-impl StoreMaintenance for PostgresSessionStore {
-    async fn vacuum(&self) -> lash_core_execution::MaintenanceResult<VacuumReport> {
-        self.vacuum_tombstones()
+impl StoreMaintenance for PostgresStore {
+    async fn vacuum(
+        &self,
+        session_id: &SessionId,
+    ) -> lash_core_execution::MaintenanceResult<VacuumReport> {
+        self.vacuum_tombstones(session_id)
             .await
             .map_err(lash_core_execution::MaintenanceFailure::failed_before_any_work)
     }
@@ -25,8 +28,8 @@ impl StoreMaintenance for PostgresSessionStore {
     }
 }
 
-impl PostgresSessionStore {
-    async fn vacuum_tombstones(&self) -> Result<VacuumReport, StoreError> {
+impl PostgresStore {
+    async fn vacuum_tombstones(&self, session_id: &SessionId) -> Result<VacuumReport, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         // `lash_deleted_sessions` is deliberately exempt: it is permanent
@@ -37,7 +40,7 @@ impl PostgresSessionStore {
                 .delete_tombstoned_for_session
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?
@@ -48,7 +51,7 @@ impl PostgresSessionStore {
                 .delete_withdrawn
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?

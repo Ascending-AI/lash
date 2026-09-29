@@ -1,6 +1,6 @@
 use super::*;
 
-impl PostgresSessionStoreFactory {
+impl PostgresStore {
     pub(super) fn turn_cancel_closure_owner_binding(
         &self,
     ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
@@ -14,35 +14,14 @@ impl PostgresSessionStoreFactory {
             owner,
         ))
     }
-
-    pub(super) fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
-        PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::clone(&self.clock),
-            fleet_format: self.fleet_format,
-            session_id,
-            turn_cancel_closure_owner: self.turn_cancel_closure_owner_binding(),
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: self.lease_clock_for_testing.clone(),
-            #[cfg(feature = "testing")]
-            fault_injector: self.fault_injector.clone(),
-            #[cfg(test)]
-            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-            #[cfg(test)]
-            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        }
-    }
 }
 
-impl PostgresSessionStoreFactory {
-    /// Concrete constructor behind [`SessionStoreFactory::create_store`]; the
-    /// gated conformance factory shares it.
-    pub(crate) async fn create_session_store(
+impl PostgresStore {
+    pub(crate) async fn admit_session_inner(
         &self,
         request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<PostgresSessionStore>, StoreError> {
+    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
-        let store = self.store_for(request.session_id.clone());
         let meta = SessionMeta {
             owning_process_id: request.owning_process_id.clone(),
             session_id: request.session_id.clone(),
@@ -67,7 +46,7 @@ impl PostgresSessionStoreFactory {
                 session_id: request.session_id.clone(),
             });
         }
-        crate::session_meta::write_session_meta_tx(
+        let inserted = crate::session_meta::write_session_meta_tx(
             &mut tx,
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
@@ -75,26 +54,24 @@ impl PostgresSessionStoreFactory {
             self.fleet_format,
         )
         .await?;
-        tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(Arc::new(store))
-    }
-
-    /// Concrete reopen behind [`SessionStoreFactory::open_existing_store`];
-    /// the gated conformance factory shares it.
-    pub(crate) async fn open_existing_session_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<PostgresSessionStore>>, String> {
-        let store = self.store_for(request.session_id.clone());
-        if store
-            .load_session_meta()
-            .await
-            .map_err(|err| err.to_string())?
-            .is_some()
-        {
-            Ok(Some(Arc::new(store)))
-        } else {
-            Ok(None)
+        if !inserted {
+            let recorded =
+                crate::session_meta::load_recorded_lineage_tx(&mut tx, &request.session_id)
+                    .await?
+                    .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
+                        session_id: request.session_id.clone(),
+                    })?;
+            lash_core_execution::store_backend_support::guard_rebind_lineage(
+                &request.session_id,
+                &recorded,
+                &request.relation,
+            )?;
         }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(if inserted {
+            lash_core_execution::SessionAdmission::Created
+        } else {
+            lash_core_execution::SessionAdmission::Rebound
+        })
     }
 }

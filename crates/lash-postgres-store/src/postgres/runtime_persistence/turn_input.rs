@@ -1,7 +1,7 @@
 use super::*;
 
 #[async_trait::async_trait]
-impl IngressStore for PostgresSessionStore {
+impl lash_core_execution::TurnInputStore for PostgresStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
@@ -111,7 +111,7 @@ impl IngressStore for PostgresSessionStore {
                 message: error.to_string(),
             })?;
         if authorization.admitted_scope().session_id().is_none()
-            && let Some(owner) = &self.turn_cancel_closure_owner
+            && let Some(owner) = self.turn_cancel_closure_owner_binding()
         {
             owner
                 .register(authorization.admitted_scope(), authorization.binding_id())
@@ -294,6 +294,7 @@ impl IngressStore for PostgresSessionStore {
 
     async fn pending_turn_cancel_closure_pins(
         &self,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
         let rows: Vec<String> = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()
@@ -301,7 +302,7 @@ impl IngressStore for PostgresSessionStore {
                 .list_by_session
                 .sql(),
         )
-        .bind(self.session_id.as_str())
+        .bind(session_id.as_str())
         .fetch_all(&self.pool)
         .await
         .map_err(store_sqlx_error)?;
@@ -826,7 +827,10 @@ impl IngressStore for PostgresSessionStore {
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::PendingTurnInputSuffixCancelOutcome::Outcomes { anchor, outcomes })
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core_execution::QueuedWorkStore for PostgresStore {
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,
@@ -884,6 +888,19 @@ impl IngressStore for PostgresSessionStore {
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         self.list_open_queued_work_pg(session_id).await
+    }
+    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+        lash_core_execution::store::validate_session_id(session_id)?;
+        sqlx::query_scalar(
+            crate::turn_ingress::turn_ingress_sql()
+                .family
+                .has_claimable_work
+                .sql(),
+        )
+        .bind(session_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(store_sqlx_error)
     }
 }
 

@@ -26,7 +26,7 @@ use crate::support::{SharedDatabaseLock, database_url};
 const CLOCK_SKEW_MS: u64 = 10 * 365 * 24 * 60 * 60 * 1_000;
 const RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE: &str = concat!(
     include_str!("../src/postgres/runtime_persistence/queued_work.rs"),
-    "\nimpl IngressStore for PostgresSessionStore"
+    "\nimpl IngressStore for PostgresStore"
 );
 const RUNTIME_PERSISTENCE_ADMISSION_SOURCE: &str = concat!(
     include_str!("../src/postgres/runtime_persistence/admission.rs"),
@@ -117,7 +117,7 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
         (
             RUNTIME_PERSISTENCE_QUEUED_WORK_SOURCE,
             "async fn list_open_queued_work_pg(",
-            "impl IngressStore for PostgresSessionStore",
+            "impl IngressStore for PostgresStore",
         ),
         (
             RUNTIME_PERSISTENCE_TURN_INPUT_SOURCE,

@@ -17,7 +17,7 @@ use super::{double_law_backend, reset, storage};
 async fn crash_runner_fixture() -> Option<(
     impl Sized,
     Arc<dyn lash_core_execution::StoreSet>,
-    impl Fn(&str) -> Arc<lash_postgres_store::PostgresSessionStore> + Send + Sync + 'static,
+    impl Fn(&str) -> Arc<lash_postgres_store::PostgresStore> + Send + Sync + 'static,
     Arc<dyn lash_core_execution::EffectHost>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
 )> {

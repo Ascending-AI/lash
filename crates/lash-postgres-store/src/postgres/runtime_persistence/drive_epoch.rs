@@ -1,4 +1,4 @@
-//! [`DriveEpochStore`] for [`PostgresSessionStore`]: the storage half of the
+//! [`DriveEpochStore`] for [`PostgresStore`]: the storage half of the
 //! admission seal that raises a session's drive epoch, and the drive-fence
 //! check every fenced commit runs in its own transaction (ADR 0105 §2).
 //!
@@ -74,7 +74,7 @@ pub(super) async fn require_commit_fences_tx(
     }
 }
 
-impl PostgresSessionStore {
+impl PostgresStore {
     /// Open a seal transaction for `session_id`, refusing a deleted session.
     async fn begin_seal_tx<'c>(
         &self,
@@ -91,7 +91,7 @@ impl PostgresSessionStore {
 }
 
 #[async_trait::async_trait]
-impl DriveEpochStore for PostgresSessionStore {
+impl DriveEpochStore for PostgresStore {
     async fn seal_drive_epoch(
         &self,
         session_id: &SessionId,

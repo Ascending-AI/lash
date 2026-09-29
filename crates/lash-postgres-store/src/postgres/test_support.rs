@@ -8,7 +8,7 @@ use lash_core_execution::store::{
 };
 
 #[async_trait::async_trait]
-impl StoreTestSupport for PostgresSessionStore {
+impl StoreTestSupport for PostgresStore {
     async fn rewrite_session_tool_access_for_testing(
         &self,
         schema_version: u32,
@@ -117,7 +117,7 @@ impl StoreTestSupport for PostgresSessionStore {
 }
 
 #[async_trait::async_trait]
-impl ConformanceSessionStoreFactory for PostgresSessionStoreFactory {
+impl ConformanceSessionStoreFactory for PostgresStore {
     async fn create_conformance_store(
         &self,
         request: &SessionStoreCreateRequest,
@@ -136,7 +136,7 @@ impl ConformanceSessionStoreFactory for PostgresSessionStoreFactory {
     }
 }
 
-impl PostgresSessionStoreFactory {
+impl PostgresStore {
     /// Drive transaction admission time independently of record timestamps.
     pub fn with_lease_clock_for_testing(
         mut self,
@@ -147,7 +147,7 @@ impl PostgresSessionStoreFactory {
     }
 }
 
-impl PostgresSessionStore {
+impl PostgresStore {
     /// Drive transaction admission time independently of record timestamps.
     pub fn with_lease_clock_for_testing(
         mut self,
@@ -184,7 +184,7 @@ pub(crate) async fn set_transaction_lease_clock_for_testing(
     Ok(())
 }
 
-impl PostgresSessionStore {
+impl PostgresStore {
     pub(crate) async fn set_transaction_lease_clock_for_testing(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

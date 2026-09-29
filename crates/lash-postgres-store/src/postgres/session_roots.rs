@@ -25,7 +25,7 @@ use lash_store_sql::session_roots::{
 use sqlx::{PgConnection, Row};
 
 use crate::support::{store_sqlx_error, u64_from_sql};
-use crate::{PostgresSessionStore, StoreError, acquire_runtime_connection};
+use crate::{PostgresStore, StoreError, acquire_runtime_connection};
 
 /// Every logical-root statement this store issues.
 pub(crate) struct SessionRootsSql {
@@ -861,7 +861,7 @@ pub(crate) async fn delete_session_roots_conn(
 }
 
 #[async_trait::async_trait]
-impl RootStore for PostgresSessionStore {
+impl RootStore for PostgresStore {
     async fn unfinished_root(
         &self,
         session_id: &SessionId,

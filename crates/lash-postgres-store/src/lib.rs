@@ -652,7 +652,7 @@ type BoundArtifactStores = (
 type SharedArtifactStores = Arc<std::sync::Mutex<Option<BoundArtifactStores>>>;
 
 #[derive(Clone)]
-pub struct PostgresSessionStoreFactory {
+pub struct PostgresStore {
     #[cfg(any(test, feature = "testing"))]
     lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
     #[cfg(feature = "testing")]
@@ -666,21 +666,6 @@ pub struct PostgresSessionStoreFactory {
         Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     effect_host: Arc<std::sync::Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>>,
     artifact_stores: SharedArtifactStores,
-}
-
-#[derive(Clone)]
-pub struct PostgresSessionStore {
-    #[cfg(any(test, feature = "testing"))]
-    lease_clock_for_testing: Option<Arc<dyn lash_core_execution::Clock>>,
-    #[cfg(feature = "testing")]
-    fault_injector: Option<testing::PostgresFaultInjector>,
-    pool: PgPool,
-    clock: Arc<dyn lash_core_execution::Clock>,
-    /// The durable-format generation this store's writers emit — the
-    /// fleet-format row (ADR 0106 §1 `F`) the opening `PostgresStorage` read.
-    fleet_format: lash_core_execution::FleetFormat,
-    session_id: SessionId,
-    turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     #[cfg(test)]
     checkpoint_probe_count: Arc<std::sync::atomic::AtomicUsize>,
     #[cfg(test)]
@@ -1164,7 +1149,7 @@ impl PostgresStorage {
         &self.catalog_id
     }
 
-    pub fn session_store_factory(&self) -> PostgresSessionStoreFactory {
+    pub fn session_store_factory(&self) -> PostgresStore {
         self.unwired_session_store_factory("PostgresStorage::session_store_factory")
     }
 
@@ -1179,9 +1164,9 @@ impl PostgresStorage {
         self.fleet_format
     }
 
-    fn unwired_session_store_factory(&self, path: &'static str) -> PostgresSessionStoreFactory {
+    fn unwired_session_store_factory(&self, path: &'static str) -> PostgresStore {
         warn_postgres_process_registry_not_wired(path);
-        PostgresSessionStoreFactory {
+        PostgresStore {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
             fleet_format: self.fleet_format,
@@ -1194,15 +1179,17 @@ impl PostgresStorage {
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
+            #[cfg(test)]
+            checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            #[cfg(test)]
+            checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
     }
 
     /// Construct a session factory that explicitly declares this storage's
     /// Lash process registry shares the same PostgreSQL database.
-    pub fn session_store_factory_with_shared_process_registry(
-        &self,
-    ) -> PostgresSessionStoreFactory {
-        PostgresSessionStoreFactory {
+    pub fn session_store_factory_with_shared_process_registry(&self) -> PostgresStore {
+        PostgresStore {
             pool: self.pool.clone(),
             catalog_id: Arc::clone(&self.catalog_id),
             fleet_format: self.fleet_format,
@@ -1215,34 +1202,16 @@ impl PostgresStorage {
             turn_cancel_closure_owner: Arc::new(std::sync::Mutex::new(None)),
             effect_host: Arc::new(std::sync::Mutex::new(None)),
             artifact_stores: Arc::new(std::sync::Mutex::new(None)),
-        }
-    }
-
-    /// Construct a handle bound to `session_id` without validating that the
-    /// session already exists.
-    ///
-    /// Construction binds identity; it does not validate existence.
-    /// Consequently, a mistyped id produces a valid absent handle that can subsequently create
-    /// the mistyped session.
-    /// Call
-    /// [`SessionStoreFactory::open_existing_store`]
-    /// through [`Self::session_store_factory`] when existence must be checked.
-    pub fn session_store(&self, session_id: impl Into<SessionId>) -> PostgresSessionStore {
-        PostgresSessionStore {
-            pool: self.pool.clone(),
-            clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            fleet_format: self.fleet_format,
-            session_id: session_id.into(),
-            turn_cancel_closure_owner: None,
-            #[cfg(any(test, feature = "testing"))]
-            lease_clock_for_testing: None,
-            #[cfg(feature = "testing")]
-            fault_injector: None,
             #[cfg(test)]
             checkpoint_probe_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             #[cfg(test)]
             checkpoint_write_transaction_count: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         }
+    }
+
+    /// One multi-session store over this catalog.
+    pub fn store(&self) -> PostgresStore {
+        self.unwired_session_store_factory("PostgresStorage::store")
     }
 
     pub fn process_registry(&self) -> PostgresProcessRegistry {
@@ -1328,9 +1297,9 @@ impl PostgresStorage {
     }
 }
 
-impl PostgresSessionStoreFactory {
+impl PostgresStore {
     pub fn new(storage: &PostgresStorage) -> Self {
-        storage.unwired_session_store_factory("PostgresSessionStoreFactory::new")
+        storage.unwired_session_store_factory("PostgresStore::new")
     }
 
     pub fn new_with_shared_process_registry(storage: &PostgresStorage) -> Self {
@@ -1363,13 +1332,7 @@ fn warn_postgres_process_registry_not_wired(path: &'static str) {
     );
 }
 
-impl PostgresSessionStore {
-    /// Bind this handle to an explicit clock for deterministic embedding and tests.
-    pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
-        self.clock = clock;
-        self
-    }
-
+impl PostgresStore {
     #[cfg(test)]
     fn checkpoint_admission_counts(&self) -> (usize, usize) {
         (
@@ -1378,17 +1341,6 @@ impl PostgresSessionStore {
             self.checkpoint_write_transaction_count
                 .load(std::sync::atomic::Ordering::Relaxed),
         )
-    }
-
-    fn bind_session_id(&self, attempted_session_id: &SessionId) -> Result<(), StoreError> {
-        if self.session_id == attempted_session_id {
-            Ok(())
-        } else {
-            Err(StoreError::SessionBindingMismatch {
-                bound_session_id: self.session_id.clone(),
-                attempted_session_id: SessionId::from(attempted_session_id.to_string()),
-            })
-        }
     }
 }
 

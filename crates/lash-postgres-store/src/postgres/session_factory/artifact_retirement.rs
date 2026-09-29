@@ -1,6 +1,6 @@
 use super::*;
 
-impl PostgresSessionStoreFactory {
+impl PostgresStore {
     pub(super) async fn resume_artifact_owner_retirements(
         &self,
     ) -> Result<(), lash_core_execution::StoreError> {

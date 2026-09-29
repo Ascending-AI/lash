@@ -19,7 +19,7 @@ use tracing_subscriber::{Layer, Registry};
 async fn persisted_record_decode_store(
     storage: &PostgresStorage,
     label: &str,
-) -> (SessionId, PostgresSessionStore) {
+) -> (SessionId, PostgresStore) {
     let session_id = SessionId::from(format!(
         "persisted-record-decode-{label}:{}",
         uuid::Uuid::new_v4()
@@ -330,7 +330,7 @@ async fn attachment_unwired_process_registry_factory_warns() {
     };
     for path in [
         "PostgresStorage::session_store_factory",
-        "PostgresSessionStoreFactory::new",
+        "PostgresStore::new",
     ] {
         let warnings = AttachmentWarnings::default();
         let subscriber = Registry::default().with(warnings.clone());
@@ -338,14 +338,14 @@ async fn attachment_unwired_process_registry_factory_warns() {
             let factory = if path == "PostgresStorage::session_store_factory" {
                 storage.session_store_factory()
             } else {
-                PostgresSessionStoreFactory::new(&storage)
+                PostgresStore::new(&storage)
             };
             assert!(
                 !lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&factory)
             );
             let wired = storage.session_store_factory_with_shared_process_registry();
             assert!(lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&wired));
-            let wired = PostgresSessionStoreFactory::new_with_shared_process_registry(&storage);
+            let wired = PostgresStore::new_with_shared_process_registry(&storage);
             assert!(lash_core_execution::AttachmentRootSet::can_prove_process_owner_death(&wired));
         });
         let events = warnings.0.lock().unwrap();
@@ -1141,7 +1141,7 @@ async fn admitted_input_fixture(
     label: &str,
     root: &TurnId,
 ) -> (
-    PostgresSessionStore,
+    PostgresStore,
     lash_core_execution::store::DriveFence,
     lash_core_execution::RuntimeSessionState,
     lash_core_execution::store::RootAdmission,

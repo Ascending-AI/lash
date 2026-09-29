@@ -134,7 +134,7 @@ fn missing_relation(err: &sqlx::Error) -> bool {
         .is_some_and(|code| code == "42P01")
 }
 
-impl lash_core_execution::FleetFormatStore for crate::PostgresSessionStore {
+impl lash_core_execution::FleetFormatStore for crate::PostgresStore {
     /// The fleet format this store's durable writers emit — the `F` of ADR
     /// 0106 §1 the opening `PostgresStorage` admitted.
     ///

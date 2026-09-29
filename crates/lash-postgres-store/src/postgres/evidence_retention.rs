@@ -12,7 +12,7 @@ pub(crate) type ReclaimResult = Result<
 >;
 
 pub(crate) async fn reclaim(
-    factory: &PostgresSessionStoreFactory,
+    factory: &PostgresStore,
     bound: lash_core_execution::store::RetentionBound,
 ) -> ReclaimResult {
     async {
