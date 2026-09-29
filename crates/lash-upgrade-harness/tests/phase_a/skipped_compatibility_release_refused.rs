@@ -32,6 +32,14 @@ fn skipped_component(component: ComponentId, stamp: CompatStamp) -> Result<()> {
     }
 }
 
+async fn postgres_fleet(pool: &PgPool) -> Result<i32> {
+    Ok(
+        sqlx::query_scalar("SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE")
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs both node builds, PostgreSQL and a restate-server: `just phase-a` runs it"]
 async fn skipped_compatibility_release_refused() -> Result<()> {
@@ -42,11 +50,23 @@ async fn skipped_compatibility_release_refused() -> Result<()> {
     let scratch = tempfile::tempdir()?;
     let postgres = Case::postgres("skipped-postgres", &services, scratch.path())?;
     operator.run("migrate", None)?;
-    builds.n.probe(&postgres, None)?;
+    let pool = PgPool::connect(&services.postgres_url).await?;
+    // `lashctl migrate` seeds F (FIG-4075), so N+1 opening the freshly
+    // migrated store before any N reads F=1 and never records its own epoch:
+    // the rollback window stays open.
+    ensure!(
+        postgres_fleet(&pool).await? == 1,
+        "N's migrate did not seed F=1"
+    );
+    builds.next.probe(&postgres, None)?;
+    let fleet = postgres_fleet(&pool).await?;
+    ensure!(
+        fleet == 1,
+        "N+1's first open of a freshly migrated store left F={fleet}"
+    );
     // A compatibility build may open F=1; a build starting at F=2 must
     // refuse before it registers a deployment or handles a turn.
-    builds.next.probe(&postgres, None)?;
-    let pool = PgPool::connect(&services.postgres_url).await?;
+    builds.n.probe(&postgres, None)?;
     let skipped_f = VersionRange::between(2, 3);
     let error = PostgresStorage::from_pool_with_fleet_writable_range_for_testing(
         pool.clone(),
@@ -72,12 +92,34 @@ async fn skipped_compatibility_release_refused() -> Result<()> {
             min_reader: u32::try_from(min_reader)?,
         },
     )?;
-    let fleet: i32 =
-        sqlx::query_scalar("SELECT format_version FROM lash_fleet_format WHERE singleton = TRUE")
-            .fetch_one(&pool)
-            .await?;
+    let fleet = postgres_fleet(&pool).await?;
     ensure!(fleet == 1, "refused PostgreSQL open changed F to {fleet}");
     pool.close().await;
+
+    // SQLite migrates on open: N+1 provisioning a fresh store seeds its
+    // writable floor, F=1, in every database.
+    let sqlite_next = Case::sqlite("skipped-sqlite-next", &services, scratch.path())?;
+    builds.next.probe(&sqlite_next, None)?;
+    for database in [
+        SqliteDatabase::DurableCore,
+        SqliteDatabase::ProcessRegistry,
+        SqliteDatabase::Triggers,
+    ] {
+        let path = scratch
+            .path()
+            .join("skipped-sqlite-next/stores")
+            .join(database.file_name());
+        let fleet: i64 = rusqlite::Connection::open(&path)?.query_row(
+            "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        ensure!(
+            fleet == 1,
+            "N+1's first open provisioned {} at F={fleet}",
+            database.name()
+        );
+    }
 
     let sqlite = Case::sqlite("skipped-sqlite", &services, scratch.path())?;
     let root = scratch.path().join("skipped-sqlite/stores");

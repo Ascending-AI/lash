@@ -46,9 +46,10 @@ CREATE TABLE IF NOT EXISTS lash_migrations (
 );
 
 -- The durable-format generation every writer in the fleet emits (ADR 0106
--- §1 `F`). The first open provisions the row; later opens read the recorded
--- generation and keep writing it until `finalize-upgrade` (FIG-3800) moves it.
--- One row, like the other deployment-scoped singletons in this schema.
+-- §1 `F`). The installer seeds the row below; opens read the recorded
+-- generation, never record one, and keep writing it until `finalize-upgrade`
+-- (FIG-3800) moves it. One row, like the other deployment-scoped singletons in
+-- this schema.
 CREATE TABLE IF NOT EXISTS lash_fleet_format (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
     format_version INTEGER NOT NULL,
@@ -1133,12 +1134,19 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
     CONSTRAINT ck_catalog_identity_singleton CHECK (singleton)
 );
 
--- Seed rows. Every opened catalog requires them: the component version stamp, the
--- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
--- core PostgreSQL, so the identity needs no extension.
+-- Seed rows. Every opened catalog requires them: the component version stamp,
+-- the fleet epoch, the transactional clock rows, and the catalog identity.
+-- `gen_random_uuid()` is core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version, min_reader)
 VALUES ('lash-postgres-store', 1, 1)
 ON CONFLICT (component) DO NOTHING;
+
+-- The fleet epoch starts at the floor of the installing build's writable
+-- range, so a newer build never opens a fresh store outside the rollback
+-- window (ADR 0115 §2.1).
+INSERT INTO lash_fleet_format (singleton, format_version)
+VALUES (TRUE, 1)
+ON CONFLICT (singleton) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (
     singleton, current_seq, tombstone_compaction_horizon

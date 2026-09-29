@@ -2,14 +2,16 @@
 //!
 //! The row is the durable fact of ADR 0106 §1 `F`: the durable-format
 //! generation every writer in the fleet emits. What is certified here is the
-//! storage contract FIG-3796 establishes — the row exists after open, it reads
-//! back through the store API, and the store a writer holds reports the same
-//! value — not the finalize operation (FIG-3800) that will one day move it.
+//! storage contract FIG-3796 establishes — the installer seeds the row, it
+//! reads back through the store API, and the store a writer holds reports the
+//! same value — not the finalize operation (FIG-3800) that will one day move
+//! it.
 //!
 //! The law never asserts a *particular* format integer beyond
-//! [`lash_core::FLEET_FORMAT_VERSION`]: the constant the whole workspace
-//! shares, so the value the deployment records is exactly the value this build
-//! claims to write.
+//! [`lash_core::FleetFormat::seed`] of this build's writable range and
+//! [`lash_core::FLEET_FORMAT_VERSION`]: the values the whole workspace shares,
+//! so the value the deployment records is exactly the value this build claims
+//! to install and write.
 
 use async_trait::async_trait;
 
@@ -43,33 +45,24 @@ pub trait FleetFormatDeployment: Send + Sync {
 
 /// Certify the fleet-format row against one deployment.
 ///
-/// The deployment must be fresh: the first assertion is that a store nothing
-/// has opened records no fleet format — absence, not a zero and not a read
-/// failure.
+/// The deployment must be freshly installed: PostgreSQL provisioned from
+/// `schema.sql` or by `lashctl migrate`, SQLite not yet opened (its open-time
+/// migration is its installer). Either way no build has written `F` since the
+/// installer seeded it.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: every result is established by the deployment under test"
 )]
 pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
-    // An unopened store records no fleet format. Absence must read as absence:
-    // a host that cannot tell "no row" from "a row" cannot stage a rollout.
-    let before = deployment
-        .preflight()
-        .await
-        .expect("preflight reads an unopened deployment");
+    // The installer seeds `F` at the floor of the installing build's writable
+    // range (ADR 0115 §2.1) — the bootstrap or `lashctl migrate` on
+    // PostgreSQL, the open-time migration on SQLite — and the handle reports
+    // the value it read. An open never decides `F` on its own.
+    let seed = FleetFormat::seed(FleetFormat::writable());
+    let opened = deployment.open().await.expect("first open");
     assert_eq!(
-        before.fleet_format,
-        FleetFormatState::Unrecorded,
-        "a store nothing has opened records no fleet format"
-    );
-
-    // The first open writes the row — provisioned on PostgreSQL, finalized on
-    // open on SQLite — and the handle reports the value it recorded.
-    let opened = deployment.open().await.expect("first open provisions");
-    assert_eq!(
-        opened,
-        FleetFormat::current(),
-        "the opened store reports this build's fleet format"
+        opened, seed,
+        "the opened store reports the epoch the installer seeded"
     );
     let recorded = deployment
         .preflight()
@@ -78,7 +71,7 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
         .fleet_format;
     assert_eq!(
         recorded,
-        FleetFormatState::Recorded(FleetFormat::current()),
+        FleetFormatState::Recorded(seed),
         "the fleet-format row exists after open and reads back"
     );
 

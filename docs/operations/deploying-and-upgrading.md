@@ -71,6 +71,7 @@ An incompatible store may report a typed refusal:
 | `reader_floor_above` | A newer release contracted beyond this build. Roll forward; this build cannot read the store. |
 | `shape_refused` | An addition would change how this build writes an expected table. Stop the roll and correct the migration. |
 | `fleet_outside_writable` | The recorded `F` is outside this build's writable range. Below it means a skipped release; above it means the fleet has advanced. Use the intervening or newer build as appropriate. |
+| `fleet_unrecorded` | The PostgreSQL store records no `F`. `lashctl migrate` seeds it and a worker open never records one. Run `lashctl migrate`, then open again. |
 | `partially_advanced` | The three SQLite databases disagree after a partial migration. Reopen with a build able to complete the set forward. |
 | `unknown_vocabulary` | A stored kind or state is unknown to this build. Keep the record and route to a build that understands it. |
 
@@ -93,6 +94,13 @@ state while investigating either refusal.
 
    Expand may add only shapes N can tolerate and must retain N's reader floor.
    It does not move `F`. Check the result and stop on any refusal.
+
+   Every `migrate` run also seeds `F` when the store records none, at the
+   floor of the migrating build's writable range, and never changes a recorded
+   `F`. A fresh store therefore starts at the older release's epoch even when
+   N+1 migrates or opens it first. Workers never record `F`, so a store that
+   no `migrate` seeded refuses them with `fleet_unrecorded`. Each SQLite
+   database seeds `F` the same way when its open-time migration provisions it.
 
 2. Run the new build's preflight again, and verify the old build still admits
    the expanded store. Start N+1 workers beside N at a new Restate endpoint

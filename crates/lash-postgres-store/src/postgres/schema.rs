@@ -184,11 +184,11 @@ pub(crate) async fn ensure_schema(
     crate::release_stamp::write(&mut tx)
         .await
         .map_err(store_sqlx_error)?;
-    // The same admitted open reads the fleet-format row — provisioning it on
-    // the first open ever — so the storage handle carries the value durable
-    // writers consult rather than a build constant. A recorded generation this
-    // build cannot write is refused here, inside the transaction, so nothing
-    // half-opens.
+    // The same admitted open reads the fleet-format row `lash migrate` seeded,
+    // so the storage handle carries the value durable writers consult rather
+    // than a build constant. An absent row, or a recorded generation this
+    // build cannot write, is refused here, inside the transaction, so nothing
+    // half-opens and the release stamp above rolls back with it.
     let fleet_format = crate::fleet_format::admit(&mut tx, writable).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok((catalog_id, fleet_format))

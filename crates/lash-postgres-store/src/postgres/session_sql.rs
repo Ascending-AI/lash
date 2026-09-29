@@ -735,27 +735,15 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `fleet_format` statements. A shared store *provisions* the row rather
-    /// than finalizing it on open the way the SQLite twin does: the first
-    /// opener inserts this build's fleet format, every later open reads the
-    /// recorded generation, and only `finalize-upgrade` (FIG-3800) ever moves
-    /// it (ADR 0106 §1).
+    /// `fleet_format` statements. The installer seeds the row, every open
+    /// reads the recorded generation, and only `finalize-upgrade` (FIG-3800)
+    /// ever moves it (ADR 0106 §1, ADR 0115 §2.1).
     pub(crate) struct FleetFormatStatements @ "fleet_format" {
-        /// Asked for, never discovered by a refused write inside the
-        /// admitting transaction — the reason the release-stamp twin exists.
-        /// The `lash_` prefix is spelled for the same reason too: the
-        /// catalog functions take the relation as *text*, which the
-        /// renderer's token rewriter cannot reach.
-        select_is_writable = "SELECT CASE
-                  WHEN to_regclass('lash_fleet_format') IS NULL THEN FALSE
-                  ELSE has_table_privilege('lash_fleet_format', 'INSERT')
-                END";
-
         /// The recorded fleet format.
         select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = TRUE";
 
-        /// Provision only: a later open never overwrites the fleet's recorded
-        /// generation — moving the row is the finalize operation's job alone.
+        /// `lash migrate`'s seed: a recorded generation is never overwritten
+        /// — moving the row is the finalize operation's job alone.
         insert_if_absent = "INSERT INTO fleet_format (
              singleton, format_version
          ) VALUES (TRUE, ?1)

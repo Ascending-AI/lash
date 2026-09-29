@@ -250,6 +250,92 @@ async fn a_migrate_rerun_is_a_no_op() {
     drop_scratch_schema(&database_url, &schema).await;
 }
 
+/// The fleet epoch the scratch schema records, or `None` without a row.
+async fn recorded_fleet_epoch(url: &str) -> Option<i32> {
+    let mut connection = PgConnection::connect(url)
+        .await
+        .expect("connect fleet-epoch inspector");
+    let epoch = sqlx::query_scalar("SELECT format_version FROM lash_fleet_format WHERE singleton")
+        .fetch_optional(&mut connection)
+        .await
+        .expect("read the fleet epoch");
+    connection
+        .close()
+        .await
+        .expect("close fleet-epoch inspector");
+    epoch
+}
+
+/// `lash migrate` seeds `F` at the migrating build's writable floor, and an
+/// open never records it (FIG-4075, ADR 0115 §2.1): a store with no epoch
+/// refuses typed and stays unrecorded, and a migrate rerun seeds it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn migrate_seeds_the_fleet_epoch_and_an_open_never_records_one() {
+    let Some(database_url) = support::database_url() else {
+        eprintln!("skipping migrate proof: LASH_POSTGRES_DATABASE_URL is not set");
+        return;
+    };
+    let schema = create_scratch_schema(&database_url).await;
+    let url = scratch_url(&database_url, &schema);
+    let seed = lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable());
+    let seeded = i32::try_from(seed.version()).expect("epoch fits");
+
+    PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("migrate a fresh schema");
+    assert_eq!(
+        recorded_fleet_epoch(&url).await,
+        Some(seeded),
+        "a fresh migrate seeds F before any open"
+    );
+
+    // A catalog a build predating the seed migrated: the open refuses and
+    // decides nothing.
+    let mut admin = PgConnection::connect(&url).await.expect("connect scratch");
+    sqlx::query("DELETE FROM lash_fleet_format")
+        .execute(&mut admin)
+        .await
+        .expect("drop the fleet epoch");
+    admin.close().await.expect("close scratch");
+    let refused = PostgresStorage::connect(&url)
+        .await
+        .err()
+        .expect("an open with no recorded F must refuse");
+    assert!(
+        matches!(
+            &refused,
+            lash_core_execution::StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::FleetUnrecorded { component }
+            } if component == "postgres"
+        ),
+        "the refusal is typed: {refused}"
+    );
+    assert_eq!(
+        recorded_fleet_epoch(&url).await,
+        None,
+        "a refused open records no F"
+    );
+
+    let rerun = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("rerun migrate");
+    assert!(
+        rerun.executed.is_empty(),
+        "the rerun applies no step: {rerun:?}"
+    );
+    assert_eq!(
+        recorded_fleet_epoch(&url).await,
+        Some(seeded),
+        "a migrate rerun seeds a catalog that records no F"
+    );
+    let storage = PostgresStorage::connect(&url)
+        .await
+        .expect("the seeded catalog opens");
+    assert_eq!(storage.fleet_format(), seed);
+    storage.pool().close().await;
+    drop_scratch_schema(&database_url, &schema).await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_dry_run_reports_the_plan_and_changes_nothing() {
     let Some(database_url) = support::database_url() else {

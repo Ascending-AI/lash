@@ -100,7 +100,7 @@ pub async fn reset(pool: &PgPool) {
         "SELECT tablename FROM pg_tables
          WHERE schemaname = 'public'
            AND tablename LIKE 'lash\\_%'
-           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity',
+           AND tablename NOT IN ('lash_schema_versions', 'lash_catalog_identity', 'lash_fleet_format',
                                  'lash_migrations')
          ORDER BY tablename",
     )

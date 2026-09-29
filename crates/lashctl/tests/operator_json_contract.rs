@@ -152,6 +152,12 @@ async fn operator_json_contract_postgres() {
     assert_eq!(preflight["result"]["databases"][0]["expected"], 1);
     assert_eq!(preflight["result"]["databases"][0]["min_reader"], 1);
     assert_eq!(preflight["result"]["databases"][0]["verdict"], "matches");
+    // `migrate` seeded the fleet epoch before any worker opened the store
+    // (FIG-4075), so no first opener decides it.
+    assert_eq!(
+        preflight["result"]["fleet_format"],
+        json!({"state":"recorded","version":1})
+    );
 
     let (code, empty_version) = run(&["version", "--json"], Some(&scratch_url));
     assert_eq!(code, 0);

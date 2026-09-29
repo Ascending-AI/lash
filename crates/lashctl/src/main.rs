@@ -547,6 +547,27 @@ mod tests {
         );
     }
 
+    /// A store `lashctl migrate` never seeded refuses every opening command
+    /// as incompatible, and the refusal names the remedy (FIG-4075).
+    #[test]
+    fn a_store_without_a_fleet_epoch_is_refused_toward_migrate() {
+        let error = CliError::store(StoreError::Incompatible {
+            refusal: CompatRefusal::FleetUnrecorded {
+                component: "postgres".to_string(),
+            },
+        });
+        assert_eq!(error.exit as u8, 4);
+        assert_eq!(
+            error_json(&error)["refusal"],
+            json!({"refusal":"fleet_unrecorded","component":"postgres"})
+        );
+        assert!(
+            error.message.contains("run `lashctl migrate`"),
+            "{}",
+            error.message
+        );
+    }
+
     #[test]
     fn a_stalled_obligation_lists_its_identity_and_typed_reason() {
         use lash_core_store::store::{KeyColumn, ObligationId, StallReason, UndecodableObligation};

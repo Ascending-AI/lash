@@ -1823,7 +1823,7 @@ fn apply_versioned_schema_tx_with_writable(
     match admission {
         lash_core_execution::compat::CompatAdmission::Provision => {
             apply_schema(tx)?;
-            crate::compat::provision(tx, database)?;
+            crate::compat::provision(tx, database, writable)?;
         }
         lash_core_execution::compat::CompatAdmission::Native => {
             #[cfg(feature = "synthetic-next")]
@@ -1908,6 +1908,43 @@ mod compat_tests {
                 )
                 .expect("expand catalog");
             provision(&mut connection, database);
+        }
+    }
+
+    /// The open-time migration seeds `F` at the opening build's writable
+    /// floor, never its own epoch: a compatibility release (`[1, 2]`)
+    /// provisioning a fresh database records 1, a build writing `[2, 3]`
+    /// records 2, and a reopen leaves the recorded epoch alone (ADR 0115
+    /// §2.1).
+    #[test]
+    fn sqlite_provisioning_seeds_the_opening_build_s_fleet_floor() {
+        use lash_core_execution::compat::VersionRange;
+        for database in SqliteDatabase::ALL {
+            for writable in [VersionRange::between(1, 2), VersionRange::between(2, 3)] {
+                let mut connection = Connection::open_in_memory().expect("open database");
+                for _ in 0..2 {
+                    connection
+                        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                        .and_then(|tx| {
+                            apply_versioned_schema_tx_with_writable(&tx, database, writable)?;
+                            tx.commit()
+                        })
+                        .expect("open SQLite database");
+                    let fleet: u32 = connection
+                        .query_row(
+                            "SELECT fleet_format FROM lash_compat WHERE singleton = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .expect("read the seeded epoch");
+                    assert_eq!(
+                        fleet,
+                        writable.min(),
+                        "{} under {writable} seeded F={fleet}",
+                        database.name()
+                    );
+                }
+            }
         }
     }
 

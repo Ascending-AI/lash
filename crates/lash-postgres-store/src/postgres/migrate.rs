@@ -714,6 +714,29 @@ async fn apply_synthetic_expand(
     }))
 }
 
+/// Seeds `F` at this build's [`FleetFormat::seed`] when the store records
+/// none (ADR 0115 §2.1), still under the exclusive advisory lock.
+///
+/// The installer owns the fleet epoch and an open never records it: were the
+/// first opener to decide it, an N+1 that opened a freshly migrated store
+/// before any N would record its own epoch and skip the rollback window. The
+/// bootstrap's seed rows already carry it; this also covers every run on an
+/// installed catalog, including a rerun against one that a build predating
+/// the seed migrated. A recorded epoch is left alone.
+///
+/// [`FleetFormat::seed`]: lash_core_execution::FleetFormat::seed
+async fn seed_fleet_format(connection: &mut sqlx::PgConnection) -> Result<(), StoreError> {
+    let mut tx = sqlx::Connection::begin(&mut *connection)
+        .await
+        .map_err(store_sqlx_error)?;
+    crate::fleet_format::seed(
+        &mut tx,
+        lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable()),
+    )
+    .await?;
+    tx.commit().await.map_err(store_sqlx_error)
+}
+
 fn report(state: &MigrationState, executed: Vec<MigrationStep>) -> MigrationReport {
     MigrationReport {
         namespace: state
@@ -841,6 +864,7 @@ pub(crate) async fn migrate_on(
         if let Some(step) = apply_synthetic_expand(&mut connection).await? {
             executed.push(step);
         }
+        seed_fleet_format(&mut connection).await?;
         // A run that changed the catalog proves it before releasing the lock:
         // the structural check is the same one an open would run, so a
         // migrated database that cannot open fails here, not at the first
@@ -937,6 +961,22 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The bootstrap and a host applying `schema.sql` seed the same `F` that
+    /// [`seed_fleet_format`] seeds on an installed catalog: the migrating
+    /// build's writable floor (ADR 0115 §2.1).
+    #[test]
+    fn the_schema_artifact_seeds_the_migrating_build_s_fleet_epoch() {
+        let seed =
+            lash_core_execution::FleetFormat::seed(lash_core_execution::FleetFormat::writable());
+        let statement = format!(
+            "INSERT INTO lash_fleet_format (singleton, format_version)\nVALUES (TRUE, {seed})\nON CONFLICT (singleton) DO NOTHING;"
+        );
+        assert!(
+            SCHEMA_DDL.contains(&statement),
+            "schema.sql must seed lash_fleet_format at F={seed}"
+        );
     }
 
     /// A step that alters tables before it creates any still creates each

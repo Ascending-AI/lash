@@ -228,7 +228,16 @@ pub(crate) fn finalize(
 
 /// Only the installer writes the row. An existing row is never changed by an
 /// ordinary open, including an open by an older build after expand.
-pub(crate) fn provision(tx: &Transaction<'_>, database: SqliteDatabase) -> rusqlite::Result<()> {
+///
+/// `F` starts at [`FleetFormat::seed`] of the provisioning build's writable
+/// range `writable`, its floor: a compatibility release that provisions a
+/// database leaves it inside the rollback window, and only finalize moves `F`
+/// (ADR 0115 §2.1).
+pub(crate) fn provision(
+    tx: &Transaction<'_>,
+    database: SqliteDatabase,
+    writable: VersionRange,
+) -> rusqlite::Result<()> {
     let descriptor = compat::descriptor(database.component())
         .ok_or_else(|| malformed(database, "the build has no descriptor for this database"))?;
     tx.execute(
@@ -238,7 +247,7 @@ pub(crate) fn provision(tx: &Transaction<'_>, database: SqliteDatabase) -> rusql
             descriptor.component.as_str(),
             descriptor.writes.max(),
             descriptor.reads.min(),
-            lash_core_execution::FLEET_FORMAT_VERSION,
+            FleetFormat::seed(writable).version(),
         ],
     )?;
     Ok(())

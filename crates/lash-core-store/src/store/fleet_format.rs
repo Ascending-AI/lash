@@ -2,7 +2,7 @@
 //! durable-format generation every writer in the fleet emits.
 //!
 //! `F` is deployment state, not a build constant: the store carries one row
-//! recording it, the schema-open transaction seeds it, and every durable
+//! recording it, the installer seeds it, and every durable
 //! writer consults the value the store reports rather than a version it baked
 //! in. Until the first format upgrade the answer is always
 //! [`FLEET_FORMAT_VERSION`] — the row's presence is what matters now, because
@@ -80,7 +80,9 @@ pub struct WriterPin {
 }
 
 impl FleetFormat {
-    /// The fleet format an unrecorded store takes at open: this build's own.
+    /// This build's own epoch, `F_self`: what a store with no fleet-format
+    /// row to read (an in-memory fake, a test store) reports. A durable store
+    /// never takes it at open; its installer seeds [`Self::seed`].
     pub const fn current() -> Self {
         Self {
             version: FLEET_FORMAT_VERSION,
@@ -116,6 +118,41 @@ impl FleetFormat {
     /// (ADR 0115 §2.1).
     pub const fn writable() -> VersionRange {
         FLEET_WRITABLE_RANGE
+    }
+
+    /// The epoch an installer records in a store that has none, for a build
+    /// writing under `writable`: the range's floor, `F_prev` (ADR 0115 §2.1).
+    ///
+    /// Only finalize moves `F` to `F_self`, so a store provisioned by a
+    /// compatibility release still starts inside the rollback window: the
+    /// release before it reads everything written there. For 1.0 the floor is
+    /// the one epoch it introduces. `lashctl migrate` seeds PostgreSQL with
+    /// it; each SQLite database records it when its open-time migration
+    /// provisions the database.
+    pub const fn seed(writable: VersionRange) -> Self {
+        Self::from_version(writable.min())
+    }
+
+    /// The epoch a store records, required present and admitted at open
+    /// against `writable` (ADR 0115 §2.1).
+    ///
+    /// An open never records `F`: the installer seeds it. A store `component`
+    /// with no recorded epoch refuses with [`CompatRefusal::FleetUnrecorded`]
+    /// rather than deciding the fleet's epoch from whichever build opened it
+    /// first; a recorded one goes through [`Self::admit`].
+    pub fn admit_recorded(
+        component: &str,
+        recorded: Option<u32>,
+        writable: VersionRange,
+    ) -> Result<Self, StoreError> {
+        match recorded {
+            Some(recorded) => Self::admit(recorded, writable),
+            None => Err(StoreError::Incompatible {
+                refusal: CompatRefusal::FleetUnrecorded {
+                    component: component.to_owned(),
+                },
+            }),
+        }
     }
 
     /// The epoch a store records, admitted at open against the writable
@@ -734,6 +771,35 @@ mod tests {
             panic!("F 4 outside {writable} must fence the writer");
         };
         assert_eq!((recorded, w), (4, writable));
+    }
+
+    #[test]
+    fn an_installer_seeds_the_writable_floor_and_an_open_requires_it() {
+        // The seed is `F_prev`, so a compatibility release provisioning a
+        // store leaves it inside the rollback window.
+        assert_eq!(FleetFormat::seed(FLEET_WRITABLE_RANGE).version(), 1);
+        let compatibility = VersionRange::between(1, 2);
+        assert_eq!(FleetFormat::seed(compatibility).version(), 1);
+
+        assert_eq!(
+            FleetFormat::admit_recorded("postgres", Some(1), compatibility)
+                .expect("recorded")
+                .version(),
+            1
+        );
+        let Err(StoreError::Incompatible {
+            refusal: CompatRefusal::FleetUnrecorded { component },
+        }) = FleetFormat::admit_recorded("postgres", None, compatibility)
+        else {
+            panic!("a store with no recorded F must refuse at open");
+        };
+        assert_eq!(component, "postgres");
+        assert!(matches!(
+            FleetFormat::admit_recorded("postgres", Some(3), compatibility),
+            Err(StoreError::Incompatible {
+                refusal: CompatRefusal::FleetOutsideWritable { recorded: 3, .. }
+            })
+        ));
     }
 
     #[test]

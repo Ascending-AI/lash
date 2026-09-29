@@ -629,6 +629,11 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // sealed stopped partials (ADR 0114, FIG-433, changed in place under the
 // version freeze). A catalog provisioned before them fails the open-time
 // shape check; recreate it.
+//
+// Version 141 also seeds the `lash_fleet_format` row among `schema.sql`'s seed
+// rows, and `lash migrate` seeds it on every run (FIG-4075, changed in place
+// under the version freeze): an open reads `F` and never records it, so a
+// catalog without the row refuses `fleet_unrecorded` until migrate runs.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
@@ -971,7 +976,10 @@ impl PostgresStorage {
             .ok_or_else(crate::schema::missing_catalog_identity_error)?;
         let fleet_format = match crate::fleet_format::read(&pool).await {
             lash_core_execution::FleetFormatState::Recorded(format) => format,
-            _ => lash_core_execution::FleetFormat::current(),
+            lash_core_execution::FleetFormatState::Unreadable { reason } => {
+                return Err(StoreError::Backend(reason));
+            }
+            _ => crate::fleet_format::unrecorded(lash_core_execution::FleetFormat::writable())?,
         };
         Ok(Self {
             pool,

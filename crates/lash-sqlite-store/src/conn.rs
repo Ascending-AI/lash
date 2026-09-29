@@ -867,7 +867,11 @@ mod tests {
                          )",
                 )?;
                 if crate::compat::read(tx, SqliteDatabase::DurableCore)?.is_none() {
-                    crate::compat::provision(tx, SqliteDatabase::DurableCore)?;
+                    crate::compat::provision(
+                        tx,
+                        SqliteDatabase::DurableCore,
+                        FleetFormat::writable(),
+                    )?;
                 }
                 Ok(FleetFormat::current())
             })

@@ -253,6 +253,14 @@ pub enum CompatRefusal {
         recorded: u32,
         writable: VersionRange,
     },
+    /// `F` at open: the store records no fleet epoch. The installer seeds it
+    /// and an open never does, so no build decides `F` by opening first.
+    #[error(
+        "{component} records no fleet epoch: `lashctl migrate` seeds it when it provisions or \
+         advances the store, and an open never records one. The store is refused unchanged; \
+         run `lashctl migrate`, then open again"
+    )]
+    FleetUnrecorded { component: String },
     /// The SQLite databases of one store disagree on their stamps or `F`.
     #[error(
         "the store's databases disagree on their stamps ({}): a migration or finalize stopped \

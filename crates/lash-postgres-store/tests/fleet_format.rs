@@ -70,8 +70,8 @@ async fn postgres_fleet_format_conformance() {
         eprintln!("skipping fleet format conformance: database URL is not set");
         return;
     };
-    // The committed DDL creates `lash_fleet_format` and seeds no row, so a
-    // host-provisioned schema starts unrecorded — the law's first
+    // The committed DDL creates `lash_fleet_format` and seeds its row, so a
+    // host-provisioned schema is a freshly installed deployment — the law's
     // precondition.
     let deployment = PostgresDeployment {
         scratch: ScratchSchema::provision(&database_url).await,
@@ -136,12 +136,12 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
-    // Record `F` once through an ordinary writable open so the read arm has a
-    // row to read.
+    // `schema.sql` seeded `F`; an ordinary writable open first, as a
+    // deployment's workers would.
     scratch
         .open_host_provisioned(SchemaCheck::Enforce)
         .await
-        .expect("first open records the fleet format");
+        .expect("first open reads the seeded fleet format");
 
     let role = format!(
         "lash_ro_{}",
