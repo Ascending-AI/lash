@@ -15,7 +15,7 @@ use lash_core_execution::{
     FleetFormat, FleetFormatState, StorePreflight, StoreReleaseState, StoreSchemaOutcome,
     StoreSchemaVerdict,
 };
-use lash_postgres_store::{PostgresStorage, PostgresStorePreflight, SchemaCheck};
+use lash_postgres_store::{MigrationPhase, PostgresStorage, PostgresStorePreflight, SchemaCheck};
 
 #[allow(dead_code)]
 mod support;
@@ -27,6 +27,152 @@ use support::database_url;
 mod harness;
 
 use harness::ScratchSchema;
+
+#[test]
+fn synthetic_feature_selects_the_owning_compatibility_descriptor() {
+    use lash_core_execution::compat::{ComponentId, VersionRange, descriptor};
+
+    let descriptor = descriptor(ComponentId::POSTGRES).expect("PostgreSQL descriptor");
+    let next = if cfg!(feature = "synthetic-next") {
+        2
+    } else {
+        1
+    };
+    assert_eq!(descriptor.reads, VersionRange::between(1, next));
+    assert_eq!(descriptor.writes, VersionRange::exactly(next));
+}
+
+#[tokio::test]
+async fn stamp_one_preflight_open_and_migrate_agree() {
+    let Some(database_url) = database_url() else {
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
+    let before = preflight.schema_status().await.expect("stamp-1 status");
+    assert_eq!(before.databases[0].verdict, StoreSchemaVerdict::Matches);
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("stamp 1 opens before migration");
+    let stamp: (i32, i32) = sqlx::query_as("SELECT version, min_reader FROM lash_schema_versions")
+        .fetch_one(&scratch.pool)
+        .await
+        .expect("read stamp after preflight and open");
+    assert_eq!(stamp, (1, 1), "preflight and open do not migrate");
+
+    let separator = if database_url.contains('?') { '&' } else { '?' };
+    let url = format!(
+        "{database_url}{separator}options=-csearch_path%3D{}",
+        scratch.name
+    );
+    let migrated = PostgresStorage::migrate(&url, MigrationPhase::Expand)
+        .await
+        .expect("migrate the accepted stamp-1 catalog");
+    assert_eq!(
+        migrated.executed.len(),
+        usize::from(cfg!(feature = "synthetic-next"))
+    );
+    let stamp: (i32, i32) = sqlx::query_as("SELECT version, min_reader FROM lash_schema_versions")
+        .fetch_one(&scratch.pool)
+        .await
+        .expect("read migrated stamp");
+    let expected = if cfg!(feature = "synthetic-next") {
+        2
+    } else {
+        1
+    };
+    assert_eq!(stamp, (expected, 1));
+    let after = preflight.schema_status().await.expect("migrated status");
+    assert_eq!(after.databases[0].verdict, StoreSchemaVerdict::Matches);
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("the migrated catalog opens");
+    assert!(
+        PostgresStorage::migrate(&url, MigrationPhase::Expand)
+            .await
+            .expect("migration rerun")
+            .executed
+            .is_empty()
+    );
+    scratch.cleanup().await;
+}
+
+#[tokio::test]
+async fn stamp_two_preflight_and_open_agree_on_synthetic_shape() {
+    let Some(database_url) = database_url() else {
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    scratch
+        .apply(
+            "UPDATE lash_schema_versions SET version = 2, min_reader = 1;
+             ALTER TABLE lash_sessions ADD COLUMN synthetic_next_note TEXT;
+             CREATE TABLE lash_synthetic_next (id BIGSERIAL PRIMARY KEY, note TEXT);
+             CREATE INDEX idx_lash_synthetic_next_note ON lash_synthetic_next(note)",
+        )
+        .await;
+    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
+    let expected = if cfg!(feature = "synthetic-next") {
+        StoreSchemaVerdict::Matches
+    } else {
+        StoreSchemaVerdict::Expanded { found: 2 }
+    };
+    assert_eq!(
+        preflight
+            .schema_status()
+            .await
+            .expect("stamp-2 status")
+            .databases[0]
+            .verdict,
+        expected
+    );
+    scratch
+        .open_host_provisioned(SchemaCheck::Enforce)
+        .await
+        .expect("the complete stamp-2 catalog opens");
+    for (mutation, missing) in [
+        (
+            "ALTER TABLE lash_sessions DROP COLUMN synthetic_next_note",
+            "missing nullable lash_sessions.synthetic_next_note",
+        ),
+        (
+            "DROP INDEX idx_lash_synthetic_next_note",
+            "missing non-unique index idx_lash_synthetic_next_note",
+        ),
+        (
+            "DROP TABLE lash_synthetic_next",
+            "missing table lash_synthetic_next",
+        ),
+    ] {
+        scratch.apply(mutation).await;
+        let status = preflight
+            .schema_status()
+            .await
+            .expect("incomplete stamp-2 status");
+        let open = scratch.open_host_provisioned(SchemaCheck::Enforce).await;
+        if cfg!(feature = "synthetic-next") {
+            assert!(
+                matches!(
+                    &status.databases[0].verdict,
+                    StoreSchemaVerdict::Refused {
+                        refusal: lash_core_execution::compat::CompatRefusal::ShapeRefused { findings, .. }
+                    } if findings.iter().any(|finding| finding.contains(missing))
+                ),
+                "the synthetic generation requires {missing}: {status:?}"
+            );
+            let error = open
+                .err()
+                .expect("an incomplete synthetic generation must not open");
+            assert!(error.to_string().contains(missing), "{error}");
+        } else {
+            assert_eq!(status.databases[0].verdict, expected);
+            open.expect("the current generation tolerates missing next-generation objects");
+        }
+    }
+    scratch.cleanup().await;
+}
 
 /// A schema carrying every lash table but no version stamp is refused at open
 /// (`unstamped_schema`), so the preflight has to refuse it too. Reporting it as
@@ -522,10 +668,7 @@ async fn status_preserves_expanded_and_synthetic_policy_without_writes() {
         .schema_status()
         .await
         .expect("read next-build status");
-    let descriptor =
-        lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
-            .expect("PostgreSQL declares its compatibility descriptor");
-    let native_next = cfg!(feature = "synthetic-next") && descriptor.writes.max() == 2;
+    let native_next = cfg!(feature = "synthetic-next");
     if native_next {
         assert_eq!(synthetic.databases[0].verdict, StoreSchemaVerdict::Matches);
     } else {
