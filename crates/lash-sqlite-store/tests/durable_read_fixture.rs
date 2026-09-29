@@ -11,12 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use lash_core_execution::{
-    ProcessContinuationStore, ProcessExecutionEnvStore, RuntimePersistence, SessionStoreFactory,
-    TriggerStore,
+    DeploymentStore, ProcessContinuationStore, ProcessExecutionEnvStore, TriggerStore,
 };
-use lash_sqlite_store::{
-    SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteStore, SqliteTriggerStore,
-};
+use lash_sqlite_store::{SqliteProcessRegistry, SqliteStore, SqliteTriggerStore};
 use serde::{Deserialize, Serialize};
 
 #[path = "../../lash-core/tests/support/durable_read_fixture.rs"]
@@ -223,14 +220,9 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
         .expect("open SQLite trigger fixture")
         .with_incarnation_for_testing("durable-read-trigger-incarnation"),
     );
-    let session_factory = Arc::new(
-        SqliteSessionStoreFactory::new(root)
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
-    );
     fixture::FixtureHandles {
         clock: Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-        runtime: Arc::clone(&runtime) as Arc<dyn RuntimePersistence>,
-        session_factory: session_factory as Arc<dyn SessionStoreFactory>,
+        store: Arc::clone(&runtime) as Arc<dyn DeploymentStore>,
         processes: Arc::clone(&processes)
             as Arc<dyn lash_core_execution::ConformanceProcessRegistry>,
         continuations: processes as Arc<dyn ProcessContinuationStore>,
