@@ -12,8 +12,8 @@
 //! over the tier's host and stores per execution, a scripted model and the
 //! probe tools below, which record the identity each attempt saw.
 //!
-//! What a law reads as "the identity" is [`AttemptIdentity`], taken in one
-//! place ([`AttemptIdentity::of`]), so the cutover to a lash-minted call id
+//! What a law reads as "the identity" is `AttemptIdentity`, taken in one
+//! place (`AttemptIdentity::of`), so the cutover to a lash-minted call id
 //! (FIG-4080) changes one function and no law.
 
 use std::sync::Arc;
@@ -253,7 +253,7 @@ fn probe_definition(name: &str) -> crate::ToolDefinition {
     .with_retry_policy(crate::ToolRetryPolicy::safe(3, 1, 1))
 }
 
-/// The probe tools: [`PROBE`] and [`DEFERRED`].
+/// The probe tools: [`PROBE`], [`DEFERRED`] and [`DRIFTING`].
 struct IdentityProbes {
     witness: Arc<Witness>,
     effect_host: Arc<dyn crate::EffectHost>,
@@ -466,7 +466,7 @@ pub(crate) struct World {
     /// What the model answers in each segment it is asked in: the text that
     /// opens the segment (a turn's input, a follow-on frame's task) and the
     /// answers, in order.
-    scripts: Arc<std::sync::Mutex<Vec<(String, Arc<Vec<crate::LlmResponse>>)>>>,
+    scripts: Arc<std::sync::Mutex<Vec<Script>>>,
     protocol: Protocol,
     /// The process registry the session starts processes in.
     process_registry: Option<Arc<dyn crate::ProcessRegistry>>,
@@ -492,6 +492,10 @@ struct WorldProcesses {
     registry: Arc<dyn crate::ProcessRegistry>,
     wiring: crate::ProcessWorkWiring,
 }
+
+/// The text that opens a segment of the conversation, and the model's
+/// answers in it, in order.
+type Script = (String, Arc<Vec<crate::LlmResponse>>);
 
 /// What the model answers in a segment no script opens: a compaction's
 /// summary request.
