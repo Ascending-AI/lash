@@ -458,39 +458,6 @@ pub fn rederive_tool_intent_identity(identity: &ToolIntentIdentity) -> ToolInten
     )
 }
 
-pub(crate) fn derive_legacy_tool_intent_v1_replay_key(identity: &ToolIntentIdentity) -> String {
-    let mut encoder = crate::stable_identity::IdentityEncoder::new("lash.tool-intent", 1);
-    encoder.string(&identity.session_id);
-    encoder.string(&identity.execution_scope_id);
-    encoder.string(identity.tool_call_id.as_str());
-    encoder.u32(identity.intent_index);
-    crate::stable_identity::rendered_hash("tool-intent", 1, &encoder.finish())
-}
-
-pub(crate) fn has_v2_tool_intent_replay_key(identity: &ToolIntentIdentity) -> bool {
-    let Some(hash) = identity.replay_key.strip_prefix("tool-intent:v2:blake3:") else {
-        return false;
-    };
-    hash.len() == 64
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-}
-
-pub fn legacy_tool_intent_v1_lookup_key(
-    invocation: &crate::RuntimeEffectInvocation,
-) -> Option<String> {
-    let crate::RuntimeReplayAttribution::ToolIntent(identity) =
-        invocation.replay_attribution.as_ref()?;
-    if !has_v2_tool_intent_replay_key(identity) {
-        return None;
-    }
-    let legacy_identity = derive_legacy_tool_intent_v1_replay_key(identity);
-    let replay_key = invocation.effect_replay_key();
-    let legacy_lookup = replay_key.replace(&identity.replay_key, &legacy_identity);
-    (legacy_lookup != replay_key).then_some(legacy_lookup)
-}
-
 /// A completed leaf-provider value. Unlike [`crate::ToolOutcome`], this type has
 /// no deferred variant, so a completed result can be paired with intents
 /// without making `Pending + intents` representable.
