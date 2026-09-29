@@ -160,6 +160,11 @@ pub struct AttemptContext<'run> {
     /// running inside one, and the child takes the declaring session's own.
     process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
     process_lineage: Option<crate::ProcessLineage>,
+    /// The execution-environment reference this attempt inherits from the
+    /// durable process it runs inside — already published under a durable
+    /// owner, so a declaration carrying it publishes nothing at realization.
+    /// `None` outside a process execution, where the spec must be published.
+    inherited_process_execution_env_ref: Option<crate::ProcessExecutionEnvRef>,
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
@@ -227,6 +232,10 @@ impl<'run> AttemptContext<'run> {
                 .as_ref()
                 .and_then(|runtime| runtime.process_spawn_provenance()),
             process_lineage: context.process_lineage(),
+            inherited_process_execution_env_ref: context
+                .runtime_execution_context
+                .as_ref()
+                .and_then(|runtime| runtime.inherited_process_execution_env_ref()),
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
@@ -332,6 +341,14 @@ impl<'run> AttemptContext<'run> {
     /// rebuilding it from mutable host state.
     pub fn process_execution_env_spec(&self) -> crate::ProcessExecutionEnvSpec {
         self.execution_env_spec.clone()
+    }
+    /// The execution-environment reference this attempt inherits when it runs
+    /// inside a durable process (FIG-3116): a registration declaring that env
+    /// needs no publication because the reference already names durable bytes.
+    /// `None` means the declaration's env must be published from
+    /// [`Self::process_execution_env_spec`] at realization.
+    pub fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+        self.inherited_process_execution_env_ref.clone()
     }
     /// Integrator class 3 decode of the sealed payload into a provider-owned type.
     pub fn decode_prepared_payload<T>(&self) -> Result<T, serde_json::Error>

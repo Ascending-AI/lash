@@ -1568,11 +1568,14 @@ pub(super) async fn execute_with_host_environment(
         .open_handler(crate::testing::default_cell_scope())
         .await
         .expect("open the cell's handler");
-    let ctx = lash_core::testing::code_execution_context_with_trigger_store(
+    let artifact_store = crate::testing::fresh_memory_artifact_store().await;
+    let ctx = super::triggers::trigger_tool_context(
         crate::testing::double_ports(&double, &handler),
         crate::testing::memory_trigger_store().await,
-        crate::testing::memory_process_registry().await,
-    );
+        &artifact_store,
+        None,
+    )
+    .await;
     let surface = LashlangSurface::new(
         abilities,
         lashlang::LashlangLanguageFeatures::default(),
@@ -1584,7 +1587,7 @@ pub(super) async fn execute_with_host_environment(
         ExecRequest {
             code: code.to_string(),
         },
-        crate::testing::fresh_memory_artifact_store().await,
+        artifact_store,
         surface,
         None,
         RlmProjectedBindings::default(),

@@ -58,11 +58,18 @@ impl<'module> Linker<'module> {
         scope: &mut Scope,
     ) -> Result<(Vec<Expr>, TypeExpr), LinkError> {
         match operation {
-            crate::TriggerHostOperation::Register
-            | crate::TriggerHostOperation::Update
-            | crate::TriggerHostOperation::Revive => {
-                self.lower_trigger_registration_args(operation, args, call_path, scope)
-            }
+            crate::TriggerHostOperation::Update => self.lower_trigger_registration_args(
+                TriggerRegistrationOperation::Update,
+                args,
+                call_path,
+                scope,
+            ),
+            crate::TriggerHostOperation::Revive => self.lower_trigger_registration_args(
+                TriggerRegistrationOperation::Revive,
+                args,
+                call_path,
+                scope,
+            ),
             crate::TriggerHostOperation::List => {
                 let call = crate::list_call_args(args)
                     .map_err(|_| LinkError::InvalidTriggerList { span: scope.span })?;
@@ -107,7 +114,7 @@ impl<'module> Linker<'module> {
 
     pub(super) fn lower_trigger_registration_args(
         &self,
-        operation: crate::TriggerHostOperation,
+        operation: TriggerRegistrationOperation,
         args: &[Expr],
         call_path: &AstPath,
         scope: &mut Scope,
@@ -171,7 +178,7 @@ impl<'module> Linker<'module> {
         }
         if matches!(
             operation,
-            crate::TriggerHostOperation::Update | crate::TriggerHostOperation::Revive
+            TriggerRegistrationOperation::Update | TriggerRegistrationOperation::Revive
         ) {
             let expected_revision = trigger_operation_record_entry(args, "expected_revision")
                 .ok_or(LinkError::InvalidTriggerRegistration { span: scope.span })?;
@@ -409,6 +416,26 @@ impl<'module> Linker<'module> {
     }
 }
 
+/// Which registration-shaped call the shared lowering is lowering: the
+/// `triggers.register` leaf tool, or the `update`/`revive` host operations
+/// that take the same record plus `expected_revision`.
+#[derive(Clone, Copy)]
+pub(super) enum TriggerRegistrationOperation {
+    Register,
+    Update,
+    Revive,
+}
+
+impl TriggerRegistrationOperation {
+    fn output_ty(self) -> TypeExpr {
+        match self {
+            Self::Register => crate::register_trigger_tool_output_ty(),
+            Self::Update => crate::TriggerHostOperation::Update.output_ty(),
+            Self::Revive => crate::TriggerHostOperation::Revive.output_ty(),
+        }
+    }
+}
+
 fn trigger_operation_record_entry<'expr>(args: &'expr [Expr], field: &str) -> Option<&'expr Expr> {
     let [Expr::Record(entries)] = args else {
         return None;
@@ -429,6 +456,22 @@ pub(super) fn validate_trigger_operation_subscription_key(
     ) {
         return Ok(());
     }
+    validate_trigger_subscription_key_field(args, span)
+}
+
+/// The `register_trigger` tool's `subscription_key` gets the same literal
+/// check its host-operation predecessor ran.
+pub(super) fn validate_register_tool_subscription_key(
+    args: &[Expr],
+    span: Option<Span>,
+) -> Result<(), LinkError> {
+    validate_trigger_subscription_key_field(args, span)
+}
+
+fn validate_trigger_subscription_key_field(
+    args: &[Expr],
+    span: Option<Span>,
+) -> Result<(), LinkError> {
     let [Expr::Record(entries)] = args else {
         return Ok(());
     };

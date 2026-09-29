@@ -440,6 +440,12 @@ impl TriggerRouter {
         Arc::clone(&self.store)
     }
 
+    /// The env store a trigger registration intent publishes its draft's env
+    /// through, when this router was wired with one (FIG-3116).
+    pub(crate) fn process_env_store(&self) -> Option<Arc<dyn crate::ProcessExecutionEnvStore>> {
+        self.process_env_store.as_ref().map(Arc::clone)
+    }
+
     /// Emits a recorded [`crate::ToolIntent::EmitTrigger`] declaration and
     /// settles the report so redriving that one declaration returns the same
     /// bytes.

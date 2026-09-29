@@ -37,7 +37,10 @@ mod open_shapes;
 use open_shapes::OpenPlaces;
 mod pass_validation;
 mod process_literal;
-use pass_validation::validate_trigger_operation_subscription_key;
+use pass_validation::{
+    TriggerRegistrationOperation, validate_register_tool_subscription_key,
+    validate_trigger_operation_subscription_key,
+};
 mod type_helpers;
 use type_helpers::{
     Completion, Scope, any_binding, binary_op_source, binary_operands_compatible,

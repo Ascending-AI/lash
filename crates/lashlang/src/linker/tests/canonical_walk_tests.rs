@@ -208,10 +208,7 @@ fn registration_call(expr: &Expr) -> (&Expr, &[Expr]) {
     else {
         panic!("expected a registration call, got {expr:?}")
     };
-    assert_eq!(
-        operation.as_str(),
-        crate::TriggerHostOperation::Register.receiver_method()
-    );
+    assert_eq!(operation.as_str(), "register");
     (receiver, args)
 }
 
@@ -267,7 +264,7 @@ fn assignment_indexes_retain_lowering_and_their_own_registrations_in_evaluation_
     impl crate::ExprVisitor for Ordered {
         fn visit_expr(&mut self, expr: &Expr) {
             if let Expr::ReceiverCall { operation, .. } = expr
-                && operation.as_str() == crate::TriggerHostOperation::Register.receiver_method()
+                && operation.as_str() == "register"
             {
                 let (_, args) = registration_call(expr);
                 let call =

@@ -174,6 +174,8 @@ fn workbench_link_environment() -> lashlang::LashlangHostEnvironment {
     let mut resources = workbench_lashlang_resources();
     lashlang::add_trigger_resource_operations(&mut resources)
         .expect("trigger resource operations are unique");
+    lashlang::add_trigger_register_tool_binding(&mut resources)
+        .expect("trigger register tool binding is unique");
     let modules: [(&[&str], &str, &[&str]); 4] = [
         (&["agents"], "Agents", &["spawn"]),
         (&["inbox", "work"], "Inbox", &["list", "send", "delete"]),
@@ -398,7 +400,7 @@ impl TutorialHost {
             .manifest()
             .id
             .to_string();
-        if host_operation == lashlang::TriggerHostOperation::Register.host_operation() {
+        if host_operation == lashlang::REGISTER_TRIGGER_TOOL_ID {
             return Ok(lashlang::from_json(tutorial_trigger_handle()));
         }
         if host_operation == lashlang::TriggerHostOperation::List.host_operation() {

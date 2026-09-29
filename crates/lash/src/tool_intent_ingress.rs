@@ -116,6 +116,22 @@ pub enum ToolIntentIngressRefusal {
         /// Session, scope, or outcome identity found in recorded state.
         recorded: String,
     },
+    /// Refuses a trigger registration claiming an owner scope other than the
+    /// one this ingress's session confers (FIG-3116).
+    ForeignTriggerOwnerScope {
+        /// Owner scope the ingress's session resolves to.
+        expected: lash_core::TriggerOwnerScope,
+        /// Owner scope the submitted registration claimed.
+        recorded: lash_core::TriggerOwnerScope,
+    },
+    /// Refuses a trigger registration claiming an actor other than the
+    /// ingress's own session originator (FIG-3116).
+    ForeignTriggerActor {
+        /// Actor the ingress's session confers.
+        expected: lash_core::ProcessOriginator,
+        /// Actor the submitted registration claimed.
+        recorded: lash_core::ProcessOriginator,
+    },
     /// Refuses an identity already bound to a different intent kind.
     IdentityBoundToDifferentIntent {
         /// Intent kind already bound to this identity.
@@ -171,10 +187,10 @@ pub enum ToolIntentIngressOutcome {
 enum RealizedIntent {
     Process(lash_core::ProcessEffectOutcome),
     Trigger(lash_core::facade_support::TriggerEmitReport),
-    // Boxed: a registration receipt carries the whole admitted subscription
+    // Boxed: a registration handle carries the whole admitted subscription
     // record, including its captured source contract and route, and is an
     // order of magnitude larger than the other two variants.
-    TriggerRegistration(Box<lash_core::TriggerMutationReceipt>),
+    TriggerRegistration(Box<serde_json::Value>),
     ProcessDefinitionRegistration(Box<lash_core::ProcessDefinitionRegistration>),
 }
 
@@ -519,6 +535,10 @@ impl ToolIntentIngress {
             ToolIntentIngressRefusal::ForeignSession { .. } => "foreign_session",
             ToolIntentIngressRefusal::ForeignExecutionScope { .. } => "foreign_execution_scope",
             ToolIntentIngressRefusal::IntentSessionMismatch { .. } => "intent_session_mismatch",
+            ToolIntentIngressRefusal::ForeignTriggerOwnerScope { .. } => {
+                "foreign_trigger_owner_scope"
+            }
+            ToolIntentIngressRefusal::ForeignTriggerActor { .. } => "foreign_trigger_actor",
             ToolIntentIngressRefusal::IdentityBoundToDifferentIntent { .. } => {
                 "identity_bound_to_different_intent"
             }
@@ -574,7 +594,39 @@ impl ToolIntentIngress {
                 recorded: intent.session_id().to_string(),
             });
         }
+        if let lash_core::ToolIntent::RegisterTrigger(registration) = intent {
+            return self.validate_trigger_authority(registration);
+        }
         None
+    }
+
+    /// A host front door runs inside no process, so the only registration
+    /// authority it confers is its own session's: the owner scope
+    /// `resolve_trigger_owner_scope` rules for that session with no
+    /// originator, and the session's frameless originator as actor. Any other
+    /// claim is refused before realization installs anything (FIG-3116).
+    fn validate_trigger_authority(
+        &self,
+        registration: &lash_core::RegisterTriggerIntent,
+    ) -> Option<ToolIntentIngressRefusal> {
+        // With no originator the ruling is infallible: the session's own scope.
+        let expected_owner = lash_core::resolve_trigger_owner_scope(&self.session_id, None)
+            .unwrap_or_else(|_| lash_core::TriggerOwnerScope::session(self.session_id.clone()));
+        if registration.owner_scope != expected_owner {
+            return Some(ToolIntentIngressRefusal::ForeignTriggerOwnerScope {
+                expected: expected_owner,
+                recorded: registration.owner_scope.clone(),
+            });
+        }
+        let expected_actor = lash_core::ProcessOriginator::session(lash_core::SessionScope::new(
+            self.session_id.clone(),
+        ));
+        (registration.actor != expected_actor).then(|| {
+            ToolIntentIngressRefusal::ForeignTriggerActor {
+                expected: expected_actor,
+                recorded: registration.actor.clone(),
+            }
+        })
     }
 
     /// The identity a well-formed record must carry, re-derived from its own
@@ -673,10 +725,9 @@ impl ToolIntentIngress {
                 lash_core::ToolIntentKind::EmitTrigger,
                 serde_json::to_value(report).unwrap_or(serde_json::Value::Null),
             )),
-            RealizedIntent::TriggerRegistration(receipt) => Some((
-                lash_core::ToolIntentKind::RegisterTrigger,
-                serde_json::to_value(receipt).unwrap_or(serde_json::Value::Null),
-            )),
+            RealizedIntent::TriggerRegistration(handle) => {
+                Some((lash_core::ToolIntentKind::RegisterTrigger, *handle.clone()))
+            }
             RealizedIntent::ProcessDefinitionRegistration(registration) => Some((
                 lash_core::ToolIntentKind::RegisterProcessDefinition,
                 serde_json::to_value(registration).unwrap_or(serde_json::Value::Null),
@@ -1053,13 +1104,8 @@ impl ToolIntentIngress {
                 ));
             }
             lash_core::ToolIntent::RegisterTrigger(intent) => {
-                let receipt = self
-                    .register_recorded_trigger(identity, intent.draft)
-                    .await?;
-                return Ok((
-                    RealizedIntent::TriggerRegistration(Box::new(receipt)),
-                    false,
-                ));
+                let handle = self.register_recorded_trigger(identity, *intent).await?;
+                return Ok((RealizedIntent::TriggerRegistration(Box::new(handle)), false));
             }
         };
         let (result, replayed) = self.run_command(identity, command).await?;
@@ -1071,8 +1117,10 @@ impl ToolIntentIngress {
     async fn register_recorded_trigger(
         &self,
         identity: &lash_core::ToolIntentIdentity,
-        draft: lash_core::TriggerSubscriptionDraft,
-    ) -> crate::Result<lash_core::TriggerMutationReceipt> {
+        intent: lash_core::RegisterTriggerIntent,
+    ) -> crate::Result<serde_json::Value> {
+        // `validate` already pinned `owner_scope` and `actor` to this
+        // ingress's own session authority (FIG-3116).
         let store = self.core.env.core.trigger_store();
         let scoped = self
             .core
@@ -1081,6 +1129,21 @@ impl ToolIntentIngress {
             .control
             .effect_host
             .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
+        let mut draft = intent.draft;
+        if let Some(env_spec) = intent.env_spec.as_ref() {
+            // The declaring attempt carries the env spec; publication lands
+            // here under the realizing execution scope's artifact owner — the
+            // same owner the retired host-operation path used (FIG-3116). The
+            // draft's env ref is content-addressed, so the published
+            // reference is the one it already names.
+            draft.env_ref = lash_core::publish_process_execution_env(
+                self.core.env.core.durability.process_env_store.as_ref(),
+                &lash_core::ArtifactOwner::execution(scoped.execution_scope().clone()),
+                env_spec,
+            )
+            .await
+            .map_err(crate::EmbedError::Plugin)?;
+        }
         let invocation = lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 scoped.execution_scope().clone(),
@@ -1095,17 +1158,14 @@ impl ToolIntentIngress {
         .with_replay_attribution(lash_core::RuntimeReplayAttribution::ToolIntent(
             identity.clone(),
         ));
-        let session_scope = lash_core::SessionScope::new(self.session_id.clone());
         let outcome = scoped
             .execute_effect(
                 lash_core::RuntimeEffectEnvelope::new(
                     invocation,
                     lash_core::RuntimeEffectCommand::Trigger {
                         command: Box::new(lash_core::TriggerCommand::Register {
-                            owner_scope: lash_core::TriggerOwnerScope::session(
-                                self.session_id.clone(),
-                            ),
-                            actor: lash_core::ProcessOriginator::session(session_scope),
+                            owner_scope: intent.owner_scope,
+                            actor: intent.actor,
                             draft,
                         }),
                     },
@@ -1124,7 +1184,9 @@ impl ToolIntentIngress {
                 crate::EmbedError::Plugin(lash_core::PluginError::Session(error.to_string()))
             })?;
         match outcome {
-            lash_core::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+            lash_core::TriggerCommandOutcome::Mutation { receipt } => {
+                lash_core::trigger_handle_outcome_value(&receipt).map_err(crate::EmbedError::Plugin)
+            }
             other => Err(crate::EmbedError::Plugin(lash_core::PluginError::Session(
                 format!("trigger registration returned a non-mutation outcome: {other:?}"),
             ))),

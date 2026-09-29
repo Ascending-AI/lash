@@ -61,6 +61,8 @@ impl CorpusProgram {
         }
         lashlang::add_trigger_resource_operations(&mut environment.resources)
             .expect("the corpus catalogue has no conflicting trigger operation");
+        lashlang::add_trigger_register_tool_binding(&mut environment.resources)
+            .expect("the corpus catalogue has no conflicting trigger register binding");
         environment
             .resources
             .add_trigger_source_constructor(

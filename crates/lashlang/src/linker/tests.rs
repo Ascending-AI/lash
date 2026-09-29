@@ -81,6 +81,8 @@ fn resources() -> LashlangHostCatalog {
         .expect("host catalog operation must not conflict");
     crate::add_trigger_resource_operations(&mut catalog)
         .expect("trigger resource operations are unique");
+    crate::add_trigger_register_tool_binding(&mut catalog)
+        .expect("trigger register tool binding is unique");
     // The process control surface is a set of leaf tools now (FIG-2999), so a
     // fixture that starts, signals or cancels a process calls them like any
     // other module operation.
@@ -292,6 +294,8 @@ fn resources_with_timer_event(event_type: NamedDataType) -> LashlangHostCatalog 
     let mut catalog = LashlangHostCatalog::new();
     crate::add_trigger_resource_operations(&mut catalog)
         .expect("trigger resource operations are unique");
+    crate::add_trigger_register_tool_binding(&mut catalog)
+        .expect("trigger register tool binding is unique");
     catalog
         .add_trigger_source_constructor(
             ["timer", "Schedule"],

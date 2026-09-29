@@ -2290,6 +2290,7 @@ dependencies = [
  "lash-internal-restate-test",
  "lash-internal-sansio",
  "lash-internal-sqlite-store",
+ "lash-internal-tool-support",
  "lash-internal-trace",
  "serde",
  "serde_json",

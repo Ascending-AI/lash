@@ -582,6 +582,7 @@ pub use triggers::{
     TriggerProviderRoute, TriggerRetentionReconciliationReport, TriggerRouteRefusal,
     TriggerRouteRestorer, TriggerSourceCapture, TriggerStore, TriggerSubscriptionDraft,
     TriggerSubscriptionFilter, TriggerSubscriptionRecord, admit_trigger_registration_target,
+    trigger_handle_outcome_value,
 };
 
 pub(crate) mod facade_ops {}
@@ -736,6 +737,9 @@ pub use process_registry::{
 };
 pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
+/// Intent realization publishes the execution environment a declared trigger
+/// subscription names, under the realizing scope's artifact owner (FIG-3116).
+pub use runtime::publish_process_execution_env;
 pub use runtime::{
     AbandonEvidence, AbandonWriter, AdmittedProcessIdentity, AdmittedScope, AdmittedTurnInputs,
     Ancestry, ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
@@ -824,14 +828,13 @@ pub(crate) use runtime::{
     load_process_execution_env, materialize_process_event_semantics, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
-    process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
-    require_event_replay, settle_started_process_engine_artifacts,
-    settle_started_process_execution_env,
+    process_wake_turn_cause, process_wake_turn_text, require_event_replay,
+    settle_started_process_engine_artifacts, settle_started_process_execution_env,
 };
 pub(crate) use session::Session;
 pub use session::{
     ExecRequest, RuntimeExecutionContext, SessionError, ToolDispatchSurface, ToolSurfaceDrift,
-    ToolSurfaceDriftKind, tool_dispatch_surface,
+    ToolSurfaceDriftKind, resolve_trigger_owner_scope, tool_dispatch_surface,
 };
 pub use session_graph::{
     PersistedSessionConfig, PersistedTurnState, SESSION_NODE_BODY_SCHEMA_VERSION, SessionGraph,

@@ -406,14 +406,7 @@ async fn execute_one(
                     "trigger store is unavailable in this runtime".to_string(),
                 )
             })?;
-            let outcome = Box::pin(register_recorded_trigger(
-                context,
-                router,
-                identity,
-                intent.draft.clone(),
-            ))
-            .await?;
-            Ok(serde_json::to_value(outcome).unwrap_or(serde_json::Value::Null))
+            Ok(register_recorded_trigger(context, router, identity, intent).await?)
         }
     }
 }
@@ -566,9 +559,28 @@ async fn register_recorded_trigger(
     context: &ToolDispatchContext<'_>,
     router: &crate::TriggerRouter,
     identity: &crate::ToolIntentIdentity,
-    draft: crate::TriggerSubscriptionDraft,
-) -> Result<crate::TriggerMutationReceipt, crate::PluginError> {
+    intent: &crate::RegisterTriggerIntent,
+) -> Result<serde_json::Value, crate::PluginError> {
     let scoped = context.effect_controller.scoped();
+    let mut draft = intent.draft.clone();
+    if let Some(env_spec) = intent.env_spec.as_ref() {
+        // Publication moved out of the attempt and into realization: the
+        // bytes land under the realizing execution scope's artifact owner,
+        // the same owner the retired host-operation path published under
+        // (FIG-3116). The draft's env ref is content-addressed, so the
+        // published reference is the one the draft already names.
+        let env_store = router.process_env_store().ok_or_else(|| {
+            crate::PluginError::Session(
+                "process execution env store is unavailable in this runtime".to_string(),
+            )
+        })?;
+        draft.env_ref = crate::publish_process_execution_env(
+            env_store.as_ref(),
+            &crate::ArtifactOwner::execution(scoped.execution_scope().clone()),
+            env_spec,
+        )
+        .await?;
+    }
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
             scoped.execution_scope().clone(),
@@ -581,15 +593,14 @@ async fn register_recorded_trigger(
     .with_replay_attribution(crate::RuntimeReplayAttribution::ToolIntent(
         identity.clone(),
     ));
-    let session_scope = crate::SessionScope::new(context.session_id.clone());
     let outcome = scoped
         .execute_effect(
             crate::RuntimeEffectEnvelope::new(
                 invocation,
                 crate::RuntimeEffectCommand::Trigger {
                     command: Box::new(crate::TriggerCommand::Register {
-                        owner_scope: crate::TriggerOwnerScope::session(context.session_id.clone()),
-                        actor: crate::ProcessOriginator::session(session_scope),
+                        owner_scope: intent.owner_scope.clone(),
+                        actor: intent.actor.clone(),
                         draft,
                     }),
                 },
@@ -602,7 +613,9 @@ async fn register_recorded_trigger(
         .map_err(crate::PluginError::RuntimeEffectController)?
         .map_err(|error| crate::PluginError::Session(error.to_string()))?;
     match outcome {
-        crate::TriggerCommandOutcome::Mutation { receipt } => Ok(*receipt),
+        crate::TriggerCommandOutcome::Mutation { receipt } => {
+            crate::trigger_handle_outcome_value(&receipt)
+        }
         other => Err(crate::PluginError::Session(format!(
             "trigger registration returned a non-mutation outcome: {other:?}"
         ))),

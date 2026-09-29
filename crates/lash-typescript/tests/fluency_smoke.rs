@@ -158,6 +158,8 @@ fn fluency_environment() -> lashlang::LashlangHostEnvironment {
     }
     lashlang::add_trigger_resource_operations(&mut catalog)
         .expect("trigger resource operations are unique");
+    lashlang::add_trigger_register_tool_binding(&mut catalog)
+        .expect("trigger register tool binding is unique");
     catalog
         .add_trigger_source_constructor(
             ["timer", "Schedule"],

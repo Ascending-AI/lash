@@ -43,6 +43,12 @@ pub(super) fn register_rlm_protocol_plugin(
         .provider(Arc::new(crate::control_tools::RlmControlToolsProvider {
             vocabulary: dialect.prompt_vocabulary(),
         }))?;
+    // `triggers.register` is a leaf tool now (FIG-3116): it validates the
+    // registration and declares the intent; the subscription installs at
+    // realization.
+    reg.tools().provider(Arc::new(
+        lash_lashlang_runtime::register_trigger_tool_provider(dialect.artifact_store()),
+    ))?;
     reg.tool_catalog().contribute(Arc::new(move |ctx| {
         crate::tool_catalog::validate_discovery(
             &ctx.tools,

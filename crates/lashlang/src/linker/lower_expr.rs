@@ -911,16 +911,21 @@ impl<'module> Linker<'module> {
                 span: scope.span,
             });
         };
-        let operation_binding = match receiver_alias.as_deref() {
-            Some(alias) => self
-                .surface
-                .resources
-                .resolve_module_operation(&resource_type, alias, operation.as_str())
-                .map(|resolved| resolved.binding),
-            None => self
+        let resolved_module_operation = match receiver_alias.as_deref() {
+            Some(alias) => self.surface.resources.resolve_module_operation(
+                &resource_type,
+                alias,
+                operation.as_str(),
+            ),
+            None => None,
+        };
+        let operation_binding = match &resolved_module_operation {
+            Some(resolved) => Some(resolved.binding),
+            None if receiver_alias.is_none() => self
                 .surface
                 .resources
                 .resolve_operation(&resource_type, operation),
+            None => None,
         };
         let Some(operation_binding) = operation_binding.cloned() else {
             return Err(LinkError::UnknownResourceOperation {
@@ -941,16 +946,40 @@ impl<'module> Linker<'module> {
         if let Some(trigger_operation) = trigger_operation {
             validate_trigger_operation_subscription_key(trigger_operation, args, scope.span)?;
         }
-        let trigger_operation = trigger_operation.filter(|operation| {
-            matches!(
-                operation,
-                crate::TriggerHostOperation::Register
-                    | crate::TriggerHostOperation::List
-                    | crate::TriggerHostOperation::Update
-                    | crate::TriggerHostOperation::Revive
-            )
-        });
-        if let Some(trigger_operation) = trigger_operation {
+        // `triggers.register` is an ordinary catalog tool (FIG-3116); the
+        // module binding points at it by tool id. Its arguments still lower
+        // through the shared registration path so the link-time checks
+        // (source event type, target lift, inputs defaulting) hold.
+        let registration_operation = match resolved_module_operation {
+            Some(resolved) if resolved.host_operation == crate::REGISTER_TRIGGER_TOOL_ID => {
+                validate_register_tool_subscription_key(args, scope.span)?;
+                Some(TriggerRegistrationOperation::Register)
+            }
+            _ => match trigger_operation {
+                Some(crate::TriggerHostOperation::Update) => {
+                    Some(TriggerRegistrationOperation::Update)
+                }
+                Some(crate::TriggerHostOperation::Revive) => {
+                    Some(TriggerRegistrationOperation::Revive)
+                }
+                _ => None,
+            },
+        };
+        if let Some(registration_operation) = registration_operation {
+            let (lowered_args, output_ty) =
+                self.lower_trigger_registration_args(registration_operation, args, path, scope)?;
+            return Ok((
+                Expr::ReceiverCall {
+                    receiver: Box::new(lowered_receiver),
+                    operation: operation.clone(),
+                    args: lowered_args,
+                },
+                Binding::Value(output_ty),
+            ));
+        }
+        if let Some(trigger_operation) = trigger_operation
+            .filter(|operation| matches!(operation, crate::TriggerHostOperation::List))
+        {
             let (lowered_args, output_ty) =
                 self.lower_trigger_operation_args(trigger_operation, args, path, scope)?;
             return Ok((

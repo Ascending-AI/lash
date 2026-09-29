@@ -186,13 +186,16 @@ pub use tracking::{
     ProcessBranchSelection, process_ref_key,
 };
 pub use trigger::{
-    HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, TRIGGER_MODULE_ALIAS,
-    TRIGGER_REGISTRATION_TYPE_NAME, TriggerCompatibility, TriggerCompatibilityError,
-    TriggerCompatibilityRequest, TriggerHostOperation, TriggerInputBinding, TriggerInputTemplate,
-    TriggerListRequest, TriggerPruneRequest, TriggerRegistrationRequest,
-    add_trigger_resource_operations, check_trigger_compatibility, event_type_for_source,
-    is_resolved_type_assignable, is_trigger_resource_type, list_call_args, register_call_args,
-    trigger_event_placeholder_expr, with_trigger_resource_operations,
+    HostDescriptor, HostDescriptorError, LASH_TRIGGER_EVENT_KEY, REGISTER_TRIGGER_TOOL_ID,
+    TRIGGER_MODULE_ALIAS, TRIGGER_REGISTRATION_TYPE_NAME, TriggerCompatibility,
+    TriggerCompatibilityError, TriggerCompatibilityRequest, TriggerHostOperation,
+    TriggerInputBinding, TriggerInputTemplate, TriggerListRequest, TriggerPruneRequest,
+    TriggerRegistrationRequest, add_trigger_register_tool_binding, add_trigger_resource_operations,
+    check_trigger_compatibility, event_type_for_source, is_resolved_type_assignable,
+    is_trigger_resource_type, list_call_args, register_call_args,
+    register_trigger_tool_input_schema, register_trigger_tool_output_schema,
+    register_trigger_tool_output_ty, trigger_event_placeholder_expr,
+    with_trigger_resource_operations,
 };
 pub use typed_output::{OutputSchemaError, parse_output_schema};
 pub use workflow_graph::{

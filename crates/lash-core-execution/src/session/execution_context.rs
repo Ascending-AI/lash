@@ -4,7 +4,8 @@ use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
 mod trigger_scope;
-use trigger_scope::{missing_process_execution_error, resolve_trigger_owner_scope};
+use trigger_scope::missing_process_execution_error;
+pub use trigger_scope::resolve_trigger_owner_scope;
 
 use tokio_util::sync::CancellationToken;
 
@@ -1333,7 +1334,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         .await
     }
 
-    fn inherited_process_execution_env_ref(&self) -> Option<crate::ProcessExecutionEnvRef> {
+    pub(crate) fn inherited_process_execution_env_ref(
+        &self,
+    ) -> Option<crate::ProcessExecutionEnvRef> {
         self.process_execution
             .as_ref()
             .and_then(|exec| exec.env_ref.clone())

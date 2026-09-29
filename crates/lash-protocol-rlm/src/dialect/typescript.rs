@@ -104,6 +104,11 @@ impl TypescriptDialect {
     pub(crate) fn renderer(&self) -> crate::render::CodeRendererSlot {
         self.services.code_renderer.clone()
     }
+    /// The module-artifact store the dialect's tools resolve trigger targets
+    /// and process definitions against.
+    pub(crate) fn artifact_store(&self) -> lashlang::LashlangArtifacts {
+        self.services.artifact_store.clone()
+    }
     pub(crate) fn new(surface: LashlangSurface, services: RlmDialectServices) -> Self {
         Self { surface, services }
     }
@@ -1158,6 +1163,8 @@ mod tests {
         // nothing about the shapes it names.
         lashlang::add_trigger_resource_operations(&mut resources)
             .expect("valid trigger operations");
+        lashlang::add_trigger_register_tool_binding(&mut resources)
+            .expect("trigger register tool binding is unique");
         let host =
             lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::all());
         // Identifiers that exist only in Lashlang's surface. A model reading

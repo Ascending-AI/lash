@@ -1113,6 +1113,26 @@ pub struct TriggerMutationReceipt {
     pub record_snapshot: TriggerSubscriptionRecord,
 }
 
+/// The trigger handle a mutation answers with: the receipt record plus the
+/// `type`/`id` pair every holder of the handle reads (FIG-3116). Shared by the
+/// host-operation adapter and the registration intent's realized result so
+/// both routes answer the same shape.
+pub fn trigger_handle_outcome_value(
+    receipt: &TriggerMutationReceipt,
+) -> Result<serde_json::Value, PluginError> {
+    let mut value = serde_json::to_value(receipt)
+        .map_err(|err| PluginError::Session(format!("failed to encode trigger receipt: {err}")))?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        PluginError::Session("trigger mutation receipt must encode as a record".to_string())
+    })?;
+    object.insert("type".to_string(), serde_json::json!("trigger_handle"));
+    object.insert(
+        "id".to_string(),
+        serde_json::json!(receipt.subscription_key),
+    );
+    Ok(value)
+}
+
 impl TriggerMutationReceipt {
     fn from_record(record: TriggerSubscriptionRecord, disposition: TriggerMutationOutcome) -> Self {
         Self {
