@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 177,
+  "cargo_target_count": 178,
   "feature_lane_units": [
     {
       "features": [
@@ -16366,7 +16366,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 236,
+  "generated_label_count": 237,
   "packages": [
     {
       "declared_features": [
@@ -18089,6 +18089,12 @@
           "tags": []
         },
         {
+          "cargo": "stopped_partial_recovery",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:stopped_partial_recovery__test",
+          "tags": []
+        },
+        {
           "cargo": "substrate_lost_zombie",
           "kind": "test",
           "label": "//crates/lash-restate-test:substrate_lost_zombie__test",
@@ -18129,6 +18135,7 @@
           "//crates/lash-restate-test:session_driver__test",
           "//crates/lash-restate-test:session_send__test",
           "//crates/lash-restate-test:start_gate_peek__test",
+          "//crates/lash-restate-test:stopped_partial_recovery__test",
           "//crates/lash-restate-test:substrate_lost_zombie__test",
           "//crates/lash-restate-test:suspended_turn__test",
           "//crates/lash-restate-test:tool_child_drift__test",
