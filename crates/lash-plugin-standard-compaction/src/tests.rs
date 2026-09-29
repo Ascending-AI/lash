@@ -232,7 +232,7 @@ fn build_turn_ctx_with_direct(
 ) -> TurnTransformContext<'static> {
     TurnTransformContext {
         session_id: SessionId::from(session_id.to_string()),
-        state: state.read_view().expect("runtime frame scope resolves"),
+        state: state.read_view(),
         prompt_usage,
         max_context_tokens,
         sessions: manager.clone(),
@@ -281,7 +281,7 @@ fn build_compaction_ctx_with_services(
     CompactionContext {
         session_id: SessionId::from(session_id.to_string()),
         instructions,
-        state: state.read_view().expect("runtime frame scope resolves"),
+        state: state.read_view(),
         sessions,
         session_lifecycle,
         session_graph,
@@ -737,8 +737,7 @@ async fn standard_compactor_returns_summary_seed_for_new_frame() {
     ];
     let mut changed_state = state.clone();
     changed_state
-        .replace_active_read_state(&changed_messages)
-        .expect("replace changed read state");
+        .replace_active_read_state(&changed_messages);
     let (changed_snapshot, changed_prompt_text) =
         prepare_compaction_request(&changed_state, changed_messages, Some(instructions))
             .expect("prepare changed-state compaction request");
@@ -963,7 +962,7 @@ fn transform_state_ctx_with_services(
 ) -> TurnTransformContext<'static> {
     TurnTransformContext {
         session_id: SessionId::from("root"),
-        state: state.read_view().expect("runtime frame scope resolves"),
+        state: state.read_view(),
         prompt_usage: None,
         max_context_tokens: Some(max_context_tokens),
         sessions: Arc::new(MockSessionManager::default()),
