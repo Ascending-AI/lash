@@ -170,10 +170,20 @@ pub(crate) fn load_session_meta(
     selected_session_id: Option<&SessionId>,
 ) -> Result<Option<SessionMeta>, StoreError> {
     let tx = conn.unchecked_transaction().map_err(sqlite_error)?;
+    let result = load_session_meta_in_tx(&tx, selected_session_id)?;
+    tx.commit().map_err(sqlite_error)?;
+    Ok(result)
+}
+
+/// Read metadata on the caller's snapshot without starting another transaction.
+pub(crate) fn load_session_meta_in_tx(
+    conn: &Connection,
+    selected_session_id: Option<&SessionId>,
+) -> Result<Option<SessionMeta>, StoreError> {
     let session_id = if let Some(session_id) = selected_session_id {
         session_id.to_string()
     } else {
-        let mut stmt = tx
+        let mut stmt = conn
             .prepare(session_sql().meta_sqlite.select_sole_session_id.sql())
             .map_err(sqlite_error)?;
         let session_ids = stmt
@@ -183,7 +193,6 @@ pub(crate) fn load_session_meta(
             .map_err(sqlite_error)?;
         drop(stmt);
         if session_ids.len() != 1 {
-            tx.commit().map_err(sqlite_error)?;
             return Ok(None);
         }
         #[expect(
@@ -193,7 +202,7 @@ pub(crate) fn load_session_meta(
         let session_id = session_ids.into_iter().next().expect("one session id");
         session_id
     };
-    let mut stored = tx
+    let mut stored = conn
         .query_row(
             session_sql().meta_sqlite.select_relation.sql(),
             params![session_id],
@@ -202,10 +211,9 @@ pub(crate) fn load_session_meta(
         .optional()
         .map_err(sqlite_error)?;
     let Some(mut stored) = stored.take() else {
-        tx.commit().map_err(sqlite_error)?;
         return Ok(None);
     };
-    let mut stmt = tx
+    let mut stmt = conn
         .prepare(session_sql().observer_intents.select_for_session.sql())
         .map_err(sqlite_error)?;
     let observer_rows = stmt
@@ -234,7 +242,7 @@ pub(crate) fn load_session_meta(
     }
     let session_id = stored.session_id.clone();
     let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
-    meta.owning_process_id = tx
+    meta.owning_process_id = conn
         .query_row(
             session_sql().meta.select_owning_process.sql(),
             params![session_id.as_str()],
@@ -245,7 +253,6 @@ pub(crate) fn load_session_meta(
             },
         )
         .map_err(sqlite_error)?;
-    tx.commit().map_err(sqlite_error)?;
     Ok(Some(meta))
 }
 

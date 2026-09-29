@@ -636,6 +636,38 @@ async fn live_attachment_refs_aborts_on_unreadable_catalog() {
 }
 
 #[tokio::test]
+async fn catalog_lookup_and_repeated_admission_share_a_readable_snapshot() {
+    let store = crate::test_support::memory_store()
+        .await
+        .expect("open memory catalog");
+    let request = SessionStoreCreateRequest {
+        owning_process_id: None,
+        pending_observer_intents: Vec::new(),
+        session_id: SessionId::from("catalog-lookup"),
+        relation: lash_core_execution::SessionRelation::Root,
+        policy: lash_core_execution::SessionPolicy::new(lash_core_execution::TurnBudget::Unbounded),
+    };
+    assert!(matches!(
+        store.admit_session(&request).await.expect("admit session"),
+        lash_core_execution::SessionAdmission::Created
+    ));
+    assert!(matches!(
+        store
+            .lookup_session(&request.session_id)
+            .await
+            .expect("look up live session"),
+        lash_core_execution::SessionLookup::Live(_)
+    ));
+    assert!(matches!(
+        store
+            .admit_session(&request)
+            .await
+            .expect("readmit session"),
+        lash_core_execution::SessionAdmission::Rebound
+    ));
+}
+
+#[tokio::test]
 async fn lookup_session_aborts_on_unreadable_requested_session_meta() {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().join("sessions");
