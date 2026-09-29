@@ -112,3 +112,10 @@ misconfiguration; it is not a lock between two registrations that race.
   against a live server.
 - A namespace is part of a deployment's identity, in the same way as its
   authority. An operator who changes it starts a new deployment.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 6: Registration composes with
+[ADR 0115 §3.5](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)'s
+generation guard. A deployment namespace does not bypass the journal-generation
+check.

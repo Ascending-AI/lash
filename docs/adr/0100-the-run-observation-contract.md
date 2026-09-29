@@ -479,3 +479,9 @@ has its checked-in document under `schemas/host/`. The example frontend
 consumes only the workflow graph and facet shapes, through types generated
 from those documents; the trace, observation, and durable-event shapes reach
 it only through the example's own run-event contract.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 4: The pre-1.0 freeze changes shapes in place;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+1.0 cut. Earlier version-bump examples describe their historical cutovers.

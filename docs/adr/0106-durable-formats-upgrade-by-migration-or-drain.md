@@ -4,9 +4,10 @@
 
 Accepted 2026-09-25 (FIG-3660). Sam ruled the open questions Q1 to Q7 the
 same day; they are recorded under *Rulings*. This record takes effect at the
-clean-slate release, lash 1.0 (arc FIG-3789). Until then the temporary rule
-holds: a durable-format change is a version bump plus a typed refusal of older
-state.
+clean-slate release, lash 1.0 (arc FIG-3789). Amended 2026-09-29 (FIG-4125,
+item 4): until then the pre-1.0 freeze changes shapes in place without version
+bumps or upcasters. [ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md)
+governs the cut.
 
 At the release, this record replaces that rule wherever it is written as
 current policy: ADR 0043 (*journal prefix*), ADR 0045 (FIG-3588), ADR 0105 §12,

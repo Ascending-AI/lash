@@ -168,3 +168,10 @@ The arc is FIG-3015. This ADR is its first child and lands before any deletion.
   TypeScript and re-judged.
 - **FIG-3024** — docs and READMEs: lashlang means the IR; TypeScript is the
   authoring language everywhere.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Items 4 and 24: During the version freeze, shapes change in place;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs the
+1.0 cut. The FIG-3021 tool-prose cutover is complete via FIG-4093, so its former
+pending status and transitional prose are historical.

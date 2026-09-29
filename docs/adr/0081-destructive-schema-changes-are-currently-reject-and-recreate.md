@@ -75,3 +75,10 @@ left to work backwards from two integers.
   both SQL schemas. PostgreSQL component 86 and SQLite durable-core version 57
   are reject-and-recreate boundaries for that new guard; neither backend adds a
   migration arm.
+
+## Amendment (FIG-4125, 2026-09-29)
+
+Item 4: This reject-and-recreate rule is historical for the pre-1.0 freeze.
+Shapes change in place until the clean-slate cut;
+[ADR 0115](0115-the-1-0-binary-carries-its-half-of-every-upgrade.md) governs 1.0
+and later compatibility.
