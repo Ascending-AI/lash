@@ -14,6 +14,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.execution_scope_id();
     let _ = attempt.start_cx();
     let _ = attempt.agent_frame_id();
+    assert!(attempt.tool_catalog().is_some());
     let _ = attempt.cancellation_token();
     let _ = attempt.enclosing_process();
     let _ = attempt.attachments();
