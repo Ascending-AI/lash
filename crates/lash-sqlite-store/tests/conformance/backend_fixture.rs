@@ -122,10 +122,6 @@ impl TestBackend {
 
     /// The store set as the [`StoreSet`](lash_core_execution::StoreSet) a law
     /// runs over.
-    #[expect(
-        dead_code,
-        reason = "one conformance root's suite may not hold a law that asks for the store set"
-    )]
     pub(crate) fn as_stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
         Arc::new(self.stores.clone())
     }

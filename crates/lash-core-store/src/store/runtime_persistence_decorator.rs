@@ -99,6 +99,7 @@ macro_rules! persistence_operations {
                 fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
                 fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                fn bound_turn_scopes(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Vec<crate::TurnId>, StoreError>;
                 fn bind_root_inputs(&self, session_id: &SessionId, root: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;
             }
             StoreMaintenance {

@@ -132,6 +132,31 @@ impl lash_core::store::RootStore for SnapshotStore {
         Ok(self.roots.binding(session_id, input))
     }
 
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> std::result::Result<Vec<lash_core::TurnId>, lash_core::StoreError> {
+        let pending = self.pending_turn_inputs.lock_recover();
+        Ok(pending
+            .iter()
+            .filter(|input| {
+                input.session_id == *session_id
+                    && self.roots.binding(session_id, &input.input_id).as_ref() == Some(root)
+            })
+            .map(|input| {
+                lash_core::TurnId::from(
+                    input
+                        .source_key
+                        .as_deref()
+                        .unwrap_or_else(|| input.input_id.as_str()),
+                )
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect())
+    }
+
     async fn bind_root_inputs(
         &self,
         session_id: &SessionId,

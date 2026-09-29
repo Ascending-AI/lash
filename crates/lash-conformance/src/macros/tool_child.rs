@@ -190,6 +190,7 @@ macro_rules! drive_admission_tests {
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
             (a_command_roots_redrive_replays_its_recorded_outcome, "drive-command-root-redrive"),
             (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
+            (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
             (an_idle_session_admits_its_turn_lane_in_enqueue_order_whatever_the_kind, "drive-idle-turn-lane-order"),
             (a_turn_never_takes_an_item_past_an_earlier_unconsumed_item_of_the_other_kind, "drive-turn-lane-contiguous"),
         ]);

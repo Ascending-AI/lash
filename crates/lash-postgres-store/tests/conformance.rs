@@ -1857,6 +1857,7 @@ mod root_control {
     (redrive_under_a_restored_build_completes_once_and_clears_the_park, "s7b-9"),
     (a_stale_redrive_is_fenced_by_a_later_cancel, "s7b-10"),
     (root_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked, "s7b-11"),
+    (a_joined_inputs_turn_scope_closes_with_its_admitting_root, "drive-joined-scope-close"),
     (a_root_crashed_at_its_report_handover_still_closes_its_scope, "s7b-11b"),
     (cancel_fork_and_close_raise_the_drive_epoch_and_redrive_does_not, "s7b-12"),
 

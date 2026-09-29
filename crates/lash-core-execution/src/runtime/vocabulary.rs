@@ -614,6 +614,20 @@ pub trait SessionStoreFactory:
         session_id: &SessionId,
     ) -> Result<Option<Arc<dyn crate::store::RuntimePersistence>>, crate::StoreError>;
 
+    /// Turn scopes whose inputs the root's admission bound to it. The scope
+    /// owner reads these after terminal evidence to close joined turns with
+    /// their root, even when the session remains open.
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, crate::StoreError> {
+        let Some(store) = self.open_existing_store_by_id(session_id).await? else {
+            return Ok(Vec::new());
+        };
+        store.bound_turn_scopes(session_id, root).await
+    }
+
     /// Read exact cancellation closure pins before session deletion or
     /// process-scope retirement. Implementors that cannot provide this
     /// lifecycle fence fail closed; callers must never infer an empty set from

@@ -915,6 +915,21 @@ impl RootStore for PostgresSessionStore {
         root_binding_conn(&mut connection, session_id, input).await
     }
 
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        let scopes: Vec<String> =
+            sqlx::query_scalar(session_roots_sql().inputs.bound_turn_scopes.sql())
+                .bind(session_id.as_str())
+                .bind(root.as_str())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(store_sqlx_error)?;
+        Ok(scopes.into_iter().map(TurnId::from).collect())
+    }
+
     async fn bind_root_inputs(
         &self,
         session_id: &SessionId,

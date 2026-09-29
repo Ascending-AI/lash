@@ -971,6 +971,28 @@ impl RootStore for crate::Store {
             .map_err(sqlite_error)?
     }
 
+    async fn bound_turn_scopes(
+        &self,
+        session_id: &SessionId,
+        root: &TurnId,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        let session_id = session_id.clone();
+        let root = root.clone();
+        let scopes = self
+            .conn
+            .call(move |conn| {
+                let mut stmt =
+                    conn.prepare_cached(session_roots_sql().inputs.bound_turn_scopes.sql())?;
+                stmt.query_map(params![session_id.as_str(), root.as_str()], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .map_err(sqlite_error)?;
+        Ok(scopes.into_iter().map(TurnId::from).collect())
+    }
+
     async fn bind_root_inputs(
         &self,
         session_id: &SessionId,

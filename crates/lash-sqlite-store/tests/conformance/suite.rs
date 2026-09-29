@@ -39,6 +39,59 @@ lash_conformance::turn_commit_outcome_tests!({
     (backend, factory)
 });
 
+struct ScopeLawTurnRunner(lash_restate_test::RestateTestBackend);
+
+#[async_trait::async_trait]
+impl lash_conformance::ConformanceTurnRunner for ScopeLawTurnRunner {
+    async fn run_turn(
+        &self,
+        admitted: lash_core_execution::AdmittedScope,
+        attempt: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.0
+            .run_in_handler(
+                admitted,
+                Arc::new(move |scoped| {
+                    let attempt = Arc::clone(&attempt);
+                    Box::pin(async move {
+                        attempt(scoped).await;
+                    })
+                }),
+            )
+            .await
+            .expect("the joined-scope law runs inside a handler");
+    }
+
+    async fn run_crashed_then_redriven_turn(
+        &self,
+        _admitted: lash_core_execution::AdmittedScope,
+        _crashing: lash_conformance::ConformanceTurnAttempt,
+        _redrive: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        unreachable!("the joined-scope law does not crash a turn")
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_joined_inputs_turn_scope_closes_with_its_admitting_root() {
+    let backend = TestBackend::open(SUBSTRATE).await;
+    let stores = backend.as_stores();
+    let double_stores = Arc::clone(&stores);
+    let double = lash_restate_test::backend_with(
+        4023,
+        lash_restate_test::ServerConfig::default(),
+        move |_| Arc::clone(&double_stores),
+    )
+    .await
+    .expect("boot the joined-scope law's handler");
+    let effect_host = double.restate().restate_effect_host();
+    let runner =
+        Arc::new(ScopeLawTurnRunner(double)) as Arc<dyn lash_conformance::ConformanceTurnRunner>;
+    lash_conformance::registration_macro_support::a_joined_inputs_turn_scope_closes_with_its_admitting_root(
+        "sqlite-joined-scope", effect_host, stores, runner,
+    ).await;
+}
+
 struct MultiSessionAdmissionStore {
     inner: Arc<dyn RuntimePersistence>,
     backend: TestBackend,

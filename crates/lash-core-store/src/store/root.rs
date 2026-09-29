@@ -420,6 +420,19 @@ pub trait RootStore: Send + Sync {
         input: &InputId,
     ) -> Result<Option<TurnId>, StoreError>;
 
+    /// The turn scopes named by inputs bound to `root`. A joined input's
+    /// source key names its turn scope; an unkeyed input uses its input id.
+    /// These bindings outlive input settlement until session deletion.
+    async fn bound_turn_scopes(
+        &self,
+        _session_id: &SessionId,
+        _root: &TurnId,
+    ) -> Result<Vec<TurnId>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "RootStore::bound_turn_scopes",
+        })
+    }
+
     /// Bind each of `inputs` to `root`, set-if-absent, and open `root`'s
     /// record if it has none. The root's admission binds the rows it
     /// admitted. A binding to another root is refused and nothing is written.
