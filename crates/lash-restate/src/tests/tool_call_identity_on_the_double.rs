@@ -148,7 +148,7 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
 
 /// The RLM protocol with its process lifecycle on, over `backend`'s
 /// artifacts, and the process controls a cell's `processes.start` needs.
-pub(super) fn process_rlm(
+fn process_rlm(
     backend: &lash_core::Backend,
 ) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![
@@ -204,24 +204,43 @@ async fn tier(
     )
     .await
     .unwrap_or_else(|error| panic!("start the Restate server double: {error}"));
-    let backend = double.lash_backend();
     let tier = lash_conformance::ToolCallIdentityTier {
         prefix: format!("identity-{label}-{seed}"),
-        effect_host: backend.effect_host() as Arc<dyn EffectHost>,
+        effect_host: double.lash_backend().effect_host() as Arc<dyn EffectHost>,
         stores: Arc::clone(double.engine_stores()),
         runner: Arc::new(DoubleTurnRunner {
             backend: double.clone(),
         }),
         rlm: vec![super::conformance_and_poison::drift_law_rlm_factory()],
-        process_rlm: process_rlm(&backend),
     };
     (double, tier)
 }
 
+/// [`tier`] with the RLM protocol that starts processes over the double's
+/// backend.
+async fn process_tier(
+    label: &str,
+    always_replay: bool,
+) -> (
+    lash_restate_test::RestateTestBackend,
+    lash_conformance::ToolCallIdentityTier,
+    Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+) {
+    let (double, tier) = tier(label, always_replay).await;
+    let process_rlm = process_rlm(&double.lash_backend());
+    (double, tier, process_rlm)
+}
+
 mod in_process {
     lash_conformance::tool_call_identity_tests!({ super::tier("in-process", false).await });
+    lash_conformance::tool_call_identity_process_tests!({
+        super::process_tier("in-process", false).await
+    });
 }
 
 mod double {
     lash_conformance::tool_call_identity_tests!({ super::tier("double", true).await });
+    lash_conformance::tool_call_identity_process_tests!({
+        super::process_tier("double", true).await
+    });
 }

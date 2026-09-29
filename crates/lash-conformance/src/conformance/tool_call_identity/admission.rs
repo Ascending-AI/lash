@@ -25,8 +25,14 @@ fn process_cell(label: &str, hold: bool, finish: bool) -> crate::LlmResponse {
 /// once; every run of the held call sees one call id; and the two calls,
 /// the same statement at the same position of two processes, are two
 /// identities.
-pub async fn process_admission_names_each_call_and_survives_replay(tier: ToolCallIdentityTier) {
-    let world = World::code_with_processes(&tier, "process-admission");
+///
+/// `process_rlm` is the RLM protocol with its process lifecycle on, and the
+/// process controls a cell's `processes.start` needs.
+pub async fn process_admission_names_each_call_and_survives_replay(
+    tier: ToolCallIdentityTier,
+    process_rlm: Vec<std::sync::Arc<dyn crate::facade_support::PluginFactory>>,
+) {
+    let world = World::code_with_processes(&tier, process_rlm, "process-admission");
     let turn = world.turn(
         "turn",
         vec![

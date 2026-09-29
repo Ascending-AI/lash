@@ -3,8 +3,7 @@
 /// [`ToolCallIdentityTier`](crate::ToolCallIdentityTier): the tier's effect
 /// host and store set and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner), which must crash
-/// and redrive a turn and serve process segments, and the RLM protocol
-/// plugin factories.
+/// and redrive a turn, and the RLM protocol plugin factories.
 ///
 /// A law registered `held` states a contract that holds only once FIG-4080
 /// cuts every tool-derived identity over to the lash-minted call id: its
@@ -33,8 +32,6 @@ macro_rules! tool_call_identity_tests {
             compaction_keeps_identity_and_distinguishes_fresh_calls);
         $crate::tool_call_identity_tests!(@held [$(#[$attr])*] $fixture;
             retained_payload_drift_is_refused_before_effects);
-        $crate::tool_call_identity_tests!(@law [$(#[$attr])*] $fixture;
-            process_admission_names_each_call_and_survives_replay);
     };
     (@law [$($attr:tt)*] $fixture:block; $law:ident) => {
         $($attr)*
@@ -65,6 +62,34 @@ macro_rules! tool_call_identity_tests {
                 .expect(concat!(stringify!($law), " finishes within its bound"));
             })
             .await;
+        }
+    };
+}
+
+/// Register the process-admission law (FIG-4079): a call a Lashlang process
+/// body issues is named by its process. The fixture hands back a guard, a
+/// [`ToolCallIdentityTier`](crate::ToolCallIdentityTier) whose runner serves
+/// process segments on the law's worker, and the RLM protocol with its
+/// process lifecycle on beside the process controls.
+///
+/// The law's worker runs in the test process, so a tier whose process
+/// workflow runs a deployment's own engine (live Restate) cannot carry it.
+#[macro_export]
+macro_rules! tool_call_identity_process_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $(#[$attr])*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn process_admission_names_each_call_and_survives_replay() {
+            let (_guard, tier, process_rlm) = $fixture;
+            tokio::time::timeout(
+                std::time::Duration::from_secs(240),
+                $crate::registration_macro_support::process_admission_names_each_call_and_survives_replay(
+                    tier,
+                    process_rlm,
+                ),
+            )
+            .await
+            .expect("process_admission_names_each_call_and_survives_replay finishes within its bound");
         }
     };
 }

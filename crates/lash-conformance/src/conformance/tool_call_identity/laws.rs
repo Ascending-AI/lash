@@ -370,15 +370,24 @@ pub(super) async fn crash_when(
             world.witness.open_gate();
         })
     };
-    world
-        .runner()
-        .run_crashed_then_redriven_turn(
-            world.admitted(&turn),
-            crashing,
-            world.attempt(&turn, report),
-        )
-        .await;
-    fire.await.expect("the crash trigger's task");
+    let run = world.runner().run_crashed_then_redriven_turn(
+        world.admitted(&turn),
+        crashing,
+        world.attempt(&turn, report),
+    );
+    tokio::pin!(run);
+    let mut fire = fire;
+    // A trigger that never fires fails the law with its own message at
+    // once, rather than leaving the crashing turn to run out the law's bound.
+    tokio::select! {
+        () = &mut run => fire.await.expect("the crash trigger's task"),
+        fired = &mut fire => {
+            if let Err(failed) = fired {
+                std::panic::resume_unwind(failed.into_panic());
+            }
+            run.await;
+        }
+    }
     last_result(reported).await
 }
 

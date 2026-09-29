@@ -47,10 +47,6 @@ pub struct ToolCallIdentityTier {
     /// The RLM protocol plugin factories the code-cell laws run under: the
     /// part of the tier this crate cannot construct.
     pub rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
-    /// The RLM protocol with its process lifecycle on, and the process
-    /// controls a cell's `processes.start` needs: what the process-admission
-    /// law's cells run under.
-    pub process_rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 }
 
 /// How long a turn gets before the law fails rather than hangs.
@@ -191,7 +187,13 @@ impl Witness {
             }
         })
         .await
-        .unwrap_or_else(|_| panic!("{what} within {PATIENCE:?}"));
+        .unwrap_or_else(|_| {
+            panic!(
+                "{what} within {PATIENCE:?} (bodies started: {:?}; executions: {:?})",
+                self.started.lock_recover(),
+                self.executions(),
+            )
+        });
     }
 }
 
@@ -475,14 +477,14 @@ pub(crate) struct World {
 }
 
 /// Which protocol a law's session runs under.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone)]
 enum Protocol {
     /// The standard protocol: the model calls tools natively.
     Standard,
     /// RLM: the model answers with code cells.
     Code,
-    /// RLM whose cells can start Lashlang processes.
-    CodeWithProcesses,
+    /// RLM whose cells can start Lashlang processes: these factories.
+    CodeWithProcesses(Arc<Vec<Arc<dyn crate::facade_support::PluginFactory>>>),
 }
 
 /// A world's process registry and the work wiring the tier's engine runs its
@@ -534,16 +536,21 @@ impl World {
         }
     }
 
-    /// A world whose code cells start Lashlang processes, whose segments the
-    /// tier's engine runs on a worker over the same plugins.
+    /// A world whose code cells, under `process_rlm`, start Lashlang
+    /// processes, whose segments the tier's engine runs on a worker over the
+    /// same plugins.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: the worker is built from the setup above"
     )]
-    pub(crate) fn code_with_processes(tier: &ToolCallIdentityTier, law: &str) -> Self {
+    pub(crate) fn code_with_processes(
+        tier: &ToolCallIdentityTier,
+        process_rlm: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
+        law: &str,
+    ) -> Self {
         let registry = tier.stores.process_registry();
         let mut world = Self {
-            protocol: Protocol::CodeWithProcesses,
+            protocol: Protocol::CodeWithProcesses(Arc::new(process_rlm)),
             process_registry: Some(Arc::clone(&registry)),
             ..Self::new(tier, law)
         };
@@ -734,10 +741,10 @@ impl World {
             witness: Arc::clone(&self.witness),
             effect_host: Arc::clone(&self.tier.effect_host),
         });
-        let protocol = match self.protocol {
+        let protocol = match &self.protocol {
             Protocol::Standard => crate::testing::test_standard_protocol_factories(),
             Protocol::Code => self.tier.rlm.clone(),
-            Protocol::CodeWithProcesses => self.tier.process_rlm.clone(),
+            Protocol::CodeWithProcesses(factories) => factories.as_ref().clone(),
         };
         let factories = protocol
             .into_iter()
