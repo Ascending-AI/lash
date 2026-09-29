@@ -22,7 +22,9 @@ use lash_core::facade_support::{TurnFinish, TurnOutcome, TurnStop};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_core::{SessionId, SessionStoreFactory as _, StoreSet as _};
-use lash_restate_test::{RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE};
+use lash_restate_test::{
+    RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE,
+};
 
 /// The first model call waits here until the law releases it, so a law can
 /// act while a turn is running.
@@ -265,6 +267,69 @@ async fn busy_sends_answer_in_arrival_order() {
     assert!(at("first question") < at("answer 1"));
     assert!(at("answer 1") < at("second question"));
     assert!(at("second question") < at("third question"));
+}
+
+/// Sends accepted back-to-back ask for at most one drive behind the running
+/// one (FIG-4036): an ask that finds the session's drive in flight joins the
+/// one drive queued behind it instead of queuing its own, and every input
+/// is still answered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn back_to_back_sends_queue_at_most_one_drive() {
+    const SENDS: usize = 24;
+    let world = world(0x5508).await;
+    let session = world
+        .core
+        .session("back-to-back")
+        .open()
+        .await
+        .expect("open");
+    let mut handles = Vec::with_capacity(SENDS);
+    for index in 0..SENDS {
+        handles.push(
+            session
+                .send(lash::TurnInput::text(format!("question {index}")))
+                .await
+                .expect("accept"),
+        );
+    }
+    for handle in handles {
+        let outcome = tokio::time::timeout(Duration::from_secs(60), handle.outcome())
+            .await
+            .expect("the input is answered")
+            .expect("the outcome");
+        assert!(
+            matches!(outcome.status, lash::TurnStatus::Answered),
+            "{:?}",
+            outcome.status
+        );
+    }
+    assert!(
+        session
+            .durable()
+            .pending_turn_inputs()
+            .await
+            .expect("pending")
+            .is_empty(),
+        "every accepted input was driven"
+    );
+    assert_eq!(
+        session
+            .durable()
+            .turn_input_applications()
+            .await
+            .expect("applications")
+            .len(),
+        SENDS
+    );
+    assert!(
+        world
+            .backend
+            .server()
+            .inbox_high_water(SESSION_DRIVER_SERVICE, "back-to-back")
+            <= 1,
+        "at most one drive ever waited behind the running one: {:?}",
+        world.backend.server().invocations()
+    );
 }
 
 /// The double's drive hold: while a test holds the engine's drive of a
@@ -703,8 +768,9 @@ async fn dropped_schedule_is_reconciled() {
 
 /// A row that lands while an engine-side invocation owns its session is
 /// asked for once, through its own ingress obligation, and never by a second ask:
-/// its drive queues behind the live one on the session's object, so no
-/// sibling ever fences the live turn (S5a review, ADR 0109 §3).
+/// its ask joins the one drive the engine queues behind the live one, which
+/// is not sent while the live drive runs (FIG-4036), so no sibling ever
+/// fences the live turn (S5a review, ADR 0109 §3).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_session_with_live_engine_work_is_not_re_asked() {
     let world = world(0x5e55).await;
@@ -766,11 +832,14 @@ async fn a_session_with_live_engine_work_is_not_re_asked() {
         "only ingress obligations asked for drives: {asks:?}"
     );
     assert_eq!(
-        asks.iter()
-            .filter(|row| row.idempotency_key.as_deref() == Some(own.as_str()))
-            .count(),
+        asks.len(),
         1,
-        "the row's own drive was asked for once: {asks:?}"
+        "the row's ask queued no drive behind the live one: {asks:?}"
+    );
+    assert!(
+        asks.iter()
+            .all(|row| row.idempotency_key.as_deref() != Some(own.as_str())),
+        "the row's drive waits until the live one ended: {asks:?}"
     );
 
     // The live drive's own re-admission picks the row up once the turn

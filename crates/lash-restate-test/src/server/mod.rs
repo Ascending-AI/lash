@@ -1244,6 +1244,16 @@ impl RestateTestServer {
             .collect()
     }
 
+    /// The most invocations that ever waited at once on the exclusive lock
+    /// of `service`'s object `key`: 0 when none ever queued behind another.
+    pub fn inbox_high_water(&self, service: &str, key: &str) -> usize {
+        self.shared
+            .lock()
+            .keys
+            .get(&(service.to_owned(), key.to_owned()))
+            .map_or(0, |record| record.inbox_high_water)
+    }
+
     /// Under [`Scheduling::Serial`], every grant of the turn so far, in
     /// order: the invocation id and attempt number that ran. Equal across
     /// two runs of one seed exactly when their attempts interleaved the

@@ -495,6 +495,95 @@ async fn a_schedule_committed_while_a_drive_runs_is_admitted_by_the_next_invocat
     assert_eq!(driver.ledger(&session).consumed, ["a", "b"]);
 }
 
+/// A send that lands exactly as the drive finishes — committed after that
+/// drive's last admission read the ledger, asked for before it returned —
+/// is still admitted (FIG-4036): its ask joins the one drive the engine
+/// sends once the running drive ended, never the running drive alone, and
+/// that drive's first admission takes it. Its waiter follows that drive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_send_as_the_drive_finishes_is_admitted_by_one_drive_behind_it() {
+    let (backend, driver, _installation) = fixture(0x4036).await;
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    let session = SessionId::from("drive-finishing");
+    driver.accept(&session, "a");
+    let gate = driver.gate("ingress:a:1", 1);
+    engine
+        .request_drive(&session, request("ingress:a:1"))
+        .await
+        .expect("the first ask is accepted");
+    tokio::time::timeout(Duration::from_secs(20), gate.reached.notified())
+        .await
+        .expect("the drive reaches its last admission");
+    driver.accept(&session, "b");
+    engine
+        .request_drive(&session, request("ingress:b:1"))
+        .await
+        .expect("the ask as the drive finishes is accepted");
+    engine
+        .request_drive(&session, request("ingress:b:1"))
+        .await
+        .expect("a repeated ask is accepted");
+    gate.release.notify_one();
+    let waited = tokio::time::timeout(
+        Duration::from_secs(20),
+        engine.await_drive(&session, &request("ingress:b:1")),
+    )
+    .await
+    .expect("the send's drive ends")
+    .expect("the send's drive outcome");
+    assert_eq!(waited.stop, DriveStop::Idle);
+    assert_eq!(driver.ledger(&session).consumed, ["a", "b"]);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert!(
+        backend
+            .server()
+            .inbox_high_water(SESSION_DRIVER_SERVICE, "drive-finishing")
+            <= 1,
+        "at most one drive waited behind the running one: {:?}",
+        backend.server().invocations()
+    );
+}
+
+/// Asks for one session's drive, back to back, each after its item
+/// committed, queue at most one drive behind the running one, and every
+/// item is admitted (FIG-4036).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn back_to_back_asks_queue_at_most_one_drive() {
+    const ASKS: usize = 32;
+    let (backend, driver, _installation) = fixture(0x4037).await;
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    let session = SessionId::from("drive-back-to-back");
+    let items: Vec<String> = (0..ASKS).map(|index| format!("item-{index:02}")).collect();
+    for item in &items {
+        driver.accept(&session, item);
+        engine
+            .request_drive(&session, request(&format!("ingress:{item}:1")))
+            .await
+            .expect("the ask is accepted");
+    }
+    for item in &items {
+        tokio::time::timeout(
+            Duration::from_secs(20),
+            engine.await_drive(&session, &request(&format!("ingress:{item}:1"))),
+        )
+        .await
+        .expect("the ask's drive ends")
+        .expect("the ask's drive outcome");
+    }
+    settle(&backend).await;
+    assert_eq!(driver.ledger(&session).consumed, items);
+    no_drive_failed(&backend);
+    assert!(
+        backend
+            .server()
+            .inbox_high_water(SESSION_DRIVER_SERVICE, "drive-back-to-back")
+            <= 1,
+        "at most one drive waited behind the running one: {:?}",
+        backend.server().invocations()
+    );
+}
+
 /// One request id is one drive: a repeated schedule of it attaches to the
 /// first invocation, so an item committed after that drive's last admission
 /// stays open until another request drives the session. This is why every

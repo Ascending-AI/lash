@@ -406,6 +406,7 @@ impl State {
             let record = self.key_record(service_key);
             if record.locked_by.is_some() {
                 record.inbox.push_back(key);
+                record.inbox_high_water = record.inbox_high_water.max(record.inbox.len());
                 self.invocations[key.0].status = Status::Inboxed;
                 self.touch(key);
                 return;

@@ -334,6 +334,9 @@ pub enum PromiseState {
 pub struct KeyRecord {
     pub locked_by: Option<InvKey>,
     pub inbox: VecDeque<InvKey>,
+    /// The longest the inbox ever was: how many invocations ever waited on
+    /// the lock at once.
+    pub inbox_high_water: usize,
     pub state: BTreeMap<String, Bytes>,
     pub workflow_run: Option<InvKey>,
     pub promises: BTreeMap<String, PromiseState>,

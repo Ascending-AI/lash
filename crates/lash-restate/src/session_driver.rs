@@ -36,18 +36,23 @@
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.
 //!
-//! **Scheduling (O2).** [`SessionWorkEngine::request_drive`] is a send to
-//! `LashSession/{session}/drive` whose idempotency key is the drive
-//! request's id, answered once Restate accepted it; `schedule_drive` is its
-//! fire-and-forget twin. Every ask names its own request (the admitted row
-//! and attempt its ingress obligation asks for, `ingress:{item}:{attempt}`,
-//! or a continuation), never the session or a running drive, so an ask
-//! issued while a drive runs is never deduplicated away: it queues behind
-//! the running drive on the object, and its first admission is the re-check
-//! that admits whatever that drive left pending. An ask lost with its
-//! process, or a drive the engine lost before it admitted the row, is the
-//! ingress relay's to ask again from the row's obligation (ADR 0109 §3);
-//! nothing scans the session catalog for undriven rows.
+//! **Scheduling (O2).** A drive is a send to `LashSession/{session}/drive`
+//! whose idempotency key is the drive's request id. Every ask names its own
+//! request: the admitted row and attempt its ingress obligation asks for,
+//! `ingress:{item}:{attempt}`, or a continuation. It never names the session
+//! or a running drive. The engine coalesces the asks of one session (FIG-4036,
+//! [`asks`]). An ask that finds none of the session's drives in flight from
+//! this process is sent at once, under its own request.
+//! [`SessionWorkEngine::request_drive`] answers once Restate accepted it, and
+//! `schedule_drive` is its fire-and-forget twin. An ask that finds a drive in
+//! flight is never deduplicated into that drive. It joins the one drive queued
+//! behind it, which the engine sends once the drive in flight has ended.
+//! That drive's first admission is the re-check that admits whatever the
+//! drive before it left pending. So a burst of sends queues one drive, not
+//! one per send. An ask lost with its process, or a drive the engine lost
+//! before it admitted the row, is the ingress relay's to ask again from the
+//! row's obligation (ADR 0109 §3). Nothing scans the session catalog for
+//! undriven rows.
 //!
 //! **Generations.** Both handlers' requests carry
 //! [`LASH_SESSION_DRIVE_VERSION`], the generation of the commands their
@@ -87,6 +92,8 @@ use crate::{
     LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
     parked_turn_failure,
 };
+
+mod asks;
 
 /// The generation of the session driver's journaled command prefix: the
 /// input stamp of every `LashSession` and `LashTurn` request (ADR 0105 §12).
@@ -347,6 +354,9 @@ pub struct RestateSessionWork {
     /// (FIG-3898).
     namespace: crate::RestateNamespace,
     control: Arc<dyn lash_core::engine::SessionControlEngine>,
+    /// Every session's drive asks from this engine: what is in flight and
+    /// what is queued behind it.
+    asks: Arc<asks::DriveAsks>,
 }
 
 #[expect(
@@ -367,6 +377,7 @@ impl RestateSessionWork {
             build_generation,
             namespace,
             control,
+            asks: Arc::default(),
         }
     }
 
@@ -520,6 +531,25 @@ impl RestateSessionWork {
             ),
         )))
     }
+
+    /// The leg a drive continues on after `leg` ended with `outcome`, when
+    /// `leg` spent its root budget and handed off.
+    fn continuation(
+        &self,
+        session: &SessionId,
+        leg: &DriveRequestId,
+        outcome: &DriveOutcome,
+    ) -> Option<DriveRequestId> {
+        let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
+            && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
+        handed_off.then(|| {
+            drive_continuation_request(&DriveRequest {
+                session: session.clone(),
+                request: leg.clone(),
+                build_generation: self.build_generation.clone(),
+            })
+        })
+    }
 }
 
 impl std::fmt::Debug for RestateSessionWork {
@@ -549,37 +579,42 @@ impl SessionWorkEngine for RestateSessionWork {
             );
             return;
         };
-        let engine = self.clone();
-        let session = session.clone();
-        runtime.spawn(async move {
-            if let Err(error) = engine.send_drive(&session, request.clone()).await {
-                tracing::warn!(
-                    session_id = session.as_str(),
-                    request = request.as_str(),
-                    error = %error,
-                    "session drive send failed"
-                );
-            }
-        });
+        self.asks.join(self, &runtime, session, request);
     }
 
-    /// Send `request`'s drive and answer once Restate accepted it, under
-    /// the request's idempotency key: a repeated request attaches to its
-    /// first invocation. A send that did not reach Restate is retryable.
+    /// Join `request` to the session's drive ([`asks`]). An ask that sends
+    /// a drive answers once Restate accepted it, under the request's
+    /// idempotency key; a send that did not reach Restate is retryable. An ask
+    /// queued behind the drive in flight is accepted at once: the engine
+    /// sends it once that drive ended. A repeated request joins the drive it
+    /// joined first.
     async fn request_drive(
         &self,
         session: &SessionId,
         request: DriveRequestId,
     ) -> Result<(), lash_core::engine::EngineRefusal> {
-        self.send_drive(session, request.clone())
-            .await
-            .map(|_| ())
-            .map_err(|error| {
-                lash_core::engine::EngineRefusal::Retryable(format!(
-                    "drive `{}` of session `{session}` was not accepted: {error}",
-                    request.as_str()
-                ))
-            })
+        let refusal = |request: &DriveRequestId, error: &dyn std::fmt::Display| {
+            lash_core::engine::EngineRefusal::Retryable(format!(
+                "drive `{}` of session `{session}` was not accepted: {error}",
+                request.as_str()
+            ))
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            // No runtime to pump on: send this ask alone.
+            return self
+                .send_drive(session, request.clone())
+                .await
+                .map(|_| ())
+                .map_err(|error| refusal(&request, &error));
+        };
+        let joined = self.asks.join(self, &runtime, session, request);
+        if joined.queued {
+            return Ok(());
+        }
+        match joined.drive.sent().await {
+            asks::Sent::Accepted => Ok(()),
+            asks::Sent::Failed(error) => Err(refusal(joined.drive.request(), &error)),
+        }
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
@@ -596,8 +631,10 @@ impl SessionWorkEngine for RestateSessionWork {
         installed
     }
 
-    /// Attach to `request`'s drive by its idempotency key, starting it if no
-    /// send reached Restate. A drive a handler refused terminally is decoded
+    /// Attach to the drive `request` joined ([`asks`]) once the engine sent
+    /// it. When this engine holds no ask of `request`, attach to `request`'s
+    /// own drive by its idempotency key, starting it if no send reached
+    /// Restate. A drive a handler refused terminally is decoded
     /// back to the kernel's refusal; any other failure to attach (transport,
     /// the attach ceiling) is a retry under the same key.
     ///
@@ -614,24 +651,35 @@ impl SessionWorkEngine for RestateSessionWork {
         session: &SessionId,
         request: &DriveRequestId,
     ) -> Result<DriveOutcome, DriveAbort> {
-        let mut leg = request.clone();
+        let mut leg = match self.asks.joined(session, request) {
+            Some(drive) => match drive.sent().await {
+                asks::Sent::Accepted => drive.request().clone(),
+                asks::Sent::Failed(error) => {
+                    return Err(DriveAbort::Retry(lash_core::RuntimeError::new(
+                        lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
+                        format!(
+                            "drive `{}` of session `{session}` was not sent: {error}",
+                            drive.request().as_str()
+                        ),
+                    )));
+                }
+            },
+            None => request.clone(),
+        };
         let mut ran = Vec::new();
         loop {
             let outcome = self.attach_drive_leg(session, &leg).await?;
-            let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
-                && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
+            let next = self.continuation(session, &leg, &outcome);
             ran.extend(outcome.ran);
-            if !handed_off {
-                return Ok(DriveOutcome {
-                    ran,
-                    stop: outcome.stop,
-                });
+            match next {
+                Some(next) => leg = next,
+                None => {
+                    return Ok(DriveOutcome {
+                        ran,
+                        stop: outcome.stop,
+                    });
+                }
             }
-            leg = drive_continuation_request(&DriveRequest {
-                session: session.clone(),
-                request: leg,
-                build_generation: self.build_generation.clone(),
-            });
         }
     }
 }
@@ -1435,7 +1483,7 @@ mod tests {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .len()
-                    == 2
+                    >= 2
                 {
                     break;
                 }
@@ -1444,6 +1492,8 @@ mod tests {
         })
         .await
         .expect("the send retries after 503");
+        // The accepted send is followed by the engine's attach to learn when
+        // the drive ended (FIG-4036); the first two requests are the sends.
         let requests = transport
             .requests
             .lock()
