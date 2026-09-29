@@ -36,7 +36,34 @@ use crate::linker::{
 pub use lash_sansio::LASHLANG_SEMANTIC_HASH_VERSION;
 pub const LASHLANG_COMPILER_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The JSON module envelope written by the 1.0 binary.
+#[cfg(not(feature = "synthetic-next"))]
 pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope encoding to 2.
+/// Its shape is 1's. The module encoder never sees the fleet epoch, so N+1
+/// writes N's encoding, as `F` pinned at N's epoch would have it write, and
+/// every module it publishes before finalize is one N verifies after a
+/// rollback.
+#[cfg(feature = "synthetic-next")]
+pub const MODULE_ARTIFACT_ENVELOPE_VERSION: u32 = 2;
+
+/// The envelope encoding this build writes: its own, and for the synthetic
+/// N+1 N's, one back.
+pub(crate) const fn written_envelope_encoding() -> u32 {
+    if cfg!(feature = "synthetic-next") {
+        MODULE_ARTIFACT_ENVELOPE_VERSION - 1
+    } else {
+        MODULE_ARTIFACT_ENVELOPE_VERSION
+    }
+}
+
+/// Whether this build reads envelope `encoding`: its own, and for the
+/// synthetic N+1 also N's, one back.
+const fn envelope_encoding_admitted(encoding: u64) -> bool {
+    encoding == MODULE_ARTIFACT_ENVELOPE_VERSION as u64
+        || (cfg!(feature = "synthetic-next")
+            && encoding + 1 == MODULE_ARTIFACT_ENVELOPE_VERSION as u64)
+}
 /// v11: `ResourceOperationBatch` carries the aggregate's consumer mode, timer
 /// leaves and the immediate-prefix boundary, and its result is the response
 /// algebra of ADR 0099 §10 L2 instead of a settlement order.
@@ -368,7 +395,7 @@ impl ModuleArtifact {
     pub fn to_store_bytes(&self) -> Result<Vec<u8>, ModuleArtifactError> {
         serde_json::to_vec(&ModuleArtifactEnvelope {
             family: LASHLANG_SEMANTIC_HASH_VERSION,
-            encoding: MODULE_ARTIFACT_ENVELOPE_VERSION,
+            encoding: written_envelope_encoding(),
             artifact: self,
         })
         .map_err(|err| ModuleArtifactError::Codec(err.to_string()))
@@ -379,7 +406,7 @@ impl ModuleArtifact {
             .map_err(|err| ModuleArtifactError::Codec(err.to_string()))?;
         if let (Some(family), Some(encoding)) = (raw.get("family"), raw.get("encoding"))
             && (family.as_str() != Some(LASHLANG_SEMANTIC_HASH_VERSION)
-                || encoding.as_u64() != Some(u64::from(MODULE_ARTIFACT_ENVELOPE_VERSION)))
+                || !encoding.as_u64().is_some_and(envelope_encoding_admitted))
         {
             return Err(ModuleArtifactError::UnsupportedFamily {
                 family: family
@@ -409,7 +436,7 @@ impl ModuleArtifact {
                 }
             })?;
         if envelope.family != LASHLANG_SEMANTIC_HASH_VERSION
-            || envelope.encoding != MODULE_ARTIFACT_ENVELOPE_VERSION
+            || !envelope_encoding_admitted(u64::from(envelope.encoding))
         {
             return Err(ModuleArtifactError::UnsupportedFamily {
                 family: envelope.family,

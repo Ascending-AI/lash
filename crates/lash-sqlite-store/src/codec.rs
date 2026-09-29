@@ -4,7 +4,21 @@ use super::*;
 use lash_sansio::SessionId;
 
 /// The stored SQLite blob envelope's format under the 1.0 freeze.
+#[cfg(not(feature = "synthetic-next"))]
 pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the envelope to 2. Its shape
+/// is 1's; while `F` is N's epoch the fleet pins writers to 1, so every blob
+/// N+1 writes before finalize is one N reads after a rollback.
+#[cfg(feature = "synthetic-next")]
+pub const SQLITE_BLOB_ENVELOPE_VERSION: u32 = 2;
+
+/// Whether this build encodes and decodes envelope `version`: its own, and
+/// for the synthetic N+1 also N's, one back.
+const fn blob_envelope_admits(version: u32) -> bool {
+    version == SQLITE_BLOB_ENVELOPE_VERSION
+        || (cfg!(feature = "synthetic-next") && version + 1 == SQLITE_BLOB_ENVELOPE_VERSION)
+}
 
 /// Read a stored process id: a column this store only ever wrote from a
 /// minted id, so any other spelling is corrupt stored data.
@@ -90,7 +104,7 @@ pub(crate) fn encode_artifact_blob(
     content: &[u8],
     version: u32,
 ) -> Result<Vec<u8>, StoreError> {
-    if version != SQLITE_BLOB_ENVELOPE_VERSION {
+    if !blob_envelope_admits(version) {
         return Err(StoreError::RecordEncodingFailed {
             record_kind: "SQLite stored blob envelope".to_string(),
             message: format!("no encoder for fleet-selected version {version}"),
@@ -119,7 +133,7 @@ pub(crate) fn encode_artifact_blob(
 pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> {
     let envelope = rmp_serde::from_slice::<StoredBlobEnvelope>(bytes)
         .map_err(|error| stored_data_corrupt("artifact blob envelope", error))?;
-    if envelope.version != SQLITE_BLOB_ENVELOPE_VERSION {
+    if !blob_envelope_admits(envelope.version) {
         return Err(StoreError::UnsupportedRecordSchemaVersion {
             record_kind: "SQLite stored blob envelope",
             actual: envelope.version,
@@ -241,6 +255,35 @@ pub(crate) fn decode_msgpack<T: serde::de::DeserializeOwned>(bytes: &[u8]) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_admitted_envelope_version_round_trips() {
+        let content = b"durable attachment".to_vec();
+        let admitted: Vec<u32> = (1..=SQLITE_BLOB_ENVELOPE_VERSION)
+            .filter(|version| blob_envelope_admits(*version))
+            .collect();
+        assert_eq!(admitted.last(), Some(&SQLITE_BLOB_ENVELOPE_VERSION));
+        assert_eq!(
+            admitted.len(),
+            if cfg!(feature = "synthetic-next") {
+                2
+            } else {
+                1
+            }
+        );
+        for version in admitted {
+            let stored = encode_msgpack(
+                &StoredBlobEnvelope {
+                    version,
+                    compression: "None".to_string(),
+                    content: content.clone(),
+                },
+                "blob fixture",
+            )
+            .expect("encode envelope");
+            assert_eq!(decode_artifact_blob(&stored).expect("decode"), content);
+        }
+    }
 
     #[test]
     fn blob_envelope_decoder_refuses_an_unknown_version_or_compression() {

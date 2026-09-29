@@ -182,6 +182,19 @@ impl RestateView {
         .await
     }
 
+    /// Every invocation of any of `service`'s handlers on `key` that has not
+    /// completed, oldest first: work a node still owes the object.
+    pub async fn live_invocations(&self, service: &str, key: &str) -> Result<Vec<Invocation>> {
+        self.query(&format!(
+            "SELECT id, status, pinned_deployment_id, invoked_by_id, last_failure, retry_count \
+             FROM sys_invocation WHERE target_service_name = {} AND target_service_key = {} \
+             AND status <> 'completed' ORDER BY created_at",
+            sql_literal(&self.service_name(service)),
+            sql_literal(key)
+        ))
+        .await
+    }
+
     /// Every deployment the server holds.
     pub async fn deployments(&self) -> Result<Vec<Deployment>> {
         #[derive(Deserialize)]

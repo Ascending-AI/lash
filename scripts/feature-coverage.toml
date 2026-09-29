@@ -403,6 +403,8 @@ features = [
   "lash-runtime/synthetic-next:off",
   "lash-internal-core/synthetic-next:on",
   "lash-internal-core/synthetic-next:off",
+  "lash-internal-sansio/synthetic-next:on",
+  "lash-internal-sansio/synthetic-next:off",
   "lash-internal-core-store/synthetic-next:on",
   "lash-internal-core-store/synthetic-next:off",
   "lash-internal-lashlang/synthetic-next:on",
@@ -417,6 +419,8 @@ features = [
   "lash-internal-restate/synthetic-next:off",
 ]
 commands = [
+  ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--locked"],
+  ["cargo", "check", "-p", "lash-internal-sansio", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core-store", "--all-targets", "--no-default-features", "--features", "synthetic-next", "--locked"],
   ["cargo", "check", "-p", "lash-internal-core", "--lib", "--no-default-features", "--locked"],

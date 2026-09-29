@@ -19,8 +19,10 @@ use anyhow::{Result, bail};
 
 mod expanded_store_rollback;
 mod generation_handoff_rollback;
+mod history_after_finalize;
 mod negotiated_wire_both_directions;
 mod object_sweep_crash_resume;
+mod retention_delivery_rollback;
 mod skipped_compatibility_release_refused;
 mod support;
 
@@ -42,28 +44,4 @@ fn waits_for(lane: &str) -> Result<()> {
 #[ignore = "waits for lanes L2 and L3 (FIG-3800 A): the PostgreSQL and SQLite writer fences"]
 fn finalize_races_every_writer() -> Result<()> {
     waits_for("lanes L2 and L3 (FIG-3800 A)")
-}
-
-/// Checkpoints, attachments, referrer edges and fences, and obligations
-/// written by N+1 before finalize survive N's rollback, N's retention and
-/// GC, and a return to N+1: nothing is lost or delivered twice. A row with
-/// an unknown obligation kind stays outstanding and typed under N.
-///
-/// Waits for lanes L7a (surfaces now) and L7b (surfaces after ADR 0113).
-#[test]
-#[ignore = "waits for lanes L7a and L7b: the per-surface obligations of §5"]
-fn retention_delivery_rollback() -> Result<()> {
-    waits_for("lanes L7a and L7b")
-}
-
-/// After finalize, N+1 still reads the history N wrote, through the
-/// permanent floor and not through `{F, newest}`.
-///
-/// Waits for lane L1 (FIG-4043), plus the `synthetic-next` session node
-/// body version and its history upcaster in
-/// `crates/lash-core-store/src/session_graph.rs`.
-#[test]
-#[ignore = "waits for lane L1 (FIG-4043): the history floor behind admitted stores"]
-fn history_after_finalize() -> Result<()> {
-    waits_for("lane L1 (FIG-4043)")
 }

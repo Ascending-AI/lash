@@ -39,8 +39,21 @@ fn artifact_verifies_under_its_stored_family() {
     let bytes = artifact.to_store_bytes().expect("artifact encodes");
     let stored: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON envelope");
     assert_eq!(stored["family"], LASHLANG_SEMANTIC_HASH_VERSION);
-    assert_eq!(stored["encoding"], MODULE_ARTIFACT_ENVELOPE_VERSION);
+    assert_eq!(stored["encoding"], super::written_envelope_encoding());
     assert_eq!(ModuleArtifact::from_store_bytes(&bytes), Ok(artifact));
+}
+
+#[test]
+fn artifact_reads_every_envelope_encoding_it_admits() {
+    let artifact = process_typed_artifact("event");
+    let mut stored = stored_artifact_value(&artifact);
+    for encoding in super::written_envelope_encoding()..=MODULE_ARTIFACT_ENVELOPE_VERSION {
+        stored["encoding"] = serde_json::json!(encoding);
+        assert_eq!(
+            ModuleArtifact::from_store_bytes(&serde_json::to_vec(&stored).expect("JSON envelope")),
+            Ok(artifact.clone())
+        );
+    }
 }
 
 #[test]
@@ -53,7 +66,7 @@ fn artifact_refuses_an_unknown_family_typed() {
         ModuleArtifact::from_store_bytes(&bytes),
         Err(ModuleArtifactError::UnsupportedFamily {
             family: "lashlang-semantic-v-next".to_owned(),
-            encoding: MODULE_ARTIFACT_ENVELOPE_VERSION.to_string(),
+            encoding: super::written_envelope_encoding().to_string(),
         })
     );
     assert_eq!(

@@ -23,6 +23,10 @@ workspace = true
 default = []
 # Compile JSON Schema validators for tool inputs and process payloads.
 schema-validation = ["dep:jsonschema"]
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it, through the
+# crates that forward it; no production build does.
+synthetic-next = []
 
 [dependencies]
 blake3 = { workspace = true }

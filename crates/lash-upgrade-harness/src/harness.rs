@@ -129,6 +129,38 @@ pub fn block_on<T>(future: impl std::future::Future<Output = Result<T>>) -> Resu
         .block_on(future)
 }
 
+/// A loopback address no deployment on the Restate server is registered at.
+///
+/// Every leg shares one server, and a stopped node's deployment stays
+/// registered. The OS hands a later node that node's port again, and the
+/// registration guard refuses the URI, rightly, since it names another
+/// deployment. So a node is given a port whose URI no deployment holds.
+fn unregistered_address(case: &Case) -> Result<String> {
+    let view = case.view()?;
+    // On a thread of its own: a leg may call `serve` from inside a runtime.
+    let deployments = std::thread::scope(|scope| {
+        scope
+            .spawn(|| block_on(view.deployments()))
+            .join()
+            .map_err(|_| anyhow!("listing the deployments panicked"))
+    })??;
+    let registered: std::collections::BTreeSet<String> = deployments
+        .into_iter()
+        .map(|deployment| deployment.endpoint.trim_end_matches('/').to_owned())
+        .collect();
+    // Ports already refused stay bound, so the OS never offers them again.
+    let mut refused = Vec::new();
+    for _ in 0..64 {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").context("pick a port")?;
+        let address = listener.local_addr()?;
+        if !registered.contains(&format!("http://{address}")) {
+            return Ok(address.to_string());
+        }
+        refused.push(listener);
+    }
+    bail!("every loopback port offered is registered to a deployment")
+}
+
 /// Poll `probe` until it answers `Some`, failing after [`WAIT`] with what
 /// the leg was waiting for.
 pub fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Result<Option<T>>) -> Result<T> {
@@ -147,8 +179,8 @@ pub fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Result<Option<T>>) -> 
 /// How a `serve` node starts.
 #[derive(Clone, Debug, Default)]
 pub struct ServeOptions {
-    /// The address the endpoint listens on; a fresh loopback port when
-    /// `None`. A node that comes back at a crashed node's address serves
+    /// The address the endpoint listens on; when `None`, a loopback port
+    /// whose URI no deployment is registered at. A node that comes back at a crashed node's address serves
     /// the invocations pinned to that node's deployment.
     pub bind: Option<String>,
     /// Serve without registering the endpoint.
@@ -312,9 +344,11 @@ impl NodeBinary {
             .arg(case.effects_log())
             .arg("--gate-dir")
             .arg(case.gate_dir());
-        if let Some(bind) = &options.bind {
-            command.args(["--bind", bind]);
-        }
+        let bind = match &options.bind {
+            Some(bind) => bind.clone(),
+            None => unregistered_address(case)?,
+        };
+        command.args(["--bind", &bind]);
         if options.unregistered {
             command.arg("--no-register");
         }
@@ -358,6 +392,40 @@ impl NodeBinary {
             .output()
             .with_context(|| format!("run {} turn", self.label()))?;
         report(&self.path, "turn", output)
+    }
+
+    /// [`turn`](Self::turn) with `attachment` sent beside `message` as a
+    /// `text/plain` attachment, which the session stores and roots.
+    pub fn turn_with_attachment(
+        &self,
+        case: &Case,
+        session: &str,
+        message: &str,
+        attachment: &str,
+    ) -> Result<TurnReport> {
+        let output = Command::new(&self.path)
+            .arg("turn")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--session", session, "--message", message])
+            .args(["--attachment", attachment])
+            .output()
+            .with_context(|| format!("run {} turn", self.label()))?;
+        report(&self.path, "turn", output)
+    }
+
+    /// Run one `retention` step (`publish`, `release`, `orphan`, `relay`,
+    /// `maintain` or `inspect` and its arguments) as this build over
+    /// `case`'s store, with no deployment serving.
+    pub fn retention<T: DeserializeOwned>(&self, case: &Case, step: &[&str]) -> Result<T> {
+        let output = Command::new(&self.path)
+            .arg("retention")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(step)
+            .output()
+            .with_context(|| format!("run {} retention {step:?}", self.label()))?;
+        report(&self.path, "retention", output)
     }
 
     /// Send `message` to `session` as a host of this build, in the
@@ -630,6 +698,18 @@ impl Operator {
     }
 
     pub fn run(&self, verb: &str, generation: Option<&str>) -> Result<serde_json::Value> {
+        let (code, body) = self.answer(verb, generation)?;
+        ensure!(code == 0, "lashctl {verb} failed (exit {code}): {body}");
+        ensure!(
+            body["error"].is_null(),
+            "invalid lashctl {verb} result: {body}"
+        );
+        Ok(body["result"].clone())
+    }
+
+    /// Run `verb` and answer its pinned exit code and its whole `--json`
+    /// body, whether it succeeded or refused.
+    pub fn answer(&self, verb: &str, generation: Option<&str>) -> Result<(i32, serde_json::Value)> {
         let mut command = Command::new(&self.path);
         command
             .arg(verb)
@@ -653,15 +733,14 @@ impl Operator {
             generation.map_or(String::new(), |value| format!("{value} "))
         );
         ensure!(
-            output.status.success(),
-            "lashctl {verb} failed ({}): {body}",
-            output.status
-        );
-        ensure!(
-            body["schema_version"] == 1 && body["command"] == verb && body["error"].is_null(),
+            body["schema_version"] == 1 && body["command"] == verb,
             "invalid lashctl {verb} result: {body}"
         );
-        Ok(body["result"].clone())
+        let code = output
+            .status
+            .code()
+            .with_context(|| format!("lashctl {verb} ended by a signal"))?;
+        Ok((code, body))
     }
 }
 
@@ -914,6 +993,14 @@ impl Case {
         match &self.store {
             StoreSpec::Postgres(url) => Some(url),
             StoreSpec::Sqlite(_) => None,
+        }
+    }
+
+    /// The case's SQLite store directory, when it is a SQLite case.
+    pub fn sqlite_dir(&self) -> Option<&Path> {
+        match &self.store {
+            StoreSpec::Postgres(_) => None,
+            StoreSpec::Sqlite(dir) => Some(dir),
         }
     }
 

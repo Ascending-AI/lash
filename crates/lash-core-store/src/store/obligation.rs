@@ -16,7 +16,15 @@ use super::StoreError;
 use super::control_intent::ControlIntentId;
 
 /// The obligation state, kind, key, and stall labels written at the 1.0 cut.
+#[cfg(not(feature = "synthetic-next"))]
 pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) declares the vocabulary one ahead
+/// and still writes only N's states, kinds, keys and stall reasons while `F`
+/// is N's epoch (ADR 0115 §5). A row a later build writes with a label N
+/// does not know stays outstanding under N, stalled `undecodable`.
+#[cfg(feature = "synthetic-next")]
+pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 2;
 
 /// Which ledger an obligation lives on. Its [`label`](Self::label) is the
 /// metric label and the drain-status key.

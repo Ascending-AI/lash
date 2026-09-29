@@ -16,6 +16,9 @@
 //!   two builds ([`remote`]).
 //! - `process-start`, `process-signal` and `process-status` start, signal
 //!   and read a durable process ([`process`]).
+//! - `retention` publishes and releases host-pinned modules, relays their
+//!   cleanups, runs retention and GC, and reports what survives
+//!   ([`retention`]).
 //!
 //! The scripted provider answers every model call with the serving build's
 //! label and `G`, so a turn's reply names the build that drove it, and it
@@ -25,6 +28,7 @@ pub mod objects;
 pub mod process;
 pub mod provider;
 pub mod remote;
+pub mod retention;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -40,6 +44,7 @@ use objects::{CallArgs, SweepArgs};
 use process::{ProcessSignalArgs, ProcessStartArgs, ProcessStatusArgs};
 use provider::ProviderArgs;
 use remote::{RemoteClientArgs, RemoteHostArgs};
+use retention::RetentionArgs;
 
 /// The node binary's command line.
 #[derive(Debug, Parser)]
@@ -76,6 +81,8 @@ pub enum Command {
     ProcessSignal(ProcessSignalArgs),
     /// Read a process: its lifecycle, its signals and its output.
     ProcessStatus(ProcessStatusArgs),
+    /// Publish, release, relay, retain and inspect artifacts and attachments.
+    Retention(RetentionArgs),
 }
 
 /// Which store a command opens.
@@ -154,6 +161,9 @@ pub struct TurnArgs {
     pub session: String,
     #[arg(long)]
     pub message: String,
+    /// Attach this text to the input as a `text/plain` attachment.
+    #[arg(long)]
+    pub attachment: Option<String>,
     /// How long the turn may take to settle.
     #[arg(long, default_value_t = 120)]
     pub timeout_secs: u64,
@@ -279,6 +289,7 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::ProcessStart(args) => print(&process::start(args).await?),
         Command::ProcessSignal(args) => print(&process::signal(args).await?),
         Command::ProcessStatus(args) => print(&process::status(args).await?),
+        Command::Retention(args) => retention::run(args).await,
     }
 }
 
@@ -658,8 +669,17 @@ async fn turn(args: TurnArgs) -> Result<TurnReport> {
         .await
         .map_err(|error| anyhow!("create session {}: {error}", args.session))?;
     let settle = async {
+        let mut input = lash::TurnInput::text(args.message.clone());
+        if let Some(text) = &args.attachment {
+            let media_type = lash_core::MediaType::parse("text/plain")
+                .map_err(|error| anyhow!("media type: {error}"))?;
+            input = input.with_attachment(lash_core::AttachmentSource::inline(
+                media_type,
+                text.clone().into_bytes(),
+            ));
+        }
         let handle = session
-            .send(lash::TurnInput::text(args.message.clone()))
+            .send(input)
             .into_future()
             .await
             .map_err(|error| anyhow!("send to {}: {error}", args.session))?;

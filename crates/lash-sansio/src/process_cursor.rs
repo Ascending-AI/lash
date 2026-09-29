@@ -21,12 +21,25 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::{ProcessId, VersionRange};
 
 /// The newest process cursor format this build reads and writes.
+#[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_CURSOR_VERSION: u32 = 3;
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the cursor to 4. Its shape is
+/// 3's; while `F` is N's epoch the fleet pins minting to 3, so a cursor N+1
+/// hands a host before finalize is one N parses after a rollback.
+#[cfg(feature = "synthetic-next")]
+pub const PROCESS_CURSOR_VERSION: u32 = 4;
 
 /// Cursor versions whose identity and position shape this build understands.
 /// A compatibility release widens this range while its fleet pins writers to
 /// the earlier version.
+#[cfg(not(feature = "synthetic-next"))]
 pub const PROCESS_CURSOR_READ_RANGE: VersionRange = VersionRange::exactly(PROCESS_CURSOR_VERSION);
+
+/// The synthetic N+1 reads N's cursors as well as its own.
+#[cfg(feature = "synthetic-next")]
+pub const PROCESS_CURSOR_READ_RANGE: VersionRange =
+    VersionRange::between(PROCESS_CURSOR_VERSION - 1, PROCESS_CURSOR_VERSION);
 
 /// Cursor version stamps this build recognises only to refuse them.
 ///
@@ -273,7 +286,7 @@ impl schemars::JsonSchema for ProcessCursor {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some(format!("^lashpc{PROCESS_CURSOR_VERSION}:[^:]+:p_[0-9a-f]{{32}}:[0-9]+:[0-9]+$")),
+                pattern: Some(format!("^lashpc{}:[^:]+:p_[0-9a-f]{{32}}:[0-9]+:[0-9]+$", schema_versions())),
                 ..Default::default()
             })),
             metadata: Some(Box::new(schemars::schema::Metadata {
@@ -286,6 +299,20 @@ impl schemars::JsonSchema for ProcessCursor {
         }
         .into()
     }
+}
+
+/// The cursor versions the schema pattern admits: this build's read range,
+/// one version or an alternation of them.
+fn schema_versions() -> String {
+    let (min, max) = (
+        PROCESS_CURSOR_READ_RANGE.min(),
+        PROCESS_CURSOR_READ_RANGE.max(),
+    );
+    if min == max {
+        return min.to_string();
+    }
+    let versions: Vec<String> = (min..=max).map(|version| version.to_string()).collect();
+    format!("(?:{})", versions.join("|"))
 }
 
 #[cfg(test)]
@@ -306,7 +333,9 @@ mod tests {
         let wire = cursor.to_string();
         assert_eq!(
             wire,
-            "lashpc3:epoch-a:p_00000000000070008000000000000003:7:11"
+            format!(
+                "lashpc{PROCESS_CURSOR_VERSION}:epoch-a:p_00000000000070008000000000000003:7:11"
+            )
         );
         assert_eq!(ProcessCursor::parse(&wire), Ok(cursor.clone()));
         assert!(cursor.reference().names(&process(3)));
@@ -366,11 +395,31 @@ mod tests {
             );
         }
         assert!(ProcessCursor::new("a:b", reference(), 0, 0).is_err());
+        let unsupported = format!("lashpc{}", PROCESS_CURSOR_READ_RANGE.max() + 1);
         assert_eq!(
-            ProcessCursor::parse("lashpc4:e:p_00000000000070008000000000000003:1:2"),
-            Err(ProcessCursorError::UnsupportedVersion {
-                found: "lashpc4".to_string()
-            })
+            ProcessCursor::parse(&format!(
+                "{unsupported}:e:p_00000000000070008000000000000003:1:2"
+            )),
+            Err(ProcessCursorError::UnsupportedVersion { found: unsupported })
+        );
+    }
+
+    #[test]
+    fn every_version_of_the_read_range_parses_and_the_next_is_refused() {
+        let (min, max) = (
+            PROCESS_CURSOR_READ_RANGE.min(),
+            PROCESS_CURSOR_READ_RANGE.max(),
+        );
+        assert_eq!(max, PROCESS_CURSOR_VERSION);
+        for version in min..=max {
+            let cursor = ProcessCursor::at_version(version, "fleet", reference(), 2, 7)
+                .expect("mint inside the read range");
+            assert_eq!(ProcessCursor::parse(&cursor.to_string()), Ok(cursor));
+        }
+        let next = format!("lashpc{}", max + 1);
+        assert_eq!(
+            ProcessCursor::parse(&format!("{next}:e:p_00000000000070008000000000000003:1:2")),
+            Err(ProcessCursorError::UnsupportedVersion { found: next })
         );
     }
 
