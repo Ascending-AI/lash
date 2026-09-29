@@ -80,7 +80,7 @@ pub(crate) async fn root_terminal_conn(
     let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
         return Ok(None);
     };
-    RootTerminal::from_stored(
+    let mut terminal = RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
         &kind,
@@ -89,28 +89,54 @@ pub(crate) async fn root_terminal_conn(
             .map(|revision| u64_from_sql("RootTerminal", "terminal_head_revision", revision))
             .transpose()?,
         u64_from_sql("RootTerminal", "terminal_at_ms", at_ms)?,
-    )
-    .map(Some)
+    )?;
+    terminal.stopped_partial =
+        crate::capture::committed_root_summary_conn(conn, session_id, root).await?;
+    Ok(Some(terminal))
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RootAlreadyTerminal`].
 pub(crate) async fn write_root_terminal_conn(
-    conn: &mut PgConnection,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     terminal: &RootTerminal,
 ) -> Result<(), StoreError> {
-    let stored = root_terminal_conn(conn, &terminal.session_id, &terminal.root).await?;
+    let stored = root_terminal_conn(&mut *tx, &terminal.session_id, &terminal.root).await?;
     if decide_root_terminal_write(stored.as_ref(), terminal)?
         == RootTerminalWriteDecision::AlreadyWritten
     {
         return Ok(());
     }
+    let reason = match &terminal.cause {
+        RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
+        RootTerminalCause::SubstrateLost {
+            cancelled_by: Some(_),
+        } => Some(lash_sansio::StopReason::UserCancel),
+        RootTerminalCause::SubstrateLost { cancelled_by: None } => {
+            Some(lash_sansio::StopReason::ProcessLoss)
+        }
+        RootTerminalCause::OperatorCancelled { .. } | RootTerminalCause::Forked { .. } => {
+            Some(lash_sansio::StopReason::Other {
+                cause: lash_sansio::OtherStopCause::OperatorCancellation,
+            })
+        }
+    };
+    if let Some(reason) = reason {
+        crate::capture::seal_root_terminal_capture_tx(
+            tx,
+            &terminal.session_id,
+            &terminal.root,
+            reason,
+            terminal.at_ms,
+        )
+        .await?;
+    }
     let sql = session_roots_sql();
     sqlx::query(sql.roots.insert_open.sql())
         .bind(terminal.session_id.as_str())
         .bind(terminal.root.as_str())
-        .execute(&mut *conn)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
     let columns = terminal.to_stored()?;
@@ -126,7 +152,7 @@ pub(crate) async fn write_root_terminal_conn(
                 .transpose()?,
         )
         .bind(sql_i64("terminal instant", columns.at_ms)?)
-        .execute(&mut *conn)
+        .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -139,7 +165,7 @@ pub(crate) async fn write_root_terminal_conn(
     // A terminal root owes its scope close (ADR 0109 §3): the terminal
     // transaction arms the row's obligation, due at the terminal instant.
     crate::obligation_ledger::arm_obligation_id_tx(
-        conn,
+        &mut *tx,
         &lash_core_execution::store::ObligationKey::ScopeClose {
             session_id: terminal.session_id.clone(),
             root: terminal.root.clone(),
@@ -214,7 +240,7 @@ pub(crate) async fn end_lost_root_tx(
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
-    write_root_terminal_conn(&mut *tx, &terminal).await?;
+    write_root_terminal_conn(tx, &terminal).await?;
 
     let sql = &session_roots_sql().verbs;
     let mut inputs: Vec<String> = sqlx::query_scalar(sql.bound_inputs.sql())
@@ -255,7 +281,7 @@ pub(crate) async fn end_lost_root_tx(
             .await
             .map_err(store_sqlx_error)?;
     }
-    Ok(Some(terminal))
+    root_terminal_conn(&mut *tx, session, root).await
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).

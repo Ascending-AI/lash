@@ -14,6 +14,7 @@ macro_rules! turn_capture_tests {
         $crate::turn_capture_tests!(@catalogue $fixture; [
             (capture_batch_replay_and_conflict, "batch"),
             (capture_reset_fences_old_epoch, "reset"),
+            (capture_successor_resets_inherited_epoch, "inherited-reset"),
             (capture_base_advance_removes_old_tail, "base"),
             (capture_seal_is_first_writer_wins, "seal"),
             (capture_commit_publishes_exact_partial, "commit"),

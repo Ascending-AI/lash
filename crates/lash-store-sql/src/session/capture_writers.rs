@@ -18,6 +18,9 @@ crate::statements! {
         retract = "UPDATE turn_capture_writers SET state = 'retracted'
                   WHERE session_id = ?1 AND turn_id = ?2 AND invocation = ?3
                   AND attempt_epoch = ?4 AND state = 'live'";
+        retract_fenced = "UPDATE turn_capture_writers SET state = 'retracted'
+                  WHERE session_id = ?1 AND turn_id = ?2 AND invocation = ?3
+                  AND attempt_epoch = ?4 AND state = 'fenced'";
         fence_turn = "UPDATE turn_capture_writers SET state = 'fenced'
                   WHERE session_id = ?1 AND turn_id = ?2 AND state = 'live'";
         select_retracted = "SELECT invocation, attempt_epoch FROM turn_capture_writers

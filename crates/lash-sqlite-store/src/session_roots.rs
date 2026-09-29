@@ -85,7 +85,7 @@ pub(crate) fn root_terminal_conn(
     let Some((Some(kind), Some(cause_json), head_revision, Some(at_ms))) = row else {
         return Ok(None);
     };
-    RootTerminal::from_stored(
+    let mut terminal = RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
         &kind,
@@ -94,8 +94,9 @@ pub(crate) fn root_terminal_conn(
             .map(|revision| stored_u64("RootTerminal", revision))
             .transpose()?,
         stored_u64("RootTerminal", at_ms)?,
-    )
-    .map(Some)
+    )?;
+    terminal.stopped_partial = crate::capture::committed_root_summary_conn(conn, session_id, root)?;
+    Ok(Some(terminal))
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
@@ -110,6 +111,29 @@ pub(crate) fn write_root_terminal_conn(
         == RootTerminalWriteDecision::AlreadyWritten
     {
         return Ok(());
+    }
+    let reason = match &terminal.cause {
+        RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
+        RootTerminalCause::SubstrateLost {
+            cancelled_by: Some(_),
+        } => Some(lash_sansio::StopReason::UserCancel),
+        RootTerminalCause::SubstrateLost { cancelled_by: None } => {
+            Some(lash_sansio::StopReason::ProcessLoss)
+        }
+        RootTerminalCause::OperatorCancelled { .. } | RootTerminalCause::Forked { .. } => {
+            Some(lash_sansio::StopReason::Other {
+                cause: lash_sansio::OtherStopCause::OperatorCancellation,
+            })
+        }
+    };
+    if let Some(reason) = reason {
+        crate::capture::seal_root_terminal_capture_conn(
+            tx,
+            &terminal.session_id,
+            &terminal.root,
+            reason,
+            terminal.at_ms,
+        )?;
     }
     let sql = session_roots_sql();
     crate::conn::cached_execute(
@@ -254,7 +278,7 @@ pub(crate) fn end_lost_root_conn(
         crate::conn::cached_execute(tx, statement, params![session.as_str()])
             .map_err(sqlite_error)?;
     }
-    Ok(Some(terminal))
+    root_terminal_conn(tx, session, root)
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).

@@ -321,6 +321,225 @@ pub(crate) fn delete_session_capture_conn(
     Ok(removed)
 }
 
+pub(crate) fn seal_capture_conn(
+    conn: &Connection,
+    request: &SealTurnCapture,
+    now: u64,
+) -> Result<SealedCapture, StoreError> {
+    let session = &request.turn.session_id;
+    let turn = &request.turn.turn_id;
+    crate::persistence::ensure_session_not_deleted_conn(conn, session)?;
+    if let Some((partial, committed)) = partial_row(conn, session, turn)? {
+        return Ok(if committed.is_some() {
+            SealedCapture::Committed(partial)
+        } else {
+            SealedCapture::Sealed(partial)
+        });
+    }
+    conn.execute(
+        SQL.turns.insert.sql(),
+        params![session.as_str(), turn.as_str(), request.root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    let (root, base, next, recovered) = turn_row(conn, session, turn)?
+        .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
+    if root != request.root.as_str() {
+        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+    }
+    let through = unsigned(next)?.saturating_sub(1);
+    if let Some(recorded) = request.recorded_watermark {
+        if through < recorded {
+            return Err(StoreError::CaptureSealBelowWatermark {
+                session_id: session.clone(),
+                turn_id: turn.clone(),
+                sealed_through: through,
+                recorded,
+            });
+        }
+    }
+    conn.execute(
+        SQL.writers.fence_turn.sql(),
+        params![session.as_str(), turn.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    let mut frame_stmt = conn
+        .prepare_cached(SQL.frames.select_all.sql())
+        .map_err(sqlite_error)?;
+    let rows = frame_stmt
+        .query_map(params![session.as_str(), turn.as_str()], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })
+        .map_err(sqlite_error)?;
+    let mut frames = Vec::new();
+    for row in rows {
+        let (sequence, frame_base, invocation, epoch, json) = row.map_err(sqlite_error)?;
+        frames.push((
+            CaptureFrameKey {
+                turn: request.turn.clone(),
+                base: CaptureBase(
+                    u32::try_from(unsigned(frame_base)?)
+                        .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
+                ),
+                invocation: CaptureInvocationKey(invocation),
+                attempt_epoch: u32::try_from(unsigned(epoch)?)
+                    .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
+                sequence: unsigned(sequence)?,
+            },
+            decode(&json)?,
+        ));
+    }
+    drop(frame_stmt);
+    let mut writer_stmt = conn
+        .prepare_cached(SQL.writers.select_retracted.sql())
+        .map_err(sqlite_error)?;
+    let rows = writer_stmt
+        .query_map(params![session.as_str(), turn.as_str()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(sqlite_error)?;
+    let mut retracted = BTreeSet::new();
+    for row in rows {
+        let (key, epoch) = row.map_err(sqlite_error)?;
+        retracted.insert((
+            CaptureInvocationKey(key),
+            u32::try_from(unsigned(epoch)?)
+                .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
+        ));
+    }
+    drop(writer_stmt);
+    let recovered = recovered != 0;
+    let id = lash_sansio::StoppedPartialId {
+        session_id: session.clone(),
+        root: request.root.clone(),
+        turn_id: turn.clone(),
+        base: CaptureBase(
+            u32::try_from(unsigned(base)?)
+                .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
+        ),
+        sealed_through: through,
+    };
+    let coverage = if recovered {
+        CaptureCoverage::AcknowledgedPrefix
+    } else {
+        CaptureCoverage::Complete
+    };
+    let partial = reduce_capture(
+        id,
+        request.reason.clone(),
+        recovered,
+        coverage,
+        &frames,
+        &retracted,
+    )
+    .map_err(|violation| StoreError::CaptureCorrupt {
+        session_id: session.clone(),
+        turn_id: turn.clone(),
+        violation,
+    })?;
+    let json = crate::encode_json(&partial)?;
+    conn.execute(
+        SQL.partials.insert.sql(),
+        params![
+            session.as_str(),
+            turn.as_str(),
+            request.root.as_str(),
+            base,
+            number(through)?,
+            crate::encode_json(&request.reason)?,
+            i64::from(recovered),
+            partial.digest.to_hex(),
+            json,
+            number(json.len() as u64)?,
+            number(now)?
+        ],
+    )
+    .map_err(sqlite_error)?;
+    Ok(SealedCapture::Sealed(partial))
+}
+
+pub(crate) fn committed_root_summary_conn(
+    conn: &Connection,
+    session: &SessionId,
+    root: &TurnId,
+) -> Result<Option<lash_sansio::StoppedPartialSummary>, StoreError> {
+    let json: Option<String> = conn
+        .query_row(
+            SQL.partials.select_committed_by_root.sql(),
+            params![session.as_str(), root.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    json.map(|json| decode::<StoppedPartial>(&json).map(|partial| partial.summary()))
+        .transpose()
+}
+
+pub(crate) fn seal_root_terminal_capture_conn(
+    conn: &Connection,
+    session: &SessionId,
+    root: &TurnId,
+    reason: lash_sansio::StopReason,
+    now: u64,
+) -> Result<lash_sansio::StoppedPartialSummary, StoreError> {
+    if let Some(summary) = committed_root_summary_conn(conn, session, root)? {
+        return Ok(summary);
+    }
+    let mut stmt = conn
+        .prepare_cached(SQL.turns.select_by_root.sql())
+        .map_err(sqlite_error)?;
+    let turns = stmt
+        .query_map(params![session.as_str(), root.as_str()], |row| {
+            row.get::<_, String>(0)
+        })
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    drop(stmt);
+    if turns.len() > 1 {
+        return Err(stored_data_corrupt(
+            "TurnCapture",
+            "multiple active physical turns for one root",
+        ));
+    }
+    let turn = turns
+        .first()
+        .map_or_else(|| root.clone(), |id| TurnId::from(id.clone()));
+    let request = SealTurnCapture {
+        turn: lash_core_execution::facade_support::TurnAddress::new(session.clone(), turn.clone()),
+        root: root.clone(),
+        reason,
+        recorded_watermark: None,
+    };
+    let partial = seal_capture_conn(conn, &request, now)?.into_partial();
+    conn.execute(
+        SQL.partials.commit.sql(),
+        params![session.as_str(), turn.as_str(), number(now)?],
+    )
+    .map_err(sqlite_error)?;
+    conn.execute(
+        SQL.frames.delete_turn.sql(),
+        params![session.as_str(), turn.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    conn.execute(
+        SQL.writers.delete_turn.sql(),
+        params![session.as_str(), turn.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    conn.execute(
+        SQL.turns.delete.sql(),
+        params![session.as_str(), turn.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    Ok(partial.summary())
+}
+
 #[async_trait::async_trait]
 impl TurnCaptureStore for Store {
     async fn open_capture_writer(
@@ -520,6 +739,59 @@ impl TurnCaptureStore for Store {
                     crate::persistence::ensure_session_not_deleted_conn(tx, session)?;
                     reject_sealed(tx, session, turn)?;
                     let latest = latest_epoch(tx, session, turn, lease.invocation.as_str())?;
+                    if let Some((latest_epoch, latest_state)) = latest.as_ref()
+                        && *latest_epoch > lease.attempt_epoch
+                        && latest_state == "live"
+                    {
+                        let prior: Option<String> = tx
+                            .query_row(
+                                SQL.writers.select_epoch.sql(),
+                                params![
+                                    session.as_str(),
+                                    turn.as_str(),
+                                    lease.invocation.as_str(),
+                                    i64::from(lease.attempt_epoch)
+                                ],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                            .map_err(sqlite_error)?;
+                        if matches!(prior.as_deref(), Some("fenced" | "retracted")) {
+                            let (_, base, _, _) =
+                                turn_row(tx, session, turn)?.ok_or_else(|| {
+                                    stored_data_corrupt("TurnCapture", "missing turn row")
+                                })?;
+                            if unsigned(base)? != u64::from(lease.base.0) {
+                                return Err(StoreError::CaptureBaseStale {
+                                    session_id: session.clone(),
+                                    turn_id: turn.clone(),
+                                    offered: lease.base.0,
+                                    current: u32::try_from(unsigned(base)?).map_err(|_| {
+                                        stored_data_corrupt("TurnCapture", "base overflow")
+                                    })?,
+                                });
+                            }
+                            if prior.as_deref() == Some("fenced") {
+                                tx.execute(
+                                    SQL.writers.retract_fenced.sql(),
+                                    params![
+                                        session.as_str(),
+                                        turn.as_str(),
+                                        lease.invocation.as_str(),
+                                        i64::from(lease.attempt_epoch)
+                                    ],
+                                )
+                                .map_err(sqlite_error)?;
+                            }
+                            return lease_at(
+                                tx,
+                                &lease.turn,
+                                &lease.invocation,
+                                *latest_epoch,
+                                lease.base,
+                            );
+                        }
+                    }
                     let next = lease
                         .attempt_epoch
                         .checked_add(1)
@@ -641,145 +913,7 @@ impl TurnCaptureStore for Store {
         let now = self.clock.timestamp_ms();
         self.conn
             .write_flow(move |tx| {
-                let result = (|| {
-                    let session = &request.turn.session_id;
-                    let turn = &request.turn.turn_id;
-                    crate::persistence::ensure_session_not_deleted_conn(tx, session)?;
-                    if let Some((partial, committed)) = partial_row(tx, session, turn)? {
-                        return Ok(if committed.is_some() {
-                            SealedCapture::Committed(partial)
-                        } else {
-                            SealedCapture::Sealed(partial)
-                        });
-                    }
-                    tx.execute(
-                        SQL.turns.insert.sql(),
-                        params![session.as_str(), turn.as_str(), request.root.as_str()],
-                    )
-                    .map_err(sqlite_error)?;
-                    let (root, base, next, recovered) = turn_row(tx, session, turn)?
-                        .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-                    if root != request.root.as_str() {
-                        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
-                    }
-                    let through = unsigned(next)?.saturating_sub(1);
-                    if let Some(recorded) = request.recorded_watermark {
-                        if through < recorded {
-                            return Err(StoreError::CaptureSealBelowWatermark {
-                                session_id: session.clone(),
-                                turn_id: turn.clone(),
-                                sealed_through: through,
-                                recorded,
-                            });
-                        }
-                    }
-                    tx.execute(
-                        SQL.writers.fence_turn.sql(),
-                        params![session.as_str(), turn.as_str()],
-                    )
-                    .map_err(sqlite_error)?;
-                    let mut frame_stmt = tx
-                        .prepare_cached(SQL.frames.select_all.sql())
-                        .map_err(sqlite_error)?;
-                    let rows = frame_stmt
-                        .query_map(params![session.as_str(), turn.as_str()], |row| {
-                            Ok((
-                                row.get::<_, i64>(0)?,
-                                row.get::<_, i64>(1)?,
-                                row.get::<_, String>(2)?,
-                                row.get::<_, i64>(3)?,
-                                row.get::<_, String>(4)?,
-                            ))
-                        })
-                        .map_err(sqlite_error)?;
-                    let mut frames = Vec::new();
-                    for row in rows {
-                        let (sequence, frame_base, invocation, epoch, json) =
-                            row.map_err(sqlite_error)?;
-                        frames.push((
-                            CaptureFrameKey {
-                                turn: request.turn.clone(),
-                                base: CaptureBase(u32::try_from(unsigned(frame_base)?).map_err(
-                                    |_| stored_data_corrupt("TurnCapture", "base overflow"),
-                                )?),
-                                invocation: CaptureInvocationKey(invocation),
-                                attempt_epoch: u32::try_from(unsigned(epoch)?).map_err(|_| {
-                                    stored_data_corrupt("TurnCapture", "epoch overflow")
-                                })?,
-                                sequence: unsigned(sequence)?,
-                            },
-                            decode(&json)?,
-                        ));
-                    }
-                    drop(frame_stmt);
-                    let mut writer_stmt = tx
-                        .prepare_cached(SQL.writers.select_retracted.sql())
-                        .map_err(sqlite_error)?;
-                    let rows = writer_stmt
-                        .query_map(params![session.as_str(), turn.as_str()], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                        })
-                        .map_err(sqlite_error)?;
-                    let mut retracted = BTreeSet::new();
-                    for row in rows {
-                        let (key, epoch) = row.map_err(sqlite_error)?;
-                        retracted.insert((
-                            CaptureInvocationKey(key),
-                            u32::try_from(unsigned(epoch)?).map_err(|_| {
-                                stored_data_corrupt("TurnCapture", "epoch overflow")
-                            })?,
-                        ));
-                    }
-                    drop(writer_stmt);
-                    let recovered = recovered != 0;
-                    let id = lash_sansio::StoppedPartialId {
-                        session_id: session.clone(),
-                        root: request.root.clone(),
-                        turn_id: turn.clone(),
-                        base: CaptureBase(
-                            u32::try_from(unsigned(base)?)
-                                .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
-                        ),
-                        sealed_through: through,
-                    };
-                    let coverage = if recovered {
-                        CaptureCoverage::AcknowledgedPrefix
-                    } else {
-                        CaptureCoverage::Complete
-                    };
-                    let partial = reduce_capture(
-                        id,
-                        request.reason.clone(),
-                        recovered,
-                        coverage,
-                        &frames,
-                        &retracted,
-                    )
-                    .map_err(|violation| StoreError::CaptureCorrupt {
-                        session_id: session.clone(),
-                        turn_id: turn.clone(),
-                        violation,
-                    })?;
-                    let json = crate::encode_json(&partial)?;
-                    tx.execute(
-                        SQL.partials.insert.sql(),
-                        params![
-                            session.as_str(),
-                            turn.as_str(),
-                            request.root.as_str(),
-                            base,
-                            number(through)?,
-                            crate::encode_json(&request.reason)?,
-                            i64::from(recovered),
-                            partial.digest.to_hex(),
-                            json,
-                            number(json.len() as u64)?,
-                            number(now)?
-                        ],
-                    )
-                    .map_err(sqlite_error)?;
-                    Ok(SealedCapture::Sealed(partial))
-                })();
+                let result = seal_capture_conn(tx, &request, now);
                 Ok(match result {
                     Ok(value) => TxOutcome::Commit(Ok(value)),
                     Err(error) => TxOutcome::Rollback(Err(error)),

@@ -9,6 +9,8 @@ crate::statements! {
                   VALUES (?1, ?2, ?3, 0, 1, 0) ON CONFLICT(session_id, turn_id) DO NOTHING";
         select = "SELECT root, base, next_sequence, recovered FROM turn_capture_turns
                   WHERE session_id = ?1 AND turn_id = ?2";
+        select_by_root = "SELECT turn_id FROM turn_capture_turns
+                  WHERE session_id = ?1 AND root = ?2 ORDER BY turn_id LIMIT 2";
         advance = "UPDATE turn_capture_turns SET base = ?3 WHERE session_id = ?1 AND turn_id = ?2 AND base = ?4";
         set_next_sequence = "UPDATE turn_capture_turns SET next_sequence = ?3
                   WHERE session_id = ?1 AND turn_id = ?2";

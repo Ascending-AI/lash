@@ -163,6 +163,59 @@ pub async fn capture_reset_fences_old_epoch(factory: Arc<dyn SessionStoreFactory
     clippy::expect_used,
     reason = "conformance assertions require fixture setup"
 )]
+pub async fn capture_successor_resets_inherited_epoch(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    let (store, turn) = fixture(factory, label).await;
+    let first = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &first, 0, text_frames()).await;
+    let successor = writer(store.as_ref(), &turn).await;
+    assert_eq!(successor.attempt_epoch, first.attempt_epoch + 1);
+    assert_eq!(successor.inherited.len(), 3);
+    let reset = CaptureAttemptReset {
+        lease: first.lease_ref(),
+    };
+    let resumed = store
+        .persist_attempt_reset(&reset)
+        .await
+        .expect("reset inherited epoch");
+    assert_eq!(resumed.attempt_epoch, successor.attempt_epoch);
+    assert!(resumed.inherited.is_empty());
+    assert_eq!(
+        store
+            .persist_attempt_reset(&reset)
+            .await
+            .expect("reset replay"),
+        resumed
+    );
+    let mut stale = first.lease_ref();
+    stale.attempt_epoch = successor.attempt_epoch + 1;
+    assert!(matches!(
+        store
+            .persist_attempt_reset(&CaptureAttemptReset { lease: stale })
+            .await,
+        Err(StoreError::CaptureWriterFenced { .. })
+    ));
+    append(store.as_ref(), &resumed, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: turn.turn_id,
+            reason: StopReason::UserCancel,
+            recorded_watermark: None,
+        })
+        .await
+        .expect("seal")
+        .into_partial();
+    assert_eq!(partial.items.len(), 1);
+    assert!(matches!(&partial.items[0], PartialItem::Text { text, .. } if text == "partial"));
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
 pub async fn capture_base_advance_removes_old_tail(
     factory: Arc<dyn SessionStoreFactory>,
     label: &str,

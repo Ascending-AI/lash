@@ -9,6 +9,8 @@ crate::statements! {
                   FROM stopped_partials WHERE session_id = ?1 AND turn_id = ?2";
         select_by_turn_or_root = "SELECT partial_json, committed_at_ms FROM stopped_partials
                   WHERE session_id = ?1 AND (turn_id = ?2 OR root = ?2)";
+        select_committed_by_root = "SELECT partial_json FROM stopped_partials
+                  WHERE session_id = ?1 AND root = ?2 AND committed_at_ms IS NOT NULL";
         insert = "INSERT INTO stopped_partials
                   (session_id, turn_id, root, base, sealed_through, reason, recovered, digest,
                    partial_json, body_bytes, sealed_at_ms, committed_at_ms)

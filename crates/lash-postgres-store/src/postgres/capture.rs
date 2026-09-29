@@ -14,7 +14,7 @@ use lash_store_sql::session::{
     capture_frames::CaptureFrameStatements, capture_turns::CaptureTurnStatements,
     capture_writers::CaptureWriterStatements, stopped_partials::StoppedPartialStatements,
 };
-use sqlx::{Acquire, Postgres, Row, Transaction};
+use sqlx::{Acquire, PgConnection, Postgres, Row, Transaction};
 
 use crate::{
     PostgresSessionStore, RuntimeCommit, StoreError, acquire_runtime_connection, store_sqlx_error,
@@ -331,6 +331,210 @@ pub(crate) fn retention_delete_sql() -> &'static str {
     SQL.partials.delete_retained.sql()
 }
 
+async fn seal_capture_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    request: &SealTurnCapture,
+    now: u64,
+) -> Result<SealedCapture, StoreError> {
+    let session = &request.turn.session_id;
+    let turn = &request.turn.turn_id;
+    crate::runtime_persistence::ensure_session_not_deleted_tx(tx, session).await?;
+    if let Some((partial, committed)) = partial_row(tx, session, turn).await? {
+        return Ok(if committed.is_some() {
+            SealedCapture::Committed(partial)
+        } else {
+            SealedCapture::Sealed(partial)
+        });
+    }
+    sqlx::query(SQL.turns.insert.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .bind(request.root.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let (root, base, next, recovered) = turn_row(tx, session, turn)
+        .await?
+        .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
+    if root != request.root.as_str() {
+        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+    }
+    let through = unsigned(next)?.saturating_sub(1);
+    if let Some(recorded) = request.recorded_watermark {
+        if through < recorded {
+            return Err(StoreError::CaptureSealBelowWatermark {
+                session_id: session.clone(),
+                turn_id: turn.clone(),
+                sealed_through: through,
+                recorded,
+            });
+        }
+    }
+    sqlx::query(SQL.writers.fence_turn.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let rows = sqlx::query(SQL.frames.select_all.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let mut frames = Vec::new();
+    for row in rows {
+        let sequence: i64 = row.try_get(0).map_err(store_sqlx_error)?;
+        let frame_base: i64 = row.try_get(1).map_err(store_sqlx_error)?;
+        let invocation: String = row.try_get(2).map_err(store_sqlx_error)?;
+        let epoch: i64 = row.try_get(3).map_err(store_sqlx_error)?;
+        let json: String = row.try_get(4).map_err(store_sqlx_error)?;
+        frames.push((
+            CaptureFrameKey {
+                turn: request.turn.clone(),
+                base: CaptureBase(
+                    u32::try_from(unsigned(frame_base)?)
+                        .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
+                ),
+                invocation: CaptureInvocationKey(invocation),
+                attempt_epoch: u32::try_from(unsigned(epoch)?)
+                    .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
+                sequence: unsigned(sequence)?,
+            },
+            decode(&json)?,
+        ));
+    }
+    let rows: Vec<(String, i64)> = sqlx::query_as(SQL.writers.select_retracted.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let mut retracted = BTreeSet::new();
+    for (key, epoch) in rows {
+        retracted.insert((
+            CaptureInvocationKey(key),
+            u32::try_from(unsigned(epoch)?)
+                .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
+        ));
+    }
+    let recovered = recovered != 0;
+    let id = lash_sansio::StoppedPartialId {
+        session_id: session.clone(),
+        root: request.root.clone(),
+        turn_id: turn.clone(),
+        base: CaptureBase(
+            u32::try_from(unsigned(base)?)
+                .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
+        ),
+        sealed_through: through,
+    };
+    let coverage = if recovered {
+        CaptureCoverage::AcknowledgedPrefix
+    } else {
+        CaptureCoverage::Complete
+    };
+    let partial = reduce_capture(
+        id,
+        request.reason.clone(),
+        recovered,
+        coverage,
+        &frames,
+        &retracted,
+    )
+    .map_err(|violation| StoreError::CaptureCorrupt {
+        session_id: session.clone(),
+        turn_id: turn.clone(),
+        violation,
+    })?;
+    let json = crate::encode_json(&partial)?;
+    sqlx::query(SQL.partials.insert.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .bind(request.root.as_str())
+        .bind(base)
+        .bind(number(through)?)
+        .bind(crate::encode_json(&request.reason)?)
+        .bind(i64::from(recovered))
+        .bind(partial.digest.to_hex())
+        .bind(&json)
+        .bind(number(json.len() as u64)?)
+        .bind(number(now)?)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    Ok(SealedCapture::Sealed(partial))
+}
+
+pub(crate) async fn committed_root_summary_conn(
+    conn: &mut PgConnection,
+    session: &SessionId,
+    root: &TurnId,
+) -> Result<Option<lash_sansio::StoppedPartialSummary>, StoreError> {
+    let json: Option<String> = sqlx::query_scalar(SQL.partials.select_committed_by_root.sql())
+        .bind(session.as_str())
+        .bind(root.as_str())
+        .fetch_optional(conn)
+        .await
+        .map_err(store_sqlx_error)?;
+    json.map(|json| decode::<StoppedPartial>(&json).map(|partial| partial.summary()))
+        .transpose()
+}
+
+pub(crate) async fn seal_root_terminal_capture_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    session: &SessionId,
+    root: &TurnId,
+    reason: lash_sansio::StopReason,
+    now: u64,
+) -> Result<lash_sansio::StoppedPartialSummary, StoreError> {
+    if let Some(summary) = committed_root_summary_conn(&mut *tx, session, root).await? {
+        return Ok(summary);
+    }
+    let turns: Vec<String> = sqlx::query_scalar(SQL.turns.select_by_root.sql())
+        .bind(session.as_str())
+        .bind(root.as_str())
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    if turns.len() > 1 {
+        return Err(stored_data_corrupt(
+            "TurnCapture",
+            "multiple active physical turns for one root",
+        ));
+    }
+    let turn = turns
+        .first()
+        .map_or_else(|| root.clone(), |id| TurnId::from(id.clone()));
+    let request = SealTurnCapture {
+        turn: lash_core_execution::facade_support::TurnAddress::new(session.clone(), turn.clone()),
+        root: root.clone(),
+        reason,
+        recorded_watermark: None,
+    };
+    let partial = seal_capture_tx(tx, &request, now).await?.into_partial();
+    sqlx::query(SQL.partials.commit.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .bind(number(now)?)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    for statement in [
+        SQL.frames.delete_turn.sql(),
+        SQL.writers.delete_turn.sql(),
+        SQL.turns.delete.sql(),
+    ] {
+        sqlx::query(statement)
+            .bind(session.as_str())
+            .bind(turn.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    Ok(partial.summary())
+}
+
 #[async_trait::async_trait]
 impl TurnCaptureStore for PostgresSessionStore {
     async fn open_capture_writer(
@@ -486,6 +690,53 @@ impl TurnCaptureStore for PostgresSessionStore {
         crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session).await?;
         reject_sealed(&mut tx, session, turn).await?;
         let latest = latest_epoch(&mut tx, session, turn, lease.invocation.as_str()).await?;
+        if let Some((latest_epoch, latest_state)) = latest.as_ref()
+            && *latest_epoch > lease.attempt_epoch
+            && latest_state == "live"
+        {
+            let prior: Option<String> = sqlx::query_scalar(SQL.writers.select_epoch.sql())
+                .bind(session.as_str())
+                .bind(turn.as_str())
+                .bind(lease.invocation.as_str())
+                .bind(i64::from(lease.attempt_epoch))
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            if matches!(prior.as_deref(), Some("fenced" | "retracted")) {
+                let (_, base, _, _) = turn_row(&mut tx, session, turn)
+                    .await?
+                    .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
+                if unsigned(base)? != u64::from(lease.base.0) {
+                    return Err(StoreError::CaptureBaseStale {
+                        session_id: session.clone(),
+                        turn_id: turn.clone(),
+                        offered: lease.base.0,
+                        current: u32::try_from(unsigned(base)?)
+                            .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
+                    });
+                }
+                if prior.as_deref() == Some("fenced") {
+                    sqlx::query(SQL.writers.retract_fenced.sql())
+                        .bind(session.as_str())
+                        .bind(turn.as_str())
+                        .bind(lease.invocation.as_str())
+                        .bind(i64::from(lease.attempt_epoch))
+                        .execute(&mut *tx)
+                        .await
+                        .map_err(store_sqlx_error)?;
+                }
+                let result = lease_at(
+                    &mut tx,
+                    &lease.turn,
+                    &lease.invocation,
+                    *latest_epoch,
+                    lease.base,
+                )
+                .await?;
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(result);
+            }
+        }
         let next = lease
             .attempt_epoch
             .checked_add(1)
@@ -584,135 +835,9 @@ impl TurnCaptureStore for PostgresSessionStore {
         self.bind_session_id(&request.turn.session_id)?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let session = &request.turn.session_id;
-        let turn = &request.turn.turn_id;
-        crate::runtime_persistence::ensure_session_not_deleted_tx(&mut tx, session).await?;
-        if let Some((partial, committed)) = partial_row(&mut tx, session, turn).await? {
-            return Ok(if committed.is_some() {
-                SealedCapture::Committed(partial)
-            } else {
-                SealedCapture::Sealed(partial)
-            });
-        }
-        sqlx::query(SQL.turns.insert.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .bind(request.root.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let (root, base, next, recovered) = turn_row(&mut tx, session, turn)
-            .await?
-            .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-        if root != request.root.as_str() {
-            return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
-        }
-        let through = unsigned(next)?.saturating_sub(1);
-        if let Some(recorded) = request.recorded_watermark {
-            if through < recorded {
-                return Err(StoreError::CaptureSealBelowWatermark {
-                    session_id: session.clone(),
-                    turn_id: turn.clone(),
-                    sealed_through: through,
-                    recorded,
-                });
-            }
-        }
-        sqlx::query(SQL.writers.fence_turn.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let rows = sqlx::query(SQL.frames.select_all.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let mut frames = Vec::new();
-        for row in rows {
-            let sequence: i64 = row.try_get(0).map_err(store_sqlx_error)?;
-            let frame_base: i64 = row.try_get(1).map_err(store_sqlx_error)?;
-            let invocation: String = row.try_get(2).map_err(store_sqlx_error)?;
-            let epoch: i64 = row.try_get(3).map_err(store_sqlx_error)?;
-            let json: String = row.try_get(4).map_err(store_sqlx_error)?;
-            frames.push((
-                CaptureFrameKey {
-                    turn: request.turn.clone(),
-                    base: CaptureBase(
-                        u32::try_from(unsigned(frame_base)?)
-                            .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
-                    ),
-                    invocation: CaptureInvocationKey(invocation),
-                    attempt_epoch: u32::try_from(unsigned(epoch)?)
-                        .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
-                    sequence: unsigned(sequence)?,
-                },
-                decode(&json)?,
-            ));
-        }
-        let rows: Vec<(String, i64)> = sqlx::query_as(SQL.writers.select_retracted.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .fetch_all(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
-        let mut retracted = BTreeSet::new();
-        for (key, epoch) in rows {
-            retracted.insert((
-                CaptureInvocationKey(key),
-                u32::try_from(unsigned(epoch)?)
-                    .map_err(|_| stored_data_corrupt("TurnCapture", "epoch overflow"))?,
-            ));
-        }
-        let recovered = recovered != 0;
-        let id = lash_sansio::StoppedPartialId {
-            session_id: session.clone(),
-            root: request.root.clone(),
-            turn_id: turn.clone(),
-            base: CaptureBase(
-                u32::try_from(unsigned(base)?)
-                    .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,
-            ),
-            sealed_through: through,
-        };
-        let coverage = if recovered {
-            CaptureCoverage::AcknowledgedPrefix
-        } else {
-            CaptureCoverage::Complete
-        };
-        let partial = reduce_capture(
-            id,
-            request.reason.clone(),
-            recovered,
-            coverage,
-            &frames,
-            &retracted,
-        )
-        .map_err(|violation| StoreError::CaptureCorrupt {
-            session_id: session.clone(),
-            turn_id: turn.clone(),
-            violation,
-        })?;
-        let json = crate::encode_json(&partial)?;
-        sqlx::query(SQL.partials.insert.sql())
-            .bind(session.as_str())
-            .bind(turn.as_str())
-            .bind(request.root.as_str())
-            .bind(base)
-            .bind(number(through)?)
-            .bind(crate::encode_json(&request.reason)?)
-            .bind(i64::from(recovered))
-            .bind(partial.digest.to_hex())
-            .bind(&json)
-            .bind(number(json.len() as u64)?)
-            .bind(number(self.clock.timestamp_ms())?)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let result = seal_capture_tx(&mut tx, request, self.clock.timestamp_ms()).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(SealedCapture::Sealed(partial))
+        Ok(result)
     }
 
     async fn read_stopped_partial(
