@@ -41,6 +41,8 @@
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;
+#[cfg(feature = "perf-witness")]
+pub use conn::{enable_gate_timings, take_gate_timings};
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
 #[cfg(test)]

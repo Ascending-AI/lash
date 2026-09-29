@@ -178,6 +178,9 @@ pub struct LatencyWorkerArgs {
 /// raw sample ledger, print the human summary, and exit non-zero when the
 /// gated case is over budget.
 pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
+    if std::env::var_os("LASH_SQLITE_GATE_TIMING").is_some() {
+        lash_sqlite_store::enable_gate_timings();
+    }
     let mut specs = default_cases(run.fast_samples, run.lanes);
     let known: std::collections::BTreeSet<&'static str> =
         specs.iter().map(|spec| spec.name).collect();
@@ -216,6 +219,27 @@ pub async fn run(run: LatencyRun) -> anyhow::Result<i32> {
         let (report, case_samples) = runner::run_case(spec, &env).await?;
         reports.push(report);
         samples.extend(case_samples);
+        let gate_timings = lash_sqlite_store::take_gate_timings();
+        if !gate_timings.is_empty() {
+            let waits: Vec<f64> = gate_timings
+                .iter()
+                .map(|(wait, _)| *wait as f64 / 1000.0)
+                .collect();
+            let holds: Vec<f64> = gate_timings
+                .iter()
+                .map(|(_, hold)| *hold as f64 / 1000.0)
+                .collect();
+            let waits = crate::perf_support::metrics::percentile_summary(waits);
+            let holds = crate::perf_support::metrics::percentile_summary(holds);
+            println!(
+                "sqlite gate {} writes: wait p50={:.3} p99={:.3} ms; hold p50={:.3} p99={:.3} ms",
+                gate_timings.len(),
+                waits.p50,
+                waits.p99,
+                holds.p50,
+                holds.p99
+            );
+        }
     }
     dhat::finish_dhat_profiler(profiler);
     let report = runner::build_report(env.describe(), reports);

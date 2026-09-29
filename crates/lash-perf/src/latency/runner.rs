@@ -2,7 +2,7 @@
 //!
 //! One *sample* is a send→outcome round trip on a live Restate server. The
 //! host measures the wall spans it can see; a per-sample store poller reads
-//! durable evidence at a fixed 2 ms cadence so the claim, application and
+//! durable evidence at a fixed 50 ms cadence so the claim, application and
 //! settlement instants do not ride the follower's own wake schedule. Every
 //! read is keyed — the open-input row, the input's root binding, the root's
 //! terminal — and all of them run on the lane's one observer connection, so
@@ -40,9 +40,10 @@ use crate::perf_support::time::round3;
 use crate::runtime_perf::openai_compat::OpenAiCompatBenchServer;
 use crate::runtime_perf::providers::BenchmarkStreamProfile;
 
-/// Store-poller cadence. The follower's poll floor is 25 ms; 2 ms keeps the
-/// durable markers' observation error small next to it.
-const STORE_POLL_TICK: Duration = Duration::from_millis(2);
+/// Keep the observer's reads sparse enough to leave checkpoint windows under
+/// concurrent lanes. These phase markers have up to one tick of observation
+/// error; the send-to-completion measurement uses the direct outcome clock.
+const STORE_POLL_TICK: Duration = Duration::from_millis(50);
 /// A sample's store poller gives up here; its marks stay `None`.
 const STORE_POLL_TIMEOUT: Duration = Duration::from_secs(120);
 /// The follower poll schedule the `poll_detect` phase simulates.
@@ -253,7 +254,7 @@ impl LaneSession {
 ///
 /// `observer` is a second core over its own store set on the same directory:
 /// the per-sample durable pollers read through its connections (WAL readers
-/// beside the writer) so a 2 ms polling cadence never serializes on the
+/// beside the writer) so marker reads never serialize on the
 /// connections the drive itself writes through.
 struct CaseTopology {
     core: lash::LashCore,
