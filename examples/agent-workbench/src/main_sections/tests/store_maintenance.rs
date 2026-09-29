@@ -38,6 +38,7 @@ struct StoreMaintenanceFixture {
 
 struct DeleteFailingWorkbenchAttachmentStore {
     pub(super) inner: Arc<dyn lash::persistence::AttachmentStore>,
+    class: lash::persistence::AttachmentStoreFailureClass,
 }
 
 #[async_trait]
@@ -67,7 +68,7 @@ impl lash::persistence::AttachmentStore for DeleteFailingWorkbenchAttachmentStor
     ) -> Result<(), lash::persistence::AttachmentStoreError> {
         Err(lash::persistence::AttachmentStoreError::Backend {
             operation: "delete",
-            class: lash::persistence::AttachmentStoreFailureClass::Transient,
+            class: self.class,
             source: format!("scripted workbench delete failure for {id}").into(),
         })
     }
@@ -526,6 +527,7 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
     let mut state = fixture.state;
     state.attachment_store = Arc::new(DeleteFailingWorkbenchAttachmentStore {
         inner: Arc::clone(&inner),
+        class: lash::persistence::AttachmentStoreFailureClass::Transient,
     });
     state.session_store_factory = crate::tests::memory_session_store_factory();
 
@@ -548,6 +550,8 @@ async fn store_maintenance_serves_incomplete_sweep_with_failure_counts_inner() {
     let summary = &body["reclaimed_attachments"];
     assert_eq!(summary["sweep"], "incomplete");
     assert_eq!(summary["failed_count"], 1);
+    assert_eq!(summary["stalled_count"], 0);
+    assert_eq!(summary["stalled_ids"], json!([]));
     assert_eq!(summary["condemn_deferred_count"], 0);
     assert_eq!(summary["failed_ids"], json!([orphan.id.to_string()]));
     inner
@@ -659,4 +663,63 @@ fn store_maintenance_is_absent_from_the_workbench_ui() {
         !ui::INDEX_HTML.contains("/api/admin/store-maintenance"),
         "store maintenance is operator-only: it must never be one click away"
     );
+}
+
+#[test]
+fn store_maintenance_serves_stalled_delete_counts() {
+    run_async_test_on_stack_budget("workbench-store-maintenance-stalled", || async {
+        let provider = lash::testing::TestProvider::builder()
+            .kind("workbench-store-maintenance")
+            .complete_error("the stalled-sweep test must not call the provider")
+            .build()
+            .into_handle();
+        let fixture = store_maintenance_fixture(provider).await;
+        let inner = Arc::clone(&fixture.attachment_store);
+        let orphan = inner
+            .put(
+                b"workbench-stalled-sweep".to_vec(),
+                lash::attachments::AttachmentCreateMeta::new(
+                    lash::attachments::MediaType::parse("application/octet-stream")
+                        .expect("media type"),
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("seed deletion candidate");
+        let mut state = fixture.state;
+        state.attachment_store = Arc::new(DeleteFailingWorkbenchAttachmentStore {
+            inner: Arc::clone(&inner),
+            class: lash::persistence::AttachmentStoreFailureClass::Credentials,
+        });
+        let Json(response) = run_store_maintenance(
+            State(state.clone()),
+            Json(reclaim_only_request(
+                TEST_ONLY_INSTANT_ELIGIBILITY_MS,
+                EmptyRootSetAuthorization::AuthorizeDeleteAll,
+            )),
+        )
+        .await
+        .expect("a stalled delete is a completed incomplete sweep");
+        assert_eq!(
+            Json(response.clone()).into_response().status(),
+            StatusCode::OK
+        );
+        let body = serde_json::to_value(response).expect("serialize response");
+        let summary = &body["reclaimed_attachments"];
+        assert_eq!(summary["sweep"], "incomplete");
+        assert_eq!(summary["failed_count"], 1);
+        assert_eq!(summary["stalled_count"], 1);
+        assert_eq!(summary["stalled_ids"], json!([orphan.id.to_string()]));
+        let listed = state
+            .session_store_factory
+            .list_condemnations()
+            .await
+            .expect("stalled listing");
+        assert_eq!(
+            listed[0].stalled,
+            Some(lash::persistence::AttachmentDeleteStallReason::Refused)
+        );
+        inner.get(&orphan.id).await.expect("stalled bytes remain");
+    });
 }

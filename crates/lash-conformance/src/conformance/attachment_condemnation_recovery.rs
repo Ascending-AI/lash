@@ -481,18 +481,10 @@ pub async fn persistently_failing_delete_stalls_typed(
         .unwrap();
     backend.fail_delete(true);
     for attempt in 1..=MAX_ATTACHMENT_DELETE_ATTEMPTS {
-        let failure =
+        let report =
             reclaim_unreferenced_attachments(f.as_ref(), backend.as_ref(), authorize_all())
                 .await
-                .expect_err("a failed delete fails the sweep with its partial report");
-        assert!(matches!(
-            failure.stop,
-            lash_core::store::MaintenanceStop::Failed(AttachmentStoreError::Backend {
-                operation: "delete",
-                ..
-            })
-        ));
-        let report = failure.partial;
+                .expect("a failed delete completes an incomplete sweep");
         assert_eq!(report.failed_ids, vec![reference.id.clone()]);
         let stalled = attempt == MAX_ATTACHMENT_DELETE_ATTEMPTS;
         assert_eq!(
@@ -559,17 +551,9 @@ pub async fn persistently_failing_delete_stalls_typed(
         )
         .await
         .unwrap();
-    let failure = reclaim_unreferenced_attachments(f.as_ref(), refused.as_ref(), authorize_all())
+    let report = reclaim_unreferenced_attachments(f.as_ref(), refused.as_ref(), authorize_all())
         .await
-        .expect_err("a refused delete fails the sweep with its partial report");
-    assert!(matches!(
-        failure.stop,
-        lash_core::store::MaintenanceStop::Failed(AttachmentStoreError::Backend {
-            class: AttachmentStoreFailureClass::Credentials,
-            ..
-        })
-    ));
-    let report = failure.partial;
+        .expect("a refused delete completes an incomplete sweep");
     assert_eq!(report.stalled_ids, vec![refused_reference.id.clone()]);
     let listed = f.list_condemnations().await.unwrap();
     assert_eq!(listed.len(), 1);

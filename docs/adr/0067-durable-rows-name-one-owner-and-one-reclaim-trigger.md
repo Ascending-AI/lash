@@ -309,14 +309,15 @@ A reclamation report distinguishes three outcomes, and the types make all three
 reachable:
 
 1. **Empty** — the scope was enumerated and there was nothing to reclaim.
-2. **Blocked** — typed blocked reasons, each with a count, ride in `Ok(report)`.
-   A row skipped because its owner is live, because a peer sweeper holds the
-   condemnation, or because a grace window has not elapsed is a normal outcome
-   with a name, not an absence.
-3. **Failed** — always `Err`, and the error **carries the partial report
-   accumulated before the failure**. Work already done is reported; the failure
-   is not laundered by discarding it, and the caller is not told to guess how
-   far the sweep got.
+2. **Incomplete** — the sweep completed its scope, with unfinished work named
+   in `Ok(report)`. Failed attachment deletes and typed stalls remain in the
+   report's failure and stall channels. A live owner, a peer's condemnation,
+   and a grace window are also named deferrals. The workbench serves a completed
+   incomplete sweep as HTTP 200 with failed and stalled counts and IDs.
+3. **Failed** — `Err` means the sweep itself could not complete its scope, and
+   the error **carries the partial report accumulated before the stop**. Failure
+   to open a pass, adopt its predecessors, or enumerate the backend cannot be
+   mistaken for a completed sweep.
 
 A conformance law reds any backend that swallows an injected failure into a
 clean report. (Seam ticket: FIG-1505.) The evidence sweep's report names each

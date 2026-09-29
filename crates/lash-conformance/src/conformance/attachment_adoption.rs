@@ -761,7 +761,7 @@ async fn failed_delete_keeps_the_condemnation_until_a_fresh_put(
         .unwrap();
     record_completed_write(&store, &write_intent(&session_id, &reference.id)).await;
     backend.fail_delete(true);
-    let failure = reclaim_unreferenced_attachments(
+    let report = reclaim_unreferenced_attachments(
         f.as_ref(),
         backend.as_ref(),
         AttachmentReclamationPolicy {
@@ -770,12 +770,8 @@ async fn failed_delete_keeps_the_condemnation_until_a_fresh_put(
         },
     )
     .await
-    .expect_err("a failed delete fails the sweep with its partial report");
-    assert!(matches!(
-        failure.stop,
-        lash_core::store::MaintenanceStop::Failed(_)
-    ));
-    assert_eq!(failure.partial.failed_ids, vec![reference.id.clone()]);
+    .expect("a failed delete completes an incomplete sweep");
+    assert_eq!(report.failed_ids, vec![reference.id.clone()]);
     assert!(
         backend.get(&reference.id).await.is_ok(),
         "a failed delete leaves the bytes in place"

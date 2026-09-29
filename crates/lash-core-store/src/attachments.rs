@@ -598,8 +598,8 @@ pub struct AttachmentReclamationReport {
     pub reclaimed_count: usize,
     /// Blobs whose per-candidate handling failed: final `HEAD`, physical
     /// delete, or condemnation-state settlement. The sweep continues past
-    /// per-blob failures and reports them in the partial error report after
-    /// attempting the remaining candidates.
+    /// per-blob failures and reports them after attempting the remaining
+    /// candidates. These failures make a completed pass incomplete.
     pub failed_ids: Vec<AttachmentId>,
     /// Why the live root set could not be enumerated. The sweep deleted
     /// nothing: no blob was deletion-eligible, so nothing was at risk.
@@ -664,8 +664,8 @@ impl crate::store::MaintenanceReport for AttachmentReclamationReport {
     }
 }
 
-/// An attachment sweep that refused a step or finished with failed candidates,
-/// carrying the report accumulated before that refusal or across the pass
+/// An attachment sweep that stopped before completing its scope, carrying
+/// the report accumulated before that refusal or sweep-level failure
 /// (ADR 0067 §4).
 pub type AttachmentReclamationFailure =
     crate::store::MaintenanceFailure<AttachmentReclamationReport, AttachmentStoreError>;
@@ -703,8 +703,10 @@ pub struct AttachmentReclamationPolicy {
 /// and the partial report accumulated before the first eligible blob.
 /// Per-blob final-`HEAD`, delete, and condemnation-settlement failures are collected into
 /// [`AttachmentReclamationReport::failed_ids`]; the sweep attempts the remaining
-/// candidates, then returns [`AttachmentReclamationFailure`] with that partial
-/// report and the first error.
+/// candidates, then returns `Ok(report)` classified as
+/// [`MaintenanceSweep::Incomplete`](crate::store::MaintenanceSweep::Incomplete).
+/// Failed or stalled deletes are completed sweep outcomes. `Err` is reserved
+/// for a refusal or a failure that prevents the sweep from completing.
 ///
 /// # Two reconciliation windows, one grace period
 ///
@@ -848,7 +850,6 @@ where
     } else {
         None
     };
-    let mut first_failure = None;
     let mut settled = HashSet::new();
     if let Some(generation) = &generation {
         let adoption = match root_set.adopt_attachment_condemnations(generation).await {
@@ -886,7 +887,6 @@ where
                 },
                 grace_period_ms,
                 &mut report,
-                &mut first_failure,
             )
             .await;
         }
@@ -1009,7 +1009,6 @@ where
                         },
                         grace_period_ms,
                         &mut report,
-                        &mut first_failure,
                     )
                     .await;
                     continue;
@@ -1043,7 +1042,6 @@ where
                 Err(error) => {
                     record_reclamation_failure(
                         &mut report,
-                        &mut first_failure,
                         blob.id,
                         AttachmentStoreError::RootSetOperationFailed {
                             operation: "condemn",
@@ -1075,7 +1073,7 @@ where
             // Could not re-stat: treat as a per-blob failure rather than risk
             // deleting a blob we can no longer vouch for.
             Err(error) => {
-                record_reclamation_failure(&mut report, &mut first_failure, blob.id, error);
+                record_reclamation_failure(&mut report, blob.id, error);
                 continue;
             }
         }
@@ -1096,7 +1094,6 @@ where
             Err(error) => {
                 record_reclamation_failure(
                     &mut report,
-                    &mut first_failure,
                     blob.id,
                     AttachmentStoreError::RootSetOperationFailed {
                         operation: "probe live reference",
@@ -1128,26 +1125,21 @@ where
                 .await;
             }
             Err(error) => {
-                record_reclamation_failure(&mut report, &mut first_failure, blob.id, error);
+                record_reclamation_failure(&mut report, blob.id, error);
             }
         }
     }
-    match first_failure {
-        Some(error) => Err(AttachmentReclamationFailure::failed(error, report)),
-        None => Ok(report),
-    }
+    Ok(report)
 }
 
 fn record_reclamation_failure(
     report: &mut AttachmentReclamationReport,
-    first_failure: &mut Option<AttachmentStoreError>,
     id: AttachmentId,
     error: AttachmentStoreError,
 ) {
+    tracing::warn!(attachment_id = %id, error = %error, retryable = error.is_retryable(),
+        "attachment sweep item failed; the completed pass reports incomplete work");
     report.failed_ids.push(id);
-    if first_failure.is_none() {
-        *first_failure = Some(error);
-    }
 }
 
 fn warn_empty_root_set_refused(
@@ -1184,7 +1176,6 @@ async fn complete_condemnation<R>(
     candidate: Candidate<'_>,
     grace_period_ms: u64,
     report: &mut AttachmentReclamationReport,
-    first_failure: &mut Option<AttachmentStoreError>,
 ) where
     R: AttachmentRootSet + ?Sized,
 {
@@ -1206,7 +1197,6 @@ async fn complete_condemnation<R>(
             Err(error) => {
                 record_reclamation_failure(
                     report,
-                    first_failure,
                     id.clone(),
                     AttachmentStoreError::RootSetOperationFailed {
                         operation: "arm delete",
@@ -1233,7 +1223,6 @@ async fn complete_condemnation<R>(
                 generation,
                 AttachmentCondemnationSettlement::Spared,
                 report,
-                first_failure,
             )
             .await;
             return;
@@ -1248,21 +1237,12 @@ async fn complete_condemnation<R>(
                 generation,
                 AttachmentCondemnationSettlement::Deleted,
                 report,
-                first_failure,
             )
             .await;
             return;
         }
         Err(error) => {
-            record_failed_delete(
-                root_set,
-                &candidate,
-                generation,
-                error,
-                report,
-                first_failure,
-            )
-            .await;
+            record_failed_delete(root_set, &candidate, generation, error, report).await;
             return;
         }
     }
@@ -1283,20 +1263,11 @@ async fn complete_condemnation<R>(
                 generation,
                 AttachmentCondemnationSettlement::Deleted,
                 report,
-                first_failure,
             )
             .await;
         }
         Err(error) => {
-            record_failed_delete(
-                root_set,
-                &candidate,
-                generation,
-                error,
-                report,
-                first_failure,
-            )
-            .await;
+            record_failed_delete(root_set, &candidate, generation, error, report).await;
         }
     }
 }
@@ -1310,7 +1281,6 @@ async fn record_failed_delete<R>(
     generation: &AttachmentSweepGeneration,
     error: AttachmentStoreError,
     report: &mut AttachmentReclamationReport,
-    first_failure: &mut Option<AttachmentStoreError>,
 ) where
     R: AttachmentRootSet + ?Sized,
 {
@@ -1323,7 +1293,7 @@ async fn record_failed_delete<R>(
         None
     };
     let message = error.to_string();
-    record_reclamation_failure(report, first_failure, candidate.id.clone(), error);
+    record_reclamation_failure(report, candidate.id.clone(), error);
     match root_set
         .settle_attachment_condemnation(
             candidate.id,
@@ -1365,7 +1335,6 @@ async fn settle<R>(
     generation: &AttachmentSweepGeneration,
     settlement: AttachmentCondemnationSettlement,
     report: &mut AttachmentReclamationReport,
-    first_failure: &mut Option<AttachmentStoreError>,
 ) where
     R: AttachmentRootSet + ?Sized,
 {
@@ -1375,7 +1344,6 @@ async fn settle<R>(
     {
         record_reclamation_failure(
             report,
-            first_failure,
             id.clone(),
             AttachmentStoreError::RootSetOperationFailed {
                 operation: "settle condemnation",

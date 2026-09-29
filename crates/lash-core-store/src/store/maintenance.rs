@@ -11,8 +11,7 @@
 //! * **Swept** — `Ok(report)` that reclaimed at least one item and recorded no
 //!   per-item failures.
 //! * **Incomplete** — `Ok(report)` that completed its scope but reports
-//!   unfinished work. Failed attachment steps return `Err` with their partial
-//!   report.
+//!   unfinished work, including per-item attachment failures and typed stalls.
 //! * **Nothing to do** — `Ok(report)` that reclaimed nothing and recorded no
 //!   failures or deferrals. Emptiness here is *witnessed*: the pass enumerated
 //!   its whole scope and there was nothing to reclaim.
@@ -21,7 +20,8 @@
 //!   be proven, so the pass declined to take it. Nothing was destroyed after
 //!   the refusal; a later pass can retry.
 //! * **Failed** — `Err(`[`MaintenanceFailure`]`)` carrying
-//!   [`MaintenanceStop::Failed`]. The backend errored.
+//!   [`MaintenanceStop::Failed`]. A backend error stopped the pass before it
+//!   completed its scope.
 //!
 //! Both stop arms carry the report accumulated **before** the stop, so work
 //! already done is reported instead of being discarded. That is the half of the
@@ -86,8 +86,8 @@ pub enum MaintenanceSweep {
     /// The pass enumerated its scope and reclaimed at least one row or blob,
     /// with no per-item failures.
     Swept,
-    /// The pass completed its scope but reports unfinished work. Failed
-    /// attachment steps return `Err` with their partial report.
+    /// The pass completed its scope but reports unfinished work, including
+    /// per-item attachment failures and typed stalls.
     Incomplete,
     /// The pass enumerated its *whole* scope and found nothing reclaimable.
     ///
