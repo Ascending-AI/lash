@@ -1762,6 +1762,50 @@
         },
         {
           "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "foreign_trigger_owner_scope"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "foreign_trigger_actor"
+              ],
+              "type": "string"
+            },
+            "recorded": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expected",
+            "reason",
+            "recorded"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "code": {
               "type": "string"
             },
