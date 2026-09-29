@@ -23,6 +23,7 @@ mod fork_rewind_contract;
 #[path = "../../shared/prior_store_layout.rs"]
 mod prior_store_layout;
 mod raw_activities;
+mod remote_protocol;
 mod restate;
 mod retention;
 #[cfg(test)]

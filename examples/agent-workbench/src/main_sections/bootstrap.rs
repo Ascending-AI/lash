@@ -501,10 +501,11 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         )
         .route(
             "/api/observations",
-            get(move |state, query| {
+            get(move |state, query, headers| {
                 session_observations_with_shutdown(
                     state,
                     query,
+                    headers,
                     Some(observation_stream_shutdown.subscribe()),
                 )
             }),

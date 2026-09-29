@@ -648,7 +648,10 @@ pub mod secrets {
 /// protocol error type live at this root; everything else has exactly one
 /// home in a domain sub-namespace.
 pub mod remote {
-    pub use lash_remote_protocol::{Envelope, REMOTE_PROTOCOL_VERSION, RemoteProtocolError};
+    pub use lash_remote_protocol::{
+        Envelope, Negotiated, Negotiation, REMOTE_PROTOCOL, REMOTE_PROTOCOL_VERSION,
+        RemoteProtocolError, answer,
+    };
 
     /// LLM request/response envelopes: messages, attachments, tool specs,
     /// output specs, and provider metadata.

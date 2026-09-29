@@ -547,8 +547,8 @@ fn drain_area_witnesses() {
     });
     // W0147: lash::remote::Envelope::into_body [function]
     let _ = lash::remote::Envelope::<serde_json::Value>::into_body;
-    // W0148: lash::remote::Envelope::new [function]
-    let _ = lash::remote::Envelope::<serde_json::Value>::new;
+    // W0148: lash::remote::Envelope::at [function]
+    let _ = lash::remote::Envelope::<serde_json::Value>::at;
     // W0149: lash::remote::Envelope::protocol_version [function]
     let _ = lash::remote::Envelope::<serde_json::Value>::protocol_version;
     // W0150: lash::remote::RemoteProtocolError::ConflictingLlmCallRecord [variant]

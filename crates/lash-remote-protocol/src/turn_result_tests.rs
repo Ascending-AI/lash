@@ -99,20 +99,14 @@ fn in_progress_turn_report_is_refused_by_version_negotiation_before_body_decode(
     let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
     assert!(matches!(
         RemoteTurnReport::decode_json(&wire),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 43,
-            expected: REMOTE_PROTOCOL_VERSION,
-        })
+        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(43) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 
     payload["status"] = serde_json::json!("in_progress");
     let wire = serde_json::to_vec(&payload).expect("serialize version 43 report");
     assert!(matches!(
         RemoteTurnReport::decode_json(&wire),
-        Err(RemoteProtocolError::UnsupportedProtocolVersion {
-            actual: 43,
-            expected: REMOTE_PROTOCOL_VERSION,
-        })
+        Err(RemoteProtocolError::Unsupported { peer, local }) if peer == crate::VersionRange::exactly(43) && local == crate::VersionRange::exactly(REMOTE_PROTOCOL_VERSION)
     ));
 }
 
@@ -366,7 +360,9 @@ fn a_remote_send_outcome_carries_four_statuses_and_refuses_inconsistent_ones() {
     ];
     for outcome in consistent {
         outcome.validate().expect("a consistent outcome");
-        let wire = outcome.encode_json().expect("encode");
+        let wire = outcome
+            .encode_json(&crate::negotiation::test_negotiated())
+            .expect("encode");
         assert_eq!(
             RemoteSendOutcome::decode_json(&wire).expect("decode"),
             outcome
@@ -393,7 +389,9 @@ fn a_remote_send_outcome_carries_four_statuses_and_refuses_inconsistent_ones() {
         outcome
             .validate()
             .expect_err("an inconsistent outcome is refused");
-        let wire = outcome.encode_json().expect("encode");
+        let wire = outcome
+            .encode_json(&crate::negotiation::test_negotiated())
+            .expect("encode");
         RemoteSendOutcome::decode_json(&wire).expect_err("decode refuses it too");
     }
 }

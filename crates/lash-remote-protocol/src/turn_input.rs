@@ -60,12 +60,16 @@ impl RemoteTurnInput {
     }
 
     /// Nested turn input remains a bare body.
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let input = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let input =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         input.validate()?;
         Ok(input)
     }
@@ -118,12 +122,16 @@ pub struct RemoteTurnRequest {
 }
 
 impl RemoteTurnRequest {
-    pub fn encode_json(&self) -> Result<Vec<u8>, serde_json::Error> {
-        crate::Envelope::new(self).encode_json()
+    pub fn encode_json(
+        &self,
+        negotiated: &crate::Negotiated,
+    ) -> Result<Vec<u8>, serde_json::Error> {
+        crate::Envelope::at(negotiated, self).encode_json()
     }
 
     pub fn decode_json(bytes: &[u8]) -> Result<Self, RemoteProtocolError> {
-        let request = crate::Envelope::<Self>::decode_json(bytes)?.into_body();
+        let request =
+            crate::Envelope::<Self>::decode_json(bytes, crate::REMOTE_PROTOCOL)?.into_body();
         request.validate()?;
         Ok(request)
     }

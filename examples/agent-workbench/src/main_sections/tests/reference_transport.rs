@@ -348,6 +348,7 @@ async fn connect_observations(
     )
     .await
     .expect("open observation stream");
+    assert!(response.headers().contains_key("x-lash-protocol-accept"));
     assert_eq!(
         response
             .headers()

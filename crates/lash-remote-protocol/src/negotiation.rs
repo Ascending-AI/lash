@@ -70,7 +70,7 @@ pub fn answer(local: VersionRange, hello: &Negotiation) -> Negotiation {
 }
 
 /// A connection's selected version. Built only from an `Accept` that this
-/// side validated: `selected` is inside both ranges.
+/// side validated: `selected` is the highest version inside both ranges.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Negotiated {
     selected: u32,
@@ -80,7 +80,8 @@ impl Negotiated {
     /// Validates the server's answer against the client's `local` range.
     ///
     /// An `Unsupported` answer, a `Hello`, or an `Accept` whose `selected`
-    /// is outside either range is refused, and the connection runs nothing.
+    /// is not the highest common version is refused, and the connection runs
+    /// nothing.
     pub fn from_accept(
         local: VersionRange,
         accept: &Negotiation,
@@ -93,22 +94,23 @@ impl Negotiated {
             Negotiation::Accept {
                 supported,
                 selected,
-            } if local.contains(*selected) && supported.contains(*selected) => Ok(Self {
+            } if local.select(*supported) == Some(*selected) => Ok(Self {
                 selected: *selected,
             }),
             Negotiation::Accept {
                 supported,
                 selected,
             } => Err(refuse(format!(
-                "the peer selected remote protocol version {selected}, outside this side's \
-                 {local} or its own {supported}"
+                "the peer selected remote protocol version {selected}; the highest version \
+                 common to this side's {local} and its own {supported} was {:?}",
+                local.select(*supported)
             ))),
             Negotiation::Unsupported {
-                local: peer_local,
-                peer: _,
-            } => Err(refuse(format!(
-                "the peer speaks remote protocol {peer_local}, disjoint from this side's {local}"
-            ))),
+                local: peer_local, ..
+            } => Err(RemoteProtocolError::Unsupported {
+                local,
+                peer: *peer_local,
+            }),
             Negotiation::Hello { supported } => Err(refuse(format!(
                 "the peer answered a Hello with a Hello ({supported}) instead of an Accept"
             ))),
@@ -119,6 +121,15 @@ impl Negotiated {
     pub fn selected(&self) -> u32 {
         self.selected
     }
+}
+
+#[cfg(test)]
+pub(crate) fn test_negotiated() -> Negotiated {
+    let hello = Negotiation::Hello {
+        supported: REMOTE_PROTOCOL,
+    };
+    Negotiated::from_accept(REMOTE_PROTOCOL, &answer(REMOTE_PROTOCOL, &hello))
+        .expect("local protocol range accepts itself")
 }
 
 #[cfg(test)]
