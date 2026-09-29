@@ -1266,6 +1266,13 @@ impl RestateTestServer {
         Some(state.purge(key))
     }
 
+    /// Drop the journal of every completed invocation, keeping its id,
+    /// outcome, idempotency record and state: the per-scenario weight a law
+    /// sheds between scenarios. Returns how many journals it dropped.
+    pub fn drop_completed_journals(&self) -> usize {
+        self.shared.lock().drop_completed_journals()
+    }
+
     /// Resume a paused `invocation` as the admin API does, on the
     /// deployment it is pinned to.
     pub fn resume(&self, invocation: &str) -> Option<bool> {
@@ -1301,29 +1308,34 @@ impl RestateTestServer {
             .iter()
             .enumerate()
             .filter(|(index, _)| state.is_retained(InvKey(*index)))
-            .map(|(_, invocation)| InvocationView {
-                id: invocation.id.as_str().to_owned(),
-                target: invocation.target.display(),
-                pinned_deployment_id: invocation.pinned_deployment.as_str().to_owned(),
-                status: invocation.status.name(),
-                attempts: invocation.attempts,
-                suspensions: invocation.suspensions,
-                journal_len: invocation.journal.len(),
-                retry_count: invocation.retry.failures_in_loop,
-                blocked_on_server: match &invocation.status {
-                    // A closed input is work the attempt has not drained
-                    // yet, not a wait on the server: its starved flag still
-                    // reads true until the SDK polls the end of input.
-                    Status::Running(attempt) => Some(attempt.is_open() && attempt.probe.is_idle()),
-                    _ => None,
-                },
-                last_failure: invocation
-                    .retry
-                    .last_failure
-                    .as_ref()
-                    .map(|failure| (failure.code, failure.message.clone())),
-            })
+            .map(|(_, invocation)| invocation_view(invocation))
             .collect()
+    }
+
+    /// The retained invocation of `handler` on `service`'s object or
+    /// workflow `key` whose status is `status`, if one is: the targeted read
+    /// a poller takes instead of materialising [`Self::invocations`] on
+    /// every tick, which grows with every invocation the server retains.
+    pub fn find_invocation(
+        &self,
+        service: &str,
+        key: &str,
+        handler: &str,
+        status: &str,
+    ) -> Option<InvocationView> {
+        let state = self.shared.lock();
+        state
+            .invocations
+            .iter()
+            .enumerate()
+            .find(|(index, invocation)| {
+                invocation.target.service == service
+                    && invocation.target.key.as_deref() == Some(key)
+                    && invocation.target.handler == handler
+                    && invocation.status.name() == status
+                    && state.is_retained(InvKey(*index))
+            })
+            .map(|(_, invocation)| invocation_view(invocation))
     }
 
     /// The most invocations that ever waited at once on the exclusive lock
@@ -1522,4 +1534,30 @@ fn fnv1a_extend(mut hash: u64, bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }
     hash
+}
+
+/// One invocation as [`RestateTestServer::invocations`] reports it.
+fn invocation_view(invocation: &model::Invocation) -> InvocationView {
+    InvocationView {
+        id: invocation.id.as_str().to_owned(),
+        target: invocation.target.display(),
+        pinned_deployment_id: invocation.pinned_deployment.as_str().to_owned(),
+        status: invocation.status.name(),
+        attempts: invocation.attempts,
+        suspensions: invocation.suspensions,
+        journal_len: invocation.journal.len(),
+        retry_count: invocation.retry.failures_in_loop,
+        blocked_on_server: match &invocation.status {
+            // A closed input is work the attempt has not drained
+            // yet, not a wait on the server: its starved flag still
+            // reads true until the SDK polls the end of input.
+            Status::Running(attempt) => Some(attempt.is_open() && attempt.probe.is_idle()),
+            _ => None,
+        },
+        last_failure: invocation
+            .retry
+            .last_failure
+            .as_ref()
+            .map(|failure| (failure.code, failure.message.clone())),
+    }
 }

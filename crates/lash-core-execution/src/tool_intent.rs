@@ -234,14 +234,34 @@ pub struct RegisterProcessDefinitionIntent {
     pub label: Option<String>,
     /// The registered name this declaration claims. Tool input only: the
     /// durable row pins the resolved reference, never this name. `None`
-    /// refuses realization because an unnamed registration cannot be
-    /// addressed.
+    /// registers no name: the declaration only creates the definition, and
+    /// the caller holds the definition value it answered (ADR 0113 §6). A
+    /// host front door has no frame to hold one, so it refuses `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// The revision the caller last observed under `name`. `None` creates a
     /// fresh slot; a stale value conflicts with the live row (FIG-2995 CAS).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<u64>,
+    /// The module the definition names, when no store holds it yet: a
+    /// definition `processes.create` compiled in its attempt. The attempt
+    /// publishes nothing (ADR 0116); realization publishes these bytes under
+    /// the realizing execution's journal referrer before it resolves the
+    /// definition, and a name's revision or the caller's frame takes them
+    /// over from there (ADR 0113 §3.6, §3.7).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub module: Option<DeclaredModuleArtifact>,
+}
+
+/// A module artifact a declaration carries for realization to publish.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeclaredModuleArtifact {
+    /// The content-addressed reference the definition value names.
+    pub module_ref: String,
+    /// The module port's bytes for `module_ref`, exactly as its codec wrote
+    /// them. The lashlang module codec is JSON, so they travel as text and
+    /// publish byte-for-byte.
+    pub bytes: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -599,6 +619,7 @@ mod tests {
                     label: None,
                     name: None,
                     expected_revision: None,
+                    module: None,
                 }))
             }
             ToolIntentKind::RegisterTrigger => {

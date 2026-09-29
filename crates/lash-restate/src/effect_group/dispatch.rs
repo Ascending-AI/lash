@@ -207,7 +207,6 @@ impl EffectGroupDispatchImpl {
         // settles with the typed refusal, which resolves the opener's rank
         // wait instead of stranding it; its effect never runs.
         if let Some(refusal) = session_generation_refusal(self.sessions.as_ref(), request).await? {
-            request.shape.validate_wire()?;
             return record_child_settlement(
                 &ctx,
                 self.route.namespace(),
@@ -218,7 +217,6 @@ impl EffectGroupDispatchImpl {
             )
             .await;
         }
-        request.shape.validate_wire()?;
         let own_id = ctx.invocation_id().to_string();
         let admission_request = EffectGroupAdmissionRequest {
             position: request.position,
@@ -634,9 +632,11 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
             .call()
             .await?
             .into_body();
-        let shape = match adopted {
-            EffectGroupProbeAdoptResponse::Adopted { shape }
-            | EffectGroupProbeAdoptResponse::AlreadyAdopted { shape } => shape,
+        let (shape, membership) = match adopted {
+            EffectGroupProbeAdoptResponse::Adopted { shape, membership }
+            | EffectGroupProbeAdoptResponse::AlreadyAdopted { shape, membership } => {
+                (shape, membership)
+            }
             EffectGroupProbeAdoptResponse::Ready
             | EffectGroupProbeAdoptResponse::Closed
             | EffectGroupProbeAdoptResponse::Retired => return Ok(Reply::at(wire, ())),
@@ -653,19 +653,9 @@ impl EffectGroupDispatch for EffectGroupDispatchImpl {
         // every reopen alike. Decoding is pure — a membership entry that does
         // not decode is corruption the journal itself produced, a protocol
         // defect rather than a retryable error.
-        let children = shape
-            .membership
-            .iter()
-            .enumerate()
-            .map(|(position, member)| {
-                serde_json::from_str::<RuntimeEffectEnvelope>(member).map_err(|error| {
-                    TerminalError::new(format!(
-                        "retained membership of effect group {} child {position} does \
-                         not decode: {error}",
-                        request.group_key
-                    ))
-                })
-            })
+        shape.validate_membership(&membership)?;
+        let children = (0..membership.0.len())
+            .map(|position| membership.envelope(&request.group_key, position))
             .collect::<Result<Vec<_>, _>>()?;
 
         let executors = Arc::clone(&self.executors);
@@ -1314,7 +1304,6 @@ mod tests {
                 loser_disposition: LoserPolicy::RunToCompletion,
                 replay_keys: vec!["child-0".to_owned()],
                 wait_scope: ExecutionScope::runtime_operation("group"),
-                membership: vec!["{}".to_owned()],
                 opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             position: 0,

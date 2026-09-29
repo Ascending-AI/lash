@@ -348,7 +348,7 @@ pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn ModuleArtifactS
     let mut forged: serde_json::Value =
         serde_json::from_slice(&second.to_store_bytes().expect("module bytes"))
             .expect("module JSON");
-    forged["module_ref"] = serde_json::json!(first.module_ref());
+    forged["artifact"]["module_ref"] = serde_json::json!(first.module_ref());
     assert!(
         ModuleArtifact::from_store_bytes(&serde_json::to_vec(&forged).expect("forged bytes"),)
             .is_err()

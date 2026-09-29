@@ -131,11 +131,16 @@ pub struct DeclaredStart {
     // Both boxed: a pending completion rides every recorded attempt launch.
     start: Box<crate::StartProcessIntent>,
     identity: Box<crate::ToolIntentIdentity>,
+    /// The wait's deadline, so a timeout names what timed out and after how
+    /// long.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deadline: Option<std::time::Duration>,
 }
 
 impl PartialEq for DeclaredStart {
     fn eq(&self, other: &Self) -> bool {
         self.identity == other.identity
+            && self.deadline == other.deadline
             && serde_json::to_value(&self.start).ok() == serde_json::to_value(&other.start).ok()
     }
 }
@@ -166,6 +171,7 @@ impl DeclaredStart {
         Ok(Self {
             start: Box::new(start),
             identity: Box::new(identity),
+            deadline: None,
         })
     }
 
@@ -183,6 +189,23 @@ impl DeclaredStart {
     /// derived key.
     pub(crate) fn request(&self) -> crate::ProcessStartRequest {
         self.start.into_request(&self.identity)
+    }
+
+    /// The failure a wait on this start answers when its deadline passes:
+    /// the child's declared kind, and the deadline it outlived (ADR 0116 §4).
+    fn timeout_failure(&self) -> Option<crate::ToolFailure> {
+        let deadline = self.deadline?;
+        let kind = self
+            .start
+            .declaration
+            .identity
+            .as_ref()
+            .map_or("declared start", |identity| identity.kind.as_str());
+        Some(crate::ToolFailure::runtime(
+            crate::ToolFailureClass::Timeout,
+            "tool_completion_timeout",
+            format!("{kind} timed out after {deadline:?}"),
+        ))
     }
 }
 
@@ -247,6 +270,9 @@ impl PendingCompletion {
     /// behavior rather than completing the tool successfully.
     pub fn with_deadline(mut self, deadline: std::time::Duration) -> Self {
         self.deadline = Some(deadline);
+        if let Some(PendingResolver::DeclaredStart(start)) = self.resolved_by.as_mut() {
+            start.deadline = Some(deadline);
+        }
         self
     }
 
@@ -284,7 +310,8 @@ impl PendingCompletion {
     /// The runtime launches the start at the park and arms its terminal; a
     /// cancelled or timed-out wait cancels the child under
     /// [`CancelHint::CancelExternalWork`].
-    pub fn resolved_by_declared_start(self, start: DeclaredStart) -> Self {
+    pub fn resolved_by_declared_start(self, mut start: DeclaredStart) -> Self {
+        start.deadline = self.deadline;
         self.resolved_by(PendingResolver::DeclaredStart(start))
     }
 }
@@ -557,11 +584,19 @@ pub fn tool_output_from_completion_resolution(
             failure.raw = err.raw.map(crate::ToolValue::untrusted_json);
             crate::ToolCallOutput::failure(failure)
         }
-        crate::Resolution::Timeout => crate::ToolCallOutput::failure(crate::ToolFailure::runtime(
-            crate::ToolFailureClass::Timeout,
-            "tool_completion_timeout",
-            "pending tool completion timed out",
-        )),
+        crate::Resolution::Timeout => crate::ToolCallOutput::failure(
+            match resolver {
+                Some(crate::PendingResolver::DeclaredStart(start)) => start.timeout_failure(),
+                _ => None,
+            }
+            .unwrap_or_else(|| {
+                crate::ToolFailure::runtime(
+                    crate::ToolFailureClass::Timeout,
+                    "tool_completion_timeout",
+                    "pending tool completion timed out",
+                )
+            }),
+        ),
         crate::Resolution::Cancelled => crate::ToolCallOutput::cancelled(
             crate::ToolCancellation::runtime("pending tool completion cancelled"),
         ),
@@ -785,6 +820,40 @@ mod tests {
         };
         assert_eq!(start.identity().intent_index, 0);
         assert!(resolver.awaits_process_terminal());
+    }
+
+    #[test]
+    fn a_declared_start_timeout_names_its_child_and_deadline() {
+        let crate::PendingResolver::DeclaredStart(start) = declared_start() else {
+            unreachable!()
+        };
+        let start = DeclaredStart {
+            start: Box::new(crate::StartProcessIntent {
+                session_id: start.start().session_id.clone(),
+                declaration: start.start().declaration.clone().with_declared_identity(
+                    crate::DeclaredProcessIdentity::labelled("subagent", None::<String>),
+                ),
+            }),
+            ..start
+        };
+        for pending in [
+            PendingCompletion::new()
+                .with_deadline(std::time::Duration::from_secs(3))
+                .resolved_by_declared_start(start.clone()),
+            PendingCompletion::new()
+                .resolved_by_declared_start(start)
+                .with_deadline(std::time::Duration::from_secs(3)),
+        ] {
+            let timed_out = tool_output_from_completion_resolution(
+                crate::Resolution::Timeout,
+                pending.resolved_by.as_ref(),
+            );
+            let crate::ToolCallOutcome::Failure(failure) = timed_out.outcome else {
+                panic!("a timeout is a failure: {timed_out:?}");
+            };
+            assert_eq!(failure.class, crate::ToolFailureClass::Timeout);
+            assert_eq!(failure.message, "subagent timed out after 3s");
+        }
     }
 
     #[test]

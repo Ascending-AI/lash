@@ -22,6 +22,9 @@ use crate::FrameNodeId;
 use crate::process_identity::StartKey;
 use crate::{ProcessId, SessionId};
 
+/// The seven referrer labels and their canonical id encodings at the 1.0 cut.
+pub const ARTIFACT_REFERRER_KINDS_VERSION: u32 = 1;
+
 /// The seven referrer kinds, as the `referrer_kind` column stores them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ArtifactReferrerKind {
@@ -557,6 +560,14 @@ pub enum ArtifactStoreId {
     LashlangModule,
     /// A process engine's own store, by engine kind.
     Engine(String),
+}
+
+impl ArtifactStoreId {
+    /// The store behind the module artifact port.
+    #[must_use]
+    pub const fn module() -> Self {
+        Self::LashlangModule
+    }
 }
 
 /// One artifact, by the store that holds it and its reference there.

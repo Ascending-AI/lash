@@ -129,7 +129,8 @@ pub async fn arm_pending_resolver(
             Ok(arm_terminal(site, process_id, key, ArmedResolver::default()).await)
         }
         Some(crate::PendingResolver::DeclaredStart(start)) => {
-            let launch = launch_declared_start(site, start, key).await?;
+            let cancels = pending.on_cancel == crate::CancelHint::CancelExternalWork;
+            let launch = launch_declared_start(site, start, key, cancels).await?;
             let Some(process_id) = launch.process_id.clone() else {
                 let failure = launch_refusal(&launch.outcome);
                 return Ok(ResolverArming::Settled {
@@ -147,8 +148,9 @@ pub async fn arm_pending_resolver(
                 // The call will not wait for the child it launched, so the
                 // child is cancelled rather than left running unobserved.
                 ResolverArming::Settled { failure, armed } => {
-                    cancel_owned_process(site, &process_id).await?;
-                    release_consumer_hold(site, &armed, key).await;
+                    if cancel_owned_process(site, &process_id).await? == CancelDischarge::Met {
+                        release_consumer_hold(site, &armed, key).await;
+                    }
                     Ok(ResolverArming::Settled { failure, armed })
                 }
             }
@@ -185,19 +187,15 @@ async fn launch_declared_start(
     site: &ParkSite<'_, '_>,
     start: &crate::DeclaredStart,
     key: &crate::AwaitEventKey,
+    cancels: bool,
 ) -> Result<LaunchReceipt, crate::RuntimeEffectControllerError> {
     let parent = launch_parent(site, start.identity());
     // The child is registered under the call's hold, owned by the scope the
     // call runs under, so the row outlives every redrive of the start.
-    let owner = site
-        .scope
-        .start_cx()
-        .ok()
-        .flatten()
-        .map(|cx| cx.starter().id().clone());
-    let hold = owner.map(|owner| crate::ConsumerHold {
+    let hold = consumer_hold_owner(&site.scope).map(|owner| crate::ConsumerHold {
         key: key.key_id.clone(),
         owner,
+        cancels,
     });
     let scope = site
         .scope
@@ -221,6 +219,17 @@ async fn launch_declared_start(
         outcome,
         process_id,
     })
+}
+
+/// The scope that owns a call's consumer hold: the starter the call's
+/// declared start is admitted under. A scope with no start context owns no
+/// hold, and its calls launch unheld.
+pub fn consumer_hold_owner(scope: &crate::ProcessOpScope<'_>) -> Option<crate::ScopeId> {
+    scope
+        .start_cx()
+        .ok()
+        .flatten()
+        .map(|cx| cx.starter().id().clone())
 }
 
 /// The invocation a declared start is journaled beneath: the call's lineage,
@@ -266,6 +275,16 @@ fn launch_refusal(outcome: &crate::ToolIntentExecutionOutcome) -> crate::ToolFai
     crate::ToolFailure::runtime(crate::ToolFailureClass::Unavailable, code, message)
 }
 
+/// What became of a cancel obligation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CancelDischarge {
+    /// The obligation is met, or there was none.
+    Met,
+    /// The call's invocation could journal no cancel: the obligation stays
+    /// with the hold, for the opener that abandoned the call to drain.
+    LeftToOpener,
+}
+
 /// Discharges a parked call's cancel obligation once its wait has ended.
 ///
 /// A wait that ended cancelled or timed out, on a process the runtime owns
@@ -278,16 +297,16 @@ async fn discharge_cancel_obligation(
     pending: &crate::PendingCompletion,
     armed: &ArmedResolver,
     resolution: &crate::Resolution,
-) -> Result<(), crate::RuntimeEffectControllerError> {
+) -> Result<CancelDischarge, crate::RuntimeEffectControllerError> {
     if !matches!(
         resolution,
         crate::Resolution::Cancelled | crate::Resolution::Timeout
     ) || pending.on_cancel != crate::CancelHint::CancelExternalWork
     {
-        return Ok(());
+        return Ok(CancelDischarge::Met);
     }
     let Some(process_id) = armed.awaited_process(pending) else {
-        return Ok(());
+        return Ok(CancelDischarge::Met);
     };
     cancel_owned_process(site, process_id).await
 }
@@ -325,7 +344,8 @@ async fn release_consumer_hold(
 
 /// Ends a parked call's wait: discharges its cancel obligation, then releases
 /// its hold on the child it launched. Every park site calls this once the
-/// wait has resolved, before it settles the call.
+/// wait has resolved, before it settles the call. An obligation left to the
+/// opener keeps the hold: the hold is how the opener finds it.
 pub async fn finish_parked_wait(
     site: &ParkSite<'_, '_>,
     pending: &crate::PendingCompletion,
@@ -333,8 +353,10 @@ pub async fn finish_parked_wait(
     key: &crate::AwaitEventKey,
     resolution: &crate::Resolution,
 ) -> Result<(), crate::RuntimeEffectControllerError> {
-    discharge_cancel_obligation(site, pending, armed, resolution).await?;
-    release_consumer_hold(site, armed, key).await;
+    if discharge_cancel_obligation(site, pending, armed, resolution).await? == CancelDischarge::Met
+    {
+        release_consumer_hold(site, armed, key).await;
+    }
     Ok(())
 }
 
@@ -367,12 +389,44 @@ impl crate::tool_dispatch::PendingToolDispatchOutcome {
     }
 }
 
+/// Drains the cancel obligation of a call its opener abandoned (ADR 0116
+/// §3.4): a group that decided the cancel cancels, from the opener's own
+/// journal, each process in `owed` — what the call's hold `key` held and owed
+/// a cancel when the opener abandoned the hold, which also refuses any later
+/// start under it — then releases the hold. The call's own invocation was
+/// cancelled with it and may never reach its park site's discharge.
+pub async fn discharge_abandoned_call(
+    site: &ParkSite<'_, '_>,
+    key: &crate::AwaitEventKey,
+    owed: &[crate::ProcessId],
+) -> Result<(), crate::RuntimeEffectControllerError> {
+    for process_id in owed {
+        // An opener that could not journal the cancel either leaves the hold
+        // to its scope's close.
+        if cancel_owned_process(site, process_id).await? == CancelDischarge::LeftToOpener {
+            continue;
+        }
+        if let Err(error) = site
+            .processes
+            .release_consumer_hold(process_id, &key.key_id)
+            .await
+        {
+            tracing::warn!(
+                process_id = %process_id,
+                error = %error,
+                "an abandoned call could not release its hold on the child it launched"
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Issues the replay-keyed cancel of a process the call owns, under the
 /// call's `cancel-work` key.
 async fn cancel_owned_process(
     site: &ParkSite<'_, '_>,
     process_id: &crate::ProcessId,
-) -> Result<(), crate::RuntimeEffectControllerError> {
+) -> Result<CancelDischarge, crate::RuntimeEffectControllerError> {
     let scoped = site.scope.effect_controller.scoped();
     let suffix = crate::runtime::effect::tool_cancel_work_replay_suffix(site.call_id);
     let parent = site.scope.parent_invocation.as_ref().map(|parent| {
@@ -391,16 +445,36 @@ async fn cancel_owned_process(
         .cancel(site.session_id, process_id, scope)
         .await
     {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(CancelDischarge::Met),
         Err(error) => match super::intent_executor::declared_start_fault(&error) {
-            Some(error) => Err(error),
+            // The invocation that owns the call can journal nothing more: a
+            // group child whose group decided the cancel. That group's
+            // opener drains the obligation from its own journal
+            // (`discharge_abandoned_call`).
+            Some(fault)
+                if matches!(
+                    fault.code,
+                    crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
+                        | crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+                ) =>
+            {
+                tracing::warn!(
+                    process_id = %process_id,
+                    error = %fault,
+                    "a parked call's cancel obligation is left to its opener"
+                );
+                Ok(CancelDischarge::LeftToOpener)
+            }
+            // Any other fault ends the attempt; its redrive issues the same
+            // replay-keyed cancel again.
+            Some(fault) => Err(fault),
             None => {
                 tracing::warn!(
                     process_id = %process_id,
                     error = %error,
                     "a parked call's cancel obligation found nothing to cancel"
                 );
-                Ok(())
+                Ok(CancelDischarge::Met)
             }
         },
     }

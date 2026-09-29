@@ -32,16 +32,19 @@ pub enum EffectGroupOpenResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupProbeAdoptResponse {
-    /// The dispatch was adopted; `shape` is the recorded shape whose retained
-    /// membership is the authoritative child set — a reopen's offered
-    /// children never reach dispatch.
+    /// The dispatch was adopted; `shape` is the recorded shape and
+    /// `membership` the retained membership, the authoritative child set — a
+    /// reopen's offered children never reach dispatch.
     Adopted {
         shape: EffectGroupShape,
+        membership: EffectGroupMembership,
     },
     /// A redrive of an already-adopted dispatch, answered with the same
-    /// recorded shape so the replayed `run` rebuilds the same children.
+    /// recorded shape and membership so the replayed `run` rebuilds the same
+    /// children.
     AlreadyAdopted {
         shape: EffectGroupShape,
+        membership: EffectGroupMembership,
     },
     DifferentDispatcher,
     Ready,
@@ -239,6 +242,10 @@ pub enum EffectGroupRetirementCancelResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupOpenRequest {
     pub shape: EffectGroupShape,
+    /// The offered membership: every child's canonical envelope, in child
+    /// order. A fresh open retains it; a reopen's is only compared, and the
+    /// retained one wins (ADR 0099 §3).
+    pub membership: EffectGroupMembership,
     /// The route — the full Restate service name — the group's dispatch is
     /// sent under (FIG-3795 S10). The index records it verbatim at open, and
     /// a reopen keeps the retained route: the route is data, and every later

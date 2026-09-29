@@ -15,6 +15,9 @@ use crate::{ProcessId, SessionId, TurnId};
 use super::StoreError;
 use super::control_intent::ControlIntentId;
 
+/// The obligation state, kind, key, and stall labels written at the 1.0 cut.
+pub const OBLIGATION_LEDGER_VOCABULARY_VERSION: u32 = 1;
+
 /// Which ledger an obligation lives on. Its [`label`](Self::label) is the
 /// metric label and the drain-status key.
 #[derive(
@@ -52,6 +55,14 @@ impl ObligationKind {
         Self::ProcessTerminal,
         Self::ArtifactCleanup,
     ];
+
+    /// Decode a stored kind without treating a newer build's label as corrupt.
+    pub fn from_label(label: &str) -> Result<Self, StoreError> {
+        Self::ALL
+            .into_iter()
+            .find(|kind| kind.label() == label)
+            .ok_or_else(|| unknown_vocabulary("obligation kind", label))
+    }
 
     /// The stable label metrics and drain status report.
     #[must_use]
@@ -134,6 +145,19 @@ pub enum ObligationKey {
 }
 
 impl ObligationKey {
+    /// Decode a row whose kind label came from storage. A foreign kind leaves
+    /// the row addressable by its obligation id but cannot be delivered here.
+    pub fn decode_label(
+        kind_label: &str,
+        columns: Vec<KeyColumn>,
+    ) -> Result<Self, UndecodableObligation> {
+        let kind =
+            ObligationKind::from_label(kind_label).map_err(|error| UndecodableObligation {
+                detail: error.to_string(),
+            })?;
+        Self::decode(kind, columns)
+    }
+
     /// The ledger this key addresses.
     #[must_use]
     pub const fn kind(&self) -> ObligationKind {
@@ -405,12 +429,12 @@ impl ObligationState {
     ///
     /// # Errors
     ///
-    /// A label no build wrote is refused as corrupt.
+    /// A label this build does not know is refused as incompatible.
     pub fn from_label(label: &str) -> Result<Self, StoreError> {
         Self::ALL
             .into_iter()
             .find(|state| state.as_str() == label)
-            .ok_or_else(|| StoreError::Backend(format!("unknown obligation state label `{label}`")))
+            .ok_or_else(|| unknown_vocabulary("obligation state", label))
     }
 }
 
@@ -444,14 +468,21 @@ impl StallReason {
     ///
     /// # Errors
     ///
-    /// A label no build wrote is refused as corrupt.
+    /// A label this build does not know is refused as incompatible.
     pub fn from_label(label: &str) -> Result<Self, StoreError> {
         Self::ALL
             .into_iter()
             .find(|reason| reason.as_str() == label)
-            .ok_or_else(|| {
-                StoreError::Backend(format!("unknown obligation stall reason label `{label}`"))
-            })
+            .ok_or_else(|| unknown_vocabulary("obligation stall reason", label))
+    }
+}
+
+fn unknown_vocabulary(surface: &str, label: &str) -> StoreError {
+    StoreError::Incompatible {
+        refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+            surface: surface.to_owned(),
+            label: label.to_owned(),
+        },
     }
 }
 
@@ -581,6 +612,23 @@ pub trait ObligationLedger: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unknown_obligation_labels_are_typed_and_leave_the_key_undecodable() {
+        for error in [
+            ObligationKind::from_label("synthetic_next").map(|_| ()),
+            ObligationState::from_label("synthetic_next").map(|_| ()),
+            StallReason::from_label("synthetic_next").map(|_| ()),
+        ] {
+            assert!(matches!(
+                error,
+                Err(StoreError::Incompatible {
+                    refusal: crate::compat::CompatRefusal::UnknownVocabulary { ref label, .. }
+                }) if label == "synthetic_next"
+            ));
+        }
+        assert!(ObligationKey::decode_label("synthetic_next", vec![]).is_err());
+    }
 
     #[test]
     fn every_key_round_trips_through_its_columns() {

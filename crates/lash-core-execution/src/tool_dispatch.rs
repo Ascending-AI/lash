@@ -13,7 +13,8 @@ pub use context::{
 };
 pub use pending_resolver::{
     ArmedResolver, LaunchReceipt, ParkSite, ResolverArming, arm_pending_resolver,
-    finish_parked_wait, model_visible_intent_outcomes,
+    consumer_hold_owner, discharge_abandoned_call, finish_parked_wait,
+    model_visible_intent_outcomes,
 };
 
 pub use attempt_coordinator::{

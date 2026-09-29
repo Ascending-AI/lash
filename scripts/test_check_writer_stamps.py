@@ -90,6 +90,25 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(len(failures), 1)
         self.assertIn("crates/widget-store/src/lib.rs:5", failures[0])
 
+    def test_fleet_policy_tables_are_not_durable_write_stamps(self):
+        self.write(
+            "crates/lash-core-store/src/store/fleet_format.rs",
+            """\
+            pub const RECORD_UPCASTERS: &[RecordUpcaster] = &[RecordUpcaster {
+                from_version: WIDGET_FORMAT_VERSION - 1,
+            }];
+            const WRITER_PINS: &[WriterPin] = &[WriterPin {
+                version: WIDGET_FORMAT_VERSION,
+            }];
+            fn write() -> Row {
+                Row { version: WIDGET_FORMAT_VERSION }
+            }
+            """,
+        )
+        failures = self.check()
+        self.assertEqual(len(failures), 1)
+        self.assertIn("fleet_format.rs:8", failures[0])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -136,6 +136,17 @@ pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 29;
 #[cfg(feature = "synthetic-next")]
 pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 30;
 
+/// The format a continuation this build decodes may carry: its own, and for
+/// the synthetic N+1 also N's, one back. The synthetic N+1 supplies the
+/// conversion at the segment boundary (ADR 0115 §5): N's shape is unchanged,
+/// so a continuation N parked decodes lifted to this format, and every other
+/// format is still refused.
+pub(super) const fn decodes_format(version: u64) -> bool {
+    version == VM_CONTINUATION_FORMAT_VERSION as u64
+        || (cfg!(feature = "synthetic-next")
+            && version + 1 == VM_CONTINUATION_FORMAT_VERSION as u64)
+}
+
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
 ///

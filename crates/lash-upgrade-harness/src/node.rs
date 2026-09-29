@@ -14,12 +14,15 @@
 //! - `call` and `sweep` call lash's own handlers directly ([`objects`]).
 //! - `remote-client` and `remote-host` speak the remote protocol between
 //!   two builds ([`remote`]).
+//! - `process-start`, `process-signal` and `process-status` start, signal
+//!   and read a durable process ([`process`]).
 //!
 //! The scripted provider answers every model call with the serving build's
 //! label and `G`, so a turn's reply names the build that drove it, and it
 //! records and holds calls as [`provider`] describes.
 
 pub mod objects;
+pub mod process;
 pub mod provider;
 pub mod remote;
 
@@ -34,6 +37,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::identity::BuildLabel;
 use objects::{CallArgs, SweepArgs};
+use process::{ProcessSignalArgs, ProcessStartArgs, ProcessStatusArgs};
 use provider::ProviderArgs;
 use remote::{RemoteClientArgs, RemoteHostArgs};
 
@@ -66,6 +70,12 @@ pub enum Command {
     RemoteHost(RemoteHostArgs),
     /// Run one turn through a peer build's remote host.
     RemoteClient(RemoteClientArgs),
+    /// Start the signal-waiting process through this build's deployment.
+    ProcessStart(ProcessStartArgs),
+    /// Signal a process through this build's deployment.
+    ProcessSignal(ProcessSignalArgs),
+    /// Read a process: its lifecycle, its signals and its output.
+    ProcessStatus(ProcessStatusArgs),
 }
 
 /// Which store a command opens.
@@ -113,6 +123,12 @@ pub struct ServeArgs {
     /// that URI, routes invocations to it.
     #[arg(long)]
     pub no_register: bool,
+    /// Register later, through this node's own engine and its registration
+    /// guard, once this file exists; the outcome is written beside it, to
+    /// the same path with `.done` appended. A node that opened the store
+    /// before finalize registers after it, as an operator keeping it would.
+    #[arg(long)]
+    pub register_when: Option<PathBuf>,
     #[command(flatten)]
     pub provider: ProviderArgs,
 }
@@ -260,6 +276,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         Command::RemoteClient(args) => {
             print(&tokio::task::spawn_blocking(move || remote::client(args)).await??)
         }
+        Command::ProcessStart(args) => print(&process::start(args).await?),
+        Command::ProcessSignal(args) => print(&process::signal(args).await?),
+        Command::ProcessStatus(args) => print(&process::status(args).await?),
     }
 }
 
@@ -378,9 +397,38 @@ fn restate_args(restate: &RestateArgs) -> Vec<String> {
     ]
 }
 
-/// The core every node builds: the scripted provider over `backend`. A host
-/// never calls the provider; the node that drives a turn does, and records
-/// and holds each call as `observed` asks.
+/// The model every node's sessions and processes name.
+fn model() -> Result<lash::ModelSpec> {
+    lash::ModelSpec::builder("upgrade-harness-model")
+        .context_window_tokens(200_000)
+        .build()
+        .map_err(|error| anyhow!("model spec: {error}"))
+}
+
+/// Each build's recovery lease: N+1 outranks N, so the newest build leads
+/// the drain's hand-over, and a lease whose holder died lapses in seconds.
+fn recovery_lease() -> lash::RecoveryLeaseConfig {
+    lash::RecoveryLeaseConfig {
+        generation_rank: match BuildLabel::current() {
+            BuildLabel::N => 0,
+            BuildLabel::Next => 1,
+        },
+        timings: lash::RecoveryLeaseTimings {
+            ttl: Duration::from_secs(3),
+            renew_every: Duration::from_millis(500),
+            renew_timeout: Duration::from_secs(2),
+            trust_margin: Duration::from_millis(250),
+            follower_retry: Duration::from_millis(250),
+            follower_jitter: Duration::ZERO,
+            min_tenure: Duration::ZERO,
+        },
+    }
+}
+
+/// The core every node builds: the scripted provider over `backend`, and
+/// the Lashlang process engine over the store's artifacts. A host never
+/// calls the provider; the node that drives a turn does, and records and
+/// holds each call as `observed` asks.
 fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCore> {
     let build = BuildLabel::current();
     let generation = lash::formats::build_generation().to_string();
@@ -413,14 +461,12 @@ fn core(backend: lash::Backend, observed: &ProviderArgs) -> Result<lash::LashCor
             }
         })
         .build();
+    let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(provider.into_handle())
-        .model(
-            lash::ModelSpec::builder("upgrade-harness-model")
-                .context_window_tokens(200_000)
-                .build()
-                .map_err(|error| anyhow!("model spec: {error}"))?,
-        )
+        .model(model()?)
+        .plugin(Arc::new(process::ProcessEnginePlugin(artifacts)))
+        .recovery_lease(recovery_lease())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
@@ -459,6 +505,7 @@ fn scripted_reply(text: String) -> lash_core::llm::types::LlmResponse {
 /// A deployment of this build serving on a loopback port.
 pub(crate) struct Serving {
     pub(crate) core: lash::LashCore,
+    pub(crate) engine: Arc<lash::restate::RestateEngine>,
     pub(crate) ready: ServeReady,
     stop: tokio::sync::oneshot::Sender<()>,
     serving: tokio::task::JoinHandle<()>,
@@ -476,13 +523,28 @@ impl Serving {
     ) -> Result<Self> {
         let stores = open_stores(store).await?;
         let engine = engine(stores, restate)?;
-        let core = core(lash::Backend::new(engine.clone()), provider)?;
+        let backend = lash::Backend::new(engine.clone());
+        let artifacts = lashlang::LashlangArtifacts::of_backend(&backend);
+        let core = core(backend, provider)?;
         let worker = lash::durability::DurableProcessWorker::new(
             core.durable_process_worker_config()
                 .context("process worker config")?,
         )
         .map_err(|error| anyhow!("build the process worker: {error}"))?;
-        let endpoint = engine.endpoint_builder(worker).build();
+        let endpoint = process::bind(
+            engine.endpoint_builder(worker),
+            &restate.namespace,
+            process::HarnessProcesses {
+                core: core.clone(),
+                artifacts,
+                authority: lash::restate::RestateAuthorityId::new(&restate.authority)
+                    .map_err(|error| anyhow!("authority id: {error}"))?,
+                namespace: lash::restate::RestateNamespace::new(&restate.namespace)
+                    .map_err(|error| anyhow!("namespace: {error}"))?,
+                model: model()?,
+            },
+        )?
+        .build();
         let listener = tokio::net::TcpListener::bind(bind)
             .await
             .with_context(|| format!("bind the endpoint at {bind}"))?;
@@ -507,6 +569,7 @@ impl Serving {
         };
         Ok(Self {
             core,
+            engine,
             ready,
             stop,
             serving,
@@ -531,9 +594,37 @@ async fn serve(args: ServeArgs) -> Result<()> {
     )
     .await?;
     write_atomically(&args.ready_file, &serde_json::to_vec(&serving.ready)?)?;
+    if let Some(trigger) = args.register_when {
+        let engine = Arc::clone(&serving.engine);
+        let uri = serving.ready.uri.clone();
+        tokio::spawn(async move {
+            while !trigger.exists() {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            let outcome = RegisterWhenDone {
+                error: engine
+                    .register_deployment(&uri)
+                    .await
+                    .err()
+                    .map(|error| error.to_string()),
+            };
+            let mut done = trigger.into_os_string();
+            done.push(".done");
+            if let Ok(bytes) = serde_json::to_vec(&outcome) {
+                let _ = write_atomically(Path::new(&done), &bytes);
+            }
+        });
+    }
     shutdown_signal().await?;
     serving.stop().await;
     Ok(())
+}
+
+/// What a `serve --register-when` node's later registration answered.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterWhenDone {
+    /// The registration's error, when it was refused or failed.
+    pub error: Option<String>,
 }
 
 /// SIGTERM or SIGINT, whichever comes first.

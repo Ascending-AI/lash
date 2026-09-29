@@ -13,7 +13,8 @@ use std::sync::LazyLock;
 use lash_core_execution::WakeDeliveryState;
 use lash_core_execution::store_backend_support as vocabulary;
 use lash_store_sql::process::{
-    definitions::DefinitionStatements, events::EventStatements, observers::ObserverStatements,
+    abandoned_consumer_holds::AbandonedConsumerHoldStatements, definitions::DefinitionStatements,
+    events::EventStatements, observers::ObserverStatements,
     parent_end_plans::ParentEndPlanStatements, park_events::ProcessParkEventStatements,
     processes::ProcessStatements, segment_handovers::SegmentHandoverStatements,
     tombstones::TombstoneStatements, wake_allocation_floors::WakeAllocationFloorStatements,
@@ -152,9 +153,10 @@ lash_store_sql::statements! {
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status,
                 lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
-                record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id
+                record_json, consumer_hold_key, consumer_hold_scope_kind, consumer_hold_scope_id,
+                consumer_hold_cancels
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
              ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
@@ -832,6 +834,8 @@ pub(crate) struct ProcessSql {
     pub(crate) park_clock_postgres: ProcessParkClockPostgresStatements,
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
+    /// `abandoned_consumer_holds` statements, all of them shared.
+    pub(crate) abandoned_hold: AbandonedConsumerHoldStatements,
     /// `parent_end_plans` statements only PostgreSQL issues.
     pub(crate) plan_postgres: ParentEndPlanPostgresStatements,
     /// `wake_allocation_floors` statements both backends issue verbatim.
@@ -864,6 +868,7 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         park_event: ProcessParkEventStatements::render(dialect),
         park_clock_postgres: ProcessParkClockPostgresStatements::render(dialect),
         plan: ParentEndPlanStatements::render(dialect),
+        abandoned_hold: AbandonedConsumerHoldStatements::render(dialect),
         plan_postgres: ParentEndPlanPostgresStatements::render(dialect),
         floor: WakeAllocationFloorStatements::render(dialect),
         floor_postgres: WakeAllocationFloorPostgresStatements::render(dialect),

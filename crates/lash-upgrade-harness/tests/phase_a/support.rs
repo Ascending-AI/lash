@@ -63,9 +63,9 @@ pub fn open_group_body(view: &RestateView, key: &str) -> Result<serde_json::Valu
             loser_disposition: lash_core::LoserPolicy::RunToCompletion,
             replay_keys: vec![format!("{key}-child-0")],
             wait_scope: lash_core::ExecutionScope::runtime_operation(key),
-            membership: vec!["{}".to_owned()],
             opener: lash_core::AdmittedScope::turn(format!("{key}-session"), "turn"),
         },
+        membership: lash_restate::EffectGroupMembership(vec!["{}".to_owned()]),
         dispatch_route: view.service_name("EffectGroupDispatch"),
         content_checked: false,
     };

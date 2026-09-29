@@ -92,6 +92,18 @@ pub(super) async fn build_endpoint(
     build: &'static str,
     log: &RunLog,
 ) -> (Arc<RestateEffectHost>, Endpoint) {
+    build_endpoint_reading(connection, stores, build, log, crate::RESTATE_WIRE).await
+}
+
+/// [`build_endpoint`] for a build that reads the wire versions `reads`, as a
+/// build of another release does.
+pub(super) async fn build_endpoint_reading(
+    connection: &RestateConnection,
+    stores: &lash_sqlite_store::SqliteStoreSet,
+    build: &'static str,
+    log: &RunLog,
+    reads: crate::VersionRange,
+) -> (Arc<RestateEffectHost>, Endpoint) {
     let host = Arc::new(RestateEffectHost::new_for_build(
         connection.clone(),
         test_restate_authority_id(),
@@ -105,7 +117,7 @@ pub(super) async fn build_endpoint(
     .expect("register the build's group resolver");
     let registry = stores.process_registry();
     let ingress = RestateIngressClient::new(connection.clone());
-    let endpoint = crate::services::bind_lash_services(
+    let endpoint = crate::services::bind_lash_services_reading(
         Endpoint::builder(),
         crate::services::LashServiceParts {
             effect_host: &host,
@@ -125,6 +137,7 @@ pub(super) async fn build_endpoint(
             namespace: crate::RestateNamespace::default(),
             fleet: crate::object_state::FleetView::default(),
         },
+        reads,
     )
     .build();
     (host, endpoint)
@@ -281,7 +294,7 @@ async fn l4_a_groups_children_run_on_the_build_that_opened_it() {
 
     // A retried child call with the same replay key attaches to the child
     // that lane started: no second run, on this name or any other.
-    let group_shape = crate::effect_group::EffectGroupShape::from_group(
+    let (group_shape, _) = crate::effect_group::EffectGroupShape::from_group(
         &group(key, CHILDREN),
         &lash_core::AdmittedScope::runtime_operation(key),
     )

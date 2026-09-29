@@ -9,7 +9,7 @@ impl<'de> Deserialize<'de> for VmContinuation {
         let raw = serde_json::Value::deserialize(deserializer)?;
         if let Some(version_val) = raw.get("format_version") {
             if let Some(version) = version_val.as_u64() {
-                if version != VM_CONTINUATION_FORMAT_VERSION as u64 {
+                if !super::decodes_format(version) {
                     return Err(serde::de::Error::custom(format!(
                         "continuation format version {} is incompatible with version {}",
                         version, VM_CONTINUATION_FORMAT_VERSION
@@ -26,7 +26,9 @@ impl<'de> Deserialize<'de> for VmContinuation {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Wire {
-            format_version: u32,
+            // Checked above, and lifted to this build's format below.
+            #[serde(rename = "format_version")]
+            _format_version: u32,
             executable: ExecutableIdentity,
             reference_semantics: bool,
             instruction_pointer: usize,
@@ -57,7 +59,8 @@ impl<'de> Deserialize<'de> for VmContinuation {
 
         let wire = Wire::deserialize(raw).map_err(serde::de::Error::custom)?;
         let continuation = Self {
-            format_version: wire.format_version,
+            // A format this build decodes is lifted to its own.
+            format_version: VM_CONTINUATION_FORMAT_VERSION,
             executable: wire.executable,
             reference_semantics: wire.reference_semantics,
             instruction_pointer: wire.instruction_pointer,

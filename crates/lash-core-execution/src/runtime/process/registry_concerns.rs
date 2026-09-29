@@ -956,6 +956,19 @@ pub trait ProcessRetention: Send + Sync {
         process_id: &ProcessId,
         key: &str,
     ) -> Result<(), PluginError>;
+
+    /// Marks the consumer hold `key`, owned by `owner`, abandoned and returns
+    /// the processes it holds whose call owes them a cancel (ADR 0116 §3.4):
+    /// what the opener that cancelled the call must cancel. One transaction
+    /// marks and reads, and a registration under a marked key is refused in
+    /// its own, so a launch racing the cancel is either returned here or
+    /// never registers. Marking again keeps the first mark; the read is empty
+    /// once the hold is released. `owner`'s close forgets the mark.
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &crate::ScopeId,
+    ) -> Result<Vec<ProcessId>, PluginError>;
 }
 
 /// Rebinding a registry backend to the runtime's clock.

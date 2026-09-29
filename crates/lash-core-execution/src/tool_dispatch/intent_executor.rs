@@ -186,9 +186,11 @@ pub(crate) async fn realize_declared_start(
 }
 
 /// A declared start's error the call cannot settle as its result: a replay
-/// divergence, a cancel decided before the launch, or a live fault left
-/// unrecorded, which the engine's redelivery retries (ADR 0116 §3.2 rule 7).
-/// Every other error is the start's typed refusal.
+/// divergence, a cancel decided before the launch or during it, or a live
+/// fault, which the engine's redelivery retries (ADR 0116 §3.2 rule 7). Every
+/// other error is the start's typed refusal — among them a terminal
+/// controller error such as a closed scope's `ParentEnded`, which a retry
+/// would only meet again.
 pub(crate) fn declared_start_fault(
     error: &crate::PluginError,
 ) -> Option<crate::RuntimeEffectControllerError> {
@@ -196,7 +198,8 @@ pub(crate) fn declared_start_fault(
         crate::PluginError::RuntimeEffectController(error)
             if error.code.is_replay_mismatch()
                 || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelDecided
-                || !error.journaled =>
+                || error.code == crate::RuntimeErrorCode::RuntimeEffectGroupChildCancelled
+                || error.turn_failure_cause() != crate::TurnFailureCause::Outcome =>
         {
             Some(error.clone())
         }
@@ -525,6 +528,10 @@ async fn execute_one(
             Ok(serde_json::to_value(report).unwrap_or(serde_json::Value::Null))
         }
         crate::ToolIntent::RegisterProcessDefinition(intent) => {
+            publish_declared_module(context, intent).await?;
+            if intent.name.is_none() {
+                return realize_created_process_definition(context, intent).await;
+            }
             let registry = context
                 .process_definitions
                 .clone()
@@ -554,6 +561,58 @@ fn process_definition_registry_unavailable(engine_kind: &str) -> crate::PluginEr
         "process definition registry is unavailable in this runtime: \
          cannot register a `{engine_kind}` definition"
     ))
+}
+
+/// Publish the module a definition declaration carries, under the realizing
+/// execution's journal referrer (ADR 0113 §3.7), before anything resolves or
+/// acquires it. The bytes are content-addressed, so a redrive publishes the
+/// same module again and changes nothing.
+async fn publish_declared_module(
+    context: &ToolDispatchContext<'_>,
+    intent: &crate::RegisterProcessDefinitionIntent,
+) -> Result<(), crate::PluginError> {
+    let Some(module) = intent.module.as_ref() else {
+        return Ok(());
+    };
+    let ports = context.process_engines.artifact_ports().ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "a `{}` definition carries a module but the runtime's engine registry has no \
+             artifact stores to publish it",
+            intent.engine_kind
+        ))
+    })?;
+    let scoped = context.effect_controller.scoped();
+    ports
+        .modules()
+        .publish_module_artifact(
+            &crate::session::execution_claim_of(scoped.execution_scope())?,
+            &module.module_ref,
+            module.bytes.as_bytes(),
+        )
+        .await
+        .map_err(crate::PluginError::from)
+}
+
+/// Realization of an unnamed [`RegisterProcessDefinitionIntent`](crate::tool_intent::RegisterProcessDefinitionIntent):
+/// `processes.create` (FIG-3116). No registry slot is written. The engine
+/// resolves the definition against the module just published, so a value that
+/// names bytes it does not match refuses typed, and the result is the
+/// definition value the attempt answered. The caller's frame holds its module
+/// from the cell that binds it (ADR 0113 §3.1, §6); until then the realizing
+/// execution's journal does.
+async fn realize_created_process_definition(
+    context: &ToolDispatchContext<'_>,
+    intent: &crate::RegisterProcessDefinitionIntent,
+) -> Result<serde_json::Value, crate::PluginError> {
+    context
+        .process_engines
+        .resolve(&crate::ProcessDefinitionRef::unclaimed(
+            intent.engine_kind.clone(),
+            intent.definition.clone(),
+        ))
+        .await
+        .map_err(crate::PluginError::from)?;
+    Ok(serde_json::json!({ "definition": intent.definition }))
 }
 
 /// Realization of one [`RegisterProcessDefinitionIntent`](crate::tool_intent::RegisterProcessDefinitionIntent)

@@ -1619,7 +1619,7 @@ where
                     process_segment_workflow_key(&request.process_id, target.segment_ordinal),
                     "deliver_cancel",
                 ),
-                Call::new(request.clone()),
+                Call::journaled(request.clone()),
             )
             .call()
             .await?;

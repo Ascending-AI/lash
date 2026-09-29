@@ -440,6 +440,39 @@ macro_rules! tool_batch_parallelism_tests {
     };
 }
 
+/// Register the batch crash-redrive law (FIG-4064): a turn crashed while its
+/// batch holds one settled and one in-flight member recovers without running
+/// the settled member again.
+///
+/// The fixture hands back what [`tool_batch_parallelism_tests!`] takes: a
+/// guard, a session prefix, the tier's effect host, its store set, the
+/// product producers that spell a batch on the tier, and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+#[macro_export]
+macro_rules! tool_batch_crash_redrive_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $(#[$attr])*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+        async fn a_settled_batch_member_runs_once_across_a_turn_crash() {
+            let (_guard, prefix, host, stores, producers, runner) = $fixture;
+            assert!(
+                !producers.is_empty(),
+                "a tier registers at least one product producer, or the law runs on nothing"
+            );
+            for producer in producers {
+                $crate::registration_macro_support::a_settled_batch_member_runs_once_across_a_turn_crash(
+                    prefix,
+                    std::sync::Arc::clone(&host),
+                    std::sync::Arc::clone(&stores),
+                    std::sync::Arc::clone(&runner),
+                    producer,
+                )
+                .await;
+            }
+        }
+    };
+}
+
 /// Register the handler-level tool-child invocation laws (FIG-2266, ADR 0099).
 ///
 /// The fixture hands back a guard, a session prefix and a

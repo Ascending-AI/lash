@@ -1,5 +1,6 @@
 //! Named backend test registration. Every generated test owns a fresh fixture.
 
+mod declared_start;
 mod generation_drain;
 mod obligation_relay;
 mod session_ingress;
@@ -388,6 +389,7 @@ macro_rules! process_registry_tests {
                 (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
+                (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),
                 (scopes_that_collide_in_rendering_share_no_ledger_key, "colliding-scope-keys"),
                 (an_unrecorded_turn_parent_is_reported_until_its_row_is_written, "unrecorded-turn-parents"),
                 (a_session_close_reaps_the_turn_scopes_that_never_became_roots, "never-root-turn-scopes"),

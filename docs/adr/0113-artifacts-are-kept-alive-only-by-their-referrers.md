@@ -1175,24 +1175,34 @@ These go in the cutover, with no shim.
 
 ### 6. FIG-3116 part 1 on this contract
 
-`processes.create({ source, dialect })` is an ordinary journaled tool on the
-process-controls plugin (`crates/lash-plugin-process-controls/src/declarations.rs`).
-It returns a definition value, the same `ProcessDefinitionRef` shape
-`processes.start` takes. Inside its journaled effect, before it records its
-result, it:
+`processes.create({ source, dialect })` is an ordinary leaf tool on the
+lashlang engine's tool surface, beside `triggers.register`
+(`crates/lash-lashlang-runtime/src/process_create_tool.rs`, registered by the
+RLM plugins). It returns a definition value, the same `ProcessDefinitionRef`
+shape `processes.start` takes. Under ADR 0116 its body drives nothing, so the
+two writes move from the body to realization:
 
-1. compiles the module (pure, ADR 0093);
-2. publishes it under `Execution(the call's journal)`, which arms that guard;
-3. acquires `FrameEnvironment(S, F)` for the frame the calling turn was
-   admitted on.
+1. The attempt compiles the module (pure, ADR 0093): the dialect lowers the
+   source, and it links against the catalog the attempt was dispatched with.
+   It answers the definition value of the module's one process and declares a
+   `RegisterProcessDefinition` intent with no name that carries the module's
+   store bytes.
+2. Realization publishes those bytes under `Execution(the realizing
+   execution's journal)`, which arms that guard, and resolves the definition
+   through its engine. No registry slot is written. A redrive publishes the
+   same content-addressed bytes again and changes nothing.
+3. The cell that binds the value acquires `FrameEnvironment(S, F)` for its
+   module at the cell's end (§3.1). Intents drain before the call's output
+   reaches the cell, so the module is published by then.
 
-A redrive that re-executes the effect repeats both writes idempotently. A
-replay that reads the recorded result touches no store. There is no lifetime
-argument, no plugin lifetime policy, and no new referrer kind.
+There is no lifetime argument, no plugin lifetime policy, and no new referrer
+kind. A host front door has no frame to hold a created definition, so it
+refuses an unnamed registration.
 
 The value then lives in the frame's globals and holds F's edge (I-frame). It
 survives a switch only when a `continue_as` seed passes it, because
-`frame_switch_carries` finds its module. Starting it acquires `Start(key)`
+`frame_switch_carries` finds its module, and session deletion ends F and
+reclaims it. Starting it acquires `Start(key)`
 and then `ProcessRecord(id)` (§3.3) and consumes nothing. Registering it by
 name acquires a `DefinitionRevision` (§3.6). Start lifetime stays ADR 0108's.
 FIG-3116's `triggers.register` half rides §3.4 unchanged.

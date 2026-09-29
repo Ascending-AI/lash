@@ -15,6 +15,7 @@ use serde::de::DeserializeOwned;
 
 use crate::identity::BuildLabel;
 use crate::node::objects::{CallReport, SweepLine, TargetKind};
+use crate::node::process::{HarnessOpReport, ProcessStatusReport};
 use crate::node::provider::{self, EffectRecord};
 use crate::node::remote::ClientReport;
 use crate::node::{ProbeReport, RegisterReport, ServeReady, StoreSpec, TurnReport};
@@ -67,6 +68,12 @@ impl Services {
     /// A leg that moves the fleet epoch owns its database, because `F` is
     /// one row per database.
     pub fn fresh_postgres_database(&self, name: &str) -> Result<String> {
+        block_on(self.create_postgres_database(name))
+    }
+
+    /// [`fresh_postgres_database`](Self::fresh_postgres_database) from
+    /// async code.
+    pub async fn create_postgres_database(&self, name: &str) -> Result<String> {
         let database = name.replace('-', "_");
         ensure!(
             database
@@ -74,26 +81,41 @@ impl Services {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'),
             "`{name}` is not a plain database name"
         );
-        let url = self.postgres_url.clone();
         let create = format!("CREATE DATABASE {database}");
-        block_on(async move {
+        {
             use sqlx::Connection as _;
-            let mut connection = sqlx::PgConnection::connect(&url)
+            let mut connection = sqlx::PgConnection::connect(&self.postgres_url)
                 .await
-                .with_context(|| format!("connect to {url}"))?;
+                .with_context(|| format!("connect to {}", self.postgres_url))?;
             sqlx::query(&create)
                 .execute(&mut connection)
                 .await
                 .with_context(|| create.clone())?;
             connection.close().await.ok();
-            Ok(())
-        })?;
+        }
         let (server, query) = match self.postgres_url.split_once('?') {
             Some((server, query)) => (server, format!("?{query}")),
             None => (self.postgres_url.as_str(), String::new()),
         };
         let base = server.rsplit_once('/').map_or(server, |(base, _)| base);
         Ok(format!("{base}/{database}{query}"))
+    }
+
+    /// These services over a fresh PostgreSQL database of the leg's own, so
+    /// no leg sees another's stamps or rows, whatever order they run in.
+    pub async fn isolated(&self, leg: &str) -> Result<Self> {
+        let database = format!(
+            "phase_a_{leg}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|elapsed| elapsed.as_millis())
+                .unwrap_or_default()
+        );
+        Ok(Self {
+            postgres_url: self.create_postgres_database(&database).await?,
+            ..self.clone()
+        })
     }
 }
 
@@ -131,6 +153,9 @@ pub struct ServeOptions {
     pub bind: Option<String>,
     /// Serve without registering the endpoint.
     pub unregistered: bool,
+    /// Let [`ServingNode::register_now`] register the node later, through
+    /// its own engine.
+    pub register_later: bool,
 }
 
 /// One direct call to a lash handler ([`crate::node::objects`]).
@@ -293,6 +318,12 @@ impl NodeBinary {
         if options.unregistered {
             command.arg("--no-register");
         }
+        let register_trigger = options
+            .register_later
+            .then(|| ready_file.with_extension("register"));
+        if let Some(trigger) = &register_trigger {
+            command.arg("--register-when").arg(trigger);
+        }
         let child = command
             .stdin(Stdio::null())
             .stdout(Stdio::from(log.try_clone()?))
@@ -303,6 +334,7 @@ impl NodeBinary {
             child: Some(child),
             ready: None,
             log_path,
+            register_trigger,
         };
         let ready = node.await_ready(&ready_file)?;
         ensure!(
@@ -389,6 +421,66 @@ impl NodeBinary {
         report(&self.path, "call", output)
     }
 
+    /// Start the signal-waiting process through this build's deployment,
+    /// under `key`.
+    pub fn start_process(&self, case: &Case, key: &str) -> Result<HarnessOpReport> {
+        let output = Command::new(&self.path)
+            .arg("process-start")
+            .args(case.restate_args())
+            .args(["--key", key])
+            .output()
+            .with_context(|| format!("run {} process-start", self.label()))?;
+        report(&self.path, "process-start", output)
+    }
+
+    /// Signal `process` through this build's deployment.
+    pub fn signal_process(
+        &self,
+        case: &Case,
+        process: &str,
+        signal_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<HarnessOpReport> {
+        self.spawn_signal(case, process, signal_id, payload)?.wait()
+    }
+
+    /// [`signal_process`](Self::signal_process) in the background, so two
+    /// builds can signal at once.
+    pub fn spawn_signal(
+        &self,
+        case: &Case,
+        process: &str,
+        signal_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<PendingSignal> {
+        let child = Command::new(&self.path)
+            .arg("process-signal")
+            .args(case.restate_args())
+            .args(["--process", process, "--signal-id", signal_id])
+            .arg("--payload")
+            .arg(payload.to_string())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("run {} process-signal", self.label()))?;
+        Ok(PendingSignal {
+            path: self.path.clone(),
+            child,
+        })
+    }
+
+    /// Read `process` from the store, as this build does.
+    pub fn process_status(&self, case: &Case, process: &str) -> Result<ProcessStatusReport> {
+        let output = Command::new(&self.path)
+            .arg("process-status")
+            .args(case.store_args())
+            .args(case.restate_args())
+            .args(["--process", process])
+            .output()
+            .with_context(|| format!("run {} process-status", self.label()))?;
+        report(&self.path, "process-status", output)
+    }
+
     /// Start this build's synthetic sweep in the background.
     pub fn spawn_sweep(&self, case: &Case) -> Result<Sweeper> {
         let mut child = Command::new(&self.path)
@@ -451,6 +543,23 @@ impl PendingTurn {
     pub fn wait(self) -> Result<TurnReport> {
         let output = self.child.wait_with_output().context("wait for the turn")?;
         report(&self.path, "turn", output)
+    }
+}
+
+/// A `process-signal` running in the background.
+pub struct PendingSignal {
+    path: PathBuf,
+    child: Child,
+}
+
+impl PendingSignal {
+    /// Wait for the signal's report.
+    pub fn wait(self) -> Result<HarnessOpReport> {
+        let output = self
+            .child
+            .wait_with_output()
+            .context("wait for the signal")?;
+        report(&self.path, "process-signal", output)
     }
 }
 
@@ -586,9 +695,33 @@ pub struct ServingNode {
     child: Option<Child>,
     ready: Option<ServeReady>,
     log_path: PathBuf,
+    register_trigger: Option<PathBuf>,
 }
 
 impl ServingNode {
+    /// Register a node served with [`ServeOptions::register_later`] now,
+    /// through its own engine and the registration guard.
+    pub fn register_now(&self) -> Result<()> {
+        let trigger = self
+            .register_trigger
+            .as_ref()
+            .context("the node was not served to register later")?;
+        let mut done = trigger.clone().into_os_string();
+        done.push(".done");
+        let done = PathBuf::from(done);
+        std::fs::write(trigger, b"").with_context(|| format!("write {}", trigger.display()))?;
+        let outcome: crate::node::RegisterWhenDone =
+            wait_for("the node to register", || match std::fs::read(&done) {
+                Ok(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error).with_context(|| format!("read {}", done.display())),
+            })?;
+        match outcome.error {
+            None => Ok(()),
+            Some(error) => bail!("the node's registration failed: {error}"),
+        }
+    }
+
     /// What the node registered.
     pub fn ready(&self) -> Option<&ServeReady> {
         self.ready.as_ref()

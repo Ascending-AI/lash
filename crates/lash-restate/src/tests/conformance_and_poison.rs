@@ -338,6 +338,61 @@ lash_conformance::migrated_tools_redrive_tests!(
     }
 );
 
+/// ADR 0116 §7.3's declared-start tier on `harness`'s endpoint: the turn runs
+/// in a probe handler, each `spawn_agent` child session runs in the
+/// endpoint's `LashProcessWorkflow` on the law's worker, a crash is a failed
+/// handler attempt Restate redelivers, and a scope close delivers its
+/// children's cancels through the engine's process port.
+fn declared_start_tier(
+    harness: &effect_group_conformance::LiveConformanceHarness,
+) -> lash_conformance::DeclaredStartTier {
+    let backend = harness.law_backend();
+    lash_conformance::DeclaredStartTier {
+        // Restate state outlives a run, so each run names its own sessions.
+        prefix: format!("restate-declared-start-{}", harness.run_nonce()),
+        effect_host: harness.endpoint_host(),
+        stores: harness.law_stores(),
+        runner: harness.turn_runner(),
+        rlm: vec![Arc::new(
+            lash_protocol_rlm::RlmProtocolPluginFactory::new(
+                lash_protocol_rlm::RlmProtocolPluginConfig::builder()
+                    .channel(lash_protocol_rlm::RlmChannel::Cell)
+                    .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
+                    .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
+                    .build(),
+                &backend,
+            )
+            .with_process_lifecycle(true),
+        )],
+        subagents: Arc::new(|timeout| {
+            let factory = lash_subagents::SubagentsPluginFactory::new(
+                Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
+                    lash_subagents::StaticCapability::new(
+                        "default",
+                        lash_core::facade_support::SessionSpec::inherit(),
+                    ),
+                ))),
+                lash_core::lifetime::starter,
+            );
+            Arc::new(match timeout {
+                Some(timeout) => factory.with_timeout(timeout),
+                None => factory,
+            })
+        }),
+        delivery: Arc::clone(backend.process_work().port()),
+    }
+}
+
+lash_conformance::declared_start_tests!(
+    #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
+    {
+        let harness =
+            effect_group_conformance::LiveConformanceHarness::start_for_tool_children().await;
+        let tier = declared_start_tier(&harness);
+        (harness, tier)
+    }
+);
+
 // FIG-3547's segment re-drive law on the live endpoint: the segments run in
 // the endpoint's `LashProcessWorkflow`, a crash is a failed attempt Restate
 // delivers again, and a lost substrate is the invocation killed and purged

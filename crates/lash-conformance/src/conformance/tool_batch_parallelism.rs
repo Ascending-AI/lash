@@ -127,6 +127,11 @@ pub struct ToolBatchPlan {
     /// The name of the orchestrating relay tool, for producers that issue the
     /// granted/orchestrating/deferred scenario through a single call.
     pub relay_tool: String,
+    /// Tools the session's catalog carries that the batch never calls. The
+    /// scaling guard pads every width's catalog to the largest width's, so
+    /// its ratio measures what a child costs, not what a larger catalog
+    /// costs every child that records it (FIG-4068).
+    pub idle_tools: Vec<String>,
 }
 
 impl ToolBatchPlan {
@@ -926,10 +931,12 @@ async fn run_scenario(
             }),
         )
         .await;
-    observed_rx
+    let observed = observed_rx
         .recv()
         .await
-        .expect("the tier's turn runner ran the scenario's turn")
+        .expect("the tier's turn runner ran the scenario's turn");
+    runner.scenario_finished().await;
+    observed
 }
 
 /// The `run_scenario` body with the session and turn controller chosen by the
@@ -957,6 +964,7 @@ async fn run_scenario_on_session(
         .iter()
         .filter(|leaf| leaf.route != ToolBatchRoute::Orchestrating)
         .map(|leaf| leaf.tool.clone())
+        .chain(plan.idle_tools.iter().cloned())
         .collect::<Vec<_>>();
     let deferred = plan
         .leaves
@@ -1269,6 +1277,7 @@ fn plan(scenario: &str, routes: &[ToolBatchRoute], via: ToolBatchEntry) -> ToolB
             .collect(),
         via,
         relay_tool: format!("rv_relay_{scenario}"),
+        idle_tools: Vec::new(),
     }
 }
 
@@ -1340,6 +1349,60 @@ pub async fn measure_tool_batch(
     )
     .await;
     let turn = started.elapsed();
+    ToolBatchMeasurement {
+        width,
+        turn,
+        leaf_window: observed
+            .leaf_window
+            .map(|(first, last)| last.saturating_duration_since(first)),
+        leaves_started: observed.started().len(),
+        leaves_answered: observed.answered().len(),
+        peak_in_flight: observed.peak_in_flight,
+        model_calls: observed.model_calls,
+    }
+}
+
+/// Drives one gated width-`width` batch through `producer` on a tier's turn
+/// runner, exactly as the law's width rows do, and measures it (FIG-4068).
+///
+/// Every leaf waits for the whole width before it answers, so all `width`
+/// children are live at once: the shape whose time and memory must grow
+/// linearly in the width. The session's catalog holds `catalog` tools
+/// whatever the width (at least the width's own), so two widths differ only
+/// in how many children run. The activation shape is asserted, so a tier
+/// that serialises the batch fails here rather than reporting a fast number.
+pub async fn measure_gated_tool_batch(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+    producer: &ToolBatchProducer,
+    width: usize,
+    catalog: usize,
+) -> ToolBatchMeasurement {
+    let scenario = format!("scaling_w{width}");
+    let mut plan = plan(&scenario, &leaf_routes(width), ToolBatchEntry::Direct);
+    plan.idle_tools = (width..catalog)
+        .map(|position| leaf_name(&scenario, position))
+        .collect();
+    let started = Instant::now();
+    let observed = run_scenario(
+        prefix,
+        effect_host,
+        &stores,
+        &runner,
+        producer,
+        &plan,
+        true,
+        BTreeMap::new(),
+    )
+    .await;
+    let turn = started.elapsed();
+    assert_activation_shape(
+        &format!("{prefix}/{} scaling width-{width}", producer.label),
+        &plan,
+        &observed,
+    );
     ToolBatchMeasurement {
         width,
         turn,
@@ -1430,10 +1493,10 @@ pub async fn tool_batch_cross_tier_parallelism(
 ) {
     let context = format!("{prefix}/{}", producer.label);
 
-    // Width 2 and width 8, every leaf waiting for the whole width. A serial
-    // executor cannot leave the first leaf, so it fails here with the named
-    // leaves.
-    for width in [2_usize, 8] {
+    // Widths 2, 8 and 64 (ADR 0116 §7.1: 64 is the batch ceiling), every
+    // leaf waiting for the whole width. A serial executor cannot leave the
+    // first leaf, so it fails here with the named leaves.
+    for width in [2_usize, 8, 64] {
         let plan = plan(
             &format!("width{width}"),
             &leaf_routes(width),

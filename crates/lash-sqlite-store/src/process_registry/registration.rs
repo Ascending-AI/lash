@@ -51,6 +51,23 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             });
                         }
                     }
+                    // A start whose consuming call was abandoned is refused:
+                    // the call's opener already drained what the hold owed
+                    // (ADR 0116 §3.4).
+                    if let Some(hold) = consumer_hold.as_ref()
+                        && tx
+                            .query_row(
+                                process_sql().abandoned_hold.exists.sql(),
+                                params![hold.key.as_str()],
+                                |row| row.get::<_, bool>(0),
+                            )
+                            .map_err(process_sqlite_error)?
+                    {
+                        return Err(lash_core_execution::runtime::abandoned_consumer_refusal(
+                            registration.start_key.as_ref(),
+                            &hold.key,
+                        ));
+                    }
                     // Minted only once the start is admitted, so no refusal
                     // names an id that was never registered.
                     let process_id = process_id_mint.mint();
@@ -84,6 +101,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             consumer_hold.as_ref().map(|hold| hold.key.as_str()),
                             consumer_hold.as_ref().map(|hold| hold.owner.storage_kind()),
                             consumer_hold.as_ref().map(|hold| hold.owner.storage_id()),
+                            consumer_hold.as_ref().map(|hold| hold.cancels),
                         ],
                     )
                     .map_err(process_sqlite_error)?;

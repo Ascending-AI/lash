@@ -324,7 +324,7 @@ impl crate::ProcessEngine for Engine {
         _payload: &serde_json::Value,
     ) -> Result<Vec<ArtifactName>, PluginError> {
         Ok(vec![
-            name(ArtifactStoreId::LashlangModule, "mod-start"),
+            name(ArtifactStoreId::module(), "mod-start"),
             name(ArtifactStoreId::Engine(ENGINE_KIND.to_owned()), "own-start"),
         ])
     }
@@ -456,9 +456,9 @@ async fn an_ended_referrer_hands_every_store_its_own_carries() {
         to: to.clone(),
     };
     let carries = vec![
-        carry(name(ArtifactStoreId::LashlangModule, "mod-b")),
+        carry(name(ArtifactStoreId::module(), "mod-b")),
         carry(name(ArtifactStoreId::ProcessEnv, "env-a")),
-        carry(name(ArtifactStoreId::LashlangModule, "mod-a")),
+        carry(name(ArtifactStoreId::module(), "mod-a")),
         carry(name(ArtifactStoreId::Engine(ENGINE_KIND.to_owned()), "own")),
     ];
     assert_eq!(
@@ -562,7 +562,7 @@ async fn a_registered_start_carries_the_retained_record_onto_it() {
         modules,
         vec![resolved(
             &start,
-            vec![carry(name(ArtifactStoreId::LashlangModule, "mod-start"))]
+            vec![carry(name(ArtifactStoreId::module(), "mod-start"))]
         )]
     );
     assert_eq!(
@@ -715,6 +715,39 @@ async fn a_missing_carry_is_refused_and_a_store_fault_is_retried() {
     ));
     let (_, _, engine) = harness.applied();
     assert!(engine.is_empty(), "no store after the failing one is asked");
+}
+
+#[tokio::test]
+async fn cleanup_never_counts_an_undecodable_edge_as_absent() {
+    let harness = harness();
+    let cleanup = ArtifactCleanup::ended(host_pin(), Vec::new(), None);
+    let (id, key) = harness.arm(cleanup);
+    *harness
+        .applied
+        .module_failure
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(|| ArtifactStoreError::Incompatible {
+            refusal: crate::compat::CompatRefusal::UnknownVocabulary {
+                surface: "artifact referrer edge kind".to_owned(),
+                label: "synthetic_next".to_owned(),
+            },
+        });
+    assert!(matches!(
+        harness.relay.deliver(&id, &key, 1).await,
+        Err(DeliveryFailure::Undecodable(error)) if error.contains("synthetic_next")
+    ));
+    assert!(
+        harness
+            .ledger
+            .rows
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(&id)
+    );
+    let (_, modules, engine) = harness.applied();
+    assert!(modules.is_empty(), "the module store did not apply cleanup");
+    assert!(engine.is_empty(), "later stores were not asked");
 }
 
 #[tokio::test]

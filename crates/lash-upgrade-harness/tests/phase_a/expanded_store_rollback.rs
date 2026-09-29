@@ -35,8 +35,10 @@ async fn postgres_execute(connection: &mut PgConnection, sql: &str) -> Result<()
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs both node builds, PostgreSQL and a restate-server: `just phase-a` runs it"]
 async fn expanded_store_rollback() -> Result<()> {
-    let services = Services::from_env()?;
+    // A database of the leg's own: its stamps and rows never meet another leg's.
+    let services = Services::from_env()?.isolated("expanded").await?;
     let builds = NodeBuilds::from_env()?;
     let operator_n = Operator::from_env(&services, LASHCTL_N_ENV)?;
     let operator_next = Operator::from_env(&services, LASHCTL_NEXT_ENV)?;

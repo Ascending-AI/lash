@@ -1,9 +1,11 @@
-error[E0451]: fields `start` and `identity` of struct `lash::tools::DeclaredStart` are private
- --> tests/ui/declared_start_is_sealed.rs:7:9
+error: cannot construct `lash::tools::DeclaredStart` with struct literal syntax due to private fields
+ --> tests/ui/declared_start_is_sealed.rs:6:5
   |
 6 |     DeclaredStart {
-  |     ------------- in this type
+  |     ^^^^^^^^^^^^^
 7 |         start: Box::new(start),
-  |         ^^^^^ private field
+  |         ---------------------- private field
 8 |         identity: Box::new(identity),
-  |         ^^^^^^^^ private field
+  |         ---------------------------- private field
+  |
+  = note: ...and other private field `deadline` that was not provided

@@ -659,7 +659,9 @@ async fn apply_synthetic_expand(
             .map_err(store_sqlx_error)?;
     let descriptor =
         lash_core_execution::compat::descriptor(lash_core_execution::compat::ComponentId::POSTGRES)
-            .expect("PostgreSQL component has a descriptor");
+            .ok_or_else(|| {
+                StoreError::Backend("the build has no descriptor for the PostgreSQL store".into())
+            })?;
     let next = i32::try_from(descriptor.writes.max())
         .map_err(|error| StoreError::Backend(error.to_string()))?;
     if version == next {

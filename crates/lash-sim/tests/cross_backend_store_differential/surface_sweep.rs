@@ -65,6 +65,12 @@ pub(super) enum SurfaceMethod {
     CaptureRead,
     LoadSession,
     ListPendingTurnInputs,
+    /// [`IngressStore::pending_turn_input`]: the keyed point read of the
+    /// case's next-turn input (`known`), or of an id no case enqueues
+    /// (FIG-3976).
+    PendingTurnInput {
+        known: bool,
+    },
     ListTurnInputApplications,
     /// [`RootStore::admit_root`](lash_core::store::RootStore::admit_root) of
     /// the sweep's input-headed root, under the first lease and replayed
@@ -212,6 +218,8 @@ impl SurfaceMethod {
             Self::CaptureRead => "surface:read_stopped_partial",
             Self::LoadSession => "surface:load_session",
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
+            Self::PendingTurnInput { known: true } => "surface:pending_turn_input",
+            Self::PendingTurnInput { known: false } => "surface:pending_turn_input_unknown",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
             Self::AdmitRoot {
                 lease: LeaseSlot::First,
@@ -976,6 +984,26 @@ impl BackendRunner {
                     "rows={}",
                     store.list_pending_turn_inputs(&session_id).await?.len()
                 )
+            }
+            SurfaceMethod::PendingTurnInput { known } => {
+                // The keyed point read answers what the list answers for the
+                // row: `Open`, `Admitted` naming its root, or nothing once
+                // the row is terminal or unknown (FIG-3976).
+                let input = lash_core::InputId::from(if known {
+                    format!("{session_id}:input")
+                } else {
+                    UNKNOWN_INPUT_ID.to_string()
+                });
+                match store.pending_turn_input(&session_id, &input).await? {
+                    Some(read) => match &read.status {
+                        lash_core::PendingTurnInputReadStatus::Open => "status=open".to_string(),
+                        lash_core::PendingTurnInputReadStatus::Admitted { root } => {
+                            format!("status=admitted:{root}")
+                        }
+                        other => format!("status={other:?}"),
+                    },
+                    None => "status=none".to_string(),
+                }
             }
             SurfaceMethod::ListTurnInputApplications => {
                 format!(

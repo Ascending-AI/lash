@@ -137,12 +137,43 @@ pub(crate) async fn record_tx(
     // closed scope is refused, so no redrive needs the row pinned.
     sqlx::query(process_sql().process.release_consumer_holds_owned_by.sql())
         .bind(kind)
+        .bind(&id)
+        .execute(&mut **tx)
+        .await
+        .map(drop)
+        .map_err(plugin_sqlx_error)?;
+    // Its abandoned holds' marks go with it: the ledger row now refuses a
+    // start under the scope.
+    sqlx::query(process_sql().abandoned_hold.forget_owned_by.sql())
+        .bind(kind)
         .bind(id)
         .execute(&mut **tx)
         .await
         .map(drop)
         .map_err(plugin_sqlx_error)?;
     Ok(())
+}
+
+/// Serialize every decision about one consumer hold at a stable
+/// advisory-lock key, held for the caller's transaction: the abandonment
+/// that marks the hold and reads what it owes, and a registration that
+/// checks the mark (ADR 0116 §3.4). Without it the fence is a
+/// check-then-act under READ COMMITTED, and a start that read "no mark"
+/// could commit after the abandonment's read missed it.
+pub(crate) async fn lock_consumer_hold_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    key: &str,
+) -> Result<(), PluginError> {
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind(format!("lash-consumer-hold:{key}"))
+    .execute(&mut **tx)
+    .await
+    .map(drop)
+    .map_err(plugin_sqlx_error)
 }
 
 /// Whether a ledger row exists for this scope, settled or not.

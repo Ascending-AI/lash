@@ -692,6 +692,14 @@ impl LiveTurnRunner {
 
 #[async_trait::async_trait]
 impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
+    /// On the server double, the finished scenario's completed journals are
+    /// dropped; a live server keeps its own retention.
+    async fn scenario_finished(&self) {
+        if let super::effect_group_conformance::HarnessAdmin::InProcess { server } = &self.admin {
+            server.drop_completed_journals();
+        }
+    }
+
     async fn run_turn(
         &self,
         admitted: lash_core::AdmittedScope,

@@ -18,6 +18,7 @@
 use anyhow::{Result, bail};
 
 mod expanded_store_rollback;
+mod generation_handoff_rollback;
 mod negotiated_wire_both_directions;
 mod object_sweep_crash_resume;
 mod skipped_compatibility_release_refused;
@@ -41,22 +42,6 @@ fn waits_for(lane: &str) -> Result<()> {
 #[ignore = "waits for lanes L2 and L3 (FIG-3800 A): the PostgreSQL and SQLite writer fences"]
 fn finalize_races_every_writer() -> Result<()> {
     waits_for("lanes L2 and L3 (FIG-3800 A)")
-}
-
-/// A foreign-`G` journal dispatches zero effects and parks. Signals that
-/// race a hand-off are delivered exactly once. A root admitted by a drive
-/// pinned to N runs on N+1, with no refusal and no `SubstrateLost`. A
-/// continuation N cannot decode keeps N+1's deployment and routes there.
-/// Rollback registers N at a fresh URI. Registering at a URI that serves
-/// another generation is refused.
-///
-/// Waits for lane L4: the `drive_version` gate's removal and the
-/// registration guard, plus the `synthetic-next` continuation format in
-/// `crates/lashlang/src/runtime/vm/continuation.rs`.
-#[test]
-#[ignore = "waits for lane L4: the drive_version gate's removal and the registration guard"]
-fn generation_handoff_rollback() -> Result<()> {
-    waits_for("lane L4")
 }
 
 /// Checkpoints, attachments, referrer edges and fences, and obligations

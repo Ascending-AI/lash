@@ -68,7 +68,6 @@ fn child_request(command: RuntimeEffectCommand) -> EffectGroupChildRequest {
             loser_disposition: LoserPolicy::Cancel,
             replay_keys: vec![envelope.invocation.replay_key().to_string()],
             wait_scope: scope(),
-            membership: vec![serde_json::to_string(&envelope).expect("encode the member")],
             opener: lash_core::AdmittedScope::runtime_operation("fig-3904"),
         },
         position: 0,

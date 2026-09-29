@@ -196,8 +196,9 @@ consumes:
 - the sealed payload: `prepared_payload`, `decode_prepared_payload`,
   `tool_execution_binding`;
 - controller-free reads: `sessions()` (`AttemptSessionReads`,
-  `tool_provider.rs:39-85`) and `processes()` (`AttemptProcessReads`,
-  `:88-107`);
+  `tool_provider.rs:39-85`), `processes()` (`AttemptProcessReads`,
+  `:88-107`) and `tool_catalog()`, the catalog the attempt was dispatched
+  with, which `processes.create` links its source against (FIG-3116);
 - `cancellation_token`, the cooperative stop the attempt host supplies;
 - `attachments()`, durable blob output;
 - `direct_completions()`, a direct model call inside the atomic attempt with

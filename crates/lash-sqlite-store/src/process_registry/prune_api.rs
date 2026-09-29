@@ -172,4 +172,47 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
             .await
             .map_err(process_sqlite_error)?
     }
+
+    async fn abandon_consumer_hold(
+        &self,
+        key: &str,
+        owner: &lash_core_execution::ScopeId,
+    ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
+        let key = key.to_string();
+        let owner_kind = owner.storage_kind();
+        let owner_id = owner.storage_id();
+        let now = self.clock.timestamp_ms() as i64;
+        // One write flow marks and reads, as a registration's fence reads the
+        // mark in its own: the two are serialized either way round.
+        let ids = self
+            .conn
+            .write_flow(move |tx| {
+                Ok(tx_outcome(
+                    (|| {
+                        crate::conn::cached_execute(
+                            tx,
+                            process_sql().abandoned_hold.mark.sql(),
+                            params![key, owner_kind, owner_id, now],
+                        )?;
+                        let mut statement =
+                            tx.prepare_cached(process_sql().process.select_owed_cancels.sql())?;
+                        let rows =
+                            statement.query_map(params![key], |row| row.get::<_, String>(0))?;
+                        rows.collect::<Result<Vec<_>, _>>()
+                    })()
+                    .map_err(process_sqlite_error),
+                ))
+            })
+            .await
+            .map_err(process_sqlite_error)??;
+        ids.iter()
+            .map(|id| {
+                ProcessId::parse(id).map_err(|error| {
+                    lash_core_execution::PluginError::Session(format!(
+                        "a held process row names an invalid id: {error}"
+                    ))
+                })
+            })
+            .collect()
+    }
 }

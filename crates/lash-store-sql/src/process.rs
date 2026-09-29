@@ -21,6 +21,7 @@
 //! `{{term(column)}}` token and the backend's [`crate::Vocabulary`] expands it
 //! at startup from the one source those labels have.
 
+pub mod abandoned_consumer_holds;
 pub mod change_clock;
 pub mod definitions;
 pub mod events;

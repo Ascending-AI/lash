@@ -139,6 +139,20 @@ fn artifact_failure(error: ArtifactStoreError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
 
+fn decode_stored_edge(kind: &str, id: &str) -> Result<ArtifactReferrer, StoreError> {
+    ArtifactReferrer::decode(kind, id).map_err(|error| match error {
+        lash_core_execution::ArtifactReferrerError::UnknownKind(label) => {
+            StoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                    surface: "artifact referrer edge kind".to_owned(),
+                    label,
+                },
+            }
+        }
+        other => stored_data_corrupt("artifact referrer edge", other),
+    })
+}
+
 pub(crate) fn artifact_fenced_tx(
     tx: &rusqlite::Connection,
     referrer: &ArtifactReferrer,
@@ -314,8 +328,7 @@ impl Store {
                         let artifact_ref = row.get(1)?;
                         let kind: String = row.get(2)?;
                         let id: String = row.get(3)?;
-                        ArtifactReferrer::decode(&kind, &id)
-                            .map_err(|error| sqlite_conversion_error(stored_data_corrupt("artifact referrer edge", error)))?;
+                        decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
                         Ok(artifact_ref)
                     })?.collect::<rusqlite::Result<_>>()?
             };
@@ -373,12 +386,7 @@ impl Store {
                 while let Some(row) = rows.next()? {
                     let kind: String = row.get(0)?;
                     let id: String = row.get(1)?;
-                    ArtifactReferrer::decode(&kind, &id).map_err(|error| {
-                        sqlite_conversion_error(stored_data_corrupt(
-                            "artifact referrer edge",
-                            error,
-                        ))
-                    })?;
+                    decode_stored_edge(&kind, &id).map_err(sqlite_conversion_error)?;
                 }
                 Ok(Some(
                     Self::get_blob_conn(conn, &BlobRef(blob_ref))
@@ -900,5 +908,46 @@ mod tests {
             lash_core_execution::PluginError::Runtime(runtime)
                 if runtime.code == lash_core_execution::RuntimeErrorCode::RuntimeStoreCorrupt
         ));
+    }
+
+    #[tokio::test]
+    async fn artifact_read_refuses_an_unknown_referrer_kind_and_keeps_the_bytes() {
+        let (_dir, store) = store().await;
+        store
+            .publish_module_artifact(
+                &ReferrerClaim::unguarded(pin()).expect("host pin claim"),
+                "future-edge",
+                b"module",
+            )
+            .await
+            .expect("publish module");
+        store
+            .conn
+            .call(|conn| {
+                conn.execute_batch("PRAGMA ignore_check_constraints = ON")?;
+                conn.execute(
+                    artifact_sql().edges.insert_edge.sql(),
+                    params![
+                        MODULE_ARTIFACT_NAMESPACE,
+                        "future-edge",
+                        "synthetic_next",
+                        "x"
+                    ],
+                )?;
+                conn.execute_batch("PRAGMA ignore_check_constraints = OFF")?;
+                Ok(())
+            })
+            .await
+            .expect("inject an edge written by the next build");
+        assert!(matches!(
+            store.get_module_artifact("future-edge").await,
+            Err(ArtifactStoreError::Incompatible {
+                refusal: lash_core_execution::compat::CompatRefusal::UnknownVocabulary {
+                    label,
+                    ..
+                }
+            }) if label == "synthetic_next"
+        ));
+        assert_eq!(edge_count(&store, "future-edge").await, 2);
     }
 }

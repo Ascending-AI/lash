@@ -28,6 +28,61 @@ fn process_typed_artifact(param_name: &str) -> ModuleArtifact {
     .expect("artifact builds")
 }
 
+fn stored_artifact_value(artifact: &ModuleArtifact) -> serde_json::Value {
+    serde_json::from_slice(&artifact.to_store_bytes().expect("artifact encodes"))
+        .expect("artifact envelope is JSON")
+}
+
+#[test]
+fn artifact_verifies_under_its_stored_family() {
+    let artifact = process_typed_artifact("event");
+    let bytes = artifact.to_store_bytes().expect("artifact encodes");
+    let stored: serde_json::Value = serde_json::from_slice(&bytes).expect("JSON envelope");
+    assert_eq!(stored["family"], LASHLANG_SEMANTIC_HASH_VERSION);
+    assert_eq!(stored["encoding"], MODULE_ARTIFACT_ENVELOPE_VERSION);
+    assert_eq!(ModuleArtifact::from_store_bytes(&bytes), Ok(artifact));
+}
+
+#[test]
+fn artifact_refuses_an_unknown_family_typed() {
+    let artifact = process_typed_artifact("event");
+    let mut stored = stored_artifact_value(&artifact);
+    stored["family"] = serde_json::json!("lashlang-semantic-v-next");
+    let bytes = serde_json::to_vec(&stored).expect("JSON envelope");
+    assert_eq!(
+        ModuleArtifact::from_store_bytes(&bytes),
+        Err(ModuleArtifactError::UnsupportedFamily {
+            family: "lashlang-semantic-v-next".to_owned(),
+            encoding: MODULE_ARTIFACT_ENVELOPE_VERSION.to_string(),
+        })
+    );
+    assert_eq!(
+        stored["artifact"]["module_ref"],
+        artifact.module_ref().as_str()
+    );
+    stored["family"] = serde_json::json!(LASHLANG_SEMANTIC_HASH_VERSION);
+    stored["encoding"] = serde_json::json!(MODULE_ARTIFACT_ENVELOPE_VERSION + 1);
+    assert!(matches!(
+        ModuleArtifact::from_store_bytes(&serde_json::to_vec(&stored).expect("JSON envelope")),
+        Err(ModuleArtifactError::UnsupportedFamily { .. })
+    ));
+    stored["encoding"] = serde_json::json!("json-next");
+    assert!(matches!(
+        ModuleArtifact::from_store_bytes(&serde_json::to_vec(&stored).expect("JSON envelope")),
+        Err(ModuleArtifactError::UnsupportedFamily { ref encoding, .. }) if encoding == "\"json-next\""
+    ));
+}
+
+#[test]
+fn artifact_refuses_an_unknown_identity_field() {
+    let mut stored = stored_artifact_value(&process_typed_artifact("event"));
+    stored["artifact"]["next_identity_field"] = serde_json::json!(true);
+    assert!(matches!(
+        ModuleArtifact::from_store_bytes(&serde_json::to_vec(&stored).expect("JSON envelope")),
+        Err(ModuleArtifactError::FutureShape { .. })
+    ));
+}
+
 #[test]
 fn named_process_signature_round_trips_and_names_change_identity() {
     let event = process_typed_artifact("event");
@@ -43,8 +98,8 @@ fn named_process_signature_round_trips_and_names_change_identity() {
 #[test]
 fn artifact_explicitly_refuses_obsolete_process_type_shape() {
     let artifact = process_typed_artifact("event");
-    let mut raw = serde_json::to_value(&artifact).expect("artifact serializes");
-    let declarations = raw["ir"]["declarations"]
+    let mut raw = stored_artifact_value(&artifact);
+    let declarations = raw["artifact"]["ir"]["declarations"]
         .as_array_mut()
         .expect("declarations array");
     let install = declarations
@@ -96,7 +151,11 @@ fn artifact_decoder_refuses_duplicate_signature_fields_and_parameter_extras() {
         let error = ModuleArtifact::from_store_bytes(malformed.as_bytes())
             .expect_err("malformed signature bytes must be refused");
         assert!(
-            matches!(error, ModuleArtifactError::Codec(_)),
+            if description == "unknown parameter field" {
+                matches!(error, ModuleArtifactError::FutureShape { .. })
+            } else {
+                matches!(error, ModuleArtifactError::Codec(_))
+            },
             "{description}: {error}"
         );
     }
@@ -178,7 +237,7 @@ fn frozen_predecessor_artifact_is_refused_by_its_shape() {
     )
     .expect_err("a predecessor artifact must be refused");
     assert!(
-        matches!(&error, ModuleArtifactError::Codec(message) if message.contains("`ir`")),
+        matches!(&error, ModuleArtifactError::FutureShape { .. }),
         "{error}"
     );
 }

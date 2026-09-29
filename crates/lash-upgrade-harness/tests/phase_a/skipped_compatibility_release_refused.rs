@@ -33,8 +33,10 @@ fn skipped_component(component: ComponentId, stamp: CompatStamp) -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs both node builds, PostgreSQL and a restate-server: `just phase-a` runs it"]
 async fn skipped_compatibility_release_refused() -> Result<()> {
-    let services = Services::from_env()?;
+    // A database of the leg's own: its stamps and rows never meet another leg's.
+    let services = Services::from_env()?.isolated("skipped").await?;
     let builds = NodeBuilds::from_env()?;
     let operator = Operator::from_env(&services, LASHCTL_N_ENV)?;
     let scratch = tempfile::tempdir()?;
