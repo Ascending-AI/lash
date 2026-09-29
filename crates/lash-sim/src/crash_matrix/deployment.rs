@@ -563,15 +563,6 @@ impl SessionStoreFactory for CrashSessionFactory {
         self.inner.bind_effect_host(effect_host);
     }
 
-    fn bind_artifact_stores(
-        &self,
-        process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
-        process_engines: lash_core::ProcessEngineRegistry,
-    ) {
-        self.inner
-            .bind_artifact_stores(process_env_store, process_engines);
-    }
-
     async fn create_store(
         &self,
         request: &lash_core::SessionStoreCreateRequest,

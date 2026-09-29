@@ -505,15 +505,6 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         self.inner.bind_effect_host(effect_host);
     }
 
-    fn bind_artifact_stores(
-        &self,
-        process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
-        process_engines: crate::ProcessEngineRegistry,
-    ) {
-        self.inner
-            .bind_artifact_stores(process_env_store, process_engines);
-    }
-
     async fn pending_turn_cancel_closure_pins(
         &self,
         session_id: &SessionId,

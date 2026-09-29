@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
+    ReferrerClaim,
 };
 use lash_sansio::sync::MutexExt;
 use serde::{Deserialize, Serialize};
@@ -551,8 +552,8 @@ impl From<ModuleArtifactError> for ArtifactStoreError {
 /// and never decodes them; this view encodes a [`ModuleArtifact`] on publish
 /// and decodes and verifies it on read. Modules are content-addressed and
 /// immutable, so a decoded module is cached by its reference, and a read
-/// returns the cached module only once the port confirms the module is still
-/// retained. Cloning shares the port and the cache.
+/// returns the cached module only once the port confirms a referrer still
+/// holds it. Cloning shares the port and the cache.
 #[derive(Clone)]
 pub struct LashlangArtifacts {
     store: Arc<dyn ModuleArtifactStore>,
@@ -589,17 +590,18 @@ impl LashlangArtifacts {
         self.store.durability_tier()
     }
 
-    /// Publish an immutable module and retain it for one exact owner.
+    /// Publish an immutable module and add the claim's edge to it (ADR 0113
+    /// §2.1): refused `ReferrerEnded` when the claim's referrer has a fence.
     pub async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         artifact: &ModuleArtifact,
     ) -> Result<(), ArtifactStoreError> {
         let bytes = artifact
             .to_store_bytes()
             .map_err(|err| ArtifactStoreError::Encode(err.to_string()))?;
         self.store
-            .publish_module_artifact(owner, artifact.module_ref().as_str(), &bytes)
+            .publish_module_artifact(claim, artifact.module_ref().as_str(), &bytes)
             .await?;
         self.decoded
             .lock_recover()
@@ -607,55 +609,21 @@ impl LashlangArtifacts {
         Ok(())
     }
 
-    /// Add an owner edge to an already published module.
-    pub async fn retain_module_artifact(
+    /// Add the claim's edge to a module already stored: refused
+    /// `ArtifactMissing` when it is not, and `ReferrerEnded` when the claim's
+    /// referrer has a fence.
+    pub async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &ModuleRef,
     ) -> Result<(), ArtifactStoreError> {
         self.store
-            .retain_module_artifact(owner, module_ref.as_str())
+            .acquire_module_artifact(claim, module_ref.as_str())
             .await
     }
 
-    /// Atomically add `to` and sever `from` for one module artifact.
-    pub async fn transfer_module_artifact(
-        &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store
-            .transfer_module_artifact(from, to, module_ref.as_str())
-            .await
-    }
-
-    /// Sever one exact owner edge and reclaim the module when it was the last.
-    pub async fn release_module_artifact(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &ModuleRef,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store
-            .release_module_artifact(owner, module_ref.as_str())
-            .await?;
-        self.decoded.lock_recover().remove(module_ref);
-        Ok(())
-    }
-
-    /// Permanently fence an execution owner against late publication and sever
-    /// every module edge it still owns.
-    pub async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreError> {
-        self.store.retire_module_artifact_owner(owner).await?;
-        self.decoded.lock_recover().clear();
-        Ok(())
-    }
-
-    /// The module published under `module_ref`, decoded and verified, if it is
-    /// retained.
+    /// The module published under `module_ref`, decoded and verified, if a
+    /// referrer holds it.
     pub async fn get_module_artifact(
         &self,
         module_ref: &ModuleRef,
@@ -699,8 +667,30 @@ pub(crate) struct InMemoryLashlangArtifactStore {
 #[derive(Default)]
 struct InMemoryArtifactState {
     modules: BTreeMap<String, Vec<u8>>,
-    owners: Vec<(String, lash_core_execution::ArtifactOwner)>,
-    retired_owners: Vec<lash_core_execution::ArtifactOwner>,
+    /// `(module_ref, referrer)` edges.
+    edges: BTreeSet<(String, String)>,
+    /// Ended referrers, by their stored pair.
+    fences: BTreeSet<String>,
+}
+
+#[cfg(test)]
+fn stored_pair(referrer: &lash_core_execution::ArtifactReferrer) -> String {
+    format!("{}:{}", referrer.kind(), referrer.canonical_id())
+}
+
+#[cfg(test)]
+impl InMemoryArtifactState {
+    fn check_open(
+        &self,
+        referrer: &lash_core_execution::ArtifactReferrer,
+    ) -> Result<(), ArtifactStoreError> {
+        if self.fences.contains(&stored_pair(referrer)) {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: referrer.clone(),
+            });
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -721,7 +711,7 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
         bytes: &[u8],
     ) -> Result<(), ArtifactStoreError> {
@@ -735,120 +725,73 @@ impl ModuleArtifactStore for InMemoryLashlangArtifactStore {
             pause.pause().await;
         }
         let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::OwnerRetired);
-        }
+        state.check_open(claim.referrer())?;
         if let Some(existing) = state.modules.get(module_ref)
             && existing.as_slice() != bytes
         {
-            return Err(ArtifactStoreError::Backend(format!(
-                "module artifact `{module_ref}` is immutable"
-            )));
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: module_ref.to_string(),
+            });
         }
         state
             .modules
             .entry(module_ref.to_string())
             .or_insert_with(|| bytes.to_vec());
-        let edge = (module_ref.to_string(), owner.clone());
-        if !state.owners.contains(&edge) {
-            state.owners.push(edge);
-        }
+        state
+            .edges
+            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
         Ok(())
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(owner) {
-            return Err(ArtifactStoreError::OwnerRetired);
-        }
+        state.check_open(claim.referrer())?;
         if !state.modules.contains_key(module_ref) {
-            return Err(ArtifactStoreError::Backend(format!(
-                "missing module artifact `{module_ref}`"
-            )));
-        }
-        let edge = (module_ref.to_string(), owner.clone());
-        if !state.owners.contains(&edge) {
-            state.owners.push(edge);
-        }
-        Ok(())
-    }
-
-    async fn transfer_module_artifact(
-        &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), ArtifactStoreError> {
-        let mut state = self.state.lock_recover();
-        if state.retired_owners.contains(to) {
-            return Err(ArtifactStoreError::DestinationOwnerRetired);
-        }
-        let from_edge = (module_ref.to_string(), from.clone());
-        if !state.owners.contains(&from_edge) {
-            if state.owners.contains(&(module_ref.to_string(), to.clone())) {
-                return Ok(());
-            }
-            return Err(ArtifactStoreError::StagingEdgeMissing {
-                artifact: format!("module artifact `{module_ref}`"),
+            return Err(ArtifactStoreError::ArtifactMissing {
+                artifact_ref: module_ref.to_string(),
             });
         }
-        let to_edge = (module_ref.to_string(), to.clone());
-        if !state.owners.contains(&to_edge) {
-            state.owners.push(to_edge);
-        }
-        state.owners.retain(|edge| edge != &from_edge);
+        state
+            .edges
+            .insert((module_ref.to_string(), stored_pair(claim.referrer())));
         Ok(())
     }
 
-    async fn release_module_artifact(
+    async fn end_module_referrer(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
+        cleanup: &lash_core_execution::ResolvedArtifactCleanup,
     ) -> Result<(), ArtifactStoreError> {
         let mut state = self.state.lock_recover();
-        let edge = (module_ref.to_string(), owner.clone());
-        state.owners.retain(|candidate| candidate != &edge);
-        if !state
-            .owners
+        let ended = stored_pair(&cleanup.referrer);
+        state.fences.insert(ended.clone());
+        for carry in &cleanup.carries {
+            let to = stored_pair(&carry.to);
+            if state.fences.contains(&to) {
+                continue;
+            }
+            if !state.modules.contains_key(&carry.artifact.artifact_ref) {
+                return Err(ArtifactStoreError::CarryArtifactMissing {
+                    artifact_ref: carry.artifact.artifact_ref.clone(),
+                    to: carry.to.clone(),
+                });
+            }
+            state
+                .edges
+                .insert((carry.artifact.artifact_ref.clone(), to));
+        }
+        let severed: Vec<String> = state
+            .edges
             .iter()
-            .any(|(candidate, _)| candidate == module_ref)
-        {
-            state.modules.remove(module_ref);
-        }
-        Ok(())
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreError> {
-        if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
-            return Err(ArtifactStoreError::Backend(
-                "only execution artifact owners can be retired".to_string(),
-            ));
-        }
-        let mut state = self.state.lock_recover();
-        if !state.retired_owners.contains(owner) {
-            state.retired_owners.push(owner.clone());
-        }
-        let affected = state
-            .owners
-            .iter()
-            .filter_map(|(module_ref, candidate)| {
-                (candidate == owner).then_some(module_ref.clone())
-            })
-            .collect::<Vec<_>>();
-        state.owners.retain(|(_, candidate)| candidate != owner);
-        for module_ref in affected {
-            if !state
-                .owners
-                .iter()
-                .any(|(candidate, _)| candidate == &module_ref)
-            {
+            .filter(|(_, referrer)| *referrer == ended)
+            .map(|(module_ref, _)| module_ref.clone())
+            .collect();
+        state.edges.retain(|(_, referrer)| *referrer != ended);
+        for module_ref in severed {
+            if !state.edges.iter().any(|(held, _)| *held == module_ref) {
                 state.modules.remove(&module_ref);
             }
         }

@@ -603,6 +603,12 @@ pub use triggers::{
 
 pub(crate) mod facade_ops {}
 pub use lash_core_execution::{
+    ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
+    ArtifactReferrerError, ArtifactReferrerKind, ArtifactStoreId, DefinitionRevisionId,
+    FrameEnvironmentId, HostArtifactPin, ReferrerClaim, ResolvedArtifactCleanup,
+    SubscriptionRevisionId, artifact_referrer_ended, trigger_incarnation,
+};
+pub use lash_core_execution::{
     ArtifactPublicationPause, ArtifactStoreError, Backend, DurabilityTier, EffectEngine,
     ModuleArtifactStore, StoreBindingId, StoreSet,
 };
@@ -681,7 +687,7 @@ pub use process_registry::{
 };
 pub use runtime::{
     AbandonEvidence, AbandonWriter, ActiveTurnIngress, AdmittedProcessIdentity, AdmittedScope,
-    Ancestry, ArtifactOwner, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
+    Ancestry, AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey,
     AwaitEventResolver, AwaitEventWaitIdentity, BindingId, BoundaryReason, CapabilityRef,
     CausalRef, ChargeSafetyRefusalEvidence, CheckpointClaimSet, Clock, ClockWallTime,
     CommandJournalGuard, CommandReplayKey, CompletionKeyPreparation, ContractRef,
@@ -691,8 +697,8 @@ pub use runtime::{
     ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope, ForkPoint,
     ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupChildCancelWatch,
     GroupExecutors, GroupReopen, GroupSettlement, GroupWakePolicy, HandleId, IndependentEffectWork,
-    InputItem, InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
+    InputItem, InvalidStartKey, JournalReplay, LedgerUsageDisposition, Lifetime, LifetimeDecision,
+    LifetimePolicy, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
     LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
     LlmStreamRecord, LocalTurnStop, LoserPolicy, MAX_NON_TERMINAL_PROCESS_PAGE_SIZE, NoProcessWork,
     NoSessionWork, NonTerminalProcessPage, PROCESS_EFFECT_OCCURRENCE_CAP,
@@ -702,13 +708,13 @@ pub use runtime::{
     PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
     PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
     PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions,
-    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessDriveStep,
+    ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectSummary,
+    ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
@@ -764,10 +770,9 @@ pub use runtime::{
     WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome, WakeDeliveryConfig,
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     WatchedRegistry, WeakProcessEngineRegistry, WorkCadenceError, WorkCadencePolicy,
-    admit_session_state_generation, artifact_destination_owner_retired_error,
-    artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
-    effect_groups_unsupported, lifetime, mint_process_id, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation, retry_cancel_watch, tool_failure_code,
+    admit_session_state_generation, artifact_store_plugin_error, effect_groups_unsupported,
+    lifetime, mint_process_id, park_turn_of_refused_group_child, park_turn_refused_by_generation,
+    retry_cancel_watch, tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]
@@ -775,14 +780,12 @@ pub(crate) use runtime::{
     ProcessEventSemantics, QueuedCheckpointTurnInput, QueuedCheckpointWork, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
     QueuedWorkCompletion, QueuedWorkCompletionData, QueuedWorkEnqueueOutcome, QueuedWorkItem,
-    QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, artifact_owner_is_permanently_retired,
-    artifact_staging_owner_edge_is_missing, load_process_execution_env,
+    QueuedWorkPayload, RuntimeSubject, TurnWorkPayload, load_process_execution_env,
     materialize_process_event_semantics, prepare_process_event_append,
     prepare_process_registration, prepare_process_start, prepare_process_transition,
     process_event_invocation, process_wake_batch_draft, process_wake_input_from_event_payload,
     process_wake_turn_cause, process_wake_turn_text, publish_process_execution_env,
-    require_event_replay, settle_started_process_engine_artifacts,
-    settle_started_process_execution_env,
+    require_event_replay,
 };
 pub(crate) use session_model::plugin_runtime_protocol_event;
 
