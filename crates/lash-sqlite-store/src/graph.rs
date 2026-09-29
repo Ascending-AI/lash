@@ -15,7 +15,6 @@ use super::artifact_store::artifact_namespace_kind;
 use super::*;
 use crate::catalog::retained_artifact_refs;
 use crate::session_sql::session_sql;
-use lash_sansio::SessionId;
 
 /// One GC root class. The variant *is* the label choice: a pointer-table row
 /// derives its [`PersistedArtifactKind`] from its own namespace key, the sole

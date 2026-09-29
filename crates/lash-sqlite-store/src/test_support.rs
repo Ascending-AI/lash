@@ -78,12 +78,7 @@ impl StoreTestSupport for SqliteStore {
                             .map_err(|error| {
                                 rusqlite::Error::ToSqlConversionFailure(Box::new(error))
                             })?;
-                        node.payload = lash_core_execution::SessionNodePayload::Plugin {
-                            plugin_type: "corrupt-anchor-test".to_owned(),
-                            body: lash_core_execution::session_graph::SharedJsonValue::new(
-                                serde_json::json!({}),
-                            ),
-                        };
+                        node.payload = GraphRowCorruption::plugin_payload();
                         let body = node.encode_storage_body(fleet).map_err(|error| {
                             rusqlite::Error::ToSqlConversionFailure(Box::new(error))
                         })?;

@@ -11,7 +11,6 @@
 
 use super::*;
 use crate::artifact_store::artifact_sql;
-use lash_sansio::SessionId;
 
 lash_store_sql::statements! {
     /// `blobs` statements only SQLite issues.
@@ -412,51 +411,6 @@ impl SqliteStore {
         }))
     }
 
-    pub(crate) fn load_usage_deltas_conn(
-        conn: &Connection,
-        session_id: &SessionId,
-    ) -> Result<Vec<lash_core_execution::TokenLedgerEntry>, StoreError> {
-        let mut stmt = conn
-            .prepare(
-                crate::session_sql::session_sql()
-                    .usage
-                    .select_for_session
-                    .sql(),
-            )
-            .map_err(sqlite_error)?;
-        let rows = stmt
-            .query_map(params![session_id.as_str()], |row| {
-                let usage = lash_core_execution::TokenUsage {
-                    input_tokens: row.get(2)?,
-                    output_tokens: row.get(3)?,
-                    cache_read_input_tokens: row.get(4)?,
-                    cache_write_input_tokens: row.get(5)?,
-                    reasoning_output_tokens: row.get(6)?,
-                };
-                let usage_disposition_json: String = row.get(7)?;
-                Ok((
-                    lash_core_execution::TokenLedgerEntry {
-                        source: row.get(0)?,
-                        model: row.get(1)?,
-                        usage,
-                        usage_disposition: lash_core_execution::LedgerUsageDisposition::Reported,
-                    },
-                    usage_disposition_json,
-                ))
-            })
-            .map_err(sqlite_error)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(sqlite_error)?
-            .into_iter()
-            .map(|(mut entry, usage_disposition_json)| {
-                // Strict: a disposition we cannot decode is a refusal, never a
-                // silent `Reported` — that downgrade turns a billed call free.
-                entry.usage_disposition = decode_usage_disposition(&usage_disposition_json)?;
-                Ok(entry)
-            })
-            .collect()
-    }
-
     pub async fn get_blob(&self, blob_ref: &BlobRef) -> Result<Option<Vec<u8>>, StoreError> {
         let blob_ref = blob_ref.clone();
         self.conn
@@ -514,46 +468,4 @@ impl SqliteStore {
             .await
             .map_err(sqlite_error)
     }
-
-    pub async fn load_usage_deltas(
-        &self,
-    ) -> Result<Vec<lash_core_execution::TokenLedgerEntry>, StoreError> {
-        let session_id = self.selected_session_id()?;
-        self.conn
-            .call(move |conn| {
-                Self::load_usage_deltas_conn(conn, &session_id).map_err(sqlite_conversion_error)
-            })
-            .await
-            .map_err(sqlite_error)
-    }
-}
-
-/// Rows written before the column existed cannot exist: the column is `NOT NULL` and version
-/// 52 catalogs are refused outright, so every value here was written by this encoding.
-pub(crate) fn decode_usage_disposition(
-    stored: &str,
-) -> Result<lash_core_execution::LedgerUsageDisposition, StoreError> {
-    let disposition: lash_core_execution::LedgerUsageDisposition = serde_json::from_str(stored)
-        .map_err(|error| {
-            stored_data_corrupt(
-                "TokenLedgerEntry",
-                format_args!("failed to decode usage disposition: {error}"),
-            )
-        })?;
-    disposition.validate().map_err(|error| {
-        stored_data_corrupt(
-            "TokenLedgerEntry",
-            format_args!("persisted usage disposition is invalid: {error}"),
-        )
-    })?;
-    Ok(disposition)
-}
-
-/// Encode one usage disposition for the durable column.
-pub(crate) fn encode_usage_disposition(
-    disposition: &lash_core_execution::LedgerUsageDisposition,
-) -> Result<String, StoreError> {
-    serde_json::to_string(disposition).map_err(|error| {
-        StoreError::Backend(format!("failed to encode usage disposition: {error}"))
-    })
 }

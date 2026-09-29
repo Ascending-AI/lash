@@ -28,38 +28,6 @@ use crate::session_sql::session_sql;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
-fn load_turn_failure_settlements_conn(
-    conn: &rusqlite::Connection,
-    session_id: &SessionId,
-    fleet: lash_core_execution::FleetFormat,
-) -> Result<Vec<lash_core_execution::TurnFailureSettlement>, StoreError> {
-    let mut statement = conn
-        .prepare(session_sql().turn_commits.select_failure_settlements.sql())
-        .map_err(sqlite_error)?;
-    let rows = statement
-        .query_map(params![session_id.as_str()], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(sqlite_error)?;
-    let mut settlements = Vec::new();
-    for row in rows {
-        let (turn_id, result_json) = row.map_err(sqlite_error)?;
-        let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
-            session_id,
-            &turn_id,
-            &result_json,
-            fleet,
-        )?;
-        if !receipt.failure_evidence.is_empty() {
-            settlements.push(lash_core_execution::TurnFailureSettlement {
-                turn_id,
-                evidence: receipt.failure_evidence,
-            });
-        }
-    }
-    Ok(settlements)
-}
-
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,

@@ -319,15 +319,6 @@ impl SqliteStoreSet {
     pub async fn open_store(&self) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
         Ok(Arc::clone(&self.inner.process_env_store))
     }
-
-    fn database(&self, database: SqliteDatabase) -> DatabaseLocation {
-        DatabaseLocation::in_backend(
-            &self.inner.location,
-            &self.inner.identity,
-            database,
-            self.inner.anchors.as_ref(),
-        )
-    }
 }
 
 impl lash_core_execution::StoreSet for SqliteStoreSet {
