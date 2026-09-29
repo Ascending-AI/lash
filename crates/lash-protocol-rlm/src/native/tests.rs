@@ -641,6 +641,14 @@ fn native_reasoning_only_is_provider_error() {
             replay: None,
         }],
     );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        Effect::Emit(lash_core::session_model::SessionStreamEvent::TurnOutcome {
+            outcome: lash_core::facade_support::TurnOutcome::Stopped(
+                lash_core::facade_support::TurnStop::ProviderError
+            )
+        })
+    )));
     assert!(
         effects
             .iter()

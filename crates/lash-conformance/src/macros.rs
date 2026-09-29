@@ -388,6 +388,8 @@ macro_rules! process_registry_tests {
                 (terminal_completion_atomically_retains_parent_end_plan, "parent-end-plan"),
                 (settled_parent_end_plans_are_reclaimed_by_retention, "parent-end-plan-reclaim"),
                 (a_terminal_write_arms_its_publication_once, "process-terminal-publication"),
+                (a_completion_authority_matching_its_input_class_commits, "completion-authority-granted"),
+                (a_completion_authority_for_the_wrong_input_class_is_refused, "completion-authority-refused"),
                 (a_session_scope_closes_only_through_its_close_row, "session-scope-close"),
                 (a_turn_scope_ends_through_its_recorded_ledger_row, "turn-parent-end"),
                 (an_abandoned_consumer_hold_fences_registration, "abandoned-consumer-hold"),

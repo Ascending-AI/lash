@@ -3,6 +3,7 @@
 use lash_sansio::ProcessId;
 mod caller_departure;
 mod cancellation;
+mod completion_authority;
 mod consumer_holds;
 mod event_count;
 mod event_paging;
@@ -589,6 +590,24 @@ pub async fn terminal_completion_atomically_retains_parent_end_plan(
 /// engine that published the terminal settles it delivered, once.
 pub async fn a_terminal_write_arms_its_publication_once(registry: Arc<dyn ProcessRegistry>) {
     terminal_publication::a_terminal_write_arms_its_publication_once(registry).await;
+}
+
+/// ADR 0027, granted half: each completion authority commits on the input
+/// class it names, and the terminal event records it as audit evidence.
+pub async fn a_completion_authority_matching_its_input_class_commits(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    completion_authority::a_completion_authority_matching_its_input_class_commits(registry).await;
+}
+
+/// ADR 0027, refused half: an external owner never closes an engine-executed
+/// row and a workflow authority never closes an externally-owned row; the
+/// refusal is typed and writes no terminal.
+pub async fn a_completion_authority_for_the_wrong_input_class_is_refused(
+    registry: Arc<dyn ProcessRegistry>,
+) {
+    completion_authority::a_completion_authority_for_the_wrong_input_class_is_refused(registry)
+        .await;
 }
 
 /// A turn scope has no terminal row to ride, so its ledger row is recorded
