@@ -634,16 +634,25 @@ impl<'run> RuntimeExecutionContext<'run> {
         correlation.authority.attempt_for(&correlation.process_id)
     }
 
-    /// Returns the exact owner used to stage artifacts produced by this
-    /// replayable execution.
-    pub fn artifact_owner(&self) -> crate::ArtifactOwner {
-        crate::ArtifactOwner::execution(
-            self.dispatch
-                .effect_controller
-                .scoped()
-                .execution_scope()
-                .clone(),
-        )
+    /// The execution referrer of this replayable execution (ADR 0113 §3.7):
+    /// the journal of the scope that runs it, which holds what it publishes
+    /// until the engine settles that journal.
+    ///
+    /// # Errors
+    ///
+    /// A scope with no journal identity.
+    pub fn execution_referrer(&self) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+        execution_referrer_of(self.dispatch.effect_controller.scoped().execution_scope())
+    }
+
+    /// The claim of [`Self::execution_referrer`], armed with its journal
+    /// guard.
+    ///
+    /// # Errors
+    ///
+    /// A scope with no journal identity.
+    pub fn execution_claim(&self) -> Result<crate::ReferrerClaim, crate::PluginError> {
+        execution_claim_of(self.dispatch.effect_controller.scoped().execution_scope())
     }
 
     pub fn session_scope(&self) -> crate::SessionScope {
@@ -1276,12 +1285,11 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// the journaled process-start command, publishing nothing.
     ///
     /// Publication belongs inside the replayable process effect (FIG-3050).
-    /// Publishing here would stage the artifact under
-    /// [`ArtifactOwner::process_start`](crate::ArtifactOwner::process_start)
+    /// Publishing here would stage the artifact under the start's referrer
     /// *before* the start is journaled, and a replay of the same turn would
-    /// revisit that staging owner after the first attempt's start effect
-    /// transferred the artifact and permanently retired it — the divergence
-    /// FIG-3028 had to absorb with a retirement tolerance at this call site.
+    /// revisit that referrer after the first attempt's start settled and
+    /// fenced it — the divergence FIG-3028 had to absorb with a tolerance at
+    /// this call site.
     /// The spec instead rides
     /// [`ProcessStartOptions::env_spec`](crate::ProcessStartOptions::env_spec)
     /// into the command, and the executor publishes it under the journal.
@@ -1313,21 +1321,21 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// A retired owner fails here. Every caller publishes under a durable owner and then persists
-    /// the reference (trigger registration keeps it in `TriggerSubscriptionDraft::env_ref`), so a
-    /// retirement must surface at publish time rather than hand back a reference to bytes the
-    /// fence already reclaimed. Process starts do not publish at all before their journal: they go
-    /// through [`Self::process_start_execution_env`].
+    /// An ended referrer fails here. Every caller publishes under a durable referrer and then
+    /// persists the reference (trigger registration keeps it in
+    /// `TriggerSubscriptionDraft::env_ref`), so a fence must surface at publish time rather than
+    /// hand back a reference to bytes the cleanup already reclaimed. Process starts do not publish
+    /// at all before their journal: they go through [`Self::process_start_execution_env`].
     pub async fn captured_process_execution_env_ref(
         &self,
-        owner: &crate::ArtifactOwner,
+        claim: &crate::ReferrerClaim,
     ) -> Result<crate::ProcessExecutionEnvRef, crate::PluginError> {
         if let Some(env_ref) = self.inherited_process_execution_env_ref() {
             return Ok(env_ref);
         }
         crate::publish_process_execution_env(
             self.process_env_store.as_ref(),
-            owner,
+            claim,
             &self.execution_env_spec,
         )
         .await
@@ -1863,3 +1871,24 @@ pub(crate) use correlation::{
 
 #[cfg(test)]
 mod tests;
+
+/// The execution referrer of `scope`: its journal (ADR 0113 §3.7).
+pub(crate) fn execution_referrer_of(
+    scope: &crate::ExecutionScope,
+) -> Result<crate::ArtifactReferrer, crate::PluginError> {
+    scope
+        .journal_identity()
+        .map(crate::ArtifactReferrer::Execution)
+        .map_err(|error| crate::PluginError::Session(error.to_string()))
+}
+
+/// The claim of `scope`'s execution referrer, armed with its journal guard.
+pub(crate) fn execution_claim_of(
+    scope: &crate::ExecutionScope,
+) -> Result<crate::ReferrerClaim, crate::PluginError> {
+    crate::ReferrerClaim::guarded(
+        execution_referrer_of(scope)?,
+        crate::ArtifactCleanupPlan::AwaitJournal,
+    )
+    .map_err(|error| crate::PluginError::Session(error.to_string()))
+}

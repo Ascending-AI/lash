@@ -13,8 +13,6 @@ use super::validation::prepare_process_registration;
 
 mod execution;
 pub use execution::*;
-mod artifact_cleanup;
-pub use artifact_cleanup::*;
 mod session_ids;
 pub use session_ids::*;
 mod scope_lifetime;
@@ -180,269 +178,64 @@ impl ProcessInput {
     }
 }
 
-/// Exact authority retaining immutable module or process-environment bytes.
-///
-/// Artifact stores persist one edge per owner and content address. Owners are
-/// deliberately identities rather than reference counts: releasing one edge
-/// cannot disturb another owner's use of the same bytes.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(tag = "kind", content = "id", rename_all = "snake_case")]
-pub enum ArtifactOwner {
-    /// Host-managed publication retained until that host explicitly releases it.
-    Host(String),
-    /// One durable process retaining the bytes it references.
-    Process(ProcessId),
-    /// A publication staged by replayable execution before ownership transfers
-    /// to a registered process.
-    Execution(crate::ExecutionScope),
-}
-
-impl ArtifactOwner {
-    /// Construct an explicit, indefinitely retained host owner.
-    pub fn host(id: impl Into<String>) -> Self {
-        Self::Host(id.into())
-    }
-
-    /// Construct the owner represented by one durable process record.
-    pub fn process(process_id: ProcessId) -> Self {
-        Self::Process(process_id)
-    }
-
-    /// Construct the staging owner for one replayable execution scope.
-    pub fn execution(scope: crate::ExecutionScope) -> Self {
-        Self::Execution(scope)
-    }
-
-    /// Construct the stable staging owner for one replayable process start,
-    /// addressed by the start's effect id — its admitted operation identity,
-    /// never the process id the start will mint.
-    pub fn process_start(start_effect_id: &str) -> Self {
-        Self::execution(crate::ExecutionScope::RuntimeOperation {
-            operation_id: format!("process-start:{start_effect_id}"),
-        })
-    }
-
-    /// Stable columns used by first-party artifact stores.
-    pub fn storage_parts(&self) -> Result<(&'static str, String), crate::PluginError> {
-        let (kind, id) = match self {
-            Self::Host(id) => ("host", id.clone()),
-            Self::Process(process_id) => ("process", process_id.to_string()),
-            Self::Execution(scope) => (
-                "execution",
-                scope
-                    .journal_identity()
-                    .map_err(|error| crate::PluginError::Session(error.to_string()))?
-                    .key()
-                    .to_string(),
-            ),
-        };
-        if !crate::store::namespace::is_valid_opaque_key(&id) {
-            return Err(crate::PluginError::Invoke(format!(
-                "invalid {kind} artifact owner"
-            )));
-        }
-        Ok((kind, id))
-    }
-}
-
+/// The store of process execution environments (ADR 0113 §2.1): immutable
+/// bytes under a content-addressed reference, kept alive by referrer edges.
+/// Only the cleanup executor severs edges, through
+/// [`Self::end_process_env_referrer`].
 #[async_trait::async_trait]
 pub trait ProcessExecutionEnvStore: Send + Sync {
-    /// Publish immutable bytes and retain them for one exact owner.
+    /// Store `bytes` under `env_ref` if absent, verify they equal any stored
+    /// bytes, and add the claim's edge, in one transaction that first takes
+    /// the referrer's lock, checks its fence (`ReferrerEnded`) and arms the
+    /// claim's guard if it has one and no row exists.
     async fn publish_process_execution_env(
         &self,
-        owner: &ArtifactOwner,
+        claim: &crate::ReferrerClaim,
         env_ref: &ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), crate::PluginError>;
+    ) -> Result<(), crate::ArtifactStoreError>;
 
-    /// Atomically transfer one retained environment from a staging owner to a
-    /// registered process owner, adding the destination before severing the
-    /// source edge.
-    async fn transfer_process_execution_env(
+    /// Add the claim's edge to bytes already stored, with the same lock,
+    /// fence check and guard arming. Absent bytes are `ArtifactMissing`.
+    async fn acquire_process_execution_env(
         &self,
-        from: &ArtifactOwner,
-        to: &ArtifactOwner,
+        claim: &crate::ReferrerClaim,
         env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError>;
+    ) -> Result<(), crate::ArtifactStoreError>;
 
-    /// Sever one exact owner edge and reclaim the bytes when it was the last.
-    async fn release_process_execution_env(
+    /// Apply one resolved cleanup in one transaction (ADR 0113 §2.3).
+    async fn end_process_env_referrer(
         &self,
-        owner: &ArtifactOwner,
-        env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<(), crate::PluginError>;
-
-    /// Permanently fence an execution owner against late publication and sever
-    /// every process-environment edge it still owns.
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &ArtifactOwner,
-    ) -> Result<(), crate::PluginError>;
+        cleanup: &crate::ResolvedArtifactCleanup,
+    ) -> Result<(), crate::ArtifactStoreError>;
 
     async fn get_process_execution_env(
         &self,
         env_ref: &ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, crate::PluginError>;
+    ) -> Result<Option<Vec<u8>>, crate::ArtifactStoreError>;
 }
 
-/// Display text of the typed refusal every artifact store returns when a write
-/// targets an owner that a permanent retirement fence has already closed.
-///
-/// This is the human-facing message only; classification is by
-/// [`crate::RuntimeErrorCode::ArtifactOwnerRetired`] (or
-/// `ArtifactDestinationOwnerRetired` for a transfer's destination), never by
-/// matching this text.
-pub const ARTIFACT_OWNER_RETIRED_MESSAGE: &str = "artifact owner has been permanently retired";
-
-/// Display text of the typed refusal every artifact store returns when a
-/// transfer's destination owner is already fenced by permanent retirement.
-pub const ARTIFACT_DESTINATION_OWNER_RETIRED_MESSAGE: &str =
-    "artifact destination owner has been permanently retired";
-
-/// Sentence frame every artifact store reports when a transfer finds neither
-/// the staging owner's edge nor the destination owner's edge. Producers name
-/// the artifact in their own words; classification is by
-/// [`crate::RuntimeErrorCode::ArtifactStagingEdgeMissing`], never by matching
-/// this text.
-pub const ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE: &str =
-    "is not retained by the staging owner";
-
-/// Mint the typed refusal an artifact store returns when a write targets an
-/// owner a permanent retirement fence has already closed.
-pub fn artifact_owner_retired_error() -> crate::PluginError {
-    crate::PluginError::Runtime(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::ArtifactOwnerRetired,
-        ARTIFACT_OWNER_RETIRED_MESSAGE,
-    ))
-}
-
-/// Mint the typed refusal an artifact store returns when a transfer names a
-/// destination owner a permanent retirement fence has already closed.
-pub fn artifact_destination_owner_retired_error() -> crate::PluginError {
-    crate::PluginError::Runtime(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::ArtifactDestinationOwnerRetired,
-        ARTIFACT_DESTINATION_OWNER_RETIRED_MESSAGE,
-    ))
-}
-
-/// Mint the typed refusal an artifact store returns when a transfer finds
-/// neither the staging owner's edge nor the destination owner's edge.
-/// `artifact` is the producer's noun phrase, e.g.
-/// `process execution environment \`env-…\``.
-pub fn artifact_staging_edge_missing_error(artifact: impl Into<String>) -> crate::PluginError {
-    let artifact = artifact.into();
-    crate::PluginError::Runtime(crate::RuntimeError::new(
-        crate::RuntimeErrorCode::ArtifactStagingEdgeMissing,
-        format!("{artifact} {ARTIFACT_STAGING_OWNER_EDGE_MISSING_MESSAGE}"),
-    ))
-}
-
-/// Map a store refusal raised by an artifact-owner write to the session-facing
-/// plugin error, keeping the typed retirement reasons as runtime codes rather
-/// than prose. Every other store failure stays a session error.
+/// Map a store refusal raised by an artifact write to the session-facing
+/// plugin error, keeping the typed refusals as runtime codes rather than
+/// prose. Every other store failure stays a session error.
 pub fn artifact_store_plugin_error(error: crate::StoreError) -> crate::PluginError {
+    crate::ArtifactStoreError::from(error).into()
+}
+
+/// The fenced referrer an artifact store refused a publish or acquire under,
+/// if `error` is that refusal (ADR 0113 §2.7), however many conversions it
+/// has crossed. Every other error, store faults included, is `None`.
+pub fn artifact_referrer_ended(error: &crate::PluginError) -> Option<&crate::ArtifactReferrer> {
     match error {
-        crate::StoreError::ArtifactOwnerRetired => artifact_owner_retired_error(),
-        crate::StoreError::ArtifactDestinationOwnerRetired => {
-            artifact_destination_owner_retired_error()
-        }
-        crate::StoreError::ArtifactStagingEdgeMissing { artifact } => {
-            artifact_staging_edge_missing_error(artifact)
-        }
-        other => crate::PluginError::Session(other.to_string()),
+        crate::PluginError::Runtime(error) => error.ended_referrer(),
+        crate::PluginError::RuntimeEffectController(error) => error.ended_referrer(),
+        _ => None,
     }
-}
-
-/// Reports whether `error` is an artifact store refusing a write because an
-/// owner it named — the write's owner or a transfer's destination — was
-/// permanently retired, as opposed to any other store failure.
-///
-/// Callers that stage an artifact before the effect that owns it is journaled
-/// use this to tell "this turn already ran and fenced the staging owner" apart
-/// from a real store fault.
-pub fn artifact_owner_is_permanently_retired(error: &crate::PluginError) -> bool {
-    let code = match error {
-        crate::PluginError::Runtime(error) => &error.code,
-        crate::PluginError::RuntimeEffectController(error) => &error.code,
-        _ => return false,
-    };
-    matches!(
-        code,
-        crate::RuntimeErrorCode::ArtifactOwnerRetired
-            | crate::RuntimeErrorCode::ArtifactDestinationOwnerRetired
-    )
-}
-
-/// Reports whether `error` is an artifact store refusing a transfer because the
-/// staging owner no longer retains the artifact, as opposed to any other store
-/// failure.
-///
-/// The staging owner of a process start is stable per process id, so every
-/// concurrent attempt at the same start shares it. One attempt's completed
-/// transfer, or its failure cleanup, retires that owner and severs the edge
-/// another in-flight attempt staged; when the two attempts registered different
-/// process incarnations the destination edge is absent too. The store's refusal
-/// is correct — the caller that still holds the staged bytes is the one that can
-/// settle the destination edge (FIG-3090).
-pub fn artifact_staging_owner_edge_is_missing(error: &crate::PluginError) -> bool {
-    let code = match error {
-        crate::PluginError::Runtime(error) => &error.code,
-        crate::PluginError::RuntimeEffectController(error) => &error.code,
-        _ => return false,
-    };
-    matches!(code, crate::RuntimeErrorCode::ArtifactStagingEdgeMissing)
-}
-
-/// Settle one staged process execution environment onto the owner of the process
-/// a start has just registered.
-///
-/// `staged` records whether this attempt's own publication landed. A staged
-/// attempt transfers, which is the only path that also reclaims the staging
-/// edge atomically. Two recoveries keep a concurrent attempt from losing the
-/// environment the registered process now needs:
-///
-/// * `staged == false` — the staging owner was already fenced before this
-///   attempt published, so there is no edge to move and the destination edge is
-///   written directly.
-/// * the transfer refuses because the staging edge is gone — a concurrent
-///   attempt at the same start retired the shared staging owner between this
-///   attempt's publication and its transfer. The bytes in hand are the exact
-///   content-addressed environment, so the destination edge is written the same
-///   way. The store's refusal stays intact; only this caller, which staged those
-///   bytes, may complete the start.
-pub async fn settle_started_process_execution_env(
-    env_store: &dyn ProcessExecutionEnvStore,
-    staging_owner: &ArtifactOwner,
-    process_owner: &ArtifactOwner,
-    env_ref: &ProcessExecutionEnvRef,
-    bytes: &[u8],
-    staged: bool,
-) -> Result<(), crate::PluginError> {
-    if !staged {
-        return env_store
-            .publish_process_execution_env(process_owner, env_ref, bytes)
-            .await;
-    }
-    match env_store
-        .transfer_process_execution_env(staging_owner, process_owner, env_ref)
-        .await
-    {
-        Ok(()) => {}
-        Err(error) if artifact_staging_owner_edge_is_missing(&error) => {
-            env_store
-                .publish_process_execution_env(process_owner, env_ref, bytes)
-                .await?;
-        }
-        Err(error) => return Err(error),
-    }
-    env_store
-        .retire_process_execution_env_owner(staging_owner)
-        .await
 }
 
 pub async fn publish_process_execution_env(
     env_store: &dyn ProcessExecutionEnvStore,
-    owner: &ArtifactOwner,
+    claim: &crate::ReferrerClaim,
     spec: &ProcessExecutionEnvSpec,
 ) -> Result<ProcessExecutionEnvRef, crate::PluginError> {
     let bytes = spec.to_store_bytes().map_err(|err| {
@@ -450,7 +243,7 @@ pub async fn publish_process_execution_env(
     })?;
     let env_ref = process_execution_env_ref_for_bytes(&bytes);
     env_store
-        .publish_process_execution_env(owner, &env_ref, &bytes)
+        .publish_process_execution_env(claim, &env_ref, &bytes)
         .await?;
     Ok(env_ref)
 }
@@ -500,7 +293,7 @@ pub async fn load_process_execution_env(
     let bytes = env_store
         .get_process_execution_env(env_ref)
         .await
-        .map_err(ProcessExecutionEnvLoadError::Store)?
+        .map_err(|error| ProcessExecutionEnvLoadError::Store(error.into()))?
         .ok_or_else(|| ProcessExecutionEnvLoadError::Missing(env_ref.clone()))?;
     if process_execution_env_ref_for_bytes(&bytes) != *env_ref {
         return Err(ProcessExecutionEnvLoadError::Mismatched(env_ref.clone()));

@@ -737,20 +737,23 @@ pub enum StoreError {
         /// Backend codec diagnostic describing the malformed payload.
         message: String,
     },
-    /// An artifact write named an owner a permanent retirement fence has
-    /// already closed. Carried typed so the plugin boundary classifies the
+    /// An artifact publish or acquire named a referrer that has a fence
+    /// (ADR 0113 §2.7). Carried typed so the plugin boundary classifies the
     /// refusal by code rather than by message text.
-    #[error("artifact owner has been permanently retired")]
-    ArtifactOwnerRetired,
-    /// An artifact transfer named a destination owner a permanent retirement
-    /// fence has already closed.
-    #[error("artifact destination owner has been permanently retired")]
-    ArtifactDestinationOwnerRetired,
-    /// An artifact transfer found neither the staging owner's edge nor the
-    /// destination owner's edge; `artifact` is the producer's noun phrase for
-    /// the artifact, e.g. `artifact \`env-…\`` or `module artifact \`mod-…\``.
-    #[error("{artifact} is not retained by the staging owner")]
-    ArtifactStagingEdgeMissing { artifact: String },
+    #[error("artifact referrer `{referrer}` has ended")]
+    ArtifactReferrerEnded {
+        referrer: crate::artifact_referrer::ArtifactReferrer,
+    },
+    /// An artifact acquire named bytes that are not stored.
+    #[error("artifact `{artifact_ref}` is not stored")]
+    ArtifactMissing { artifact_ref: String },
+    /// A cleanup's carry found its bytes gone: an invariant of ADR 0113 §3
+    /// was broken, and the cleanup stalls rather than papering over it.
+    #[error("artifact `{artifact_ref}` carried to `{to}` is not stored")]
+    ArtifactCarryMissing {
+        artifact_ref: String,
+        to: crate::artifact_referrer::ArtifactReferrer,
+    },
     /// A turn park feed cursor predates history `compact_turn_park_feed`
     /// removed. The consumer must perform a full relist before resuming from
     /// the reported horizon.
@@ -920,9 +923,9 @@ impl StoreError {
             Self::RecordEncodingFailed { .. } => "RecordEncodingFailed",
             Self::ExecutionStateBodiesReleased => "ExecutionStateBodiesReleased",
             Self::StoredDataCorrupt { .. } => "StoredDataCorrupt",
-            Self::ArtifactOwnerRetired => "ArtifactOwnerRetired",
-            Self::ArtifactDestinationOwnerRetired => "ArtifactDestinationOwnerRetired",
-            Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
+            Self::ArtifactReferrerEnded { .. } => "ArtifactReferrerEnded",
+            Self::ArtifactMissing { .. } => "ArtifactMissing",
+            Self::ArtifactCarryMissing { .. } => "ArtifactCarryMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::StorageFailure { .. } => "StorageFailure",
             Self::SchemaVersionOutOfRange { .. } => "SchemaVersionOutOfRange",

@@ -100,9 +100,10 @@ pub use render::{
 /// the list is also the boundary of what neutral SQL may talk about.
 pub const TABLES: &[&str] = &[
     artifact::blobs::TABLE,
+    artifact::cleanup_obligations::TABLE,
     artifact::lashlang_artifacts::TABLE,
-    artifact::owner_retirements::TABLE,
-    artifact::owners::TABLE,
+    artifact::referrer_edges::TABLE,
+    artifact::referrer_fences::TABLE,
     artifact::refs::TABLE,
     attachment::blob::TABLE,
     attachment::condemnation::TABLE,
@@ -168,8 +169,13 @@ pub const TABLES: &[&str] = &[
 pub fn all_statements() -> Vec<Statement> {
     let mut statements = Vec::new();
     statements.extend_from_slice(artifact::blobs::BlobStatements::NEUTRAL);
-    statements.extend_from_slice(artifact::owners::OwnerStatements::NEUTRAL);
-    statements.extend_from_slice(artifact::owner_retirements::OwnerRetirementStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::referrer_edges::ReferrerEdgeStatements::NEUTRAL);
+    statements.extend_from_slice(artifact::referrer_fences::ReferrerFenceStatements::NEUTRAL);
+    statements
+        .extend_from_slice(artifact::cleanup_obligations::CleanupObligationStatements::NEUTRAL);
+    statements.extend_from_slice(
+        artifact::cleanup_obligations::CleanupObligationLedgerStatements::NEUTRAL,
+    );
     statements.extend_from_slice(attachment::manifest::ManifestStatements::NEUTRAL);
     statements.extend_from_slice(attachment::manifest::ManifestProcessOwnerStatements::NEUTRAL);
     statements.extend_from_slice(attachment::condemnation::CondemnationStatements::NEUTRAL);

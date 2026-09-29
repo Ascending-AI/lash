@@ -2,6 +2,7 @@
 use crate::SessionId;
 use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
+pub mod artifact_cleanup;
 pub mod attachment_manifest;
 mod checkpoint;
 pub mod namespace;
@@ -64,6 +65,7 @@ pub use record_schema_version::{
 };
 
 pub use crate::session_graph::RealizedNodeTimestamp;
+pub use artifact_cleanup::{ArtifactCleanupLedger, CleanupUpsert};
 pub use attachment_manifest::{
     AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
     AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentIntent, AttachmentManifest,
@@ -162,7 +164,7 @@ pub use root::{
     decide_root_terminal_write, root_binding_conflict,
 };
 pub use runtime_commit::{
-    AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+    AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
     SemanticBoundaryOperation, decode_runtime_commit_receipt,
@@ -595,6 +597,7 @@ impl RuntimeCommit {
             drive_fence: _,
             root_terminal,
             park_root,
+            frame_transition,
             config: _,
             execution_config: _,
             current_frame_node_id: _,
@@ -630,7 +633,8 @@ impl RuntimeCommit {
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty()
                 && root_terminal.is_none()
-                && park_root.is_none(),
+                && park_root.is_none()
+                && frame_transition.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -796,6 +800,7 @@ impl RuntimeCommit {
             drive_fence: None,
             root_terminal: None,
             park_root: None,
+            frame_transition: None,
             config,
             execution_config,
             current_frame_node_id,

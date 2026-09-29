@@ -812,6 +812,20 @@ impl TriggerOwnerScope {
     }
 }
 
+/// The incarnation a `Register` or `Revive` under `owner` with operation id
+/// `operation_id` writes (ADR 0113 §1): a framed BLAKE3 digest of the two,
+/// so the journaled effect that runs the command knows the subscription
+/// revision it will commit, and acquires its artifacts under it, before the
+/// command commits.
+#[must_use]
+pub fn trigger_incarnation(owner: &TriggerOwnerScope, operation_id: &str) -> String {
+    let mut identity = crate::stable_identity::IdentityEncoder::new("lash.trigger-incarnation", 1);
+    identity.string(owner.owner_kind_column());
+    identity.string(owner.owner_id_column());
+    identity.string(operation_id);
+    crate::stable_identity::rendered_hash("trigger-incarnation", 1, &identity.finish())
+}
+
 /// The durable lifecycle of one trigger subscription.
 ///
 /// Three states, one carrier. The tombstone's deletion time lives in the only

@@ -54,6 +54,10 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.process-start-key",
     // FIG-3838: the name of one interned run spec.
     "lash.run-spec",
+    // FIG-4031: the incarnation a trigger `Register` or `Revive` writes,
+    // derived from its owner and operation so the effect that runs the
+    // command knows its subscription revision before it commits (ADR 0113).
+    "lash.trigger-incarnation",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

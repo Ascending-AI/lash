@@ -21,10 +21,7 @@ pub use crate::plugin::{
     SessionObserverIntent,
 };
 pub use crate::runtime::UnavailableProcessService;
-pub use crate::runtime::{
-    artifact_owner_is_permanently_retired, artifact_staging_owner_edge_is_missing,
-    load_process_execution_env, publish_process_execution_env,
-};
+pub use crate::runtime::{load_process_execution_env, publish_process_execution_env};
 pub use crate::session::{RuntimeExecutionTracing, Session};
 
 use crate::runtime::process::{ObservedWorkItem, ProcessRecord, ProcessWorkObserver};

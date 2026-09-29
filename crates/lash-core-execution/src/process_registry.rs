@@ -184,6 +184,16 @@ pub trait ProcessDefinitionRegistry: Send + Sync {
         &self,
         owner_scope: &crate::TriggerOwnerScope,
     ) -> Result<Vec<ProcessDefinitionRecord>, crate::PluginError>;
+
+    /// The row keyed `definition_id` (the registry's primary key,
+    /// `lash.process-definition:<owner namespace>:<name>`), tombstoned slots
+    /// included, or `None` when no slot has it. The artifact-cleanup guard of
+    /// a definition revision reads it to decide whether the revision is still
+    /// the slot's current resolvable one (ADR 0113 §3.6).
+    async fn definition_state(
+        &self,
+        definition_id: &str,
+    ) -> Result<Option<ProcessDefinitionRecord>, crate::PluginError>;
 }
 
 /// Validate a registration name: registry slots share the trigger
