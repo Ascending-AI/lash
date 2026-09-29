@@ -124,7 +124,7 @@ impl SqliteStore {
     const CHECKPOINT_COMPONENT_REF_CHUNK_SIZE: usize = 16_384;
 
     /// Decode a checkpoint from a fresh durable connection without calling
-    /// the `RuntimePersistence` session read path.
+    /// the session history read path.
     #[cfg(any(test, feature = "testing"))]
     pub fn raw_checkpoint_from_path_for_testing(
         path: &std::path::Path,

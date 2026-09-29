@@ -8,7 +8,8 @@ use lash_core_execution::{
     FleetFormatStore, Message, MessageRole, ModelSpec, Part, PluginState, RuntimeCommit,
     RuntimeSessionState, SessionCatalogStore, SessionCommitStore, SessionHistoryStore,
     SessionLookup, SessionPolicy, SessionStoreCreateRequest, StoreError, StoreMaintenance,
-    TokenLedgerEntry, TokenUsage, ToolState, WindowSelector, facade_support::shared_parts,
+    TokenLedgerEntry, TokenUsage, ToolState, TurnInputStore, WindowSelector,
+    facade_support::shared_parts,
 };
 use lash_sansio::SessionId;
 use lash_sqlite_store::{BlobArtifactDescriptor, SqliteStore};
