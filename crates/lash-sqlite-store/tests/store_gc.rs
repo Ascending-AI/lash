@@ -715,7 +715,7 @@ async fn sqlite_unbound_vacuum_returns_typed_error_and_preserves_catalog() {
     factory.unpin(&leaf).await.expect("unpin");
 
     let unbound =
-        Store::open(&root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
+        SqliteStore::open(&root.join(lash_sqlite_store::SqliteDatabase::DurableCore.file_name()))
             .await
             .expect("open unbound store");
     let err = unbound

@@ -11,7 +11,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
     let dir = tempfile::tempdir().expect("SQLite predecessor-refusal tempdir");
     let path = dir.path().join("durable-core.db");
     drop(
-        Store::open(&path)
+        SqliteStore::open(&path)
             .await
             .expect("create current SQLite catalog"),
     );
@@ -55,7 +55,7 @@ async fn sqlite_retained_prior_durable_core_is_refused_at_open() {
             found: i64::from(RETAINED_PRIOR_DURABLE_CORE_GENERATION),
         }
     );
-    let error = Store::open(&path)
+    let error = SqliteStore::open(&path)
         .await
         .err()
         .expect("the retained SQLite durable-core predecessor must be refused at open")
@@ -87,7 +87,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
     let dir = tempfile::tempdir().expect("SQLite graph-sequence cutover tempdir");
     let path = dir.path().join("durable-core.db");
     drop(
-        Store::open(&path)
+        SqliteStore::open(&path)
             .await
             .expect("create current SQLite catalog"),
     );
@@ -107,7 +107,7 @@ async fn sqlite_41_graph_sequence_shape_is_rejected_without_migration() {
         .expect("stamp SQLite durable-core 41");
     drop(connection);
 
-    let error = Store::open(&path)
+    let error = SqliteStore::open(&path)
         .await
         .err()
         .expect("version-41 graph shape must be rejected")

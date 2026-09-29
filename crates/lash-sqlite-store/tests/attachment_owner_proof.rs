@@ -1,4 +1,4 @@
-use lash_sqlite_store::{SqliteSessionStoreFactory, Store, StoreOptions};
+use lash_sqlite_store::{SqliteSessionStoreFactory, SqliteStore, StoreOptions};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use tracing::instrument::WithSubscriber;
@@ -33,7 +33,7 @@ lash_conformance::attachment_owner_degraded_tests!({
     let factory = Arc::new(SqliteSessionStoreFactory::new(dir.path()))
         as Arc<dyn lash_core_execution::SessionStoreFactory>;
     let attachments = Arc::new(
-        lash_core_execution::facade_support::FileAttachmentStore::new(
+        lash_core_execution::facade_support::FileAttachmentSqliteStore::new(
             dir.path().join("attachments"),
         ),
     ) as Arc<dyn lash_core_execution::AttachmentStore>;
@@ -43,10 +43,10 @@ lash_conformance::attachment_owner_degraded_tests!({
 #[tokio::test]
 async fn attachment_constructors_warn_exactly_once_with_fields() {
     for path in [
-        "Store::open",
-        "Store::open_with_clock",
-        "Store::open_with_options",
-        "Store::open_with_options_and_clock",
+        "SqliteStore::open",
+        "SqliteStore::open_with_clock",
+        "SqliteStore::open_with_options",
+        "SqliteStore::open_with_options_and_clock",
         "SqliteSessionStoreFactory::new",
         "SqliteSessionStoreFactory::with_options",
     ] {
@@ -57,19 +57,19 @@ async fn attachment_constructors_warn_exactly_once_with_fields() {
         async {
             let clock = Arc::new(lash_core_execution::facade_support::SystemClock);
             match path {
-                "Store::open" => {
-                    Store::open(&db).await.unwrap();
+                "SqliteStore::open" => {
+                    SqliteStore::open(&db).await.unwrap();
                 }
-                "Store::open_with_clock" => {
-                    Store::open_with_clock(&db, clock).await.unwrap();
+                "SqliteStore::open_with_clock" => {
+                    SqliteStore::open_with_clock(&db, clock).await.unwrap();
                 }
-                "Store::open_with_options" => {
-                    Store::open_with_options(&db, StoreOptions::default())
+                "SqliteStore::open_with_options" => {
+                    SqliteStore::open_with_options(&db, StoreOptions::default())
                         .await
                         .unwrap();
                 }
-                "Store::open_with_options_and_clock" => {
-                    Store::open_with_options_and_clock(&db, StoreOptions::default(), clock)
+                "SqliteStore::open_with_options_and_clock" => {
+                    SqliteStore::open_with_options_and_clock(&db, StoreOptions::default(), clock)
                         .await
                         .unwrap();
                 }

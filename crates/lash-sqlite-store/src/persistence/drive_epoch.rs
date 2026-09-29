@@ -93,7 +93,7 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 }
 
 #[async_trait::async_trait]
-impl DriveEpochStore for Store {
+impl DriveEpochStore for SqliteStore {
     async fn seal_drive_epoch(
         &self,
         session_id: &SessionId,

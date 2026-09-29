@@ -44,7 +44,7 @@ async fn sqlite_persisted_record_decode_classification() {
     let path = dir.path().join("persisted-record-decode.db");
 
     let head_session_id = SessionId::from("persisted-record-decode-head");
-    let head_store = Store::open(&path).await.expect("open head store");
+    let head_store = SqliteStore::open(&path).await.expect("open head store");
     head_store
         .bind_session(&head_session_id)
         .expect("bind head store");
@@ -68,7 +68,9 @@ async fn sqlite_persisted_record_decode_classification() {
         .expect("seed head session");
 
     let checkpoint_session_id = SessionId::from("persisted-record-decode-checkpoint");
-    let checkpoint_store = Store::open(&path).await.expect("open checkpoint store");
+    let checkpoint_store = SqliteStore::open(&path)
+        .await
+        .expect("open checkpoint store");
     checkpoint_store
         .bind_session(&checkpoint_session_id)
         .expect("bind checkpoint store");
@@ -126,7 +128,7 @@ async fn sqlite_persisted_record_decode_classification() {
         1
     );
     assert_corrupt(
-        SessionCommitStore::load_session(&checkpoint_store).await,
+        SessionCommitSqliteStore::load_session(&checkpoint_store).await,
         "SessionCheckpoint",
     );
 }
@@ -146,7 +148,7 @@ fn turn_failure_settlement_query_filters_receipts_without_evidence() {
 /// Seed one committed session carrying failure evidence, then splice an extra
 /// receipt row into `runtime_turn_commits` under the `bad-evidence-receipt`
 /// operation key so a refusal can be asserted against that exact row.
-async fn seed_failure_evidence_session(session_id: &str, bad_result_json: &str) -> Store {
+async fn seed_failure_evidence_session(session_id: &str, bad_result_json: &str) -> SqliteStore {
     let store = crate::test_support::memory_store()
         .await
         .expect("open receipt store");
@@ -363,7 +365,7 @@ async fn corrupt_non_msgpack_blob_surfaces_stored_data_corrupt_from_get_blob() {
 async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("unknown-attachment-owner.db");
-    let store = Store::open(&path).await.expect("open store");
+    let store = SqliteStore::open(&path).await.expect("open store");
     store
         .bind_session(&SessionId::from("unknown-attachment-owner"))
         .expect("bind store");
@@ -399,7 +401,7 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
 async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("unminted-process-attachment-owner.db");
-    let store = Store::open(&path).await.expect("open store");
+    let store = SqliteStore::open(&path).await.expect("open store");
     store
         .bind_session(&SessionId::from("unminted-process-attachment-owner"))
         .expect("bind store");
@@ -436,7 +438,7 @@ async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() 
 async fn malformed_durable_rows_surface_typed_corruption() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("corrupt.db");
-    let store = Store::open(&path).await.expect("open store");
+    let store = SqliteStore::open(&path).await.expect("open store");
     store
         .bind_session(&SessionId::from("corrupt"))
         .expect("bind store");
@@ -558,7 +560,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     .expect("insert malformed head");
     assert_corrupt(store.load_session_head_meta().await, "SessionHeadMeta");
     assert_corrupt(
-        SessionCommitStore::load_session(&store).await,
+        SessionCommitSqliteStore::load_session(&store).await,
         "SessionHeadMeta",
     );
 
@@ -576,7 +578,7 @@ async fn malformed_durable_rows_surface_typed_corruption() {
     )
     .expect("install dangling checkpoint reference");
     assert!(matches!(
-        SessionCommitStore::load_session(&store).await,
+        SessionCommitSqliteStore::load_session(&store).await,
         Err(StoreError::CheckpointComponentMissing {
             key,
             blob_ref,
@@ -609,8 +611,8 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     assert_storage_failure("get_checkpoint", store.get_checkpoint(&blob_ref).await);
     assert_storage_failure("load_usage_deltas", store.load_usage_deltas().await);
     assert_storage_failure(
-        "SessionCommitStore::load_session",
-        SessionCommitStore::load_session(&store).await,
+        "SessionCommitSqliteStore::load_session",
+        SessionCommitSqliteStore::load_session(&store).await,
     );
     assert_storage_failure(
         "AttachmentManifest::list_uncommitted",
@@ -622,13 +624,14 @@ async fn closed_connection_surfaces_storage_failure_for_every_read_family() {
     );
 }
 
-async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, Store) {
+async fn readonly_store_for_blob_write_failure() -> (tempfile::TempDir, SqliteStore) {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("readonly.db");
-    Store::open(&path).await.expect("provision store");
-    let store = Store::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
-        .await
-        .expect("open read-only store");
+    SqliteStore::open(&path).await.expect("provision store");
+    let store =
+        SqliteStore::open_readonly(&crate::location::DatabaseLocation::standalone_file(&path))
+            .await
+            .expect("open read-only store");
     (dir, store)
 }
 
@@ -677,7 +680,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     let raw = store
         .conn
         .call(|conn| {
-            Store::insert_artifact_blob_conn(
+            SqliteStore::insert_artifact_blob_conn(
                 conn,
                 BlobArtifactDescriptor::checkpoint_component(),
                 b"raw",
@@ -691,7 +694,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
     let typed = store
         .conn
         .call(|conn| {
-            Store::put_typed_artifact_blob_conn(
+            SqliteStore::put_typed_artifact_blob_conn(
                 conn,
                 BlobArtifactDescriptor::checkpoint_component(),
                 &42_u64,
@@ -715,7 +718,7 @@ async fn readonly_connection_rejects_every_surviving_blob_write_path() {
 async fn queued_work_hydration_rejects_kind_payload_contradiction() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("family-corrupt.db");
-    let store = Store::open(&path).await.expect("open store");
+    let store = SqliteStore::open(&path).await.expect("open store");
     let batch = store
         .enqueue_queued_work(lash_core_execution::runtime::QueuedWorkBatchDraft::new(
             "family-corrupt",
@@ -762,7 +765,7 @@ async fn queued_work_read_survives_a_consume_mid_hydration(session_id: &str, rea
     let path = dir.path().join("queued-work-snapshot.db");
     let injector = crate::testing::SqliteFaultInjector::default();
     let store = Arc::new(
-        Store::open_at(
+        SqliteStore::open_at(
             &crate::location::DatabaseLocation::standalone_file(&path),
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),

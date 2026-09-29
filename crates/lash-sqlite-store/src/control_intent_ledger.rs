@@ -14,21 +14,11 @@ use crate::session_roots::{
     begin_session_close_conn, load_intent_conn, settle_intent_claimed_conn, write_intent_state_conn,
 };
 
-impl SqliteSessionStoreFactory {
+impl SqliteStore {
     /// A writer on the durable core, or `None` when the catalog was never
     /// created (it then holds no session and no intent).
     pub(crate) async fn control_ledger(&self) -> Result<Option<SqliteConnection>, StoreError> {
-        if !self.core.target().exists() {
-            return Ok(None);
-        }
-        let conn =
-            SqliteConnection::open_with_policy(self.core.target(), self.options.connection_policy)
-                .await
-                .map_err(|error| StoreError::Backend(error.to_string()))?;
-        ensure_versioned_schema(&conn, SqliteDatabase::DurableCore)
-            .await
-            .map_err(sqlite_error)?;
-        Ok(Some(conn))
+        Ok(Some(self.conn.clone()))
     }
 
     /// Settle intent `id`'s engine half under obligation claim `claim` in
@@ -59,7 +49,7 @@ impl SqliteSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
-impl ControlIntentStore for SqliteSessionStoreFactory {
+impl ControlIntentStore for SqliteStore {
     async fn open_root_intent(
         &self,
         request: &lash_core_execution::store::RootIntentRequest,

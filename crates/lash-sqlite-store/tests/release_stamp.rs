@@ -27,7 +27,7 @@ impl ReleaseStampDeployment for SqliteBackend {
     }
 
     async fn open(&self) -> Result<(), StoreError> {
-        Store::open(&self.durable_core)
+        SqliteStore::open(&self.durable_core)
             .await
             .map(|_store| ())
             .map_err(|err| StoreError::Backend(err.to_string()))
@@ -73,7 +73,7 @@ async fn sqlite_release_stamp_conformance() {
 async fn a_refused_open_names_the_release_that_wrote_the_store() {
     let root = tempfile::tempdir().expect("scratch directory");
     let path = root.path().join("durable-core.db");
-    drop(Store::open(&path).await.expect("provision and stamp"));
+    drop(SqliteStore::open(&path).await.expect("provision and stamp"));
 
     // Roll the recorded schema version back to a generation this build refuses,
     // leaving the stamp in place: exactly the shape a host upgrading across a
@@ -84,7 +84,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
         .expect("stamp an unsupported generation");
     drop(connection);
 
-    let error = Store::open(&path)
+    let error = SqliteStore::open(&path)
         .await
         .err()
         .expect("an unsupported generation is refused")
@@ -108,7 +108,7 @@ async fn a_refused_open_names_the_release_that_wrote_the_store() {
 async fn an_unstamped_store_is_refused_without_inventing_a_release() {
     let root = tempfile::tempdir().expect("scratch directory");
     let path = root.path().join("durable-core.db");
-    drop(Store::open(&path).await.expect("provision and stamp"));
+    drop(SqliteStore::open(&path).await.expect("provision and stamp"));
 
     let connection = rusqlite::Connection::open(&path).expect("open the stamped database");
     connection
@@ -119,7 +119,7 @@ async fn an_unstamped_store_is_refused_without_inventing_a_release() {
         .expect("stamp an unsupported generation");
     drop(connection);
 
-    let error = Store::open(&path)
+    let error = SqliteStore::open(&path)
         .await
         .err()
         .expect("an unsupported generation is refused")

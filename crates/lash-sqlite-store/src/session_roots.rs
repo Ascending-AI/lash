@@ -749,14 +749,14 @@ pub(crate) fn settle_intent_claimed_conn(
 }
 
 /// The store half of session `session_id`'s close, in the caller's
-/// transaction ([`ControlIntentStore::begin_session_close`]).
+/// transaction ([`ControlIntentSqliteStore::begin_session_close`]).
 ///
 /// The close names the roots it releases: every root without terminal
 /// evidence (its logical-root rows, its parked root, its pending queued
 /// run), each ended `Cancelled` by `SessionDeleted`, plus the roots of the
 /// open verbs it supersedes, whose engine half then never runs.
 ///
-/// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
+/// [`ControlIntentSqliteStore::begin_session_close`]: lash_core_execution::store::ControlIntentSqliteStore::begin_session_close
 pub(crate) fn begin_session_close_conn(
     tx: &Connection,
     session_id: &SessionId,
@@ -906,12 +906,11 @@ fn commit<T>(outcome: Result<T, StoreError>) -> rusqlite::Result<TxOutcome<Resul
 }
 
 #[async_trait::async_trait]
-impl RootStore for crate::Store {
+impl RootStore for crate::SqliteStore {
     async fn unfinished_root(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<UnfinishedRoot>, StoreError> {
-        self.bind_session(session_id)?;
         let session_id = session_id.clone();
         self.conn
             .call(move |conn| Ok(unfinished_root_conn(conn, &session_id)))
@@ -923,7 +922,6 @@ impl RootStore for crate::Store {
         &self,
         request: &lash_core_execution::store::AdmitRootRequest,
     ) -> Result<Option<RootAdmission>, StoreError> {
-        self.bind_session(request.session_id())?;
         crate::persistence::admit_root_sqlite(self, request).await
     }
 
@@ -931,7 +929,6 @@ impl RootStore for crate::Store {
         &self,
         request: &lash_core_execution::store::CheckpointAdmissionRequest,
     ) -> Result<lash_core_execution::store::CheckpointAdmission, StoreError> {
-        self.bind_session(request.session_id())?;
         crate::persistence::admit_at_checkpoint_sqlite(self, request).await
     }
 
@@ -977,7 +974,6 @@ impl RootStore for crate::Store {
         root: &TurnId,
         inputs: &[InputId],
     ) -> Result<(), StoreError> {
-        self.bind_session(session_id)?;
         let session_id = session_id.clone();
         let root = root.clone();
         let inputs = inputs.to_vec();

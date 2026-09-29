@@ -135,6 +135,8 @@ impl SqliteSynchronous {
 /// Deployment policy for the SQLite connection owned by a store handle.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SqliteConnectionPolicy {
+    /// Read-only connection threads serving catalog and history reads.
+    pub read_connections: std::num::NonZeroUsize,
     /// How long a contending SQLite operation waits before returning busy.
     /// Longer waits reduce transient contention failures but can hold up a
     /// caller; the default is 15 seconds, and change it when the deployment's
@@ -159,6 +161,7 @@ pub struct SqliteConnectionPolicy {
 impl Default for SqliteConnectionPolicy {
     fn default() -> Self {
         Self {
+            read_connections: std::num::NonZeroUsize::new(4).expect("four is nonzero"),
             busy_timeout: Duration::from_millis(BUSY_TIMEOUT_MS as u64),
             synchronous: SqliteSynchronous::Normal,
             wal_autocheckpoint_pages: 1_000,

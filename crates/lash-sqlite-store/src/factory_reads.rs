@@ -19,7 +19,7 @@ type ParkFeedRow = (
     Option<String>,
 );
 
-impl SqliteSessionStoreFactory {
+impl SqliteStore {
     /// [`SessionStoreFactory::turn_park_feed`] over the durable core.
     pub(crate) async fn read_turn_park_feed(
         &self,
@@ -33,12 +33,10 @@ impl SqliteSessionStoreFactory {
             events: Vec::new(),
             next: after,
         };
-        if !self.core.target().exists() {
+        if !self.location.target().exists() {
             return Ok(page);
         }
-        let conn = SqliteConnection::open_readonly(self.core.target())
-            .await
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let conn = self.read_connection();
         let after_seq = i64::try_from(after.store_sequence()).unwrap_or(i64::MAX);
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
         let rows: Vec<ParkFeedRow> = conn
@@ -139,12 +137,10 @@ impl SqliteSessionStoreFactory {
         session_id: &SessionId,
         root: &lash_sansio::TurnId,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
-        if !self.core.target().exists() {
+        if !self.location.target().exists() {
             return Ok(None);
         }
-        let conn = SqliteConnection::open_readonly(self.core.target())
-            .await
-            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        let conn = self.read_connection();
         let session_id = session_id.clone();
         let root = root.clone();
         conn.read(move |conn| {

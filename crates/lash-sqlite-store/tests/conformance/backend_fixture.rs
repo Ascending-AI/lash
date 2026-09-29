@@ -53,7 +53,7 @@ pub(crate) fn attachment_bytes(
     Arc::new(move || {
         let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Arc::new(
-            lash_core_execution::facade_support::FileAttachmentStore::new(
+            lash_core_execution::facade_support::FileAttachmentSqliteStore::new(
                 root.join(format!("bytes-{ordinal}")),
             ),
         ) as Arc<dyn lash_core_execution::AttachmentStore>
@@ -172,7 +172,7 @@ impl TestBackend {
     }
 
     /// A new unbound durable-core store on a connection of its own.
-    pub(crate) async fn store(&self) -> Arc<Store> {
+    pub(crate) async fn store(&self) -> Arc<SqliteStore> {
         Arc::new(
             self.stores
                 .open_store()
@@ -182,7 +182,7 @@ impl TestBackend {
     }
 
     /// [`Self::store`] from synchronous fixture code.
-    pub(crate) fn blocking_store(&self) -> Arc<Store> {
+    pub(crate) fn blocking_store(&self) -> Arc<SqliteStore> {
         let backend = self.clone();
         sync_await(async move { backend.store().await })
     }

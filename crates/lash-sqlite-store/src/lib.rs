@@ -52,7 +52,7 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 
 use flate2::{Compression, read::ZlibDecoder, write::ZlibEncoder};
 use lash_core_execution::runtime::{
@@ -65,20 +65,20 @@ use lash_core_execution::store::queued_work::{
     select_leading_session_command, select_turn_work_prefix,
 };
 use lash_core_execution::store::{
-    HydratedCheckpointComponent, HydratedSessionCheckpoint, PersistedSessionRead, RuntimeCommit,
-    RuntimeCommitReceipt, SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, RuntimeCommit, RuntimeCommitReceipt,
+    SessionCheckpoint, SessionHeadMeta, SessionHeadPayload,
 };
 use lash_core_execution::{
     AttachmentId, AttachmentIntent, AttachmentManifest, AttachmentManifestEntry,
-    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, IngressStore, PersistedSegmentHandover,
+    AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, PersistedSegmentHandover,
     ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessContinuationStore, ProcessEvent,
     ProcessEventAppendReceipt, ProcessEventAppendRequest, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
     ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, RuntimePersistence, SessionCommitStore, SessionListFilter, SessionMeta,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
-    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    ProcessStarted, SessionCommitStore, SessionListFilter, SessionMeta, SessionStoreCreateRequest,
+    SessionSummary, StoreError, StoreMaintenance, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -103,10 +103,12 @@ fn commit_count_entropy_seed() -> u64 {
     (high ^ low) & (u64::MAX >> 1)
 }
 mod backend;
+mod catalog;
 mod fleet_format;
 mod forks;
 mod generation_drain;
 mod graph;
+mod history;
 mod ingress_obligation;
 mod lifecycle;
 mod location;
@@ -133,7 +135,6 @@ mod session_roots;
 mod session_sql;
 #[cfg(test)]
 mod session_sql_tests;
-mod session_store_factory;
 #[cfg(any(test, feature = "testing"))]
 mod test_support;
 #[cfg(feature = "testing")]
@@ -146,7 +147,6 @@ pub use backend::{SqliteStoreSet, SqliteStoreSetOptions};
 pub use conn::{SqliteConnectionPolicy, SqliteSynchronous};
 pub use location::SqliteLocation;
 use location::{DatabaseLocation, DatabaseTarget};
-pub use session_store_factory::SqliteSessionStoreFactory;
 
 /// File name of the one durable-core database under a session-store root.
 ///
@@ -187,7 +187,7 @@ pub use triggers::SqliteTriggerStore;
 /// This is the first-party local implementation of the runtime store traits.
 /// Internally it holds a single cloneable [`SqliteConnection`] (a
 /// tokio-rusqlite handle to one database thread).
-pub struct Store {
+pub struct SqliteStore {
     conn: SqliteConnection,
     /// The durable-format generation this store's writers emit — the
     /// fleet-format row (ADR 0106 §1 `F`) as the open transaction recorded it.
@@ -198,8 +198,25 @@ pub struct Store {
     /// The durable-core database this store is open on. Held so a store
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
-    turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
-    session_id: Arc<OnceLock<SessionId>>,
+    turn_cancel_closure_owner: Mutex<Option<lash_core_execution::TurnCancelClosureOwnerBinding>>,
+    effect_host: Mutex<Option<Arc<dyn lash_core_execution::EffectHost>>>,
+    artifact_stores: Mutex<
+        Option<(
+            Arc<dyn lash_core_execution::ProcessExecutionEnvStore>,
+            lash_core_execution::ProcessEngineRegistry,
+        )>,
+    >,
+    process_registry: Option<DatabaseTarget>,
+    readers: Vec<SqliteConnection>,
+    next_reader: AtomicU64,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_graph_node_bodies: Arc<AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_usage_rows: Arc<AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_usage_holes: Arc<AtomicU64>,
+    #[cfg(any(test, feature = "testing"))]
+    decoded_turn_receipt_bodies: Arc<AtomicU64>,
     clock: Arc<dyn lash_core_execution::Clock>,
     artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
     options: StoreOptions,
@@ -211,7 +228,7 @@ pub struct Store {
     checkpoint_write_transaction_count: AtomicUsize,
 }
 
-impl Store {
+impl SqliteStore {
     /// Replace the process-local enqueue nonce seed for deterministic fixtures.
     pub fn with_commit_count_seed_for_testing(mut self, seed: u64) -> Self {
         self.commit_count = AtomicU64::new(seed);
@@ -438,76 +455,19 @@ fn map_record_decode_error(record_kind: &'static str, error: StoreError) -> Stor
     }
 }
 
-impl Store {
-    fn bind_session(&self, session_id: &SessionId) -> Result<(), StoreError> {
-        bind_session_lock(&self.session_id, session_id)
+impl SqliteStore {
+    fn read_connection(&self) -> &SqliteConnection {
+        let index = self.next_reader.fetch_add(1, AtomicOrdering::Relaxed) as usize;
+        &self.readers[index % self.readers.len()]
     }
 
-    fn selected_session_id(&self) -> Result<SessionId, StoreError> {
-        self.session_id
-            .get()
-            .cloned()
-            .ok_or(StoreError::SessionNotBound)
-    }
-
-    async fn resolve_session_id_for_read(&self) -> Result<Option<SessionId>, StoreError> {
-        if let Some(session_id) = self.session_id.get() {
-            return Ok(Some(session_id.clone()));
-        }
-        let session_ids = self
-            .conn
-            .call(|conn| {
-                let mut stmt = conn.prepare_cached(
-                    crate::session_sql::session_sql()
-                        .head
-                        .select_sole_bound_session_id
-                        .sql(),
-                )?;
-                stmt.query_map([], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .await
-            .map_err(sqlite_error)?;
-        if session_ids.is_empty() {
-            return Ok(None);
-        }
-        if session_ids.len() > 1 {
-            return Err(StoreError::SessionResolutionAmbiguous {
-                session_count: session_ids.len() as u64,
-            });
-        }
-        self.bind_session(&SessionId::from(session_ids[0].clone()))?;
-        Ok(self.session_id.get().cloned())
-    }
-}
-
-/// Check-or-install the handle's session binding.
-///
-/// The `OnceLock` makes the decision atomic against every binder, whether it
-/// runs on a task thread or inside a `write_flow` closure on the connection
-/// thread: a set that loses to a concurrent install re-reads the winner's id
-/// and answers the mismatch.
-fn bind_session_lock(lock: &OnceLock<SessionId>, session_id: &SessionId) -> Result<(), StoreError> {
-    if let Some(bound_session_id) = lock.get() {
-        if bound_session_id != session_id {
-            return Err(StoreError::SessionBindingMismatch {
-                bound_session_id: bound_session_id.clone(),
-                attempted_session_id: session_id.clone(),
-            });
-        }
-        return Ok(());
-    }
-    let _ = lock.set(session_id.clone());
-    if lock.get().is_some_and(|bound| bound == session_id) {
-        Ok(())
-    } else {
-        Err(StoreError::SessionBindingMismatch {
-            bound_session_id: lock
-                .get()
-                .cloned()
-                .unwrap_or_else(|| SessionId::from(String::default())),
-            attempted_session_id: session_id.clone(),
-        })
+    fn turn_cancel_closure_owner_binding(
+        &self,
+    ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
+        self.turn_cancel_closure_owner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 

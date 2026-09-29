@@ -257,7 +257,7 @@ pub(crate) fn commit_attachment_refs_conn(
     Ok(())
 }
 
-impl Store {
+impl SqliteStore {
     /// Enumerate the durable condemnation authority without exposing write
     /// tokens. Persisted phase/provenance combinations are decoded strictly so
     /// a corrupt row cannot be mistaken for sweep-owned maintenance work.
@@ -488,7 +488,7 @@ impl Store {
 }
 
 #[async_trait::async_trait]
-impl AttachmentManifest for Store {
+impl AttachmentManifest for SqliteStore {
     /// The writer half of the GC fence: the condemnation check, the claim, and
     /// the intent upsert are one SQLite transaction, so a sweeper's condemn CAS
     /// either precedes this whole mutation or fails against the intent it wrote.

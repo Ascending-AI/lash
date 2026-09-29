@@ -154,7 +154,7 @@ pub(crate) fn artifact_namespace_kind(
     }
 }
 
-impl Store {
+impl SqliteStore {
     async fn publish_artifact_ref_blob(
         &self,
         namespace: &'static str,
@@ -392,7 +392,7 @@ impl Store {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ModuleArtifactStore for Store {
+impl lash_core_execution::ModuleArtifactStore for SqliteStore {
     fn pause_next_publication_for_testing(
         &self,
     ) -> Option<lash_core_execution::ArtifactPublicationPause> {
@@ -519,7 +519,7 @@ impl lash_core_execution::ModuleArtifactStore for Store {
 }
 
 #[async_trait::async_trait]
-impl lash_core_execution::ProcessExecutionEnvStore for Store {
+impl lash_core_execution::ProcessExecutionEnvStore for SqliteStore {
     async fn publish_process_execution_env(
         &self,
         owner: &lash_core_execution::ArtifactOwner,

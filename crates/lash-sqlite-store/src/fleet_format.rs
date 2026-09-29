@@ -116,7 +116,7 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     Ok(())
 }
 
-/// The fleet format a read-only [`crate::Store`] reports.
+/// The fleet format a read-only [`crate::SqliteStore`] reports.
 ///
 /// A read-only open never runs the schema transaction, so a store only ever
 /// opened by builds that predate the row reports the build's own fleet format
@@ -133,7 +133,7 @@ pub(crate) fn recorded_or_current(conn: &Connection) -> rusqlite::Result<FleetFo
     }
 }
 
-impl lash_core_execution::FleetFormatStore for crate::Store {
+impl lash_core_execution::FleetFormatStore for crate::SqliteStore {
     /// The fleet format this store's durable writers emit — the `F` of ADR
     /// 0106 §1 as the fleet-format row recorded it at open.
     ///

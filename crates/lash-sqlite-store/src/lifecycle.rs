@@ -15,54 +15,13 @@ use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_p
 use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 
-impl SqliteSessionStoreFactory {
-    pub(super) fn turn_cancel_closure_owner_binding(
-        &self,
-    ) -> Option<lash_core_execution::TurnCancelClosureOwnerBinding> {
-        self.turn_cancel_closure_owner
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
-    }
-}
-
-impl Store {
-    pub(crate) async fn open_bound_at(
-        core: &DatabaseLocation,
-        session_id: &SessionId,
-        options: StoreOptions,
-        clock: Arc<dyn lash_core_execution::Clock>,
-        turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
-        #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
-    ) -> tokio_rusqlite::Result<Self> {
-        let store = Self::open_at(
-            core,
-            options,
-            clock,
-            None,
-            turn_cancel_closure_owner,
-            lash_core_execution::FleetFormat::writable_range(),
-            #[cfg(feature = "testing")]
-            fault_injector,
-        )
-        .await?;
-        #[expect(
-            clippy::expect_used,
-            reason = "the `OnceLock` belongs to the store value constructed on the line above, so nothing else can have set it"
-        )]
-        store
-            .session_id
-            .set(session_id.clone())
-            .expect("new SQLite store binding is unset");
-        Ok(store)
-    }
-
+impl SqliteStore {
     pub async fn open(path: &Path) -> tokio_rusqlite::Result<Self> {
         Self::open_direct(
             path,
             StoreOptions::default(),
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            "Store::open",
+            "SqliteStore::open",
         )
         .await
     }
@@ -75,7 +34,7 @@ impl Store {
             path,
             StoreOptions::default(),
             clock,
-            "Store::open_with_clock",
+            "SqliteStore::open_with_clock",
         )
         .await
     }
@@ -88,7 +47,7 @@ impl Store {
             path,
             options,
             Arc::new(lash_core_execution::facade_support::SystemClock),
-            "Store::open_with_options",
+            "SqliteStore::open_with_options",
         )
         .await
     }
@@ -98,7 +57,13 @@ impl Store {
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
     ) -> tokio_rusqlite::Result<Self> {
-        Self::open_direct(path, options, clock, "Store::open_with_options_and_clock").await
+        Self::open_direct(
+            path,
+            options,
+            clock,
+            "SqliteStore::open_with_options_and_clock",
+        )
+        .await
     }
 
     async fn open_direct(
@@ -149,7 +114,7 @@ impl Store {
         )
         .await
         .map_err(sqlite_async_error)?;
-        warn_process_registry_not_wired("Store::open_with_fleet_writable_range_for_testing");
+        warn_process_registry_not_wired("SqliteStore::open_with_fleet_writable_range_for_testing");
         Ok(store)
     }
 
@@ -189,12 +154,28 @@ impl Store {
         } else {
             false
         };
+        let mut readers = Vec::with_capacity(options.connection_policy.read_connections.get());
+        for _ in 0..options.connection_policy.read_connections.get() {
+            readers.push(SqliteConnection::open_readonly(core.target()).await?);
+        }
         Ok(Self {
             conn,
             fleet_format,
             location: core.clone(),
-            turn_cancel_closure_owner,
-            session_id: Arc::new(OnceLock::new()),
+            turn_cancel_closure_owner: Mutex::new(turn_cancel_closure_owner),
+            effect_host: Mutex::new(None),
+            artifact_stores: Mutex::new(None),
+            process_registry: process_registry.cloned(),
+            readers,
+            next_reader: AtomicU64::new(0),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_rows: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_holes: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock,
             artifact_publication_pause: Mutex::new(None),
             options,
@@ -213,12 +194,25 @@ impl Store {
         let fleet_format = conn
             .call(|conn| crate::fleet_format::recorded_or_current(conn))
             .await?;
+        let readers = vec![conn.clone()];
         Ok(Self {
             conn,
             fleet_format,
             location: core.clone(),
-            turn_cancel_closure_owner: None,
-            session_id: Arc::new(OnceLock::new()),
+            turn_cancel_closure_owner: Mutex::new(None),
+            effect_host: Mutex::new(None),
+            artifact_stores: Mutex::new(None),
+            process_registry: None,
+            readers,
+            next_reader: AtomicU64::new(0),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_graph_node_bodies: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_rows: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_usage_holes: Arc::new(AtomicU64::new(0)),
+            #[cfg(any(test, feature = "testing"))]
+            decoded_turn_receipt_bodies: Arc::new(AtomicU64::new(0)),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             artifact_publication_pause: Mutex::new(None),
             options: StoreOptions::default(),
@@ -231,22 +225,6 @@ impl Store {
         })
     }
 
-    pub(crate) async fn open_bound_readonly(
-        core: &DatabaseLocation,
-        session_id: &SessionId,
-    ) -> tokio_rusqlite::Result<Self> {
-        let store = Self::open_readonly(core).await?;
-        #[expect(
-            clippy::expect_used,
-            reason = "the `OnceLock` belongs to the store value constructed on the line above, so nothing else can have set it"
-        )]
-        store
-            .session_id
-            .set(session_id.clone())
-            .expect("new read-only SQLite store binding is unset");
-        Ok(store)
-    }
-
     #[cfg(test)]
     pub(crate) fn checkpoint_admission_counts(&self) -> (usize, usize) {
         (
@@ -257,12 +235,13 @@ impl Store {
         )
     }
 
-    pub async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(None);
-        };
+    pub async fn load_session_head_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionHeadMeta>, StoreError> {
+        let session_id = session_id.clone();
         let fleet = self.fleet_format();
-        self.conn
+        self.read_connection()
             .call(move |conn| {
                 try_load_session_head_meta_from_conn(conn, &session_id, fleet)
                     .map_err(sqlite_conversion_error)
@@ -272,7 +251,6 @@ impl Store {
     }
 
     pub async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        self.bind_session(&meta.session_id)?;
         let created_at_ms = self.clock.timestamp_ms();
         let fleet_format = self.fleet_format();
         self.conn
@@ -310,20 +288,18 @@ impl Store {
         Ok(())
     }
 
-    pub async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        let selected = self.session_id.get().cloned();
-        let meta = self
-            .conn
+    pub async fn load_session_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        let selected = session_id.clone();
+        self.read_connection()
             .call(move |conn| {
-                crate::session_meta::load_session_meta(conn, selected.as_ref())
+                crate::session_meta::load_session_meta(conn, Some(&selected))
                     .map_err(sqlite_conversion_error)
             })
             .await
-            .map_err(sqlite_error)?;
-        if let Some(meta) = &meta {
-            self.bind_session(&meta.session_id)?;
-        }
-        Ok(meta)
+            .map_err(sqlite_error)
     }
 }
 

@@ -4,7 +4,7 @@
 
 use super::*;
 
-impl Store {
+impl SqliteStore {
     pub(super) async fn enqueue_queued_work_sqlite(
         &self,
         batch: QueuedWorkBatchDraft,

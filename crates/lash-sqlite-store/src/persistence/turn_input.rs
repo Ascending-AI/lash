@@ -14,7 +14,7 @@ fn decode_binding_scope(
 }
 
 #[async_trait::async_trait]
-impl IngressStore for Store {
+impl lash_core_execution::TurnInputStore for SqliteStore {
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,
@@ -98,7 +98,7 @@ impl IngressStore for Store {
                 message: error.to_string(),
             })?;
         if authorization.admitted_scope().session_id().is_none()
-            && let Some(owner) = &self.turn_cancel_closure_owner
+            && let Some(owner) = self.turn_cancel_closure_owner_binding()
         {
             owner
                 .register(authorization.admitted_scope(), authorization.binding_id())
@@ -275,14 +275,9 @@ impl IngressStore for Store {
 
     async fn pending_turn_cancel_closure_pins(
         &self,
+        session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnCancelClosureAuthorization>, StoreError> {
-        let session_id =
-            self.session_id
-                .get()
-                .cloned()
-                .ok_or(StoreError::UnsupportedStoreOperation {
-                    operation: "pending_turn_cancel_closure_pins requires a session-bound store",
-                })?;
+        let session_id = session_id.clone();
         let encoded = self
             .conn
             .call(move |conn| {
@@ -634,12 +629,16 @@ impl IngressStore for Store {
                         .map_err(sqlite_error)?;
                     let rows = stmt
                         .query_map(params![session_id.as_str()], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                            ))
                         })
                         .map_err(sqlite_error)?;
                     let mut commits = Vec::new();
                     for row in rows {
-                        let (turn_id, result_json) = row.map_err(sqlite_error)?;
+                        let (turn_id, result_json, outcome_code) = row.map_err(sqlite_error)?;
                         let result =
                             lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                                 &session_id,
@@ -647,6 +646,10 @@ impl IngressStore for Store {
                                 &result_json,
                                 fleet,
                             )?;
+                        lash_core_execution::store::validate_turn_commit_outcome_code(
+                            &result,
+                            outcome_code.as_deref(),
+                        )?;
                         commits.push((
                             result.head_revision,
                             turn_id,
@@ -809,7 +812,10 @@ impl IngressStore for Store {
             .await
             .map_err(sqlite_error)?
     }
+}
 
+#[async_trait::async_trait]
+impl lash_core_execution::QueuedWorkStore for SqliteStore {
     async fn enqueue_queued_work(
         &self,
         batch: QueuedWorkBatchDraft,
@@ -868,6 +874,23 @@ impl IngressStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
         self.list_open_queued_work_sqlite(session_id).await
+    }
+
+    async fn has_claimable_queued_work(&self, session_id: &SessionId) -> Result<bool, StoreError> {
+        let session_id = session_id.clone();
+        self.read_connection()
+            .call(move |conn| {
+                conn.query_row(
+                    crate::turn_ingress::turn_ingress_sql()
+                        .family
+                        .has_claimable_work
+                        .sql(),
+                    params![session_id.as_str()],
+                    |row| row.get(0),
+                )
+            })
+            .await
+            .map_err(sqlite_error)
     }
 }
 

@@ -118,7 +118,7 @@ fn blob_content_hash(content: &[u8]) -> String {
     BlobRef::for_content(content).0
 }
 
-impl Store {
+impl SqliteStore {
     // One JSON-array bind avoids SQLite's scalar-parameter ceiling. A
     // 16,384-ref chunk is four times the largest required depth while bounding
     // each encoded request to roughly one MiB of SHA-256 text plus JSON framing.

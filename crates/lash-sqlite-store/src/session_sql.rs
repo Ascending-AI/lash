@@ -471,6 +471,11 @@ lash_store_sql::statements! {
         select_occupied = "SELECT node_id FROM graph_nodes
                  WHERE node_id IN (SELECT value FROM json_each(?1))";
 
+        delete_by_id_for_testing = "DELETE FROM graph_nodes WHERE node_id = ?1";
+        set_parent_for_testing = "UPDATE graph_nodes SET parent_node_id = ?2 WHERE node_id = ?1";
+        set_frame_pointer_for_testing = "UPDATE graph_nodes SET frame_node_id = ?2 WHERE node_id = ?1";
+        set_body_bytes_for_testing = "UPDATE graph_nodes SET body_bytes = ?2 WHERE node_id = ?1";
+
         /// One statement rather than one per node: the rows are known in full
         /// before any of them is written and they all land or none do, so a
         /// statement per node bought no atomicity and cost a round trip per

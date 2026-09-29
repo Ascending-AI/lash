@@ -6,19 +6,18 @@ use graph_nodes::{insert_graph_nodes_conn, occupied_node_ids_conn};
 use lash_core_execution::FleetFormatStore;
 
 #[async_trait::async_trait]
-impl SessionCommitStore for Store {
+impl SessionCommitStore for SqliteStore {
     async fn committed_turn_exists(
         &self,
+        session_id: &SessionId,
         turn_id: &lash_core_execution::TurnId,
     ) -> Result<bool, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(false);
-        };
+        let session_id = session_id.clone();
         let key = lash_core_execution::store_backend_support::turn_commit_receipt_storage_key(
             &session_id,
             turn_id,
         )?;
-        self.conn
+        self.read_connection()
             .call(move |conn| {
                 let exists: bool = conn.query_row(
                     session_sql().turn_commits.exists_for_turn.sql(),
@@ -31,15 +30,17 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)
     }
 
-    async fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(false);
-        };
+    async fn drain_end_exists(
+        &self,
+        session_id: &SessionId,
+        drain_id: &str,
+    ) -> Result<bool, StoreError> {
+        let session_id = session_id.clone();
         let key = lash_core_execution::store_backend_support::drain_end_receipt_storage_key(
             &session_id,
             drain_id,
         )?;
-        self.conn
+        self.read_connection()
             .call(move |conn| {
                 let exists: bool = conn.query_row(
                     session_sql().turn_commits.exists_for_turn.sql(),
@@ -52,12 +53,10 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)
     }
 
-    async fn read_session_state_version(&self) -> Result<u32, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(lash_core_execution::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);
-        };
+    async fn read_session_state_version(&self, session_id: &SessionId) -> Result<u32, StoreError> {
+        let session_id = session_id.clone();
         let fleet = self.fleet_format();
-        self.conn
+        self.read_connection()
             .call(move |conn| Ok(read_session_state_version_conn(conn, &session_id, fleet)))
             .await
             .map_err(sqlite_error)?
@@ -87,21 +86,6 @@ impl SessionCommitStore for Store {
             })
             .await
             .map_err(sqlite_error)?
-    }
-
-    async fn load_session(&self) -> Result<Option<PersistedSessionRead>, StoreError> {
-        self.load_session_read(None).await
-    }
-
-    async fn load_session_at(
-        &self,
-        base: &lash_core_execution::store::SessionHeadRef,
-    ) -> Result<PersistedSessionRead, StoreError> {
-        self.load_session_read(Some(base.clone()))
-            .await?
-            .ok_or(StoreError::TurnBaseNotRetained {
-                revision: base.revision,
-            })
     }
 
     async fn retain_admission_base(
@@ -149,154 +133,18 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)?
     }
 
-    async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
-        self.read_session_state_version().await?;
-        Store::load_session_head_meta(self).await
-    }
-
-    /// FIG-653: session-relative history reads enforce graph membership, not authorization.
-    async fn load_node(
+    async fn load_session_head_meta(
         &self,
-        node_id: &str,
-    ) -> Result<Option<lash_core_execution::SessionNodeRecord>, StoreError> {
-        let session_id = self.selected_session_id()?;
-        let node_id = node_id.to_string();
-        let row: Option<(String, Option<String>, String)> = self
-            .conn
-            .call(move |conn| {
-                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Deferred)?;
-                let outcome = (|| {
-                    let candidate = tx
-                        .query_row(
-                            session_sql().graph_sqlite.select_lookup.sql(),
-                            params![node_id, session_id.as_str()],
-                            |row| {
-                                Ok((
-                                    row.get::<_, String>(0)?,
-                                    row.get::<_, Option<String>>(1)?,
-                                    row.get::<_, String>(2)?,
-                                    row.get::<_, String>(3)?,
-                                    row.get::<_, i64>(4)?,
-                                ))
-                            },
-                        )
-                        .optional()?;
-                    let Some((
-                        candidate_id,
-                        parent_node_id,
-                        node_json,
-                        owner,
-                        candidate_generation,
-                    )) = candidate
-                    else {
-                        return Ok(None);
-                    };
-                    if owner != session_id {
-                        let mut stmt =
-                            tx.prepare_cached(session_sql().head.select_readable_range.sql())?;
-                        let rows = stmt
-                            .query_map(params![session_id.as_str(), candidate_generation], |row| {
-                                Ok((
-                                    row.get::<_, Option<String>>(0)?,
-                                    row.get::<_, Option<i64>>(1)?,
-                                    row.get::<_, Option<i64>>(2)?,
-                                    row.get::<_, Option<String>>(3)?,
-                                    row.get::<_, Option<String>>(4)?,
-                                    row.get::<_, Option<i64>>(5)?,
-                                    row.get::<_, Option<i64>>(6)?,
-                                ))
-                            })?
-                            .collect::<Result<Vec<_>, _>>()?;
-                        let Some(first) = rows.first() else {
-                            return Ok(None);
-                        };
-                        let Some(head_id) = first.0.clone() else {
-                            return Ok(None);
-                        };
-                        let (Some(head_generation), Some(head_tombstoned)) = (first.1, first.2)
-                        else {
-                            return Err(sqlite_conversion_error(stored_data_corrupt(
-                                "SessionGraph",
-                                "head leaf is missing",
-                            )));
-                        };
-                        if head_tombstoned != 0 {
-                            return Err(sqlite_conversion_error(stored_data_corrupt(
-                                "SessionGraph",
-                                "head leaf is tombstoned",
-                            )));
-                        }
-                        if candidate_generation < 0 || candidate_generation > head_generation {
-                            return Ok(None);
-                        }
-                        let mut range = std::collections::HashMap::new();
-                        for row in rows {
-                            if let (
-                                Some(node_id),
-                                parent_node_id,
-                                Some(generation),
-                                Some(tombstoned),
-                            ) = (row.3, row.4, row.5, row.6)
-                            {
-                                range.insert(node_id, (parent_node_id, generation, tombstoned));
-                            }
-                        }
-                        let mut current_id = head_id;
-                        let mut current_generation = head_generation;
-                        loop {
-                            let Some((parent_id, generation, tombstoned)) = range.get(&current_id)
-                            else {
-                                return Err(sqlite_conversion_error(stored_data_corrupt(
-                                    "SessionGraph",
-                                    "readable generation range omits an edge-path node",
-                                )));
-                            };
-                            if *tombstoned != 0 || *generation != current_generation {
-                                return Err(sqlite_conversion_error(stored_data_corrupt(
-                                    "SessionGraph",
-                                    "parent edge crosses a tombstone or generation gap",
-                                )));
-                            }
-                            if current_generation == candidate_generation {
-                                if current_id != candidate_id {
-                                    return Ok(None);
-                                }
-                                break;
-                            }
-                            current_id = parent_id.clone().ok_or_else(|| {
-                                sqlite_conversion_error(stored_data_corrupt(
-                                    "SessionGraph",
-                                    "parent edge ended before the candidate generation",
-                                ))
-                            })?;
-                            current_generation -= 1;
-                        }
-                    }
-                    Ok(Some((candidate_id, parent_node_id, node_json)))
-                })()?;
-                tx.commit()?;
-                Ok(outcome)
-            })
-            .await
-            .map_err(sqlite_error)?;
-        let fleet = self.fleet_format();
-        row.map(|(node_id, parent_node_id, node_json)| {
-            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
-                node_id,
-                parent_node_id,
-                &node_json,
-                fleet,
-            )
-            .map_err(|error| stored_data_corrupt("SessionGraph node", error))
-        })
-        .transpose()
+        session_id: &SessionId,
+    ) -> Result<Option<SessionHeadMeta>, StoreError> {
+        self.read_session_state_version(session_id).await?;
+        SqliteStore::load_session_head_meta(self, session_id).await
     }
 
     async fn record_turn_park(
         &self,
         park: &lash_core_execution::store::TurnParkWrite,
     ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
-        self.bind_session(&park.session_id)?;
         let write = park.clone();
         self.conn
             .write_flow(move |tx| {
@@ -328,7 +176,6 @@ impl SessionCommitStore for Store {
     ) -> Result<RuntimeCommitReceipt, StoreError> {
         let planner =
             lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format())?;
-        self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
         let fleet = self.fleet_format();
@@ -341,9 +188,6 @@ impl SessionCommitStore for Store {
                     super::drive_epoch::require_commit_fences_conn(tx, commit)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
-                    planner.validate_session_binding(
-                        existing.as_ref().map(|meta| &meta.session_id),
-                    )?;
                     crate::session_meta::write_session_meta(
                         tx,
                         &SessionMeta {
@@ -391,6 +235,7 @@ impl SessionCommitStore for Store {
                             String,
                             String,
                             Option<String>,
+                            Option<String>,
                             Option<i64>,
                             Option<i64>,
                         )> = tx
@@ -404,6 +249,7 @@ impl SessionCommitStore for Store {
                                         row.get(2)?,
                                         row.get(3)?,
                                         row.get(4)?,
+                                        row.get(5)?,
                                     ))
                                 },
                             )
@@ -412,6 +258,7 @@ impl SessionCommitStore for Store {
                         if let Some((
                             stored_hash,
                             result_json,
+                            stored_outcome,
                             stored_identity,
                             stored_version,
                             stored_requested_node_count,
@@ -433,6 +280,9 @@ impl SessionCommitStore for Store {
                                     &result_json,
                                     fleet,
                                 )?;
+                            lash_core_execution::store::validate_turn_commit_outcome_code(
+                                &result, stored_outcome.as_deref(),
+                            )?;
                             let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                                 turn_commit_hash: stored_hash,
                                 result,
@@ -783,6 +633,7 @@ impl SessionCommitStore for Store {
                                 receipt.operation_key,
                                 receipt.turn_commit_hash,
                                 result_json,
+                                receipt.result.outcome.as_ref().map(|outcome| outcome.as_str()),
                                 now as i64,
                                 identity.0,
                                 identity.1,
@@ -804,6 +655,7 @@ impl SessionCommitStore for Store {
                                         marker,
                                         receipt.turn_commit_hash,
                                         result_json,
+                                        Option::<&str>::None,
                                         now as i64,
                                         !result.failure_evidence.is_empty(),
                                     ],
@@ -840,200 +692,28 @@ impl SessionCommitStore for Store {
         Ok(result)
     }
 
-    async fn admit_and_bind_session(
-        &self,
-        binding: &lash_core_execution::SessionBinding,
-    ) -> Result<lash_core_execution::SessionAdmission, StoreError> {
-        binding.validate()?;
-        let session_id = binding.session_id.clone();
-        // The tombstone outranks the handle's own binding: a bound handle
-        // asked to admit a deleted session answers SessionDeleted, not
-        // SessionBindingMismatch (FIG-1282). The binding decision is made
-        // inside the write transaction, between the tombstone check and the
-        // metadata write: the connection thread serializes these closures,
-        // and the `OnceLock` covers binders outside a transaction, so a
-        // competing admission that loses the bind rolls its creation back
-        // rather than committing a session it is then refused for. The lock
-        // crosses the closure's 'static bound as a shared `Arc`.
-        let bound = Arc::clone(&self.session_id);
-        let created_at_ms = self.clock.timestamp_ms();
-        let fleet_format = self.fleet_format();
-        let meta = SessionMeta {
-            owning_process_id: None,
-            session_id: session_id.clone(),
-            relation: binding.relation.clone(),
-            pending_observer_intents: Vec::new(),
-        };
-        let admission = self
-            .conn
-            .write_flow(move |tx| {
-                let outcome: Result<lash_core_execution::SessionAdmission, StoreError> = (|| {
-                    ensure_session_not_deleted_conn(tx, &session_id)?;
-                    crate::bind_session_lock(&bound, &session_id)?;
-                    let inserted = crate::session_meta::write_session_meta(
-                        tx,
-                        &meta,
-                        crate::session_meta::SessionMetaWrite::Insert,
-                        created_at_ms,
-                        fleet_format,
-                    )?;
-                    if inserted {
-                        return Ok(lash_core_execution::SessionAdmission::Created);
-                    }
-                    let recorded = crate::session_meta::load_recorded_lineage(tx, &session_id)?
-                        .ok_or_else(|| StoreError::SessionBindingNotMaterialized {
-                            session_id: session_id.clone(),
-                        })?;
-                    lash_core_execution::store_backend_support::guard_rebind_lineage(
-                        &session_id,
-                        &recorded,
-                        &meta.relation,
-                    )?;
-                    Ok(lash_core_execution::SessionAdmission::Rebound)
-                })(
-                );
-                Ok(match outcome {
-                    Ok(admission) => TxOutcome::Commit(Ok(admission)),
-                    Err(err) => TxOutcome::Rollback(Err(err)),
-                })
-            })
-            .await
-            .map_err(sqlite_error)??;
-        Ok(admission)
-    }
-
     async fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError> {
-        Store::save_session_meta(self, meta).await
+        SqliteStore::save_session_meta(self, meta).await
     }
 
-    async fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError> {
-        Store::load_session_meta(self).await
+    async fn load_session_meta(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        SqliteStore::load_session_meta(self, session_id).await
     }
 
-    async fn load_session_meta_for_commit(&self) -> Result<Option<SessionMeta>, StoreError> {
-        let Some(session_id) = self.session_id.get().cloned() else {
-            return self.load_session_meta().await;
-        };
+    async fn load_session_meta_for_commit(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<SessionMeta>, StoreError> {
+        let session_id = session_id.clone();
         self.conn
             .call(move |conn| {
                 Ok((|| {
                     ensure_session_not_deleted_conn(conn, &session_id)?;
                     crate::session_meta::load_session_meta(conn, Some(&session_id))
                 })())
-            })
-            .await
-            .map_err(sqlite_error)?
-    }
-}
-
-impl Store {
-    /// The live session (`base: None`), or the session as it stood at the head
-    /// one of its turns was admitted on (FIG-3682).
-    ///
-    /// A base read takes the graph along the base leaf and the base
-    /// checkpoint, and the frame nearest the base leaf with that frame's
-    /// configuration when the live head has since moved to another frame. A
-    /// base checkpoint the store no longer holds is
-    /// [`StoreError::TurnBaseNotRetained`], never another head.
-    async fn load_session_read(
-        &self,
-        base: Option<lash_core_execution::store::SessionHeadRef>,
-    ) -> Result<Option<PersistedSessionRead>, StoreError> {
-        let Some(session_id) = self.resolve_session_id_for_read().await? else {
-            return Ok(None);
-        };
-        let fleet = self.fleet_format();
-        self.conn
-            .call(move |conn| {
-                let tx = conn.transaction()?;
-                let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
-                    read_session_state_version_conn(&tx, &session_id, fleet)?;
-                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id, fleet)?
-                    else {
-                        return Ok(None);
-                    };
-                    let (head_revision, leaf_node_id, checkpoint_ref) = match base.as_ref() {
-                        None => (
-                            meta.head_revision,
-                            meta.leaf_node_id.clone(),
-                            meta.checkpoint_ref.clone(),
-                        ),
-                        Some(base) => (base.revision, base.leaf.clone(), base.checkpoint.clone()),
-                    };
-                    let graph = Self::load_active_path_session_graph_from_conn(
-                        &tx,
-                        &session_id,
-                        leaf_node_id
-                            .clone()
-                            .map(lash_core_execution::NodeId::into_inner),
-                        fleet,
-                    )?;
-                    let checkpoint = match checkpoint_ref.as_ref() {
-                        Some(blob_ref) => {
-                            Some(match Self::get_checkpoint_conn(&tx, blob_ref, fleet)? {
-                                Some(checkpoint) => checkpoint,
-                                None if base.is_some() => {
-                                    return Err(StoreError::TurnBaseNotRetained {
-                                        revision: head_revision,
-                                    });
-                                }
-                                None => {
-                                    return Err(StoreError::CheckpointComponentMissing {
-                                        key: "manifest".to_string(),
-                                        blob_ref: blob_ref.clone(),
-                                    });
-                                }
-                            })
-                        }
-                        None => None,
-                    };
-                    // A turn is admitted only while the head owes no follow-on
-                    // (ADR 0101 §3), so an admitted base never carries one.
-                    let pending_follow_on = if base.is_some() {
-                        None
-                    } else {
-                        meta.pending_follow_on.clone()
-                    };
-                    let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
-                        Some(leaf)
-                            if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) =>
-                        {
-                            let frame = super::nearest_frame_node_id_conn(&tx, leaf.as_str())?
-                                .and_then(|frame| {
-                                    lash_core_execution::FrameNodeId::new(frame).ok()
-                                });
-                            let frame_config = frame
-                                .as_ref()
-                                .filter(|frame| meta.current_frame_node_id.as_ref() != Some(*frame))
-                                .and_then(|frame| graph.find_node(frame.as_str()))
-                                .and_then(lash_core_execution::SessionNodeRecord::frame_config);
-                            (frame, frame_config.unwrap_or(meta.config))
-                        }
-                        _ => (meta.current_frame_node_id, meta.config),
-                    };
-                    Ok(Some(PersistedSessionRead {
-                        session_id: meta.session_id,
-                        head_revision,
-                        config,
-                        current_frame_node_id,
-                        pending_follow_on,
-                        graph,
-                        checkpoint_ref,
-                        checkpoint,
-                        token_ledger:
-                            lash_core_execution::store::merge_token_ledger_entries_checked(
-                                Self::load_usage_deltas_conn(&tx, &session_id)?,
-                            )?,
-                        turn_failure_settlements: load_turn_failure_settlements_conn(
-                            &tx,
-                            &session_id,
-                            fleet,
-                        )?,
-                    }))
-                })(
-                );
-                tx.commit()?;
-                Ok(outcome)
             })
             .await
             .map_err(sqlite_error)?

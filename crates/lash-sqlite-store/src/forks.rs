@@ -494,6 +494,7 @@ mod tests {
     async fn factory_catalog_connection_uses_requested_policy() {
         let dir = tempfile::tempdir().expect("tempdir");
         let policy = SqliteConnectionPolicy {
+            read_connections: std::num::NonZeroUsize::new(4).expect("four is nonzero"),
             busy_timeout: std::time::Duration::from_millis(321),
             synchronous: SqliteSynchronous::Full,
             wal_autocheckpoint_pages: 17,

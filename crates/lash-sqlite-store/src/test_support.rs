@@ -3,21 +3,111 @@
 //! production store traits carry none.
 
 use super::*;
-use lash_core_execution::store::{
-    ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
-};
+use lash_core_execution::store::{DecodedRowCounts, GraphRowCorruption, StoreTestSupport};
 
 #[async_trait::async_trait]
-impl StoreTestSupport for Store {
+impl StoreTestSupport for SqliteStore {
+    fn decoded_row_counts_for_testing(&self) -> DecodedRowCounts {
+        DecodedRowCounts {
+            graph_node_bodies: self.decoded_graph_node_bodies.load(AtomicOrdering::Relaxed),
+            usage_rows: self.decoded_usage_rows.load(AtomicOrdering::Relaxed),
+            usage_holes: self.decoded_usage_holes.load(AtomicOrdering::Relaxed),
+            turn_receipt_bodies: self
+                .decoded_turn_receipt_bodies
+                .load(AtomicOrdering::Relaxed),
+        }
+    }
+
+    async fn corrupt_graph_row_for_testing(
+        &self,
+        node_id: &lash_core_execution::NodeId,
+        corruption: GraphRowCorruption,
+    ) -> Result<(), StoreError> {
+        let node_id = node_id.clone();
+        self.conn
+            .write(move |tx| {
+                let sql = &crate::session_sql::session_sql().graph_sqlite;
+                match corruption {
+                    GraphRowCorruption::DeleteRow => {
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.delete_by_id_for_testing.sql(),
+                            params![node_id.as_str()],
+                        )?;
+                    }
+                    GraphRowCorruption::SetParent(parent) => {
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.set_parent_for_testing.sql(),
+                            params![
+                                node_id.as_str(),
+                                parent.as_ref().map(lash_core_execution::NodeId::as_str)
+                            ],
+                        )?;
+                    }
+                    GraphRowCorruption::SetFramePointer(frame) => {
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.set_frame_pointer_for_testing.sql(),
+                            params![node_id.as_str(), frame.as_str()],
+                        )?;
+                    }
+                    GraphRowCorruption::SetBodyBytes(bytes) => {
+                        let bytes =
+                            i64::try_from(bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                        crate::conn::cached_execute(
+                            tx,
+                            sql.set_body_bytes_for_testing.sql(),
+                            params![node_id.as_str(), bytes],
+                        )?;
+                    }
+                }
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
+    async fn set_head_current_frame_for_testing(
+        &self,
+        session_id: &SessionId,
+        frame: Option<lash_core_execution::FrameNodeId>,
+    ) -> Result<(), StoreError> {
+        let session_id = session_id.clone();
+        self.conn
+            .write(move |tx| {
+                let head_json: String = tx.query_row(
+                    crate::session_sql::session_sql()
+                        .head
+                        .select_head_json
+                        .sql(),
+                    params![session_id.as_str()],
+                    |row| row.get(0),
+                )?;
+                let mut head: serde_json::Value = serde_json::from_str(&head_json)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                head["current_frame_node_id"] = serde_json::to_value(frame)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                let head_json = serde_json::to_string(&head)
+                    .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+                crate::conn::cached_execute(
+                    tx,
+                    crate::session_sql::session_sql().head.set_head_json.sql(),
+                    params![session_id.as_str(), head_json],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(sqlite_error)
+    }
+
     async fn rewrite_session_tool_access_for_testing(
         &self,
+        session_id: &SessionId,
         schema_version: u32,
         tool_access: Option<serde_json::Value>,
     ) -> Result<(), StoreError> {
-        let session_id = self
-            .resolve_session_id_for_read()
-            .await?
-            .ok_or(StoreError::SessionNotBound)?;
+        let session_id = session_id.clone();
         self.conn
             .write(move |tx| {
                 let head_json: String = tx.query_row(
@@ -58,9 +148,10 @@ impl StoreTestSupport for Store {
 
     async fn stamp_session_state_version_for_testing(
         &self,
+        session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
-        let session_id = self.selected_session_id()?;
+        let session_id = session_id.clone();
         self.conn
             .write(move |tx| {
                 crate::conn::cached_execute(
@@ -79,9 +170,10 @@ impl StoreTestSupport for Store {
 
     async fn stamp_session_state_version_and_corrupt_payload_for_testing(
         &self,
+        session_id: &SessionId,
         version: u32,
     ) -> Result<(), StoreError> {
-        let session_id = self.selected_session_id()?;
+        let session_id = session_id.clone();
         self.conn
             .write(move |tx| {
                 crate::conn::cached_execute(
@@ -107,30 +199,10 @@ impl StoreTestSupport for Store {
     }
 }
 
-#[async_trait::async_trait]
-impl ConformanceSessionStoreFactory for SqliteSessionStoreFactory {
-    async fn create_conformance_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Arc<dyn ConformancePersistence>, StoreError> {
-        Ok(self.create_bound_store(request).await?)
-    }
-
-    async fn open_existing_conformance_store(
-        &self,
-        request: &SessionStoreCreateRequest,
-    ) -> Result<Option<Arc<dyn ConformancePersistence>>, String> {
-        Ok(self
-            .open_existing_bound_store(request)
-            .await?
-            .map(|store| store as Arc<dyn ConformancePersistence>))
-    }
-}
-
 /// An unbound durable-core store on a fresh memory store set. The store holds
 /// the store set's anchors, so the database lives as long as it does.
 #[cfg(test)]
-pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Store> {
+pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Arc<SqliteStore>> {
     memory_store_with_options(crate::SqliteStoreSetOptions::memory().store).await
 }
 
@@ -138,7 +210,7 @@ pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Store> {
 #[cfg(test)]
 pub(crate) async fn memory_store_with_options(
     options: StoreOptions,
-) -> tokio_rusqlite::Result<Store> {
+) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
     crate::SqliteStoreSet::memory_with_options_and_clock(
         crate::SqliteStoreSetOptions {
             store: options,

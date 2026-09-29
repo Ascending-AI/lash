@@ -26,7 +26,7 @@ use lash_store_sql::attachment::blob;
 use lash_store_sql::{Dialect, SchemaTables, TableLayout};
 use rusqlite::{OptionalExtension, params};
 
-use crate::Store;
+use crate::SqliteStore;
 use crate::conn::SqliteConnection;
 use crate::location::DatabaseTarget;
 use crate::schema_layout::Schema;
@@ -94,7 +94,7 @@ impl SqliteAttachmentStore {
     /// Its persistence is the catalog's location: bytes in a file catalog are
     /// durable; bytes in a memory backend's catalog live as long as the
     /// backend does.
-    pub fn for_store(store: &Store) -> Self {
+    pub fn for_store(store: &SqliteStore) -> Self {
         Self {
             conn: store.conn.clone(),
             clock: Arc::clone(&store.clock),

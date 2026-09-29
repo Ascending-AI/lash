@@ -192,7 +192,7 @@ fn backstop_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDeli
     clippy::expect_used,
     reason = "test fixture wiring: a failure here is a broken fixture, and panicking names it"
 )]
-async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_execution::BatchId {
+async fn enqueue_one(store: &SqliteStore, session_id: &SessionId) -> lash_core_execution::BatchId {
     store
         .enqueue_queued_work(
             lash_core_execution::runtime::process_wake_batch_draft(backstop_wake(session_id))
@@ -208,7 +208,7 @@ async fn enqueue_one(store: &Store, session_id: &SessionId) -> lash_core_executi
     reason = "test fixture wiring: a failed drive epoch setup must fail the test"
 )]
 async fn sealed_drive_fence(
-    store: &Store,
+    store: &SqliteStore,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
@@ -223,7 +223,7 @@ async fn sealed_drive_fence(
 
 /// Admit `root` headed by the batch `head` under `fence`.
 async fn admit(
-    store: &Store,
+    store: &SqliteStore,
     fence: &DriveFence,
     root: &str,
     head: &lash_core_execution::BatchId,
@@ -248,7 +248,7 @@ async fn a_lost_admission_bind_fails_closed_and_records_the_disagreement() {
     let capture = capture();
     let dir = tempfile::tempdir().expect("admission backstop tempdir");
     let path = dir.path().join("admission-backstop.db");
-    let store = Store::open(&path)
+    let store = SqliteStore::open(&path)
         .await
         .expect("open admission backstop store");
     let session_id = SessionId::from("admission-backstop-lost-write");
@@ -299,7 +299,7 @@ async fn an_admission_the_unfinished_root_refuses_never_reaches_the_write() {
     let capture = capture();
     let dir = tempfile::tempdir().expect("admission refusal tempdir");
     let path = dir.path().join("admission-refused-first.db");
-    let store = Store::open(&path)
+    let store = SqliteStore::open(&path)
         .await
         .expect("open admission refusal store");
     let session_id = SessionId::from("admission-backstop-refused-first");

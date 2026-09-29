@@ -64,7 +64,7 @@ fn lease_owner(owner_id: &str) -> LeaseOwnerIdentity {
 }
 
 async fn sealed_drive_fence(
-    store: &Store,
+    store: &SqliteStore,
     session_id: &SessionId,
     owner: &LeaseOwnerIdentity,
     executor_id: &str,
@@ -79,7 +79,7 @@ async fn sealed_drive_fence(
 
 /// Admit `root` headed by the batch `head` under `fence`.
 async fn admit(
-    store: &Store,
+    store: &SqliteStore,
     fence: &lash_core_execution::store::DriveFence,
     root: &str,
     head: &lash_core_execution::BatchId,
@@ -139,7 +139,7 @@ fn head_revision_cas_holds_across_two_connections() {
         |path: std::path::PathBuf, barrier: Arc<std::sync::Barrier>, writer_id: &'static str| {
             std::thread::spawn(move || {
                 block_on(async move {
-                    let store = Store::open(&path).await.expect("open store");
+                    let store = SqliteStore::open(&path).await.expect("open store");
                     barrier.wait();
                     store
                         .commit_runtime_state(commit_at(&SessionId::from("root"), 0, writer_id))
@@ -172,7 +172,7 @@ fn head_revision_cas_holds_across_two_connections() {
     );
 
     // The persisted head must reflect exactly one applied commit.
-    let store = block_on(Store::open(&path)).expect("reopen store");
+    let store = block_on(SqliteStore::open(&path)).expect("reopen store");
     let read = block_on(store.load_session())
         .expect("load")
         .expect("session present");
@@ -351,14 +351,14 @@ async fn second_admission_of_an_admitted_batch_is_not_won() {
 fn concurrent_admissions_never_double_own_a_batch() {
     let path = unique_db_path("admission-race");
     let batch_id = block_on(async {
-        let seed = Store::open(&path).await.expect("seed store");
+        let seed = SqliteStore::open(&path).await.expect("seed store");
         seed.enqueue_queued_work(exclusive_draft(&SessionId::from("root"), "work"))
             .await
             .expect("enqueue")
             .batch_id
     });
     let fence = {
-        let store = block_on(Store::open(&path)).expect("admission store");
+        let store = block_on(SqliteStore::open(&path)).expect("admission store");
         let owner = lease_owner("session-owner");
         block_on(sealed_drive_fence(
             &store,
@@ -376,7 +376,7 @@ fn concurrent_admissions_never_double_own_a_batch() {
                barrier: Arc<std::sync::Barrier>| {
         std::thread::spawn(move || {
             block_on(async move {
-                let store = Store::open(&path).await.expect("open store");
+                let store = SqliteStore::open(&path).await.expect("open store");
                 barrier.wait();
                 admit(&store, &fence, root, &batch_id).await
             })
@@ -416,7 +416,7 @@ fn concurrent_admissions_never_double_own_a_batch() {
     );
     // A successful admission really owns the batch: while its root is
     // unfinished, the batch is hidden from the user-editable pending snapshot.
-    let verify = block_on(Store::open(&path)).expect("verify store");
+    let verify = block_on(SqliteStore::open(&path)).expect("verify store");
     let pending = block_on(verify.list_open_queued_work(&SessionId::from("root")))
         .expect("list pending during the winning admission");
     assert!(
@@ -438,7 +438,7 @@ async fn unsupported_schema_error_reports_real_versions() {
             .expect("seed legacy schema");
     }
 
-    let message = match Store::open(&path).await {
+    let message = match SqliteStore::open(&path).await {
         Ok(_) => panic!("opening an unsupported schema must fail"),
         Err(err) => err.to_string(),
     };
@@ -467,7 +467,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
             let barrier = Arc::clone(&barrier);
             std::thread::spawn(move || {
                 barrier.wait();
-                block_on(Store::open(&path))
+                block_on(SqliteStore::open(&path))
                     .map(|_| ())
                     .map_err(|err| err.to_string())
             })
@@ -566,7 +566,7 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
     let dir = tempfile::tempdir().expect("tempdir");
     let sessions = dir.path().join("sessions");
     let foreign_path = dir.path().join("foreign.db");
-    Store::open(&foreign_path)
+    SqliteStore::open(&foreign_path)
         .await
         .expect("create non-registry Lash database");
     let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
@@ -597,7 +597,9 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
 #[tokio::test]
 async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
     let path = unique_db_path("plugin-state-predecessor");
-    let store = Store::open(&path).await.expect("provision current schema");
+    let store = SqliteStore::open(&path)
+        .await
+        .expect("provision current schema");
     drop(store);
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch("PRAGMA user_version = 51;").unwrap();
@@ -605,7 +607,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         .query_row("SELECT count(*) FROM sqlite_master", [], |row| row.get(0))
         .unwrap();
     drop(conn);
-    let error = match Store::open(&path).await {
+    let error = match SqliteStore::open(&path).await {
         Ok(_) => panic!("snapshot predecessor must be refused"),
         Err(error) => error.to_string(),
     };

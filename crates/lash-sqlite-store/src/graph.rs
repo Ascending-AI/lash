@@ -13,8 +13,8 @@
 
 use super::artifact_store::artifact_namespace_kind;
 use super::*;
+use crate::catalog::retained_artifact_refs;
 use crate::session_sql::session_sql;
-use crate::session_store_factory::retained_artifact_refs;
 use lash_sansio::SessionId;
 
 /// One GC root class. The variant *is* the label choice: a pointer-table row
@@ -47,7 +47,7 @@ impl GcRoot {
     }
 }
 
-impl Store {
+impl SqliteStore {
     /// `fleet` is the store's recorded `F`: stored node bodies admit the
     /// `[N-1, N]` reader window `F` names (FIG-3796).
     pub(crate) fn load_session_graph_from_conn(
@@ -284,7 +284,7 @@ impl Store {
         Ok(roots)
     }
 
-    /// Synchronous body of [`Store::gc_unreachable`], run on the connection thread
+    /// Synchronous body of [`SqliteStore::gc_unreachable`], run on the connection thread
     /// inside the `BEGIN IMMEDIATE` transaction so the mark/sweep is atomic and
     /// holds the write lock for its duration.
     /// `fleet` is the store's recorded `F`: a live checkpoint manifest admits
@@ -406,7 +406,8 @@ mod tests {
                         params![namespace, artifact_ref, blob_ref],
                     )?;
                 }
-                let roots = Store::artifact_ref_roots(conn).map_err(sqlite_conversion_error)?;
+                let roots =
+                    SqliteStore::artifact_ref_roots(conn).map_err(sqlite_conversion_error)?;
                 let kinds: std::collections::BTreeMap<String, PersistedArtifactKind> = roots
                     .into_iter()
                     .map(|root| match root {
@@ -443,7 +444,7 @@ mod tests {
                      VALUES ('foreign_namespace', 'ref-a', 'blob-a')",
                     [],
                 )?;
-                assert!(Store::artifact_ref_roots(conn).is_err());
+                assert!(SqliteStore::artifact_ref_roots(conn).is_err());
                 Ok(())
             })
             .await
@@ -481,7 +482,7 @@ mod tests {
         let graph = store
             .conn
             .call(move |conn| {
-                Store::load_session_graph_from_conn(
+                SqliteStore::load_session_graph_from_conn(
                     conn,
                     &session_id,
                     None,

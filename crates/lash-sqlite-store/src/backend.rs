@@ -15,7 +15,7 @@ use lash_core_execution::Clock;
 use crate::location::{DatabaseLocation, MemoryAnchors, SqliteLocation};
 use crate::{
     BuiltinBlobProfile, SqliteAttachmentStore, SqliteDatabase, SqliteProcessDefinitionRegistry,
-    SqliteProcessRegistry, SqliteSessionStoreFactory, SqliteTriggerStore, Store, StoreOptions,
+    SqliteProcessRegistry, SqliteStore, SqliteTriggerStore, StoreOptions,
 };
 
 /// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
@@ -71,11 +71,10 @@ struct StoreParts {
     anchors: Option<Arc<MemoryAnchors>>,
     options: SqliteStoreSetOptions,
     clock: Arc<dyn Clock>,
-    session_store_factory: Arc<SqliteSessionStoreFactory>,
     process_registry: Arc<SqliteProcessRegistry>,
     trigger_store: Arc<SqliteTriggerStore>,
     process_definitions: Arc<SqliteProcessDefinitionRegistry>,
-    process_env_store: Arc<Store>,
+    process_env_store: Arc<SqliteStore>,
     attachment_store: Arc<SqliteAttachmentStore>,
     recovery_leader: Arc<crate::recovery_leader::SqliteRecoveryLeader>,
 }
@@ -195,8 +194,8 @@ impl SqliteStoreSet {
         let registry = database(SqliteDatabase::ProcessRegistry);
         let triggers = database(SqliteDatabase::Triggers);
 
-        let process_env_store = Arc::new(
-            Store::open_at(
+        let mut process_env_store = Arc::new(
+            SqliteStore::open_at(
                 &core,
                 options.store,
                 Arc::clone(&clock),
@@ -224,22 +223,21 @@ impl SqliteStoreSet {
             .with_wake_delivery_config(options.wake_delivery)
             .with_process_id_mint_for_testing(options.process_id_mint.clone()),
         );
+        crate::lifecycle::attach_process_registry(
+            &process_env_store.conn,
+            registry.target(),
+            options.store.connection_policy,
+        )
+        .await?;
+        if let Some(store) = Arc::get_mut(&mut process_env_store) {
+            store.process_registry = Some(registry.target().clone());
+            store.process_registry_attached = true;
+        }
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
         let process_definitions =
             Arc::new(SqliteProcessDefinitionRegistry::open_at(&core, Arc::clone(&clock)).await?);
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
-        let factory = SqliteSessionStoreFactory::at(
-            core,
-            Some(registry.target().clone()),
-            options.store,
-            Arc::clone(&clock),
-        );
-        #[cfg(feature = "testing")]
-        let factory = match options.fault_injector.clone() {
-            Some(injector) => factory.with_fault_injector(injector),
-            None => factory,
-        };
         let recovery_leader = Arc::new(crate::recovery_leader::SqliteRecoveryLeader::new(
             process_env_store.conn.clone(),
         ));
@@ -251,7 +249,6 @@ impl SqliteStoreSet {
                 anchors,
                 options,
                 clock,
-                session_store_factory: Arc::new(factory),
                 process_registry,
                 trigger_store,
                 process_definitions,
@@ -285,8 +282,8 @@ impl SqliteStoreSet {
 
     /// The factory every session of this store set is created and reopened
     /// through, over the durable-core catalog.
-    pub fn session_store_factory(&self) -> Arc<SqliteSessionStoreFactory> {
-        Arc::clone(&self.inner.session_store_factory)
+    pub fn session_store_factory(&self) -> Arc<SqliteStore> {
+        Arc::clone(&self.inner.process_env_store)
     }
 
     /// The process registry, pruning process-owned sessions out of the
@@ -307,7 +304,7 @@ impl SqliteStoreSet {
 
     /// The durable-core [`Store`] that serves process execution environments
     /// and Lashlang artifacts. Unbound to any session.
-    pub fn process_env_store(&self) -> Arc<Store> {
+    pub fn process_env_store(&self) -> Arc<SqliteStore> {
         Arc::clone(&self.inner.process_env_store)
     }
 
@@ -319,18 +316,8 @@ impl SqliteStoreSet {
 
     /// A new unbound [`Store`] on this store set's durable-core catalog, on
     /// a connection of its own.
-    pub async fn open_store(&self) -> tokio_rusqlite::Result<Store> {
-        Store::open_at(
-            &self.database(SqliteDatabase::DurableCore),
-            self.inner.options.store,
-            Arc::clone(&self.inner.clock),
-            None,
-            None,
-            lash_core_execution::FleetFormat::writable_range(),
-            #[cfg(feature = "testing")]
-            None,
-        )
-        .await
+    pub async fn open_store(&self) -> tokio_rusqlite::Result<Arc<SqliteStore>> {
+        Ok(Arc::clone(&self.inner.process_env_store))
     }
 
     fn database(&self, database: SqliteDatabase) -> DatabaseLocation {
@@ -352,7 +339,7 @@ impl lash_core_execution::StoreSet for SqliteStoreSet {
         Arc::clone(&self.inner.clock)
     }
 
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::SessionStoreFactory> {
+    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::DeploymentStore> {
         SqliteStoreSet::session_store_factory(self)
     }
 

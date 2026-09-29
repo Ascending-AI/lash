@@ -40,15 +40,15 @@ pub(super) fn follow_on_blocks_admission_conn(
 }
 
 /// Admit the root's turn-lane run and record it with its rows, bindings and
-/// base, in one transaction ([`RootStore::admit_root`]).
+/// base, in one transaction ([`RootSqliteStore::admit_root`]).
 ///
 /// A recorded admission is returned unchanged, whatever fence or incarnation
 /// asks: a re-execution of the step reads back what it chose and never
 /// widens (FIG-3840).
 ///
-/// [`RootStore::admit_root`]: lash_core_execution::store::RootStore::admit_root
+/// [`RootSqliteStore::admit_root`]: lash_core_execution::store::RootSqliteStore::admit_root
 pub(crate) async fn admit_root_sqlite(
-    store: &crate::Store,
+    store: &crate::SqliteStore,
     request: &lash_core_execution::store::AdmitRootRequest,
 ) -> Result<Option<RootAdmission>, StoreError> {
     let request = request.clone();
@@ -178,15 +178,15 @@ pub(crate) async fn admit_root_sqlite(
 }
 
 /// Admit the checkpoint work of `request`'s root, keyed by its step
-/// ([`RootStore::admit_at_checkpoint`]).
+/// ([`RootSqliteStore::admit_at_checkpoint`]).
 ///
 /// A read-only probe answers the common empty checkpoint without a write
 /// transaction. The probe also reports rows the step already bound, so a
 /// re-executed step always reaches the read-back.
 ///
-/// [`RootStore::admit_at_checkpoint`]: lash_core_execution::store::RootStore::admit_at_checkpoint
+/// [`RootSqliteStore::admit_at_checkpoint`]: lash_core_execution::store::RootSqliteStore::admit_at_checkpoint
 pub(crate) async fn admit_at_checkpoint_sqlite(
-    store: &crate::Store,
+    store: &crate::SqliteStore,
     request: &CheckpointAdmissionRequest,
 ) -> Result<CheckpointAdmission, StoreError> {
     #[cfg(test)]
@@ -275,7 +275,7 @@ pub(crate) async fn admit_at_checkpoint_sqlite(
 /// the commit that applies the run settles it, predicated on each row still
 /// being open.
 pub(crate) async fn open_session_command_run_sqlite(
-    store: &crate::Store,
+    store: &crate::SqliteStore,
     fence: &lash_core_execution::store::DriveFence,
 ) -> Result<Vec<QueuedWorkBatch>, StoreError> {
     let fence = fence.clone();
