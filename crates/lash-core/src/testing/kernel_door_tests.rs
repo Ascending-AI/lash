@@ -110,7 +110,11 @@ async fn a_faulted_doubles_store_twin_sees_the_fault() {
     let error = crate::SessionCatalogStore::lookup_session(decorated.as_ref(), &session_id)
         .await
         .expect_err("the decorated catalog faults the lookup");
-    assert!(error.to_string().contains("injected catalog-lookup failure"));
+    assert!(
+        error
+            .to_string()
+            .contains("injected catalog-lookup failure")
+    );
 
     let original = double.stores().session_store_factory();
     assert!(matches!(
@@ -124,7 +128,11 @@ async fn a_faulted_doubles_store_twin_sees_the_fault() {
     let error = crate::SessionCatalogStore::lookup_session(&twin, &session_id)
         .await
         .expect_err("the twin sees the decorated catalog fault");
-    assert!(error.to_string().contains("injected catalog-lookup failure"));
+    assert!(
+        error
+            .to_string()
+            .contains("injected catalog-lookup failure")
+    );
 }
 
 /// The storage-only twins: a store set and a backend over it that reaches
