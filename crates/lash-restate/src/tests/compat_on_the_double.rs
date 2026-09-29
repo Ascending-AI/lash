@@ -596,3 +596,56 @@ async fn registration_refuses_an_endpoint_serving_another_generation() {
         "a fresh URI is never forced; a redeploy of the same build is"
     );
 }
+
+/// ADR 0115 §3.5 with ADR 0111 §3: a deployment in another namespace is
+/// another deployment, so build N in namespace `beta` is refused build N's
+/// default-namespace URI even at the same generation. The URI serves no
+/// generation lane of `beta`, so the refusal holds none (`held: None`). At
+/// a URI of its own `beta` registers beside it, unforced.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn registration_refuses_an_endpoint_serving_another_namespace() {
+    let roll = SessionRoll::start(0x4048_0004).await;
+    let server = &roll.server;
+    let stores = lash_sqlite_store::SqliteStoreSet::memory()
+        .await
+        .expect("open a memory store set");
+    let connection =
+        crate::RestateConnection::with_transport(server.ingress_url(), server.transport());
+    let beta = crate::RestateEngine::new(
+        Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
+        crate::RestateConfig::new(
+            connection.clone(),
+            connection,
+            test_restate_authority_id(),
+            generation("N"),
+        )
+        .with_namespace(crate::RestateNamespace::new("beta").expect("a valid namespace")),
+    );
+
+    let refused = beta
+        .register_deployment(BUILD_N_URI)
+        .await
+        .expect_err("the default namespace's endpoint is not beta's to take");
+    match refused {
+        RestateRegistrationError::EndpointServesAnotherGeneration { uri, held, local } => {
+            assert_eq!(uri, BUILD_N_URI);
+            assert_eq!(held, None, "the URI serves no generation lane of beta");
+            assert_eq!(local, generation("N"));
+        }
+        other => panic!("the refusal is typed: {other}"),
+    }
+    assert!(
+        roll.server.registration_requests().is_empty(),
+        "a refused registration sent nothing"
+    );
+
+    let own = format!("{BUILD_N_URI}/ns/beta");
+    beta.register_deployment(&own)
+        .await
+        .expect("beta registers at a URI of its own");
+    assert_eq!(
+        roll.server.registration_requests(),
+        [serde_json::json!({ "uri": own, "force": false })],
+        "a URI of beta's own is registered unforced"
+    );
+}
