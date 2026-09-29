@@ -237,3 +237,51 @@ fn every_module_a_global_references_is_held_by_the_frame_once() {
         assert_eq!(store.writes().len(), 2, "{:?}", store.writes());
     });
 }
+
+#[test]
+fn a_definition_held_only_inside_a_map_is_held_by_the_frame() {
+    block_on(async {
+        let store = Arc::new(RecordingArtifactStore::default());
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let bound = run_cell(
+            &mut state,
+            &store,
+            "const q = async () => 2; const m = new Map([['q', q]]); finish(1);",
+        )
+        .await;
+        assert!(bound.error.is_none(), "{:?}", bound.error);
+        let module_ref = state
+            .frame_held_module_refs()
+            .next()
+            .expect("the cell's module")
+            .to_string();
+
+        // A cold process: the frame cache starts empty, and only the map
+        // (which the host view omits) still names the module.
+        let snapshot = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("capture");
+        let mut restored = RlmExecutionState::for_engine("typescript");
+        restored
+            .restore_execution_state(
+                &super::lifecycle_and_diagnostics::hydrate_snapshot(snapshot),
+                lash_core::FleetFormat::current(),
+            )
+            .expect("restore");
+        assert!(restored.rlm.remove_global("q"));
+        assert!(
+            restored.rlm.globals().get("m").is_none(),
+            "the host view omits the map"
+        );
+        let before = store.writes().len();
+        let response = run_cell(&mut restored, &store, "finish(2);").await;
+        assert!(response.error.is_none(), "{:?}", response.error);
+        assert_eq!(
+            store.writes()[before..],
+            [ArtifactWrite::Acquire(
+                lash_core::ArtifactReferrerKind::FrameEnvironment,
+                module_ref
+            )]
+        );
+    });
+}

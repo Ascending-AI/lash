@@ -12,27 +12,63 @@ use serde::Deserialize;
 use serde::de::IntoDeserializer;
 
 use crate::artifact::ModuleRef;
-use crate::runtime::{LASH_MODULE_REF_KEY, LASH_PROCESS_VALUE_KEY, Record, Value};
+use crate::runtime::{
+    Heap, HeapObject, LASH_MODULE_REF_KEY, LASH_PROCESS_VALUE_KEY, Record, State, Value,
+};
 
 /// Every module a process definition anywhere inside `value` references.
 ///
-/// The walk reads detached values only: records, lists and tuples are
-/// descended, and a heap reference or a projected value is not followed,
-/// because neither owns what it points at. A record marked as a process
-/// value whose `module_ref` is not a module reference names nothing.
+/// The walk reads a detached value: records, lists and tuples are descended.
+/// A heap reference is not followed, because a detached value has no heap to
+/// resolve it in ([`State::referenced_module_refs`] follows them), and a
+/// projected value is not materialized. A record marked as a process value
+/// whose `module_ref` is not a module reference names nothing.
 #[must_use]
 pub fn referenced_module_refs(value: &Value) -> BTreeSet<ModuleRef> {
+    module_refs_reachable(std::iter::once(value), None)
+}
+
+impl State {
+    /// Every module a process definition held by any binding references,
+    /// however it is held (ADR 0113 §3.1).
+    ///
+    /// The walk starts from the records that own the bindings, not the host
+    /// view, and follows heap references with each object visited once: a
+    /// definition inside a `Map`, a `Set` or an `Error`, which the host view
+    /// omits, is found as well as one in a plain record.
+    #[must_use]
+    pub fn referenced_module_refs(&self) -> BTreeSet<ModuleRef> {
+        let (roots, heap) = self.owning_roots();
+        module_refs_reachable(roots.values(), heap)
+    }
+}
+
+fn module_refs_reachable<'a>(
+    roots: impl Iterator<Item = &'a Value>,
+    heap: Option<&'a Heap>,
+) -> BTreeSet<ModuleRef> {
     let mut refs = BTreeSet::new();
-    let mut pending = vec![value];
+    let mut visited = BTreeSet::new();
+    let mut pending = roots.collect::<Vec<_>>();
     while let Some(value) = pending.pop() {
         match value {
             Value::Record(record) => {
-                if let Some(module_ref) = process_value_module_ref(record) {
-                    refs.insert(module_ref);
-                }
-                pending.extend(record.iter().map(|(_, value)| value));
+                refs.extend(process_value_module_ref(record));
+                pending.extend(record.values());
             }
             Value::List(values) | Value::Tuple(values) => pending.extend(values.iter()),
+            Value::Ref(id) => {
+                let Some(heap) = heap else { continue };
+                if !visited.insert(*id) {
+                    continue;
+                }
+                // A reference the heap cannot resolve holds nothing.
+                let Ok(object) = heap.get(*id) else { continue };
+                if let HeapObject::Record(record) = object {
+                    refs.extend(process_value_module_ref(record));
+                }
+                pending.extend(object.values());
+            }
             Value::Null
             | Value::Undefined
             | Value::Bool(_)
@@ -40,7 +76,6 @@ pub fn referenced_module_refs(value: &Value) -> BTreeSet<ModuleRef> {
             | Value::String(_)
             | Value::Image(_)
             | Value::Resource(_)
-            | Value::Ref(_)
             | Value::Projected(_) => {}
         }
     }
@@ -129,5 +164,47 @@ mod tests {
         for value in [Value::String("module_ref".into()), unmarked, malformed] {
             assert!(referenced_module_refs(&value).is_empty(), "{value:?}");
         }
+    }
+
+    #[test]
+    fn a_state_finds_definitions_the_host_view_omits() {
+        let (plain, plain_value) = definition("plain");
+        let (in_map, in_map_value) = definition("in-map");
+        let mut state = State::new();
+        state
+            .insert_global("p", plain_value)
+            .expect("bind a definition");
+        assert_eq!(
+            state.referenced_module_refs(),
+            BTreeSet::from([plain.clone()]),
+            "a plain state is walked through its own record"
+        );
+
+        // A `Map` has no host view, so only a heap-aware walk finds the
+        // definition inside it; the map refers to itself so the walk must
+        // stop at an object it already visited.
+        let mut heap = Heap::with_limit(u64::MAX);
+        let map = heap
+            .allocate(HeapObject::Map(crate::runtime::MapObject {
+                entries: Vec::new(),
+            }))
+            .expect("allocate a map");
+        let Value::Ref(map_id) = map else {
+            panic!("a heap object is referenced: {map:?}");
+        };
+        heap.map_set(map_id, Value::String("q".into()), in_map_value)
+            .expect("store the definition");
+        heap.map_set(map_id, Value::String("self".into()), Value::Ref(map_id))
+            .expect("store the map in itself");
+        let mut roots = Record::new();
+        roots.insert("m".to_string(), Value::Ref(map_id));
+        assert_eq!(
+            module_refs_reachable(roots.values(), Some(&heap)),
+            BTreeSet::from([in_map])
+        );
+        assert!(
+            module_refs_reachable(roots.values(), None).is_empty(),
+            "a detached walk does not follow references"
+        );
     }
 }

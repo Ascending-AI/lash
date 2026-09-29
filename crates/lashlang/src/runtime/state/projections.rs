@@ -22,4 +22,13 @@ impl State {
             .map(|(name, value)| (name.to_string(), backed.heap.summarize(value)))
             .collect()
     }
+
+    /// The records that own the bindings and the heap they reach into: the
+    /// runtime roots while heap-backed, the plain record otherwise.
+    pub(crate) fn owning_roots(&self) -> (&Record, Option<&Heap>) {
+        match &self.mode {
+            StateMode::Plain(globals) => (globals, None),
+            StateMode::HeapBacked(backed) => (&backed.runtime_globals, Some(&backed.heap)),
+        }
+    }
 }

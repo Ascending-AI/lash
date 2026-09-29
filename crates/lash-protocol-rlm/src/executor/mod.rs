@@ -844,9 +844,10 @@ async fn publish_cell_module(
     }
 }
 
-/// Hold in the frame every module a global references (ADR 0113 §3.1). It
-/// covers the definitions a cell bound, and the ones a tool returned into a
-/// global. A module the frame already holds is skipped, so after the first
+/// Hold in the frame every module a global references (ADR 0113 §3.1),
+/// however the global holds it: in a record, or in a `Map` the host view
+/// omits. It covers the definitions a cell bound, and the ones a tool
+/// returned into a global. A module the frame already holds is skipped, so after the first
 /// cell of a process lifetime this reads the globals and writes nothing.
 ///
 /// A module no store holds is left alone: a value naming bytes that were
@@ -860,13 +861,7 @@ async fn hold_global_modules(
     let Some(frame) = frame_environment(ctx) else {
         return Ok(());
     };
-    let referenced = state
-        .rlm
-        .globals()
-        .iter()
-        .flat_map(|(_, value)| lashlang::referenced_module_refs(value))
-        .collect::<BTreeSet<_>>();
-    for module_ref in referenced {
+    for module_ref in state.rlm.referenced_module_refs() {
         if state.frame_holds(&frame, &module_ref) {
             continue;
         }
