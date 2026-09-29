@@ -108,13 +108,13 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             "tool_choice": "auto",
             "tools": [{
                 "function": {
-                    "description": "Run 1-25 independent tool calls concurrently. Execution order is not guaranteed; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
+                    "description": "Run 1-64 independent tool calls concurrently. Every call starts before any finishes; results return in input order, each with a success flag and result or error. Do not nest batch calls.",
                     "name": "batch",
                     "parameters": {
                         "additionalProperties": false,
                         "properties": {
                             "tool_calls": {
-                                "description": "1-25 objects { tool, parameters }; each tool must be exposed and parameters must match its schema.",
+                                "description": "1-64 objects { tool, parameters }; each tool must be available and parameters must match its schema.",
                                 "items": {
                                     "additionalProperties": false,
                                     "properties": {
@@ -128,7 +128,7 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
                                     "required": ["tool", "parameters"],
                                     "type": "object"
                                 },
-                                "maxItems": 25,
+                                "maxItems": 64,
                                 "minItems": 1,
                                 "type": "array"
                             }
@@ -142,9 +142,9 @@ async fn second_history_bearing_turn_snapshots_the_full_assembled_provider_reque
             }]
         })
     );
-    assert_eq!(requests[1]["event"]["body_len"], 1202);
+    assert_eq!(requests[1]["event"]["body_len"], 1208);
     assert_eq!(
         requests[1]["event"]["body_sha256"],
-        "38b714af125879f7f019f6b8348bb7b9c3bd0750ca6e6bf1e875e738c32895c4"
+        "f8beeb4ace379d0bad50f2b4b4802aecd289525eff4d4ab6a9d95ee71f67fee5"
     );
 }

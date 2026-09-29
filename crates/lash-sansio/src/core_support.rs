@@ -21,6 +21,7 @@ use crate::{
 /// append-only so a retired domain cannot be silently reused.
 const BLAKE3_DOMAINS: &[&str] = &[
     "lash-accepted-turn-input/v1",
+    "lash-anthropic-tool-call-wire/v1",
     "lash-append-request/v2",
     "lash-attachment/v2",
     "lash-blob/v2",
@@ -47,6 +48,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-model-facing-composition/v3",
     "lash-openai-responses-request/v2",
     "lash-plugin-snapshot-revision/v2",
+    "lash-provider-call-correlation/v1",
     "lash-provider-prompt-cache-key/v1",
     "lash-provider-session-affinity/v1",
     "lash-process-env/v4",
@@ -69,6 +71,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-session-append-draft-fallback/v2",
     "lash-stable-identity/v2",
     "lash-stopped-partial/v1",
+    "lash-tool-call-id/v1",
     "lash-tool-catalog-authority/v2",
     "lash-tool-intent-payload/v2",
     "lash-tool-intent-payload/v3",

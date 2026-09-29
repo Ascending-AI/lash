@@ -477,8 +477,7 @@ impl ToolAttemptTurnCapture {
     ///
     /// A cancelled attempt is the stop's own consequence, not a result
     /// before the cutoff: the capture keeps the call running, with the
-    /// chunks it reported, as a call whose outcome is unknown. A seal that
-    /// already fenced the writer keeps the partial as it was sealed.
+    /// chunks it reported, as a call whose outcome is unknown.
     pub async fn settle(
         self,
         call_id: &str,
@@ -490,16 +489,7 @@ impl ToolAttemptTurnCapture {
         if let crate::ToolAttemptLaunch::Done { record, .. } = &outcome.launch
             && !matches!(record.output.outcome, crate::ToolCallOutcome::Cancelled(_))
         {
-            match writer.settled(call_id, &record.output).await {
-                Ok(()) | Err(crate::ProgressRefused::Fenced) => {}
-                Err(refused) => {
-                    return Err(
-                        crate::RuntimeEffectControllerError::turn_capture_write_failed(format!(
-                            "tool settlement capture failed: {refused}"
-                        )),
-                    );
-                }
-            }
+            writer.settled(call_id, &record.output).await?;
         }
         outcome.capture_watermark = writer.watermark();
         Ok(())

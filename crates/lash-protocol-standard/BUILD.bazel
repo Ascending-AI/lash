@@ -145,6 +145,29 @@ lash_rust_integration_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_integration_test(
+    name = "tool_batch_parallelism__test",
+    crate_features = [
+        "default",
+    ],
+    crate_name = "tool_batch_parallelism",
+    crate_root = "tests/tool_batch_parallelism.rs",
+    declared_features = [
+        "default",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-protocol-standard", "tool_batch_parallelism", "//crates/lash-protocol-standard:tool_batch_parallelism__test"),
+    extra_compile_data = [
+        "//:perf_guard_budgets",
+    ],
+    library = ":lash-protocol-standard",
+    library_crate_name = "lash_protocol_standard",
+    manifest_dir = "crates/lash-protocol-standard",
+    package_name = "lash-internal-protocol-standard",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
@@ -157,6 +180,7 @@ lash_batch_test(
         ":native_tools__test",
         ":protocol_scenarios__test",
         ":render_cache_law__test",
+        ":tool_batch_parallelism__test",
     ],
 )
 

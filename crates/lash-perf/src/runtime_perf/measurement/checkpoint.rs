@@ -398,6 +398,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for CheckpointDriver {
             })],
             Self::Tools => vec![DriverAction::Start(PendingWork::Tools {
                 calls: checkpoint_tool_calls(ctx.protocol_iteration()),
+                expansion: Default::default(),
             })],
             Self::Exec => vec![DriverAction::Start(PendingWork::Exec {
                 language: "code".to_string(),
@@ -578,7 +579,7 @@ fn checkpoint_pending_parallel_tools(
     let mut machine = checkpoint_machine(config, seed_messages, turn_index);
     let effect = next_checkpoint_effect(&mut machine)
         .ok_or_else(|| anyhow::anyhow!("checkpoint tools scenario produced no effect"))?;
-    let Effect::ToolCalls { id, calls } = effect else {
+    let Effect::ToolCalls { id, calls, .. } = effect else {
         anyhow::bail!("checkpoint tools scenario expected ToolCalls effect");
     };
     let checkpoint = machine.checkpoint();
@@ -742,7 +743,7 @@ fn assert_restored_tool_batch(
     expected_calls: usize,
 ) -> anyhow::Result<()> {
     match next_checkpoint_effect(machine) {
-        Some(Effect::ToolCalls { id, calls })
+        Some(Effect::ToolCalls { id, calls, .. })
             if id == expected_id && calls.len() == expected_calls =>
         {
             Ok(())

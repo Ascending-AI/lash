@@ -1499,7 +1499,7 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
 
     assert!(matches!(&turn.outcome, TurnOutcome::Stopped(_)));
     assert_eq!(turn.errors.len(), 1);
-    assert_eq!(turn.errors[0].raw.as_deref(), Some("transport raw body"));
+    assert_eq!(turn.errors[0].raw, None);
 
     let logged = std::fs::read_to_string(&trace_path).expect("read trace");
     let entries =
@@ -1508,19 +1508,13 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
         .iter()
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_failed"))
         .expect("llm error entry");
-    assert_eq!(
-        error_entry["error"]["message"].as_str(),
-        Some("HTTP request failed: builder error")
-    );
+    assert!(error_entry["error"].get("message").is_none());
     assert_eq!(error_entry["error"]["code"].as_str(), Some("builder"));
     assert_eq!(
         error_entry["error"]["code_namespace"].as_str(),
         Some("provider")
     );
-    assert_eq!(
-        error_entry["error"]["raw"].as_str(),
-        Some("transport raw body")
-    );
+    assert!(error_entry["error"].get("raw").is_none());
     let request_entry = entries
         .iter()
         .find(|entry| entry.get("type").and_then(|v| v.as_str()) == Some("llm_call_started"))

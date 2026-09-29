@@ -1570,9 +1570,6 @@ pub struct NormalizedError {
     pub provider_request_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<std::time::Duration>,
-    /// Redacted, size-bounded diagnostic excerpt; never a raw response body.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub diagnostic: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -1736,6 +1733,8 @@ pub struct LlmResponse {
     pub parts: Vec<LlmOutputPart>,
     pub usage: LlmUsage,
     pub terminal_reason: LlmTerminalReason,
+    /// Live terminal detail. Effect outcomes omit it from their journal form.
+    #[serde(default, skip_serializing, skip_deserializing)]
     pub terminal_diagnostic: Option<String>,
     pub provider_usage: Option<serde_json::Value>,
     pub request_body: Option<String>,

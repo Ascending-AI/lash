@@ -1,5 +1,5 @@
-//! Assertion floor for the standard driver's plugin identity, batch tool
-//! contract, and the three decisions `handle_llm_success` / `handle_tool_results`
+//! Assertion floor for the standard driver's plugin identity, its `batch`
+//! sugar (expansion, fold and refusal), and the three decisions `handle_llm_success` / `handle_tool_results`
 //! make: whether a response carries tool calls, whether a completed call's
 //! control is terminal, and where the max-turns budget lands.
 //!
@@ -78,7 +78,7 @@ fn llm_call_id(effects: &[Effect]) -> sansio::EffectId {
 
 fn tool_calls(effects: &[Effect]) -> Option<(sansio::EffectId, Vec<sansio::PendingToolCall>)> {
     effects.iter().find_map(|effect| match effect {
-        Effect::ToolCalls { id, calls } => Some((*id, calls.clone())),
+        Effect::ToolCalls { id, calls, .. } => Some((*id, calls.clone())),
         _ => None,
     })
 }
@@ -176,37 +176,314 @@ fn standard_session_plugin_reports_the_registered_protocol_id() {
     );
 }
 
+fn machine_with(driver: StandardDriver) -> TurnMachine {
+    let mut config = machine_config(Some(4));
+    config.protocol_driver = Arc::new(driver);
+    TurnMachine::new(
+        config,
+        vec![Message {
+            id: "m0".to_string(),
+            role: MessageRole::User,
+            parts: vec![Part::text("m0.p0".to_string(), "drive".to_string(), None)].into(),
+            origin: None,
+        }],
+        Arc::new(Vec::new()),
+        0,
+    )
+}
+
+fn batch_call(call_id: &str, members: serde_json::Value) -> LlmOutputPart {
+    LlmOutputPart::ToolCall {
+        call_id: call_id.to_string(),
+        tool_name: "batch".to_string(),
+        input_json: serde_json::json!({ "tool_calls": members }).to_string(),
+        replay: Some(ProviderReplayMeta {
+            item_id: Some(format!("provider-{call_id}")),
+            ..ProviderReplayMeta::default()
+        }),
+    }
+}
+
+fn native_call(call_id: &str, tool_name: &str) -> LlmOutputPart {
+    LlmOutputPart::ToolCall {
+        call_id: call_id.to_string(),
+        tool_name: tool_name.to_string(),
+        input_json: "{}".to_string(),
+        replay: None,
+    }
+}
+
+/// Answer the pending LLM call with `parts`, returning the effects drained
+/// after it.
+fn respond(
+    machine: &mut TurnMachine,
+    effects: &[Effect],
+    parts: Vec<LlmOutputPart>,
+) -> Vec<Effect> {
+    machine.handle_response(Response::LlmComplete {
+        id: llm_call_id(effects),
+        text_streamed: false,
+        result: Ok(LlmResponse {
+            parts,
+            ..LlmResponse::default()
+        }),
+    });
+    drain(machine)
+}
+
+fn tool_work(
+    effects: &[Effect],
+) -> (
+    sansio::EffectId,
+    Vec<sansio::PendingToolCall>,
+    sansio::ToolExpansionPlan,
+) {
+    effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ToolCalls {
+                id,
+                calls,
+                expansion,
+            } => Some((*id, calls.clone(), expansion.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("expected the step's tool work, got {effects:?}"))
+}
+
+fn reported_tool_calls(effects: &[Effect]) -> Vec<(Option<String>, String)> {
+    effects
+        .iter()
+        .filter_map(|effect| match effect {
+            Effect::Emit(SessionStreamEvent::ToolCall { call_id, name, .. }) => {
+                Some((call_id.clone(), name.clone()))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn appended_tool_results(machine: &TurnMachine) -> Vec<(String, String)> {
+    machine
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.kind() == PartKind::ToolResult)
+        .map(|part| {
+            (
+                part.tool_call_id()
+                    .expect("a result names its call")
+                    .to_string(),
+                part.tool_name()
+                    .expect("a result names its tool")
+                    .to_string(),
+            )
+        })
+        .collect()
+}
+
 #[test]
-fn standard_batch_orchestrating_tool_exposes_the_batch_tool_contract() {
-    let tool = StandardBatchOrchestratingTool;
-
-    let manifest = lash_core::facade_support::OrchestratingToolImplementation::manifest(&tool);
-    assert_eq!(manifest.name, "batch");
-
-    let contract = lash_core::facade_support::OrchestratingToolImplementation::contract(&tool);
+fn batch_folds_to_one_transcript_call() {
+    let mut machine = machine_with(StandardDriver::default());
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![
+            native_call("native", "probe"),
+            batch_call(
+                "wrapper",
+                serde_json::json!([
+                    { "tool": "probe", "parameters": {} },
+                    { "tool": "batch", "parameters": { "tool_calls": [] } },
+                    { "tool": "probe", "parameters": { "value": "second" } },
+                ]),
+            ),
+        ],
+    );
+    let (id, calls, expansion) = tool_work(&effects);
     assert_eq!(
-        *contract,
-        batch_tool_definition().contract(),
-        "the orchestrating tool must publish the batch definition's own contract"
+        calls
+            .iter()
+            .map(|call| call.call_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["native", "wrapper/batch/0", "wrapper/batch/2"],
+        "the wrapper's admitted members join the native call in one tool work"
     );
-    assert_ne!(
-        *contract,
-        ToolContract::default(),
-        "a default contract would drop the batch input schema and examples"
+    assert_eq!(expansion.wrappers.len(), 1);
+
+    machine.handle_response(Response::ToolResults {
+        id,
+        results: calls
+            .iter()
+            .map(|call| completed_call(call, ToolCallOutput::success(serde_json::json!("ok"))))
+            .collect(),
+    });
+    let effects = drain(&mut machine);
+    assert_eq!(
+        reported_tool_calls(&effects),
+        vec![
+            (Some("native".to_string()), "probe".to_string()),
+            (Some("wrapper".to_string()), "batch".to_string()),
+        ],
+        "the stream shows one call per wrapper and no member call"
+    );
+    assert_eq!(
+        appended_tool_results(&machine),
+        vec![
+            ("native".to_string(), "probe".to_string()),
+            ("wrapper".to_string(), "batch".to_string()),
+        ],
+        "the transcript answers the provider's call id once per wrapper"
+    );
+    let assistant_calls = machine
+        .messages()
+        .iter()
+        .flat_map(|message| message.parts.iter())
+        .filter(|part| part.kind() == PartKind::ToolCall)
+        .map(|part| {
+            (
+                part.tool_call_id().expect("a call has an id").to_string(),
+                part.tool_replay().cloned(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        assistant_calls,
+        vec![
+            ("native".to_string(), None),
+            (
+                "wrapper".to_string(),
+                Some(ProviderReplayMeta {
+                    item_id: Some("provider-wrapper".to_string()),
+                    ..ProviderReplayMeta::default()
+                })
+            ),
+        ],
+        "the assistant turn keeps the wrapper call with its replay metadata"
+    );
+}
+
+#[test]
+fn batch_all_refused_opens_no_group() {
+    let mut machine = machine_with(StandardDriver::default());
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![batch_call(
+            "wrapper",
+            serde_json::json!([{ "tool": "batch", "parameters": {} }]),
+        )],
+    );
+    let (id, calls, expansion) = tool_work(&effects);
+    assert!(
+        calls.is_empty(),
+        "no slot remains, so the host opens no group"
+    );
+    assert_eq!(expansion.wrappers.len(), 1);
+    machine.handle_response(Response::ToolResults {
+        id,
+        results: Vec::new(),
+    });
+    let effects = drain(&mut machine);
+    assert_eq!(
+        reported_tool_calls(&effects),
+        vec![(Some("wrapper".to_string()), "batch".to_string())],
+        "the fully refused wrapper still answers its folded rows"
+    );
+}
+
+#[test]
+fn an_oversized_batch_is_refused_whole_and_starts_nothing() {
+    let mut machine = machine_with(StandardDriver::default());
+    let effects = drain(&mut machine);
+    let members = (0..65)
+        .map(|_| serde_json::json!({ "tool": "probe", "parameters": {} }))
+        .collect::<Vec<_>>();
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![batch_call("wrapper", serde_json::Value::Array(members))],
     );
     assert!(
-        contract.matches_manifest_identity(&manifest),
-        "the published contract must carry the batch manifest identity"
+        tool_calls(&effects).is_none(),
+        "no member starts: {effects:?}"
     );
-    let input_schema = serde_json::to_value(&contract.input_schema).expect("input schema json");
+    let refused = effects
+        .iter()
+        .find_map(|effect| match effect {
+            Effect::ReportToolCalls { completed } => Some(completed.clone()),
+            _ => None,
+        })
+        .expect("the wrapper is reported refused");
+    assert_eq!(refused.len(), 1);
+    assert_eq!(refused[0].call_id, "wrapper");
+    assert!(!refused[0].output.is_success());
+}
+
+#[test]
+fn a_disabled_batch_is_an_ordinary_tool_call() {
+    let mut machine = machine_with(StandardDriver {
+        discovery: false,
+        batch: BatchSugar::Disabled,
+    });
+    let effects = drain(&mut machine);
+    let effects = respond(
+        &mut machine,
+        &effects,
+        vec![batch_call(
+            "wrapper",
+            serde_json::json!([{ "tool": "probe", "parameters": {} }]),
+        )],
+    );
+    let (_, calls, expansion) = tool_work(&effects);
+    assert!(expansion.is_empty());
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| (call.call_id.as_str(), call.tool_name.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("wrapper", "batch")],
+        "the call goes to the host as named, where preparation refuses an unknown tool"
+    );
+}
+
+#[test]
+fn the_preamble_offers_batch_only_when_enabled() {
+    let catalog = lash_core::ToolCatalog::default();
+    let build = |batch: BatchSugar| {
+        StandardProtocolDriver {
+            config: StandardProtocolConfig::default().batch(batch),
+        }
+        .build_preamble(ProtocolBuildInput {
+            tool_catalog: Arc::new(catalog.clone()),
+            plugin_extensions: Default::default(),
+            trigger_events: Default::default(),
+            extra_prompt_contributions: Vec::new(),
+            writer_formats: lash_core::build_newest_writer_formats(),
+        })
+    };
+    let enabled = build(BatchSugar::Enabled {
+        max_members: std::num::NonZeroUsize::new(8).expect("non-zero"),
+    });
+    let names = enabled
+        .tool_specs
+        .iter()
+        .map(|spec| spec.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["batch"]);
+    assert_eq!(
+        enabled.tool_specs[0].input_schema.canonical["properties"]["tool_calls"]["maxItems"],
+        serde_json::json!(8)
+    );
+    assert!(enabled.execution_prompt.contains("at most 8 per batch"));
     assert!(
-        input_schema.to_string().contains("tool_calls"),
-        "the batch contract declares its tool_calls parameter: {input_schema}"
+        !enabled.tool_names.iter().any(|name| name == "batch"),
+        "batch is not a catalog entry"
     );
-    assert!(
-        !contract.examples.is_empty(),
-        "the batch contract carries its call examples"
-    );
+    let disabled = build(BatchSugar::Disabled);
+    assert!(disabled.tool_specs.is_empty());
 }
 
 #[test]

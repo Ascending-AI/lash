@@ -480,9 +480,9 @@ pub(crate) use lash_sansio::{ToolCatalogBuildInput, validate_tool_input};
 pub mod sansio {
     pub use lash_sansio::sansio::{
         ChatContextProjector, CheckpointDelivery, CheckpointResumeAction, CompletedToolCall,
-        ContextProjector, EffectId, ExecutionEnvironmentSync, LlmCallError, PendingToolCall,
-        PendingWork, ProjectorTurnInputs, ProtocolDriverHandle, Response, TurnCause, TurnMachine,
-        render_turn_causes_prompt,
+        ContextProjector, EffectId, ExecutionEnvironmentSync, ExpandedRow, ExpandedWrapper,
+        LlmCallError, PendingToolCall, PendingWork, ProjectorTurnInputs, ProtocolDriverHandle,
+        Response, ToolExpansionPlan, TurnCause, TurnMachine, render_turn_causes_prompt,
     };
 }
 

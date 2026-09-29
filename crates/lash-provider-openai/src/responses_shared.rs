@@ -430,7 +430,7 @@ pub fn response_parts_from_value_with_decoder(
                             .get("call_id")
                             .and_then(|v| v.as_str())
                             .map(str::to_string)
-                            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                            .unwrap_or_default(),
                         tool_name: name.to_string(),
                         input_json: tool_argument_decoder.decode(name, arguments),
                         replay: item.get("id").and_then(|v| v.as_str()).map(|id| {
@@ -1467,9 +1467,6 @@ impl ResponsesStreamState {
         let owner = self.update_tool_call_from_item(item, output_index)?;
         let tool_call = {
             let tool_call = self.tool_call_mut(owner)?;
-            if tool_call.call_id.is_empty() {
-                tool_call.call_id = uuid::Uuid::new_v4().to_string();
-            }
             if tool_call.input_json.is_empty() && !tool_call.tool_name.is_empty() {
                 tool_call.input_json = "{}".to_string();
             }

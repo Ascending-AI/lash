@@ -426,13 +426,11 @@ fn event_samples() -> Vec<TraceEvent> {
         },
         TraceEvent::LlmCallFailed {
             error: TraceError {
-                message: "boom".to_string(),
                 retryable: true,
                 terminal_reason: None,
                 failure_kind: None,
                 code: None,
                 code_namespace: None,
-                raw: None,
             },
             stream_summary: None,
             attempts: None,

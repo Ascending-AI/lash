@@ -257,6 +257,7 @@ pub fn oracle_observation_class(oracle_id: &str) -> Option<OracleObservationClas
         | "sim.oracle.generated-final-value-semantic-channel.v1"
         | "sim.oracle.generated-runtime-provider-matrix.v1"
         | "sim.oracle.generated-suspend-resume.v1"
+        | "sim.oracle.global-invariants.v1"
         | "sim.oracle.healthy-long-turn-liveness.v1"
         | "sim.oracle.independent-checkpoint-state.v1"
         | "sim.oracle.ingress-session-opened.v1"

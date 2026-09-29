@@ -101,6 +101,9 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     // FIG-4024: the resident runtime state changes only through the
     // publishing install path.
     t.compile_fail("tests/ui/runtime_resident_state_is_private.rs");
+    // FIG-4092: an ADR-0007 scenario coverage entry names its test through a
+    // function pointer, so a deleted test fails compilation.
+    t.compile_fail("tests/ui/scenario_coverage_index_stores_fn_pointers.rs");
     if cfg!(feature = "rlm") {
         // FIG-1979: the dialect has one carrier, and a memory limit cannot be
         // spelled as an instruction budget.

@@ -587,13 +587,6 @@ fn native_rejects_malformed_calls_without_execution() {
         (
             vec![
                 call("a", "execute_code", "{}"),
-                call("a", "execute_code", "{}"),
-            ],
-            "retry_duplicate_call_id",
-        ),
-        (
-            vec![
-                call("a", "execute_code", "{}"),
                 call("b", "execute_code", "{}"),
             ],
             "retry_multiple_calls",

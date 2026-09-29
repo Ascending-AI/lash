@@ -34,6 +34,57 @@ pub struct CompletedToolCall {
     pub replay: Option<ProviderReplayMeta>,
 }
 
+/// How a step's flat tool slots fold back into the calls its response made.
+///
+/// A protocol that offers call sugar (the standard protocol's `batch`)
+/// expands each sugared call into executable slots of the step's one tool
+/// group, and records here how their results fold back into one result per
+/// sugared call. The plan is a pure function of the recorded response and the
+/// turn's admitted protocol configuration, so a replay recomputes it rather
+/// than reading it back. Empty when the response held no sugar.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, serde::Deserialize)]
+pub struct ToolExpansionPlan {
+    pub wrappers: Vec<ExpandedWrapper>,
+}
+
+impl ToolExpansionPlan {
+    pub fn is_empty(&self) -> bool {
+        self.wrappers.is_empty()
+    }
+}
+
+/// One sugared call of the response and the slots its members took.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+pub struct ExpandedWrapper {
+    /// Position of the wrapper call among the response's dispatched calls.
+    pub source_position: u32,
+    /// The provider's call id and replay metadata, kept for the transcript.
+    pub call_id: String,
+    pub tool_name: String,
+    pub args: Value,
+    pub replay: Option<ProviderReplayMeta>,
+    /// One row per member, in member order.
+    pub rows: Vec<ExpandedRow>,
+}
+
+/// Where one member of a sugared call went.
+#[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExpandedRow {
+    /// The member runs in flat slot `slot` of the step's tool group.
+    Slot {
+        member_index: u32,
+        tool: String,
+        slot: u32,
+    },
+    /// The member was refused before the group opened.
+    Refused {
+        member_index: u32,
+        tool: String,
+        error: Value,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
 pub struct TurnCause {
     pub id: String,
@@ -143,9 +194,7 @@ pub enum LogEvent {
         session_id: SessionId,
         protocol_iteration: usize,
         request_body: Option<String>,
-        message: String,
         retryable: bool,
-        raw: Option<String>,
         code: Option<crate::session_model::FailureCode>,
         /// The transport's failure classification. `ProviderFailureKind::Unknown`
         /// means the failure carried no provider kind; the trace projection
@@ -181,7 +230,13 @@ pub enum Effect<M: TurnProtocol = UnitTurnProtocol> {
     },
     ToolCalls {
         id: EffectId,
+        /// The flat executable slots of the step's one tool group.
         calls: Vec<PendingToolCall>,
+        /// How the slots fold back into the response's calls. The host runs
+        /// `calls` and answers one result per slot, in slot order; the
+        /// machine folds them.
+        #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
+        expansion: ToolExpansionPlan,
     },
     ExecCode {
         id: EffectId,
@@ -232,9 +287,14 @@ impl<M: TurnProtocol> Clone for Effect<M> {
                 id: *id,
                 request: Arc::clone(request),
             },
-            Self::ToolCalls { id, calls } => Self::ToolCalls {
+            Self::ToolCalls {
+                id,
+                calls,
+                expansion,
+            } => Self::ToolCalls {
                 id: *id,
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::ReportToolCalls { completed } => Self::ReportToolCalls {
                 completed: completed.clone(),
@@ -277,11 +337,13 @@ impl<M: TurnProtocol> Clone for Effect<M> {
 /// Error details from a failed LLM call.
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct LlmCallError {
+    #[serde(serialize_with = "serialize_provider_failure_message")]
     pub message: String,
     pub retryable: bool,
     /// Required transport classification. Non-provider failures explicitly
     /// carry `ProviderFailureKind::Unknown`; missing or future kinds are refused.
     pub kind: crate::llm::types::ProviderFailureKind,
+    #[serde(default, skip_serializing, skip_deserializing)]
     pub raw: Option<String>,
     /// Namespaced failure code: `provider` spellings are provider-owned,
     /// `lash` spellings are Lash-authored (pre-cutover `adapter`/`refusal`
@@ -294,6 +356,13 @@ pub struct LlmCallError {
     /// calls in this response are retained for diagnosis but never executed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial_response: Option<Box<LlmResponse>>,
+}
+
+fn serialize_provider_failure_message<S>(_: &String, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str("provider call failed")
 }
 
 /// A response to a previously emitted effect.
@@ -402,7 +471,12 @@ pub enum PendingWork<M: TurnProtocol = UnitTurnProtocol> {
         driver_state: Option<M::DriverState>,
     },
     Tools {
+        /// The flat executable slots of the step's one tool group.
         calls: Vec<PendingToolCall>,
+        /// How the slots fold back into the response's calls. Empty when the
+        /// response held no sugar, and then absent from the encoding.
+        #[serde(default, skip_serializing_if = "ToolExpansionPlan::is_empty")]
+        expansion: ToolExpansionPlan,
     },
     Exec {
         language: String,
@@ -426,8 +500,9 @@ impl<M: TurnProtocol> Clone for PendingWork<M> {
                 request: Arc::clone(request),
                 driver_state: driver_state.clone(),
             },
-            Self::Tools { calls } => Self::Tools {
+            Self::Tools { calls, expansion } => Self::Tools {
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::Exec {
                 language,
@@ -459,9 +534,10 @@ impl<M: TurnProtocol> PendingWork<M> {
                 id,
                 request: Arc::clone(request),
             },
-            Self::Tools { calls } => Effect::ToolCalls {
+            Self::Tools { calls, expansion } => Effect::ToolCalls {
                 id,
                 calls: calls.clone(),
+                expansion: expansion.clone(),
             },
             Self::Exec { language, code, .. } => Effect::ExecCode {
                 id,
@@ -716,6 +792,22 @@ pub trait ProtocolDriverHandle<M: TurnProtocol = UnitTurnProtocol>: Send + Sync 
         llm_response: LlmResponse,
         text_streamed: bool,
     ) -> Vec<DriverAction<M>>;
+    /// Fold the step's per-slot results back into one result per call of the
+    /// response, as `plan` records. Runs before anything is appended or
+    /// emitted, so only folded calls reach the stream, the transcript and
+    /// [`Self::handle_tool_results`]. A driver that never starts tool work
+    /// with a non-empty plan keeps the default, which returns the slots.
+    fn fold_tool_results(
+        &self,
+        plan: &ToolExpansionPlan,
+        completed: Vec<CompletedToolCall>,
+    ) -> Vec<CompletedToolCall> {
+        debug_assert!(
+            plan.is_empty(),
+            "a driver that expands tool calls must fold them"
+        );
+        completed
+    }
     fn handle_tool_results(
         &self,
         ctx: DriverContextView<'_, M>,
@@ -773,6 +865,30 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
 mod llm_call_error_tests {
     use super::LlmCallError;
     use crate::llm::types::ProviderFailureKind;
+
+    #[test]
+    fn journaled_provider_error_omits_free_text() {
+        const SECRET: &str = "api_key= secret Authorization: Basic abc";
+        let error = LlmCallError {
+            message: SECRET.to_string(),
+            retryable: false,
+            kind: ProviderFailureKind::Http,
+            raw: Some(SECRET.to_string()),
+            code: Some(crate::session_model::FailureCode::provider(
+                "rate_limit_exceeded",
+            )),
+            terminal_reason: crate::llm::types::LlmTerminalReason::ProviderError,
+            request_body: None,
+            partial_response: None,
+        };
+        let journaled = serde_json::to_string(&error).expect("serialize effect result");
+        assert!(!journaled.contains(SECRET));
+        assert!(!journaled.contains("Basic abc"));
+        assert!(journaled.contains("provider:rate_limit_exceeded"));
+        let replayed: LlmCallError = serde_json::from_str(&journaled).expect("replay error");
+        assert_eq!(replayed.message, "provider call failed");
+        assert_eq!(replayed.raw, None);
+    }
 
     #[test]
     fn llm_call_error_requires_a_recognized_journal_kind() {

@@ -31,12 +31,20 @@ lashctl version --json
 ```
 
 The JSON envelope has `schema_version`, `command`, `result` and `error`.
-`result` reports the release, drain generation `G`, fleet epoch `F`'s writable
-range, each component's `reads` and `writes` ranges, and the remote and Restate
-wire ranges. This `G` describes the CLI build; read each serving node's
-generation from its deployment before a drain. A component is the PostgreSQL
-schema, one of the three SQLite
-databases, or a Restate object family. Each store stamp has a version and a
+`result.cli_build_generation` is the CLI binary's own drain generation `G`.
+`result.fleet_generations` lists generations with pinned work or a drain mark
+in the PostgreSQL store. Each entry has `generation`, `draining`, and
+`source: "postgres"`. The CLI does not have a Restate admin endpoint, so this
+list cannot show a registered deployment that has no store work and no drain
+mark. Use `fleet_generations` to find the generation to drain, and confirm the
+serving node's generation before retiring its deployment. The result also
+reports the release, fleet epoch `F`'s writable range, each component's
+`reads` and `writes` ranges, and the remote and Restate wire ranges.
+
+One release runs one worker feature set. If workers use mixed feature sets,
+they occupy separate generation lanes, and each lane must drain separately.
+A component is the PostgreSQL schema, one of the three SQLite databases, or
+a Restate object family. Each store stamp has a version and a
 `min_reader` floor. An older build admits a safely expanded component while
 the floor still allows it; an unsafe schema addition is refused. `F` selects
 the format all live writers emit. Before finalize, N+1 writes only shapes and

@@ -156,7 +156,11 @@ async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
 
     let state = session.admin().tools().state().await?;
 
-    assert!(state.generation() > 0);
+    // `batch` is protocol sugar, not a registered tool (ADR 0116 §2), so a
+    // standard session with no tools of its own exposes an empty catalog
+    // that no registration has advanced.
+    assert!(state.is_empty(), "no tool is registered by default");
+    assert_eq!(state.generation(), 0);
     Ok(())
 }
 

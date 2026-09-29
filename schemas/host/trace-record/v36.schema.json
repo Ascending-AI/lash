@@ -1182,15 +1182,6 @@
             "null"
           ]
         },
-        "message": {
-          "type": "string"
-        },
-        "raw": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "retryable": {
           "type": "boolean"
         },
@@ -1202,7 +1193,6 @@
         }
       },
       "required": [
-        "message",
         "retryable"
       ],
       "type": "object"

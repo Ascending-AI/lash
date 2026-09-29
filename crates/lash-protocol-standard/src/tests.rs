@@ -7,6 +7,7 @@ use tokio::time::{Duration, timeout};
 
 #[test]
 fn standard_execution_section_uses_only_surviving_tool_examples() {
+    let section = standard_execution_section(BatchSugar::default());
     for removed_tool in [
         "read_file",
         "\"edit\"",
@@ -16,12 +17,19 @@ fn standard_execution_section_uses_only_surviving_tool_examples() {
         "search_web",
     ] {
         assert!(
-            !STANDARD_EXECUTION_SECTION.contains(removed_tool),
+            !section.contains(removed_tool),
             "standard prompt should not mention removed tool `{removed_tool}`"
         );
     }
-    assert!(STANDARD_EXECUTION_SECTION.contains("declared JSON arguments"));
-    assert!(STANDARD_EXECUTION_SECTION.contains("Check each batch result’s success flag"));
+    let enabled = standard_execution_section(BatchSugar::default());
+    assert!(enabled.contains("declared JSON arguments"));
+    assert!(enabled.contains("Check each batch result’s success flag"));
+    assert!(enabled.contains("at most 64 per batch"));
+    let disabled = standard_execution_section(BatchSugar::Disabled);
+    assert!(
+        !disabled.contains("batch"),
+        "a disabled batch is not offered in the prompt: {disabled}"
+    );
 }
 
 #[test]
@@ -223,7 +231,8 @@ impl lash_core::facade_support::Provider for BatchRuntimeProvider {
                         "tool_calls": [
                             {"tool": "alpha", "parameters": {}},
                             {"tool": "beta", "parameters": {"value": "fail"}},
-                            {"tool": "internal_probe", "parameters": {}}
+                            {"tool": "ghost", "parameters": {}},
+                            {"tool": "batch", "parameters": {"tool_calls": []}}
                         ]
                     })
                     .to_string(),
@@ -257,21 +266,6 @@ impl lash_core::facade_support::Provider for BatchRuntimeProvider {
 struct BatchRuntimeTools {
     barrier: Arc<Barrier>,
     started: Arc<AtomicUsize>,
-}
-
-struct BatchRuntimeInternalTool {
-    executed: Arc<AtomicUsize>,
-}
-
-#[async_trait::async_trait]
-impl lash_core::InternalProcessToolImplementation for BatchRuntimeInternalTool {
-    async fn execute(
-        &self,
-        _call: lash_core::InternalProcessToolCall<'_>,
-    ) -> lash_core::ToolOutcomeDone {
-        self.executed.fetch_add(1, Ordering::SeqCst);
-        lash_core::ToolOutcomeDone::ok(serde_json::json!("internal body ran"))
-    }
 }
 
 pub(super) fn runtime_test_tool(name: &str) -> lash_core::ToolDefinition {
@@ -336,14 +330,6 @@ pub(super) struct CountingEffectController {
 }
 
 impl CountingEffectController {
-    fn count(&self, kind: lash_core::RuntimeEffectKind) -> usize {
-        self.frames
-            .lock_recover()
-            .iter()
-            .filter(|(candidate, _)| *candidate == kind)
-            .count()
-    }
-
     fn group_open_count(&self) -> usize {
         self.group_opens.load(Ordering::SeqCst)
     }
@@ -566,7 +552,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
 }
 
 #[tokio::test]
-async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_attempt() {
+async fn standard_batch_members_are_children_of_the_steps_one_group() {
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let saw_batch_result = Arc::new(AtomicBool::new(false));
     let provider = BatchRuntimeProvider {
@@ -577,7 +563,7 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
     // The counting layer sits over the lent turn scope *and* the backend's
-    // effect host, so the group children the batch mints — whose controllers
+    // effect host, so the group children the step mints — whose controllers
     // come from the host, not the scope — run under it too and their attempts
     // land on the same frame log the counter reads.
     let controller = CountingEffectController::default();
@@ -586,22 +572,16 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
     let started = Arc::new(AtomicUsize::new(0));
-    let internal_executed = Arc::new(AtomicUsize::new(0));
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "standard-batch-test-tools",
-            lash_core::facade_support::PluginSpec::new()
-                .with_tool_provider(Arc::new(BatchRuntimeTools {
+            lash_core::facade_support::PluginSpec::new().with_tool_provider(Arc::new(
+                BatchRuntimeTools {
                     barrier: Arc::new(Barrier::new(2)),
                     started: Arc::clone(&started),
-                }))
-                .with_internal_tool(lash_core::InternalProcessToolDef::new(
-                    runtime_test_tool("internal_probe"),
-                    Arc::new(BatchRuntimeInternalTool {
-                        executed: Arc::clone(&internal_executed),
-                    }),
-                )),
+                },
+            )),
         )),
     ];
     let policy = lash_core::SessionPolicy {
@@ -652,26 +632,17 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
     ));
     assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(started.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        internal_executed.load(Ordering::SeqCst),
-        0,
-        "a batch child must not cross normal admission into an Internal provider"
-    );
     assert!(saw_batch_result.load(Ordering::SeqCst));
     assert_eq!(
         controller.group_open_count(),
         1,
-        "each batch is a durable effect group now (FIG-3397)"
-    );
-    assert_eq!(
-        controller.count(lash_core::RuntimeEffectKind::ToolAttempt),
-        2,
-        "only alpha and beta are attempts; the batch body itself has no ToolAttempt frame"
+        "the batch's members run in the step's one tool group"
     );
     assert_eq!(
         controller.tool_attempt_names(),
         vec!["alpha".to_string(), "beta".to_string()],
-        "the runtime-owned batch orchestration body is never enclosed by ToolAttempt"
+        "only the admitted members are attempts: the unavailable member is refused by \
+         preparation, the nested batch is a refused row, and the wrapper is no invocation"
     );
 }
 

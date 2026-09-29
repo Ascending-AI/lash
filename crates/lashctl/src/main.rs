@@ -268,10 +268,15 @@ fn drain_status_result(status: &GenerationDrainStatus, stalled: &[StalledObligat
     })
 }
 
-fn version_result() -> Value {
+fn version_result(fleet_generations: &[(BuildGeneration, bool)]) -> Value {
     json!({
         "release": env!("CARGO_PKG_VERSION"),
-        "generation": lash::formats::build_generation().as_str(),
+        "cli_build_generation": lash::formats::build_generation().as_str(),
+        "fleet_generations": fleet_generations.iter().map(|(generation, draining)| json!({
+            "generation": generation.as_str(),
+            "draining": draining,
+            "source": "postgres",
+        })).collect::<Vec<_>>(),
         "fleet_writable": FLEET_WRITABLE_RANGE,
         "components": DESCRIPTORS.iter().map(|descriptor| json!({
             "component": descriptor.component.as_str(),
@@ -295,11 +300,15 @@ fn database_url() -> Result<String, CliError> {
 }
 
 async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
-    if matches!(command, Command::Version) {
-        return Ok((version_result(), Exit::Done));
-    }
     let url = database_url()?;
     let outcome = match command {
+        Command::Version => {
+            let storage = PostgresStorage::connect(&url)
+                .await
+                .map_err(CliError::store)?;
+            let generations = storage.fleet_generations().await.map_err(CliError::store)?;
+            (version_result(&generations), Exit::Done)
+        }
         Command::Migrate { phase, dry_run } => {
             if *phase != MigrationPhase::Expand {
                 return Err(CliError::new(
@@ -433,7 +442,6 @@ async fn run(command: &Command) -> Result<(Value, Exit), CliError> {
                 _ => unreachable!("matched a drain command"),
             }
         }
-        Command::Version => unreachable!("handled before database access"),
     };
     Ok(outcome)
 }
@@ -449,7 +457,33 @@ fn output(command: &str, result: Option<Value>, error: Option<&CliError>, json_m
     } else if let Some(error) = error {
         eprintln!("lashctl: {}", error.message);
     } else if let Some(result) = result {
-        println!("{result:#}");
+        if command == "version" {
+            println!(
+                "release: {}",
+                result["release"].as_str().unwrap_or("unknown")
+            );
+            println!(
+                "CLI build generation: {}",
+                result["cli_build_generation"].as_str().unwrap_or("unknown")
+            );
+            println!("fleet generations:");
+            if let Some(generations) = result["fleet_generations"].as_array() {
+                for generation in generations {
+                    println!(
+                        "  {} (draining: {}, source: {})",
+                        generation["generation"].as_str().unwrap_or("unknown"),
+                        generation["draining"].as_bool().unwrap_or(false),
+                        generation["source"].as_str().unwrap_or("unknown"),
+                    );
+                }
+            }
+            println!(
+                "compatibility: {}",
+                json!({"fleet_writable":result["fleet_writable"],"components":result["components"],"wires":result["wires"]})
+            );
+        } else {
+            println!("{result:#}");
+        }
     }
     exit
 }

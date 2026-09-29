@@ -55,6 +55,8 @@ pub(super) struct GeneratedRuntimeWorld {
     suspends_spawned: u64,
     /// Resolved suspend sessions, kept for the durable-content oracle.
     finished_suspends: Vec<FinishedSuspend>,
+    /// What the world's own tools and host record for the global invariants.
+    recorder: crate::invariants::HistoryRecorder,
     /// When set, the driver admits at most one live provider turn at a time
     /// (see `RuntimeCompletionState::serialize_provider_turns`). Enabled for the
     /// cross-backend durable re-run; left off for the concurrent search run.
@@ -181,6 +183,7 @@ impl GeneratedRuntimeWorld {
             staged_admissions: BTreeMap::new(),
             suspends_spawned: 0,
             finished_suspends: Vec::new(),
+            recorder: crate::invariants::HistoryRecorder::default(),
             serialize_provider_turns,
         }
     }
@@ -223,6 +226,69 @@ impl GeneratedRuntimeWorld {
         self.session_engines
             .insert(alias.to_string(), engine.clone());
         Ok((engine, backend, reopen_factory))
+    }
+
+    /// The run's history for the global invariants: the delivered boundaries,
+    /// the effects they ran with their counted executions, what the world's
+    /// tools and host recorded, and every engine's final store.
+    pub(super) async fn global_history(
+        &self,
+        scenario: &str,
+        events: &[crate::scheduler::DeliveredBoundary],
+    ) -> Result<crate::invariants::History, String> {
+        use crate::invariants::Fact;
+        let mut history = crate::invariants::History::new(scenario, self.seed);
+        // A cancellation names the queued-ingress boundary it withdraws.
+        let mut queued_inputs = BTreeMap::new();
+        for event in events {
+            let input = event
+                .observed
+                .get("input_id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .or_else(|| {
+                    let target = event.payload.get("target").and_then(Value::as_str)?;
+                    queued_inputs.get(target).cloned()
+                });
+            if let Some(input) = &input {
+                queued_inputs.insert(event.boundary_id.clone(), input.clone());
+            }
+            history.push(Fact::Boundary {
+                boundary_id: event.boundary_id.clone(),
+                actor: event.actor_alias.clone(),
+                kind: event.kind.to_string(),
+                label: event.label.clone(),
+                input,
+            });
+            if matches!(
+                event.kind,
+                BoundaryKind::Tool | BoundaryKind::ExecCode | BoundaryKind::DurableEffect
+            ) && let Some(executions) = event
+                .observed
+                .get("execution_count")
+                .and_then(Value::as_u64)
+            {
+                // A tool or exec-code boundary runs once on a live attempt; a
+                // durable effect's first attempt dies only after the engine
+                // recorded its outcome. No attempt dies inside the window.
+                history.push(Fact::EffectRan {
+                    effect: event.boundary_id.clone(),
+                    executions: usize::try_from(executions).unwrap_or(usize::MAX),
+                    unrecorded_attempts: 0,
+                });
+            }
+        }
+        history.extend_from(&self.recorder);
+        crate::invariants::capture_engines(
+            &mut history,
+            std::iter::once(("world".to_owned(), self.engine.restate())).chain(
+                self.session_engines
+                    .iter()
+                    .map(|(alias, engine)| (alias.clone(), engine.restate())),
+            ),
+        )
+        .await?;
+        Ok(history)
     }
 
     pub(super) fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
@@ -1035,6 +1101,10 @@ impl GeneratedRuntimeWorld {
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let observer = crate::invariants::ToolObserver::new(
+            self.recorder.clone(),
+            Some(turn_engine.restate().server().clone()),
+        );
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -1043,6 +1113,7 @@ impl GeneratedRuntimeWorld {
             .tools(Arc::new(SuspendToolProvider::new(
                 tool_name.clone(),
                 Arc::clone(&key_slot),
+                observer,
             )) as Arc<dyn lash_core::ToolProvider>)
             .build(crate::sim_process_owner())
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
@@ -1222,6 +1293,19 @@ impl GeneratedRuntimeWorld {
         let suspended_before_completion = turn.suspended_before_completion.unwrap_or(false);
         let completed_before = turn.completed_before_resolution;
         let resolution = turn.resolution.clone();
+        self.recorder
+            .record(crate::invariants::Fact::CompletionResolved {
+                key: crate::invariants::completion_key_label(&key),
+                session: event.actor_alias.clone(),
+                result_digest: crate::invariants::result_digest(
+                    &crate::content_oracle::ToolResultContent::from_tool_value(
+                        crate::runtime_providers::SUSPEND_TOOL_CALL_ID,
+                        &turn.tool_name,
+                        &resolution,
+                    )
+                    .content,
+                ),
+            });
         let accepted = turn
             .core
             .completions()

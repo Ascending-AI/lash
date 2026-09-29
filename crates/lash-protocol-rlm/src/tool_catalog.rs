@@ -2,20 +2,18 @@ use lash_core::plugin::{PluginError, ToolCatalogContext};
 use lash_core::{ToolActivation, ToolCatalog, facade_support::ToolCatalogContribution};
 use lash_lashlang_runtime::required_tool_typescript_executable;
 
-use crate::dialect::{TOOL_PROSE_TOKENS, TypescriptDialect, dialect_identity_markers};
+use crate::dialect::TypescriptDialect;
 
 /// RLM catalog assembly. The catalog is a flat callable set: every member is
 /// rendered as a full prompt doc under its call-path. RLM contributes
 /// no removals; it validates that each member carries an explicit
-/// `typescript.tool` binding so a cell can call it by module path,
-/// and that no member's model-facing prose spells a dialect out literally.
+/// `typescript.tool` binding so a cell can call it by module path.
 pub(crate) fn rlm_tool_catalog(
     ctx: ToolCatalogContext,
     dialect: &TypescriptDialect,
 ) -> Result<ToolCatalogContribution, PluginError> {
     let _build_tool_catalog = lash_core::facade_support::build_tool_catalog;
     validate_rlm_language_bindings(&ctx.tools, dialect.language())?;
-    validate_dialect_neutral_tool_prose(&ctx, dialect)?;
     Ok(ToolCatalogContribution::default())
 }
 
@@ -25,17 +23,13 @@ pub(crate) fn rlm_tool_catalog(
 /// is always available.
 #[expect(
     clippy::expect_used,
-    reason = "catalog registration validates dialect tool bindings for both dialects, so tool_call_path only errs on an unregistered manifest"
+    reason = "catalog registration validates the TypeScript tool binding, so tool_call_path only errs on an unregistered manifest"
 )]
 pub(crate) fn rlm_prompt_tool_docs(
     tool_catalog: &ToolCatalog,
     dialect: &crate::dialect::TypescriptDialect,
     features: crate::protocol::RlmPromptFeatures,
 ) -> String {
-    let mut vocabulary = dialect.prompt_vocabulary();
-    if !features.type_literals {
-        vocabulary.type_literal_hint = "";
-    }
     let entries = tool_catalog
         .tools
         .iter()
@@ -45,7 +39,7 @@ pub(crate) fn rlm_prompt_tool_docs(
             let contract = &tool.contract;
             let call_path = dialect
                 .tool_call_path(&tool.manifest)
-                .expect("RLM tool catalog registration validates both dialects' bindings");
+                .expect("RLM tool catalog registration validates the TypeScript binding");
             let mut compact =
                 contract.compact_contract_with_signature_name(&tool.manifest, &call_path);
             // Authored examples are Lashlang source; the dialect spells them.
@@ -54,13 +48,6 @@ pub(crate) fn rlm_prompt_tool_docs(
                 .iter()
                 .map(|example| dialect.render_tool_example(example))
                 .collect();
-            // And authored prose resolves its dialect tokens against the
-            // session's own vocabulary, the same way. The doc block is the
-            // measured leak site: a TypeScript session's saved system prompt
-            // carried `agents.spawn`'s Lashlang wording on three lines.
-            compact.description = vocabulary.render_tool_prose(&compact.description);
-            render_doc_field_prose(vocabulary, &mut compact.parameters);
-            render_doc_field_prose(vocabulary, &mut compact.return_fields);
             compact.parameters.retain(has_field_description);
             if !schema_nests(contract.output_schema.canonical(), 0) {
                 compact.return_fields.retain(has_field_description);
@@ -112,311 +99,6 @@ fn schema_nests(schema: &serde_json::Value, depth: usize) -> bool {
             .and_then(serde_json::Value::as_array)
             .is_some_and(|variants| variants.iter().any(|variant| schema_nests(variant, depth)))
     })
-}
-
-fn render_doc_field_prose(
-    vocabulary: crate::dialect::DialectPromptVocabulary,
-    rows: &mut [serde_json::Value],
-) {
-    for row in rows {
-        let Some(description) = row.get("description").and_then(serde_json::Value::as_str) else {
-            continue;
-        };
-        let rendered = vocabulary.render_tool_prose(description);
-        if let Some(object) = row.as_object_mut() {
-            object.insert("description".to_string(), serde_json::json!(rendered));
-        }
-    }
-}
-
-/// One authored string a tool contributes to a prompt doc, and whether the doc
-/// renderer will resolve a prose token in it.
-struct AuthoredProse {
-    site: &'static str,
-    text: String,
-    /// A dialect word is a defect either way; a *token* is only meaningful where it gets
-    /// resolved.
-    token_resolved: bool,
-}
-
-/// Every model-facing string one tool contributes to a prompt doc.
-///
-/// Descriptions are swept at any depth of either schema, and so are the authored
-/// literals the doc lines render (`default`, `enum`): those reach the model as
-/// `in "a"|"b"` / `= "x"` fragments, which makes them prose whatever the schema
-/// calls them.
-///
-/// Examples are excluded on purpose: they are code, they are already respelled
-/// by [`crate::dialect::RlmDialect::render_tool_example`], and the Lashlang
-/// try-operator every authored example carries would make a dialect-word sweep
-/// fire on all of them.
-///
-/// Resolvability is answered by the renderer itself rather than by a rule
-/// restating it: the strings a doc row carries are read out of the compact
-/// contract this tool would render, so the guard cannot drift from
-/// `schema_docs.rs`. It has to be asked, because the renderer's reach is
-/// uneven — input rows come from the schema's *top-level* `properties` only,
-/// while return fields are collected recursively. A token in the deep input
-/// position is a trap either way: today it renders nowhere at all, and the
-/// author who wrote it believes the model reads a hint.
-fn model_facing_tool_prose(
-    manifest: &lash_core::ToolManifest,
-    contract: Option<&lash_core::ToolContract>,
-) -> Vec<AuthoredProse> {
-    let mut prose = Vec::new();
-    if !manifest.description.trim().is_empty() {
-        prose.push(AuthoredProse {
-            site: "description",
-            text: manifest.description.clone(),
-            token_resolved: true,
-        });
-    }
-    let Some(contract) = contract else {
-        return prose;
-    };
-    let rendered = rendered_doc_strings(manifest, contract);
-    let mut authored = Vec::new();
-    collect_schema_prose(
-        "input schema",
-        contract.input_schema.canonical(),
-        &mut authored,
-    );
-    collect_schema_prose(
-        "output schema",
-        contract.output_schema.canonical(),
-        &mut authored,
-    );
-    for (site, kind, text) in authored {
-        prose.push(AuthoredProse {
-            site,
-            token_resolved: kind == SchemaProseKind::Description && rendered.contains(&text),
-            text,
-        });
-    }
-    prose
-}
-
-/// The strings this tool's rendered doc rows carry, before token resolution.
-fn rendered_doc_strings(
-    manifest: &lash_core::ToolManifest,
-    contract: &lash_core::ToolContract,
-) -> std::collections::BTreeSet<String> {
-    let compact = contract.compact_contract_shared(manifest);
-    compact
-        .parameters
-        .iter()
-        .chain(compact.return_fields.iter())
-        .filter_map(|row| row.get("description").and_then(serde_json::Value::as_str))
-        .map(str::to_string)
-        .collect()
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SchemaProseKind {
-    Description,
-    /// An authored literal (`default`, `enum`) that doc lines render inline. A
-    /// token here is never resolved, so it may only ever be dialect-neutral.
-    Literal,
-}
-
-/// Every authored string anywhere in one JSON Schema.
-fn collect_schema_prose(
-    site: &'static str,
-    schema: &serde_json::Value,
-    out: &mut Vec<(&'static str, SchemaProseKind, String)>,
-) {
-    match schema {
-        serde_json::Value::Object(object) => {
-            for (key, value) in object {
-                match (key.as_str(), value) {
-                    ("description", serde_json::Value::String(text)) if !text.trim().is_empty() => {
-                        out.push((site, SchemaProseKind::Description, text.clone()));
-                    }
-                    ("default" | "enum" | "const", value) => {
-                        collect_literal_strings(site, value, out);
-                    }
-                    _ => collect_schema_prose(site, value, out),
-                }
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_schema_prose(site, item, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Every string inside one authored literal value.
-fn collect_literal_strings(
-    site: &'static str,
-    value: &serde_json::Value,
-    out: &mut Vec<(&'static str, SchemaProseKind, String)>,
-) {
-    match value {
-        serde_json::Value::String(text) if !text.trim().is_empty() => {
-            out.push((site, SchemaProseKind::Literal, text.clone()));
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_literal_strings(site, item, out);
-            }
-        }
-        serde_json::Value::Object(object) => {
-            for item in object.values() {
-                collect_literal_strings(site, item, out);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Refuse a catalog whose members spell a dialect out in model-facing prose.
-///
-/// The narrower dialect-leak guards are all *renderer*-side: the prompt walker
-/// sweeps the fragments this crate renders, and every one of them reads its
-/// words from a [`crate::dialect::DialectPromptVocabulary`]. Tool prose does
-/// not: it is authored in the crate that owns the tool — `lash-subagents`,
-/// `lash-plugin-process-controls`, any host plugin — and rendered verbatim into
-/// the doc block, so no vocabulary sits between the author and the model. That
-/// is how `agents.spawn` told TypeScript sessions their seeds had a "lashlang
-/// source root".
-///
-/// The rule is *neutrality*, not foreignness: one authored string is served to
-/// sessions of every registered dialect, so naming any dialect is wrong even in
-/// that dialect's own session. Prose that genuinely needs a dialect word writes
-/// a [`TOOL_PROSE_TOKENS`] token and lets the session's vocabulary spell it,
-/// which is also why an unrecognized token is rejected here — a misspelled one
-/// would otherwise reach the model raw.
-pub(crate) fn validate_dialect_neutral_tool_prose(
-    ctx: &ToolCatalogContext,
-    dialect: &TypescriptDialect,
-) -> Result<(), PluginError> {
-    let markers: Vec<(&'static str, Vec<String>)> =
-        vec![(dialect.language_id(), dialect_identity_markers(dialect))];
-    // Every violation, not the first: a host fixing its plugin should see the
-    // whole list once instead of rediscovering it one failed session at a time.
-    let mut violations = Vec::new();
-    for tool in &ctx.tools {
-        if tool.activation == ToolActivation::Internal {
-            continue;
-        }
-        let contract = ctx
-            .resolve_contract
-            .as_ref()
-            .and_then(|resolve| resolve(tool));
-        for prose in model_facing_tool_prose(tool, contract.as_deref()) {
-            let AuthoredProse {
-                site,
-                text,
-                token_resolved,
-            } = prose;
-            let haystack = text.to_lowercase();
-            for (language_id, markers) in &markers {
-                for marker in markers {
-                    if haystack.contains(marker) {
-                        violations.push(format!(
-                            "tool `{name}` names the `{language_id}` dialect in its {site} \
-                             (`{marker}`)",
-                            name = tool.name,
-                        ));
-                    }
-                }
-            }
-            for token in prose_token_occurrences(&text) {
-                match token {
-                    ProseTokenOccurrence::Known(_) if token_resolved => {}
-                    ProseTokenOccurrence::Known(token) => violations.push(format!(
-                        "tool `{name}` writes `{token}` in its {site}, in a position the tool-doc \
-                         renderer never resolves (input rows are read from the schema's top-level \
-                         `properties`; literals and nested input fields are not), so the token \
-                         cannot reach the model as words",
-                        name = tool.name,
-                    )),
-                    ProseTokenOccurrence::Unknown(token) => violations.push(format!(
-                        "tool `{name}` writes `{token}` in its {site}, which is not an RLM prose \
-                         token",
-                        name = tool.name,
-                    )),
-                    ProseTokenOccurrence::Unclosed(snippet) => violations.push(format!(
-                        "tool `{name}` writes an unclosed `{{{{` token in its {site} \
-                         (`{snippet}`); nothing resolves it and it reaches the model verbatim",
-                        name = tool.name,
-                    )),
-                }
-            }
-        }
-    }
-    if violations.is_empty() {
-        return Ok(());
-    }
-    Err(PluginError::Registration(format!(
-        "model-facing tool prose is served to every registered dialect, so it must be \
-         dialect-neutral: drop the word, or write one of the RLM prose tokens ({tokens}) and let \
-         the session's dialect spell it. {count} violation(s): {list}",
-        tokens = prose_token_list(),
-        count = violations.len(),
-        list = violations.join("; "),
-    )))
-}
-
-fn prose_token_list() -> String {
-    TOOL_PROSE_TOKENS
-        .iter()
-        .map(|(token, _)| *token)
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-/// One `{{…}}` occurrence in authored prose.
-enum ProseTokenOccurrence {
-    /// A token [`TOOL_PROSE_TOKENS`] resolves. Whether that is *allowed* depends
-    /// on the position, which the caller knows and this scanner does not.
-    Known(String),
-    Unknown(String),
-    /// A `{{` with no `}}` after it — the typo that motivated scanning every
-    /// occurrence instead of stopping at the first unresolvable one. It renders
-    /// verbatim, and an earlier version of this scanner answered `None` for the
-    /// whole string when it saw one, abandoning everything written after it.
-    Unclosed(String),
-}
-
-/// Every `{{…}}` occurrence in `text`, in order.
-///
-/// An unclosed open brace ends the token but not the scan: whatever follows it
-/// is still authored prose, and the dialect word a host writes three sentences
-/// later is not excused by a typo three sentences earlier.
-fn prose_token_occurrences(text: &str) -> Vec<ProseTokenOccurrence> {
-    const UNCLOSED_SNIPPET_CHARS: usize = 32;
-    let mut occurrences = Vec::new();
-    let mut rest = text;
-    while let Some(start) = rest.find("{{") {
-        let tail = &rest[start..];
-        match tail.find("}}") {
-            Some(close) => {
-                let end = close + 2;
-                let token = &tail[..end];
-                occurrences.push(
-                    if TOOL_PROSE_TOKENS.iter().any(|(known, _)| *known == token) {
-                        ProseTokenOccurrence::Known(token.to_string())
-                    } else {
-                        ProseTokenOccurrence::Unknown(token.to_string())
-                    },
-                );
-                rest = &tail[end..];
-            }
-            None => {
-                let snippet = tail
-                    .chars()
-                    .take(UNCLOSED_SNIPPET_CHARS)
-                    .collect::<String>();
-                occurrences.push(ProseTokenOccurrence::Unclosed(snippet));
-                rest = &tail["{{".len()..];
-            }
-        }
-    }
-    occurrences
 }
 
 fn validate_rlm_language_bindings(
@@ -839,54 +521,29 @@ mod tests {
         .expect("module call lowers");
         lashlang::LinkedModule::link(program, host_environment).expect("module call links");
     }
-    /// The three strings this guard was built from, exactly as `main` shipped
-    /// them.
-    ///
-    /// Copied rather than referenced: `lash-protocol-rlm` cannot depend on
-    /// `lash-subagents` or `lash-plugin-process-controls` (they depend on it),
-    /// and a guard whose red side is only "some string with the word in it"
-    /// would not prove it catches *these*. Each was measured in a judged
-    /// TypeScript session's saved system prompt.
-    const LEAKED_HOST_PROSE: &[&str] = &[
-        "A TypeScript process definition value, for example `on_button`.",
-        "Optional typed result shape. Use string descriptors for record fields, e.g. \
-         `{ queries: \"list[str]\" }`, or write the shape inside a <typescript> cell.",
-        "Optional record of state to seed into the child. Each entry's kind is preserved \
-         automatically: if its typescript source root is a host-projected binding (e.g. \
-         `seed: { problem: input.prompt }`), the child receives it as a read-only projected \
-         binding; otherwise it lands as a regular RLM global.",
-    ];
-
-    /// One tool whose only interesting property is the prose at `site`.
-    fn tool_with_prose(site: ProseSite, prose: &str) -> ToolDefinition {
-        let (description, input_schema) = match site {
-            ProseSite::Description => (prose.to_string(), ToolContract::default_input_schema()),
-            ProseSite::Schema => (
-                "Run a subagent".to_string(),
-                json!({
-                    "type": "object",
-                    "properties": { "output": { "type": "object", "description": prose } },
-                    "additionalProperties": false
-                }),
-            ),
-        };
+    fn tool_with_prose(description: &str, schema_description: &str) -> ToolDefinition {
         ToolDefinition::raw(
             "tool:test/spawn_agent",
             "spawn_agent",
             description,
-            input_schema,
+            json!({
+                "type": "object",
+                "properties": {
+                    "output": { "type": "object", "description": schema_description }
+                },
+                "additionalProperties": false
+            }),
             json!({ "type": "string" }),
         )
         .with_tool_binding(ToolBinding::new(["agents"], "spawn"))
     }
 
-    #[derive(Clone, Copy)]
-    enum ProseSite {
-        Description,
-        Schema,
-    }
-
-    fn catalog_registration(tool: ToolDefinition) -> Result<(), PluginError> {
+    #[test]
+    fn typescript_named_tool_prose_registers() {
+        let tool = tool_with_prose(
+            "Run a TypeScript subagent in a <typescript> cell.",
+            "A TypeScript process definition value, for example `on_button`.",
+        );
         let contract = Arc::new(tool.contract());
         let name = tool.name().to_string();
         rlm_tool_catalog(
@@ -902,297 +559,30 @@ mod tests {
             },
             &typescript_test_dialect(),
         )
-        .map(|_| ())
+        .expect("TypeScript prose must register");
     }
 
-    /// The class, at both prose sites and for both dialects' words.
     #[test]
-    fn host_tool_prose_that_names_a_dialect_fails_registration() {
-        for prose in LEAKED_HOST_PROSE {
-            for site in [ProseSite::Description, ProseSite::Schema] {
-                let err = catalog_registration(tool_with_prose(site, prose))
-                    .expect_err("dialect-named prose must not register");
-                let message = err.to_string();
-                assert!(
-                    message.contains("names the `typescript` dialect"),
-                    "{message}"
-                );
-                assert!(message.contains("{{type_literal_hint}}"), "{message}");
-            }
-        }
-
-        // With TypeScript the only RLM language, "dialect-neutral" means the
-        // prose must not name *this* language: there is no second dialect for
-        // a host to be neutral toward, so the foreign-wording half of this
-        // rule retired with the Lashlang surface (FIG-3021).
-    }
-
-    /// Neutral prose registers, so the guard is a rule and not a wall.
-    #[test]
-    fn dialect_neutral_host_tool_prose_registers() {
-        catalog_registration(tool_with_prose(
-            ProseSite::Schema,
-            "A process definition value, for example `on_button`.",
-        ))
-        .expect("neutral prose registers");
-        catalog_registration(tool_with_prose(
-            ProseSite::Schema,
-            "Optional typed result shape. Use string descriptors for record fields, \
-             e.g. `{ queries: \"list[str]\" }`{{type_literal_hint}}.",
-        ))
-        .expect("token-carrying prose registers");
-    }
-
-    /// A misspelled token would otherwise reach the model verbatim.
-    #[test]
-    fn unrecognized_prose_token_fails_registration() {
-        let err = catalog_registration(tool_with_prose(
-            ProseSite::Schema,
-            "Optional typed result shape{{type_literal}}.",
-        ))
-        .expect_err("an unresolved token must not register");
-        let message = err.to_string();
-        assert!(message.contains("`{{type_literal}}`"), "{message}");
-        assert!(message.contains("not an RLM prose token"), "{message}");
-    }
-
-    /// The token resolves to the dialect's own answer in the rendered doc.
-    ///
-    /// Rendered through `rlm_prompt_tool_docs`, the path a served turn uses, so
-    /// this cannot pass while the doc block skips the substitution.
-    #[test]
-    fn prose_tokens_are_spelled_by_the_session_dialect() {
-        let authored = "Optional typed result shape. Use string descriptors for record fields, \
-             e.g. `{ queries: \"list[str]\" }`{{type_literal_hint}}.";
-        let tool = tool_with_prose(ProseSite::Schema, authored);
-        let contracts: std::collections::BTreeMap<_, _> =
-            [(tool.manifest.id.clone(), Arc::new(tool.contract()))]
-                .into_iter()
-                .collect();
-        let manifests = vec![tool.manifest()];
+    fn typescript_tool_prose_is_rendered_verbatim() {
+        let description = "Run a TypeScript subagent in a <typescript> cell.";
+        let schema_description = "A TypeScript process definition value.";
+        let tool = tool_with_prose(description, schema_description);
         let catalog = build_tool_catalog(ToolCatalogBuildInput {
-            tools: manifests,
-            resolve_contract: Some(Arc::new(move |manifest| {
-                contracts.get(&manifest.id).cloned()
+            tools: vec![tool.manifest()],
+            resolve_contract: Some(Arc::new({
+                let contract = Arc::new(tool.contract());
+                move |_| Some(Arc::clone(&contract))
             })),
             contributions: vec![ToolCatalogContribution::default()],
         })
         .expect("complete resident definition");
-
-        // TypeScript has no type-literal form, so its `type_literal_hint` is
-        // empty: the token resolves to nothing at all rather than to the
-        // retired Lashlang `Type { ... }` sentence.
-        let typescript = rlm_prompt_tool_docs(
+        let docs = rlm_prompt_tool_docs(
             &catalog,
             &typescript_test_dialect(),
             crate::protocol::RlmPromptFeatures::default(),
         );
-        assert!(
-            typescript.contains("e.g. `{ queries: \"list[str]\" }`."),
-            "{typescript}"
-        );
-        assert!(!typescript.contains("Type {"), "{typescript}");
-        assert!(!typescript.contains("{{"), "unresolved token: {typescript}");
-    }
-
-    /// A leak nested deep in a schema, and one in an *output* schema.
-    ///
-    /// The measured three all sat one level into an input schema. A result
-    /// schema's field docs are rendered into the same doc block ("Return
-    /// fields:"), and a nested `items`/`properties` chain is where a listing
-    /// tool's rows live — `processes.list` returns an array of records — so the
-    /// sweep walks whole schemas rather than reading their top level.
-    #[test]
-    fn a_dialect_word_anywhere_in_a_schema_fails_registration() {
-        let tool = ToolDefinition::raw(
-            "tool:test/list_process_handles",
-            "list_process_handles",
-            "List process runs visible to this session",
-            json!({
-                "type": "object",
-                "properties": {
-                    "filter": {
-                        "type": "object",
-                        "properties": {
-                            "definition": {
-                                "type": "object",
-                                "description": "A TypeScript process definition value."
-                            }
-                        }
-                    }
-                }
-            }),
-            json!({
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "Handle id; print it with `finish(value)` when done."
-                        }
-                    }
-                }
-            }),
-        )
-        .with_tool_binding(ToolBinding::new(["processes"], "list"));
-
-        let err = catalog_registration(tool).expect_err("both leaks must be reported");
-        let message = err.to_string();
-        assert!(message.contains("in its input schema"), "{message}");
-        assert!(message.contains("in its output schema"), "{message}");
-        assert!(message.contains("2 violation(s)"), "{message}");
-    }
-
-    /// A typo'd token: `{{` with no `}}`.
-    ///
-    /// Nothing resolves it, it renders verbatim, and the scanner that answered
-    /// "no unresolvable token" for the whole string when it met one also stopped
-    /// reading there — so a dialect word written after the typo was invisible
-    /// too. Both halves are asserted.
-    #[test]
-    fn an_unclosed_prose_token_fails_registration() {
-        let err = catalog_registration(tool_with_prose(
-            ProseSite::Schema,
-            "Optional typed result shape{{type_literal_hint.",
-        ))
-        .expect_err("an unclosed token must not register");
-        let message = err.to_string();
-        assert!(message.contains("unclosed"), "{message}");
-        assert!(message.contains("{{type_literal_hint."), "{message}");
-
-        // The scan continues past it: the dialect word later in the same string
-        // is reported alongside the typo, not swallowed by it.
-        let err = catalog_registration(tool_with_prose(
-            ProseSite::Schema,
-            "Optional typed result shape{{type_literal_hint. Pass a TypeScript type literal \
-             for nested shapes.",
-        ))
-        .expect_err("both defects must be reported");
-        let message = err.to_string();
-        assert!(message.contains("unclosed"), "{message}");
-        assert!(
-            message.contains("names the `typescript` dialect"),
-            "{message}"
-        );
-        assert!(message.contains("2 violation(s)"), "{message}");
-    }
-
-    /// A known token where the renderer will never resolve it.
-    ///
-    /// The doc renderer's reach is uneven: input rows are built from the
-    /// schema's *top-level* `properties`, while return fields are collected
-    /// recursively. Accepting a token in the deep input position would leave an
-    /// author believing a hint reaches the model when nothing renders it at all,
-    /// so the guard rejects the token exactly where it cannot be spelled — and
-    /// still accepts it one level up, and at depth in an output schema.
-    #[test]
-    fn a_prose_token_the_renderer_cannot_reach_fails_registration() {
-        let hint = "Nested shape support{{type_literal_hint}}.";
-        let deep_input = ToolDefinition::raw(
-            "tool:test/spawn_agent",
-            "spawn_agent",
-            "Run a subagent",
-            json!({
-                "type": "object",
-                "properties": {
-                    "output": {
-                        "type": "object",
-                        "properties": { "shape": { "type": "string", "description": hint } }
-                    }
-                }
-            }),
-            json!({ "type": "string" }),
-        )
-        .with_tool_binding(ToolBinding::new(["agents"], "spawn"));
-        let err = catalog_registration(deep_input).expect_err("a token nowhere is a defect");
-        let message = err.to_string();
-        assert!(
-            message.contains("a position the tool-doc renderer never resolves"),
-            "{message}"
-        );
-
-        // A deep *output* description does render — return fields are collected
-        // recursively — so the same token is accepted there.
-        let deep_output = ToolDefinition::raw(
-            "tool:test/spawn_agent",
-            "spawn_agent",
-            "Run a subagent",
-            ToolContract::default_input_schema(),
-            json!({
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": { "shape": { "type": "string", "description": hint } }
-                }
-            }),
-        )
-        .with_tool_binding(ToolBinding::new(["agents"], "spawn"));
-        catalog_registration(deep_output).expect("a rendered output field resolves its token");
-    }
-
-    /// `default` / `enum` / `const` values are authored prose too.
-    ///
-    /// They are not descriptions, but the doc line renders them inline (`in
-    /// "a"|"b"`), so a dialect word in one reaches the model exactly like a
-    /// description does — while a *token* in one never resolves, because nothing
-    /// substitutes literals.
-    #[test]
-    fn authored_schema_literals_are_swept_but_never_token_resolved() {
-        let leaked = ToolDefinition::raw(
-            "tool:test/list_process_handles",
-            "list_process_handles",
-            "List process runs",
-            json!({
-                "type": "object",
-                "properties": {
-                    "shape": {
-                        "type": "string",
-                        "enum": ["plain", "typescript record"],
-                        "default": "plain"
-                    }
-                }
-            }),
-            json!({ "type": "string" }),
-        )
-        .with_tool_binding(ToolBinding::new(["processes"], "list"));
-        let err = catalog_registration(leaked).expect_err("an enum value names a dialect");
-        assert!(
-            err.to_string().contains("names the `typescript` dialect"),
-            "{err}"
-        );
-
-        let tokenized = ToolDefinition::raw(
-            "tool:test/list_process_handles",
-            "list_process_handles",
-            "List process runs",
-            json!({
-                "type": "object",
-                "properties": {
-                    "shape": { "type": "string", "default": "{{type_literal_hint}}" }
-                }
-            }),
-            json!({ "type": "string" }),
-        )
-        .with_tool_binding(ToolBinding::new(["processes"], "list"));
-        let err = catalog_registration(tokenized).expect_err("a literal never resolves a token");
-        assert!(
-            err.to_string()
-                .contains("a position the tool-doc renderer never resolves"),
-            "{err}"
-        );
-    }
-
-    /// The guard only measures if the marker list can actually fire.
-    #[test]
-    fn the_registered_dialect_contributes_its_identity_markers() {
-        let dialect = typescript_test_dialect();
-        let markers = crate::dialect::dialect_identity_markers(&dialect);
-        assert!(
-            markers.contains(&dialect.language_id().to_lowercase()),
-            "{markers:?}"
-        );
-        assert!(markers.len() >= 3, "{markers:?}");
+        assert!(docs.contains(description), "{docs}");
+        assert!(docs.contains(schema_description), "{docs}");
     }
 }
 

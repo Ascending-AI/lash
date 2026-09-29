@@ -79,7 +79,6 @@ pub fn emit_llm_trace_completed(
 }
 
 pub struct LlmTraceFailure {
-    message: String,
     retryable: bool,
     terminal_reason: crate::LlmTerminalReason,
     /// The transport's failure classification — what OTel `error.type`
@@ -88,20 +87,17 @@ pub struct LlmTraceFailure {
     /// The namespaced failure code. OTel `lash.error.code` projects the
     /// spelling alone; the namespace travels beside it.
     code: Option<crate::FailureCode>,
-    raw: Option<String>,
 }
 
 impl LlmTraceFailure {
-    pub(crate) fn invalid_structured_output(message: String) -> Self {
+    pub(crate) fn invalid_structured_output() -> Self {
         Self {
-            message,
             retryable: false,
             terminal_reason: crate::LlmTerminalReason::ProviderError,
             kind: crate::ProviderFailureKind::Unknown,
             code: Some(crate::FailureCode::lash(
                 crate::TurnFailureCode::InvalidStructuredOutput,
             )),
-            raw: None,
         }
     }
 }
@@ -109,12 +105,10 @@ impl LlmTraceFailure {
 impl From<&LlmTransportError> for LlmTraceFailure {
     fn from(err: &LlmTransportError) -> Self {
         Self {
-            message: err.message.clone(),
             retryable: err.is_retryable(),
             terminal_reason: err.terminal_reason,
             kind: err.kind,
             code: err.code.clone(),
-            raw: err.raw.as_deref().cloned(),
         }
     }
 }
@@ -122,12 +116,10 @@ impl From<&LlmTransportError> for LlmTraceFailure {
 impl From<&LlmCallError> for LlmTraceFailure {
     fn from(err: &LlmCallError) -> Self {
         Self {
-            message: err.message.clone(),
             retryable: err.retryable,
             terminal_reason: err.terminal_reason,
             kind: err.kind,
             code: err.code.clone(),
-            raw: err.raw.clone(),
         }
     }
 }
@@ -148,7 +140,6 @@ pub fn emit_llm_trace_failed(
         context,
         lash_trace::TraceEvent::LlmCallFailed {
             error: lash_trace::TraceError {
-                message: failure.message,
                 retryable: failure.retryable,
                 terminal_reason: Some(failure.terminal_reason.code().to_string()),
                 failure_kind: (failure.kind != crate::ProviderFailureKind::Unknown)
@@ -161,7 +152,6 @@ pub fn emit_llm_trace_failed(
                     .code
                     .as_ref()
                     .map(|code| code.namespace().as_str().to_string()),
-                raw: failure.raw,
             },
             stream_summary,
             attempts: crate::trace::trace_llm_attempts(call_record),
@@ -347,7 +337,7 @@ mod tests {
             &Some(sink_dyn),
             &base,
             context,
-            super::LlmTraceFailure::invalid_structured_output("invalid".to_string()),
+            super::LlmTraceFailure::invalid_structured_output(),
             None,
             None,
             &crate::SystemClock,
@@ -477,7 +467,7 @@ mod tests {
             &Some(sink_dyn),
             &explicit_base,
             super::direct_trace_context(&session_id, Some("direct-failed"), Some(&effect_cause)),
-            super::LlmTraceFailure::invalid_structured_output("invalid".to_string()),
+            super::LlmTraceFailure::invalid_structured_output(),
             None,
             None,
             &crate::SystemClock,

@@ -143,7 +143,7 @@ impl Telemetry {
                     "error": transport.and_then(|r| r.get("error")).filter(|e| !e.is_null()).cloned().or_else(|| {
                         if completed { None } else {
                             let e = attempt.error.as_ref();
-                            Some(serde_json::json!({"kind":e.map(|e| e.class.as_str()).unwrap_or("provider_failure"), "status":e.and_then(|e| e.http_status), "message":e.and_then(|e| e.diagnostic.as_deref()).map(str::to_owned).unwrap_or_else(|| format!("{:?}",attempt.outcome)), "body_excerpt":e.and_then(|e| e.diagnostic.as_deref()), "provider_request_id":e.and_then(|e| e.provider_request_id.as_deref()), "provider_response_id":attempt.evidence.as_ref().and_then(|e| e.provider_response_id.as_deref()), "retry_after":e.and_then(|e| e.retry_after)}))
+                            Some(serde_json::json!({"kind":e.map(|e| e.class.as_str()).unwrap_or("provider_failure"), "status":e.and_then(|e| e.http_status), "message":format!("{:?}",attempt.outcome), "body_excerpt":null, "provider_request_id":e.and_then(|e| e.provider_request_id.as_deref()), "provider_response_id":attempt.evidence.as_ref().and_then(|e| e.provider_response_id.as_deref()), "retry_after":e.and_then(|e| e.retry_after)}))
                         }
                     }),
                     "normalized_error":attempt.error,

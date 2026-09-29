@@ -158,7 +158,7 @@ impl GoogleOAuthProvider {
                 .get("id")
                 .and_then(Value::as_str)
                 .map(str::to_string)
-                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                .unwrap_or_default(),
             tool_name: name.to_string(),
             input_json,
             replay: Self::thought_signature(part).map(|opaque| ProviderReplayMeta {

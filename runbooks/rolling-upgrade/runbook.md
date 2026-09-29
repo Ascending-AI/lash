@@ -32,8 +32,9 @@ run. The node binaries are:
   and the VM continuation format join as their lanes land (ADR 0115 §9, lane
   L8).
 
-`lashctl version --json` reports the operator build's generation and declared
-ranges. The nodes write their build labels and generations to ready files.
+`lashctl version --json` reports the operator build's
+`cli_build_generation`, the store's `fleet_generations`, and declared ranges.
+The nodes write their build labels and generations to ready files.
 The operator and scripted node builds enable different Lash features, so the
 ready-file generations drive routing and drain calls. The N and synthetic N+1 `lashctl` variants are Bazel targets. `lashctl version`
 reports the CLI build; the fleet generation comes from each node's ready file.

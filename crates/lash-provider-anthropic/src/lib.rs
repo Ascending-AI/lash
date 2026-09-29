@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_content_block_stop_is_deduped_on_abort_by_call_id() {
+    fn duplicate_content_block_stop_emits_one_tool_part() {
         let mut state = StreamState::default();
         let events = Arc::new(std::sync::Mutex::new(Vec::new()));
         let event_sink = Arc::clone(&events);
@@ -494,10 +494,7 @@ mod tests {
             .filter(|part| matches!(part, LlmOutputPart::ToolCall { .. }))
             .count();
 
-        assert_eq!(
-            emitted_tool_calls, 2,
-            "fixture must exercise duplicate emission"
-        );
+        assert_eq!(emitted_tool_calls, 1, "one part per content block");
         assert_eq!(
             finalized_tool_calls, 1,
             "finalization walks each block once"

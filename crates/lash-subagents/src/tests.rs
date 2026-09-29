@@ -493,17 +493,9 @@ finish(result);
 
 /// `agents.spawn`'s own doc block, read off a prompt a real session was served.
 ///
-/// The token that spells the nested-shape clause is resolved by the RLM doc
-/// renderer, one crate away from where this schema is authored. Every other
-/// assertion about it lives in that crate against a synthetic fixture, which
-/// cannot show that *this* schema's token is the spelling the renderer knows: a
-/// renamed token, a moved substitution, or a doc row the renderer stopped
-/// resolving would each leave `{{type_literal_hint}}` sitting in a served
-/// prompt. So this drives a real spawn and reads the served prompt of the
-/// session that ran — a TypeScript session, which is the reader the leak was
-/// measured on and, since ADR 0096, the only reader there is.
+/// Read the live `agents.spawn` description from a served TypeScript prompt.
 #[tokio::test]
-async fn spawn_agent_doc_resolves_its_dialect_token_in_a_served_prompt() {
+async fn spawn_agent_doc_uses_plain_prose_in_a_served_prompt() {
     let parent_response = r#"<typescript>
 const result = await agents.spawn({
   capability: "default",
@@ -532,18 +524,10 @@ finish(result);
         "a TypeScript session cannot write a type literal and must not be told to:\n{typescript}"
     );
 
-    // The token itself never reaches a model. Scoped to the rendered tool-doc
-    // section, which is the surface the registration guard governs — the
-    // builtin docs legitimately spell `{{` as the escape for a literal brace
-    // in `format`.
     let docs = tool_doc_section(&typescript);
     assert!(
-        docs.contains("Optional typed result shape"),
+        docs.contains("Optional typed result shape. Use string descriptors for record fields, e.g. `{ queries: \"list[str]\" }`."),
         "the tool-doc section must be the slice under test:\n{docs}"
-    );
-    assert!(
-        !docs.contains("{{"),
-        "unresolved prose token in the tool docs:\n{docs}"
     );
 }
 

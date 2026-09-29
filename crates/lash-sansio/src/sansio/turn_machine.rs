@@ -96,7 +96,29 @@ impl<M: TurnProtocol> TurnMachine<M> {
         TurnCheckpoint {
             schema_version: TURN_CHECKPOINT_SCHEMA_VERSION,
             state,
-            pending_effects: self.side_effect_outbox.iter().cloned().collect(),
+            pending_effects: self
+                .side_effect_outbox
+                .iter()
+                .cloned()
+                .map(|effect| match effect {
+                    Effect::Emit(SessionStreamEvent::Error {
+                        message: _,
+                        envelope: Some(mut envelope),
+                    }) if matches!(
+                        envelope.kind,
+                        crate::session_model::TurnFailureKind::LlmProvider
+                    ) =>
+                    {
+                        envelope.raw = None;
+                        envelope.user_message = "provider call failed".to_string();
+                        Effect::Emit(SessionStreamEvent::Error {
+                            message: envelope.user_message.clone(),
+                            envelope: Some(envelope),
+                        })
+                    }
+                    effect => effect,
+                })
+                .collect(),
             next_effect_id: self.next_effect_id,
             next_synthetic_message_id: self.next_synthetic_message_id,
             messages: self.messages.iter().cloned().collect(),
@@ -417,8 +439,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     ..
                 },
             ) => self.handle_llm_complete(request, driver_state, result, text_streamed)?,
-            (PendingWork::Tools { .. }, Response::ToolResults { results, .. }) => {
-                self.handle_tool_results(results);
+            (PendingWork::Tools { expansion, .. }, Response::ToolResults { results, .. }) => {
+                self.handle_tool_results(&expansion, results);
             }
             (PendingWork::Exec { driver_state, .. }, Response::ExecResult { result, .. }) => {
                 self.handle_exec_result(driver_state, result);
@@ -665,7 +687,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
             crate::session_model::TurnFailureKind::LlmProvider,
             Some(reason.into()),
             Some(reason),
-            diagnostic.clone(),
+            "provider call ended",
             None,
         );
         // A terminal reason is a deterministic outcome of a completed call
@@ -757,9 +779,7 @@ impl<M: TurnProtocol> TurnMachine<M> {
                     session_id: self.config.session_id.clone(),
                     protocol_iteration: self.protocol_iteration,
                     request_body: error.request_body.clone(),
-                    message: error.message.clone(),
                     retryable: error.retryable,
-                    raw: error.raw.clone(),
                     code: error.code.clone(),
                     kind: error.kind,
                     terminal_reason: error.terminal_reason,
@@ -774,8 +794,8 @@ impl<M: TurnProtocol> TurnMachine<M> {
             crate::session_model::TurnFailureKind::LlmProvider,
             error.code.clone(),
             Some(error.terminal_reason),
-            format!("LLM error: {}", error.message),
-            error.raw.clone(),
+            "provider call failed",
+            None,
         );
         // Carry the transport's typed signals through to the envelope (and
         // from there to `TurnIssue`): retryability is always classified, the
@@ -800,7 +820,16 @@ impl<M: TurnProtocol> TurnMachine<M> {
         }));
     }
 
-    fn handle_tool_results(&mut self, completed: Vec<CompletedToolCall>) {
+    fn handle_tool_results(
+        &mut self,
+        expansion: &ToolExpansionPlan,
+        completed: Vec<CompletedToolCall>,
+    ) {
+        let completed = if expansion.is_empty() {
+            completed
+        } else {
+            Arc::clone(&self.config.protocol_driver).fold_tool_results(expansion, completed)
+        };
         for outcome in &completed {
             self.emit(SessionStreamEvent::ToolCall {
                 call_id: Some(outcome.call_id.clone()),

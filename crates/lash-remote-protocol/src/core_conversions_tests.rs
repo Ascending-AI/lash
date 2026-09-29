@@ -1219,7 +1219,6 @@ fn synthetic_terminal_call_record(
                 http_status: None,
                 provider_request_id: None,
                 retry_after: None,
-                diagnostic: Some(code.to_string()),
             }),
             evidence: None,
             generation_disposition: None,
@@ -1321,7 +1320,7 @@ fn invalid_endpoint_record_converts_and_validates() {
 }
 
 #[test]
-fn core_diagnostics_do_not_cross_the_public_remote_projection() {
+fn attempt_records_expose_only_structured_failure_facts() {
     const PRIVATE_DIAGNOSTIC: &str = "secret provider panic: token=raw-secret";
     let record = lash_core::LlmCallRecord {
         call_id: lash_core::LlmCallId("panic-call".to_string()),
@@ -1339,7 +1338,6 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
                 http_status: None,
                 provider_request_id: None,
                 retry_after: None,
-                diagnostic: Some(PRIVATE_DIAGNOSTIC.to_string()),
             }),
             evidence: None,
             generation_disposition: None,
@@ -1348,6 +1346,10 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
         }],
     };
 
+    let mut legacy_record = serde_json::to_value(&record).expect("serialize core record");
+    legacy_record["attempts"][0]["error"]["diagnostic"] = serde_json::json!(PRIVATE_DIAGNOSTIC);
+    let record: lash_core::LlmCallRecord =
+        serde_json::from_value(legacy_record).expect("read old attempt record");
     let remote_record = RemoteLlmCallRecord::from(record.clone());
     let activity = RemoteTurnActivity::from_core(
         1,

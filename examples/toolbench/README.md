@@ -205,10 +205,11 @@ classification and adapter verdict. `body_excerpt` is capped at 2,000 characters
 `raw` preserves the facade's entire exposed body (the adapter already bounds
 non-2xx bodies to 4,096 bytes). Request bodies are capped at 4,096 UTF-8 bytes.
 Authorization, cookies, credential fields and the configured key are redacted.
-Normalized diagnostics remain available as a fallback (upstream caps them at
-1,024 characters). Non-completed turns carry their Debug `turn_outcome` when a
-turn result exists, plus the last error; a harness exception/deadline has no
-TurnOutcome and records null with its explicit error instead.
+When transport evidence is absent, the fallback reports the attempt outcome and
+structured normalized error. Non-completed turns carry their Debug
+`turn_outcome` when a turn result exists, plus the last error; a harness
+exception/deadline has no TurnOutcome and records null with its explicit error
+instead.
 
 All attempts, including failures with partial responses, contribute their
 reported costs, including `usage.cost` from a raw final response chunk when

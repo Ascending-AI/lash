@@ -285,14 +285,28 @@ pub(super) const PENDING_TOOL_PROMPT: &str = "use async tool";
 pub(super) async fn prove_pending_tool_completion_through_turn()
 -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
-    prove_pending_tool_completion_on(&engine, RUNTIME_PROOF_SEED).await
+    let recorder = crate::invariants::HistoryRecorder::default();
+    let proof = prove_pending_tool_completion_on(&engine, RUNTIME_PROOF_SEED, &recorder).await?;
+    let report = crate::invariants::check_engine(
+        "fixed/pending-tool-completion",
+        RUNTIME_PROOF_SEED,
+        &recorder,
+        &engine,
+    )
+    .await
+    .map_err(FixedScriptRunnerError::Runtime)?;
+    report.print_quarantined();
+    require(report.passed(), report.failure())?;
+    Ok(proof)
 }
 
 /// A turn parks on a pending tool until the boundary scheduler, seeded by
-/// `seed`, delivers the tool's resolution; the turn then finishes.
-pub(super) async fn prove_pending_tool_completion_on(
+/// `seed`, delivers the tool's resolution; the turn then finishes. The
+/// tool's runs, its completion key and the resolution go to `recorder`.
+pub(crate) async fn prove_pending_tool_completion_on(
     engine: &crate::backend::SimEngine,
     seed: u64,
+    recorder: &crate::invariants::HistoryRecorder,
 ) -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
@@ -306,7 +320,13 @@ pub(super) async fn prove_pending_tool_completion_on(
                 .build()
                 .map_err(|error| FixedScriptRunnerError::Assertion(error.to_string()))?,
         )
-        .tools(Arc::new(PendingToolProvider::new(key_tx)) as Arc<dyn lash_core::ToolProvider>)
+        .tools(Arc::new(PendingToolProvider::new(
+            key_tx,
+            crate::invariants::ToolObserver::new(
+                recorder.clone(),
+                Some(engine.restate().server().clone()),
+            ),
+        )) as Arc<dyn lash_core::ToolProvider>)
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let session = core
@@ -375,6 +395,18 @@ pub(super) async fn prove_pending_tool_completion_on(
             "pending tool boundary missing resolution payload".to_string(),
         )
     })?;
+    recorder.record(crate::invariants::Fact::CompletionResolved {
+        key: crate::invariants::completion_key_label(&key),
+        session: session.session_id().to_string(),
+        result_digest: crate::invariants::result_digest(
+            &crate::content_oracle::ToolResultContent::from_tool_value(
+                "",
+                "app_lookup",
+                &resolution,
+            )
+            .content,
+        ),
+    });
     let accepted = core
         .completions()
         .resolve(key.clone(), lash_core::Resolution::Ok(resolution.clone()))
@@ -652,12 +684,17 @@ pub(super) fn rlm_final_value_provider() -> ProviderHandle {
 
 struct PendingToolProvider {
     key_tx: Mutex<Option<tokio::sync::oneshot::Sender<lash_core::AwaitEventKey>>>,
+    observer: crate::invariants::ToolObserver,
 }
 
 impl PendingToolProvider {
-    fn new(key_tx: tokio::sync::oneshot::Sender<lash_core::AwaitEventKey>) -> Self {
+    fn new(
+        key_tx: tokio::sync::oneshot::Sender<lash_core::AwaitEventKey>,
+        observer: crate::invariants::ToolObserver,
+    ) -> Self {
         Self {
             key_tx: Mutex::new(Some(key_tx)),
+            observer,
         }
     }
 }
@@ -681,10 +718,12 @@ impl lash_core::ToolProvider for PendingToolProvider {
             return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
                 .into();
         }
+        let observed = self.observer.executed(call.context);
         let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
+        self.observer.registered(observed, &key);
         if let Some(tx) = self.key_tx.lock_recover().take() {
             let _ = tx.send(key);
         }
@@ -732,16 +771,19 @@ pub(super) fn pending_tool_roundtrip_provider() -> ProviderHandle {
 pub(super) struct SuspendToolProvider {
     tool_name: String,
     key_slot: Arc<tokio::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
+    observer: crate::invariants::ToolObserver,
 }
 
 impl SuspendToolProvider {
     pub(super) fn new(
         tool_name: String,
         key_slot: Arc<tokio::sync::Mutex<Option<lash_core::AwaitEventKey>>>,
+        observer: crate::invariants::ToolObserver,
     ) -> Self {
         Self {
             tool_name,
             key_slot,
+            observer,
         }
     }
 
@@ -779,10 +821,12 @@ impl lash_core::ToolProvider for SuspendToolProvider {
             return lash_core::ToolOutcome::err_fmt(format_args!("unknown tool {}", call.name()))
                 .into();
         }
+        let observed = self.observer.executed(call.context);
         let key = match call.context.completion_key() {
             Ok(key) => key,
             Err(err) => return lash_core::ToolOutcome::err_fmt(err).into(),
         };
+        self.observer.registered(observed, &key);
         *self.key_slot.lock().await = Some(key);
         lash_core::ToolOutcome::pending(lash_core::PendingCompletion::new()).into()
     }

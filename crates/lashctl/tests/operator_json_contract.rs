@@ -48,33 +48,8 @@ fn assert_envelope(body: &Value, command: &str, has_result: bool, has_error: boo
 #[test]
 fn operator_json_contract() {
     let (code, version) = run(&["version", "--json"], None);
-    assert_eq!(code, 0);
-    assert_envelope(&version, "version", true, false);
-    assert_eq!(
-        version["result"]["fleet_writable"],
-        json!({"min":1,"max":1})
-    );
-    assert_eq!(
-        version["result"]["components"]
-            .as_array()
-            .expect("components")
-            .len(),
-        7
-    );
-    assert_eq!(
-        version["result"]["wires"]["restate"],
-        json!({"min":1,"max":1})
-    );
-    assert_keys(
-        &version["result"],
-        &[
-            "components",
-            "fleet_writable",
-            "generation",
-            "release",
-            "wires",
-        ],
-    );
+    assert_eq!(code, 3);
+    assert_envelope(&version, "version", false, true);
 
     let (code, usage) = run(&["--json", "nonsense"], None);
     assert_eq!(code, 2);
@@ -90,6 +65,7 @@ fn operator_json_contract() {
         ),
         ("end-drain", vec!["end-drain", "0123456789ab", "--json"]),
         ("preflight", vec!["preflight", "--json"]),
+        ("version", vec!["version", "--json"]),
     ];
     for (name, args) in cases {
         let (code, body) = run(&args, None);
@@ -113,20 +89,6 @@ fn operator_json_contract() {
     assert_eq!(code, 1);
     assert_envelope(&failed, "migrate", false, true);
     assert_eq!(failed["error"]["code"], "unexpected_failure");
-}
-
-#[cfg(feature = "synthetic-next")]
-#[test]
-fn synthetic_next_version_reports_next_generation() {
-    let (code, version) = run(&["version", "--json"], None);
-    assert_eq!(code, 0);
-    assert_envelope(&version, "version", true, false);
-    assert_eq!(lash_restate::JOURNAL_LOGIC_EPOCH, 2);
-    assert_eq!(
-        version["result"]["generation"],
-        lash::formats::build_generation().as_str()
-    );
-    assert_ne!(version["result"]["generation"], "21c7af909642");
 }
 
 #[tokio::test]
@@ -191,6 +153,49 @@ async fn operator_json_contract_postgres() {
     assert_eq!(preflight["result"]["databases"][0]["min_reader"], 1);
     assert_eq!(preflight["result"]["databases"][0]["verdict"], "matches");
 
+    let (code, empty_version) = run(&["version", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0);
+    assert_envelope(&empty_version, "version", true, false);
+    assert_eq!(empty_version["result"]["fleet_generations"], json!([]));
+    assert_eq!(
+        empty_version["result"]["cli_build_generation"],
+        lash::formats::build_generation().as_str()
+    );
+    assert_eq!(
+        empty_version["result"]["fleet_writable"],
+        json!({"min":1,"max":1})
+    );
+    assert_eq!(
+        empty_version["result"]["components"]
+            .as_array()
+            .expect("components")
+            .len(),
+        7
+    );
+    assert_eq!(
+        empty_version["result"]["wires"]["restate"],
+        json!({"min":1,"max":1})
+    );
+    assert_keys(
+        &empty_version["result"],
+        &[
+            "cli_build_generation",
+            "components",
+            "fleet_generations",
+            "fleet_writable",
+            "release",
+            "wires",
+        ],
+    );
+    #[cfg(feature = "synthetic-next")]
+    {
+        assert_eq!(lash_restate::JOURNAL_LOGIC_EPOCH, 2);
+        assert_ne!(
+            empty_version["result"]["cli_build_generation"],
+            "21c7af909642"
+        );
+    }
+
     let generation = "0123456789ab";
     let (code, before) = run(&["drain-status", generation, "--json"], Some(&scratch_url));
     assert_eq!(code, 5);
@@ -223,6 +228,36 @@ async fn operator_json_contract_postgres() {
         json!({"generation":generation,"marked":true})
     );
 
+    let mut scratch = PgConnection::connect(&scratch_url)
+        .await
+        .expect("connect scratch catalog");
+    sqlx::query("INSERT INTO lash_turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_build_generation) VALUES ('s1', 't1', 1, 'test', '{}', 1, 1, 1, 'fedcba987654')")
+        .execute(&mut scratch)
+        .await
+        .expect("insert pinned park");
+    let (code, version) = run(&["version", "--json"], Some(&scratch_url));
+    assert_eq!(code, 0);
+    assert_envelope(&version, "version", true, false);
+    assert_eq!(
+        version["result"]["fleet_generations"],
+        json!([
+            {"generation":generation,"draining":true,"source":"postgres"},
+            {"generation":"fedcba987654","draining":false,"source":"postgres"},
+        ])
+    );
+    assert!(version["result"].get("generation").is_none());
+
+    let human = Command::new(env!("CARGO_BIN_EXE_lashctl"))
+        .arg("version")
+        .env("LASH_POSTGRES_DATABASE_URL", &scratch_url)
+        .output()
+        .expect("human version");
+    assert!(human.status.success());
+    let text = String::from_utf8(human.stdout).expect("human output");
+    assert!(text.contains("CLI build generation:"));
+    assert!(text.contains("0123456789ab (draining: true, source: postgres)"));
+    assert!(text.contains("fedcba987654 (draining: false, source: postgres)"));
+
     let (code, drained) = run(&["drain-status", generation, "--json"], Some(&scratch_url));
     assert_eq!(code, 0);
     assert_envelope(&drained, "drain-status", true, false);
@@ -236,9 +271,6 @@ async fn operator_json_contract_postgres() {
         json!({"generation":generation,"cleared":true})
     );
 
-    let mut scratch = PgConnection::connect(&scratch_url)
-        .await
-        .expect("connect scratch catalog");
     sqlx::query(
         "UPDATE lash_schema_versions SET version = 2 WHERE component = 'lash-postgres-store'",
     )

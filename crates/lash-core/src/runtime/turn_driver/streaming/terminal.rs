@@ -29,7 +29,7 @@ pub(super) fn synthesize_protocol_abort(
         // publish behaviour while streamed blocks reconcile by identity.
         expose_thinking: None,
     };
-    stream_accumulator.apply_to_response(&mut response);
+    stream_accumulator.apply_to_response_for_request(&mut response, &call_id.0);
     // Usage observed before the abort is a fact; its absence is a typed hole
     // the ledger must show, never a zero (ADR 0031).
     let usage = (response.provider_usage.is_some() || response.usage != LlmUsage::default())

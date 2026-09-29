@@ -347,6 +347,13 @@ async fn recover_staged(spec: &CaseSpec, seed: u64, report: &mut CaseReport, sta
         report
             .violations
             .extend(invariants::probe_live_sessions(&world, &expected, 4).await);
+        report.violations.extend(
+            crate::invariants::check_crash_world(
+                &world,
+                &format!("crash-matrix/{}", spec.test_name()),
+            )
+            .await,
+        );
     }
     world.finish().await;
 }

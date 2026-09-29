@@ -433,7 +433,9 @@ impl RuntimeTurnDriver<'_> {
                                     if response_usage_is_empty(&resp.usage) {
                                         resp.usage = stream_state.streamed_usage.clone();
                                     }
-                                    stream_state.stream_accumulator.apply_to_response(&mut resp);
+                                    stream_state
+                                        .stream_accumulator
+                                        .apply_to_response_for_request(&mut resp, &call_id.0);
                                     break Ok(resp);
                                 }
                                 Err(error) => {
@@ -522,7 +524,6 @@ impl RuntimeTurnDriver<'_> {
                                         http_status: None,
                                         provider_request_id: None,
                                         retry_after: None,
-                                        diagnostic: Some(message.clone()),
                                     }),
                                     evidence: None,
                                     generation_disposition: None,
@@ -590,7 +591,7 @@ impl RuntimeTurnDriver<'_> {
                             if response_usage_is_empty(&resp.usage) {
                                 resp.usage = streamed_usage.clone();
                             }
-                            stream_accumulator.apply_to_response(&mut resp);
+                            stream_accumulator.apply_to_response_for_request(&mut resp, &call_id.0);
                             break Ok(resp);
                         }
                         Err(e) => {
@@ -875,9 +876,7 @@ impl RuntimeTurnDriver<'_> {
             crate::sansio::LogEvent::LlmError {
                 session_id,
                 protocol_iteration,
-                message,
                 retryable,
-                raw,
                 code,
                 kind,
                 terminal_reason,
@@ -894,7 +893,6 @@ impl RuntimeTurnDriver<'_> {
                         )),
                     TraceEvent::LlmCallFailed {
                         error: TraceError {
-                            message,
                             retryable,
                             terminal_reason: Some(terminal_reason.code().to_string()),
                             failure_kind: (kind != crate::ProviderFailureKind::Unknown)
@@ -903,7 +901,6 @@ impl RuntimeTurnDriver<'_> {
                             code_namespace: code
                                 .as_ref()
                                 .map(|code| code.namespace().as_str().to_string()),
-                            raw,
                         },
                         // The call's own trace carries its stream summary.
                         stream_summary: None,

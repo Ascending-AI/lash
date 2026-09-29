@@ -979,7 +979,6 @@ mod span_identity_tests {
                         http_status: Some(429),
                         provider_request_id: None,
                         retry_after: Some(std::time::Duration::from_millis(250)),
-                        diagnostic: None,
                     }),
                     evidence: None,
                     generation_disposition: None,

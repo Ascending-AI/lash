@@ -60,6 +60,9 @@ pub enum PluginError {
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]
     InvalidToolDiscovery { operation: String },
+    /// A protocol's per-call batch maximum exceeds its hard ceiling.
+    #[error("batch maximum {requested} exceeds the ceiling of {ceiling} members")]
+    InvalidBatchMaximum { requested: usize, ceiling: usize },
     /// An effective resident catalog member could not supply its immutable definition.
     #[error("resident tool `{name}` ({tool_id}) has no contract")]
     ResidentToolContractUnavailable {
@@ -302,6 +305,7 @@ impl PluginError {
             | Self::ProcessCancelConflict { .. }
             | Self::ParentEnded { .. }
             | Self::InvalidToolDiscovery { .. }
+            | Self::InvalidBatchMaximum { .. }
             | Self::ResidentToolContractUnavailable { .. }
             | Self::ResidentToolDuplicateId { .. }
             | Self::ResidentToolDuplicateName { .. }

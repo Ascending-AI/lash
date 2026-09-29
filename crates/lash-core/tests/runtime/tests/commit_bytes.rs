@@ -377,7 +377,7 @@ async fn provider_failure_turn_commits_the_pinned_bytes() {
         r#"{
             "assistant_output": "",
             "errors": [
-                "LLM error: pinned provider failure"
+                "provider call failed"
             ],
             "had_code_execution": false,
             "had_tool_calls": false,

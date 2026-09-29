@@ -879,6 +879,28 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
     );
 }
 
+#[test]
+fn provider_message_is_absent_from_the_sealed_attempt() {
+    const SECRET: &str = "api_key= secret Authorization: Basic abc";
+    let failure = LlmTransportError::new(SECRET)
+        .with_kind(ProviderFailureKind::Http)
+        .with_code(FailureCode::provider("rate_limit_exceeded"))
+        .with_http_status(429);
+    let record = synthetic_terminal_call_record(
+        LlmCallId("secret-attempt".to_string()),
+        AttemptOutcome::Failed,
+        &failure,
+        true,
+        ProtocolPosition::ResponseObserved,
+        Vec::new(),
+    );
+    let journaled = serde_json::to_string(&record).expect("serialize sealed attempt");
+    assert!(!journaled.contains(SECRET));
+    assert!(!journaled.contains("Basic abc"));
+    assert!(journaled.contains("provider:rate_limit_exceeded"));
+    assert!(journaled.contains("429"));
+}
+
 #[tokio::test]
 async fn call_id_derives_from_the_request_scope() {
     let mut handle = ProviderHandle::new(MutatingProvider::default().into_components());
@@ -971,12 +993,6 @@ async fn partial_response_origin_conflict_retains_original_provider_failure_evid
         Some("provider:original_partial_code".to_string())
     );
     assert_eq!(original.http_status, Some(502));
-    assert!(
-        original
-            .diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("original partial provider failure"))
-    );
     let partial = failure
         .error
         .partial_response
@@ -1620,15 +1636,6 @@ fn forbidden_is_terminal_even_with_retry_after_and_status_noise() {
         None,
         "content-policy failures must be terminal regardless of retry/status noise"
     );
-}
-
-#[test]
-fn attempt_diagnostics_are_redacted_and_bounded() {
-    let message = format!("Bearer sk-secret api_key=also-secret {}", "x".repeat(2_000));
-    let diagnostic = bounded_redacted_diagnostic(&message).expect("diagnostic");
-    assert!(!diagnostic.contains("sk-secret"));
-    assert!(!diagnostic.contains("also-secret"));
-    assert!(diagnostic.chars().count() <= MAX_ATTEMPT_DIAGNOSTIC_CHARS);
 }
 
 #[tokio::test]

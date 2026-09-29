@@ -277,13 +277,19 @@ impl lash_core_execution::ToolAttemptCaptureWriter for ToolAttemptWriter {
         &self,
         call_id: &str,
         output: &crate::ToolCallOutput,
-    ) -> Result<(), lash_core_execution::ProgressRefused> {
+    ) -> Result<(), crate::RuntimeEffectControllerError> {
         let mut writer = self.writer.lock().await;
         writer.push(CaptureFrame::ToolSettled {
             call_id: call_id.to_string(),
             output: output.clone(),
         });
-        writer.flush().await.map_err(progress_refused)
+        match writer.flush().await {
+            Ok(())
+            | Err(StoreError::CaptureWriterFenced { .. } | StoreError::CaptureSealed { .. }) => {
+                Ok(())
+            }
+            Err(error) => Err(capture_write_fault(error)),
+        }
     }
 
     fn watermark(&self) -> Option<lash_core_execution::runtime::CaptureWatermark> {

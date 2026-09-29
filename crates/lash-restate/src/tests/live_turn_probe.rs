@@ -73,6 +73,37 @@ struct PendingTurn {
     admitted: lash_core::AdmittedScope,
     attempts: VecDeque<QueuedAttempt>,
     ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
+    /// How many executions of the invocation's handler are running an
+    /// attempt now: zero while the invocation is suspended.
+    live: usize,
+}
+
+/// One running execution of a pending turn's handler. Dropped when the
+/// execution ends, however it ends: a suspension drops the handler's future
+/// without the handler returning.
+struct LiveExecution {
+    key: String,
+}
+
+impl Drop for LiveExecution {
+    fn drop(&mut self) {
+        if let Some(turn) = pending_turns()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(&self.key)
+        {
+            turn.live = turn.live.saturating_sub(1);
+        }
+    }
+}
+
+/// Whether an execution of `key`'s handler is running an attempt.
+fn execution_live(key: &str) -> bool {
+    pending_turns()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(key)
+        .is_some_and(|turn| turn.live > 0)
 }
 
 fn pending_turns() -> &'static Mutex<HashMap<String, PendingTurn>> {
@@ -107,6 +138,7 @@ enum NextAttempt {
         crash: Option<lash_conformance::ConformanceCrash>,
         repeats_on_retry: bool,
         ends: tokio::sync::mpsc::UnboundedSender<AttemptEnd>,
+        live: LiveExecution,
     },
     /// The law has queued no attempt yet.
     Idle,
@@ -124,6 +156,7 @@ fn next_attempt(key: &str) -> NextAttempt {
     let Some(front) = turn.attempts.front() else {
         return NextAttempt::Idle;
     };
+    turn.live += 1;
     NextAttempt::Run {
         admitted: turn.admitted.clone(),
         attempt: Arc::clone(&front.attempt),
@@ -131,6 +164,9 @@ fn next_attempt(key: &str) -> NextAttempt {
         crash: front.crash.clone(),
         repeats_on_retry: front.repeats_on_retry,
         ends: turn.ends.clone(),
+        live: LiveExecution {
+            key: key.to_string(),
+        },
     }
 }
 
@@ -151,7 +187,7 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         ctx: WorkflowContext<'_>,
         Json(key): Json<String>,
     ) -> HandlerResult<Json<bool>> {
-        let (admitted, attempt, crashing, crash, repeats_on_retry, ends) = loop {
+        let (admitted, attempt, crashing, crash, repeats_on_retry, ends, _live) = loop {
             let queued = attempt_queued().notified();
             tokio::pin!(queued);
             queued.as_mut().enable();
@@ -163,7 +199,18 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
                     crash,
                     repeats_on_retry,
                     ends,
-                } => break (admitted, attempt, crashing, crash, repeats_on_retry, ends),
+                    live,
+                } => {
+                    break (
+                        admitted,
+                        attempt,
+                        crashing,
+                        crash,
+                        repeats_on_retry,
+                        ends,
+                        live,
+                    );
+                }
                 // An invocation that finds nothing to run fails terminally
                 // rather than silently succeeding without the turn it was
                 // asked to run.
@@ -197,7 +244,9 @@ impl ConformanceTurnProbe for ConformanceTurnProbeImpl {
         // A law's crash trigger kills this execution where it stands: the
         // attempt's future is dropped mid-poll, as a dying deployment drops
         // its handler, and the attempt fails retryably so Restate redelivers
-        // the invocation to the law's next run of the scope.
+        // the invocation to the law's next run of the scope. A trigger that
+        // fired while the invocation was suspended kills the execution that
+        // resumes it before its attempt is first polled.
         let ran = match crash {
             Some(crash) => tokio::select! {
                 biased;
@@ -572,6 +621,7 @@ impl LiveTurnRunner {
         let leave_open_on_crash = attempts
             .last()
             .is_some_and(|attempt| attempt.crash.is_some());
+        let crash = attempts.last().and_then(|attempt| attempt.crash.clone());
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
         let mut open = self.open.lock().await;
         let reopened = open.remove(&scope);
@@ -597,6 +647,7 @@ impl LiveTurnRunner {
                 admitted: admitted.clone(),
                 attempts: VecDeque::new(),
                 ends: ends.clone(),
+                live: 0,
             });
             turn.admitted = admitted;
             turn.attempts.extend(attempts);
@@ -617,6 +668,14 @@ impl LiveTurnRunner {
         };
         let mut crashed = false;
         let mut aborted = 0_usize;
+        // Set once the law's crash trigger fired. An execution that is running
+        // when it fires is killed where it stands and reports the crash; one
+        // that fires while no execution runs — the invocation suspended on
+        // the very work the law crashes it over — has no execution to kill.
+        // The fired trigger then kills the next execution as it starts, and
+        // the invocation is left open for the law's redrive, exactly as a
+        // reported crash leaves it (FIG-4070).
+        let mut crash_fired = false;
         let mut poll = tokio::time::interval(std::time::Duration::from_millis(100));
         loop {
             tokio::select! {
@@ -658,10 +717,23 @@ impl LiveTurnRunner {
                     }
                     None => panic!("the live conformance turn `{key}` lost its attempt channel"),
                 },
-                // A paused invocation runs nothing more until an operator
-                // resumes it; the law is done with it.
-                _ = poll.tick(), if until_paused && aborted > 0 => {
-                    if self.admin.workflow_paused("ConformanceTurnProbe", &key).await {
+                () = async {
+                    if let Some(crash) = &crash {
+                        crash.fired().await;
+                    }
+                }, if crash.is_some() && !crash_fired => crash_fired = true,
+                _ = poll.tick(), if (until_paused && aborted > 0) || crash_fired => {
+                    if crash_fired && !execution_live(&key) {
+                        open.insert(scope, OpenInvocation { key: key.clone(), call });
+                        crashed = true;
+                        break;
+                    }
+                    // A paused invocation runs nothing more until an operator
+                    // resumes it; the law is done with it.
+                    if until_paused
+                        && aborted > 0
+                        && self.admin.workflow_paused("ConformanceTurnProbe", &key).await
+                    {
                         pending_turns()
                             .lock()
                             .unwrap_or_else(std::sync::PoisonError::into_inner)

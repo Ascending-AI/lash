@@ -170,11 +170,10 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
     .await;
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
-    assert!(
-        turn.errors
-            .iter()
-            .any(|error| error.message.contains("original provider failure"))
-    );
+    assert!(turn.errors.iter().any(|error| {
+        error.message == "provider call failed"
+            && error.code == Some(FailureCode::provider("original_provider_code"))
+    }));
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
@@ -388,7 +387,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     .await;
     assert!(turn.errors.iter().any(|error| {
         error.code == Some(lash_core::TurnFailureCode::ProviderReplayOriginConflict.into())
-            && error.message.contains("confirm2 original provider failure")
+            && error.message == "provider call failed"
     }));
     let events = trace_events(&trace_path);
     assert_drop_survived(&turn, &events);
@@ -403,10 +402,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
         issue.provider_failure_kind,
         Some(lash_core::ProviderFailureKind::Validation)
     );
-    assert_eq!(
-        issue.raw.as_deref(),
-        Some("confirm2 original raw provider evidence")
-    );
+    assert_eq!(issue.raw, None);
     let original = turn.llm_calls[0].attempts[0]
         .error
         .as_ref()
@@ -420,12 +416,6 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
         Some("provider:confirm2_original_code".to_string())
     );
     assert_eq!(original.http_status, Some(502));
-    assert!(
-        original
-            .diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("confirm2 original provider failure"))
-    );
     assert!(events.iter().any(|event| matches!(
         event,
         lash_trace::TraceEvent::LlmCallFailed { error, .. }
@@ -504,12 +494,6 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
         Some("provider:tail_transport_failure".to_string())
     );
     assert_eq!(original.http_status, Some(502));
-    assert!(
-        original
-            .diagnostic
-            .as_deref()
-            .is_some_and(|message| message.contains("tail transport failure"))
-    );
     assert!(
         trace_events(&trace_path)
             .iter()

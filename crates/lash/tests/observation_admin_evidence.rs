@@ -349,14 +349,6 @@ fn drain_area_witnesses() {
     field_witness(|value: &lash::tracing::TraceError| {
         let _ = &value.code;
     });
-    // W0093: lash::tracing::TraceError::message [field]
-    field_witness(|value: &lash::tracing::TraceError| {
-        let _ = &value.message;
-    });
-    // W0094: lash::tracing::TraceError::raw [field]
-    field_witness(|value: &lash::tracing::TraceError| {
-        let _ = &value.raw;
-    });
     // W0095: lash::tracing::TraceError::retryable [field]
     field_witness(|value: &lash::tracing::TraceError| {
         let _ = &value.retryable;

@@ -251,7 +251,7 @@ impl StandardProtocolScenario {
                     let (tool_id, calls) = effects
                         .iter()
                         .find_map(|effect| match effect {
-                            Effect::ToolCalls { id, calls } => Some((*id, calls.clone())),
+                            Effect::ToolCalls { id, calls, .. } => Some((*id, calls.clone())),
                             _ => None,
                         })
                         .unwrap_or_else(|| {

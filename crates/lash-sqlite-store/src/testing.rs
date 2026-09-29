@@ -66,6 +66,73 @@ pub fn database_table_ddl(database: crate::SqliteDatabase, table: &str) -> &'sta
     panic!("{database:?} provisioning must declare {table}");
 }
 
+/// One row a raw test read returned: each selected column's name and value,
+/// in select order. SQLite's `NULL`, integer, real and text map to their JSON
+/// kinds; a blob reads as its lowercase hex.
+pub type RawRow = Vec<(String, serde_json::Value)>;
+
+/// Every row `sql` selects from `database` of `stores`, over a fresh
+/// read-only connection.
+///
+/// An inspection hook for simulation checkers that judge a finished run's
+/// durable rows (lash-sim's global invariants, FIG-4086). It never writes,
+/// and no lash component reads through it.
+pub fn read_rows_for_testing(
+    stores: &crate::SqliteStoreSet,
+    database: crate::SqliteDatabase,
+    sql: &str,
+) -> Result<Vec<RawRow>, String> {
+    use rusqlite::types::ValueRef;
+    let target = stores.location().target(database);
+    let connection = rusqlite::Connection::open_with_flags(
+        target.read_only_uri(),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )
+    .map_err(|error| format!("open {database:?} read-only: {error}"))?;
+    connection
+        .busy_timeout(crate::connection_sql::READ_ONLY_BUSY_TIMEOUT)
+        .map_err(|error| format!("set the busy timeout on {database:?}: {error}"))?;
+    let mut statement = connection
+        .prepare(sql)
+        .map_err(|error| format!("prepare `{sql}` on {database:?}: {error}"))?;
+    let names = statement
+        .column_names()
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let mut rows = statement
+        .query([])
+        .map_err(|error| format!("run `{sql}` on {database:?}: {error}"))?;
+    let mut read = Vec::new();
+    while let Some(row) = rows
+        .next()
+        .map_err(|error| format!("read `{sql}` on {database:?}: {error}"))?
+    {
+        let mut columns = Vec::with_capacity(names.len());
+        for (index, name) in names.iter().enumerate() {
+            let value = match row
+                .get_ref(index)
+                .map_err(|error| format!("read column `{name}` of `{sql}`: {error}"))?
+            {
+                ValueRef::Null => serde_json::Value::Null,
+                ValueRef::Integer(value) => serde_json::Value::from(value),
+                ValueRef::Real(value) => serde_json::Value::from(value),
+                ValueRef::Text(bytes) => {
+                    serde_json::Value::String(String::from_utf8_lossy(bytes).into_owned())
+                }
+                ValueRef::Blob(bytes) => serde_json::Value::String(
+                    bytes.iter().map(|byte| format!("{byte:02x}")).collect(),
+                ),
+            };
+            columns.push((name.clone(), value));
+        }
+        read.push(columns);
+    }
+    Ok(read)
+}
+
 /// Transaction boundary at which one armed fault is injected.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -177,8 +177,12 @@ fn producers(
     names
         .iter()
         .map(|name| match name.as_str() {
-            "standard" => lash_conformance::parallel_model_tool_calls_producer(),
-            "rlm" => lash_conformance::rlm_promise_all_producer(vec![rlm_factory(artifacts)]),
+            "standard" => lash_conformance::parallel_model_tool_calls_producer(
+                lash_core::testing::test_standard_protocol_factories(),
+            ),
+            "rlm" => {
+                lash_conformance::rlm_promise_all_producer(vec![rlm_factory(artifacts)], false)
+            }
             other => panic!("unknown producer `{other}`"),
         })
         .collect()

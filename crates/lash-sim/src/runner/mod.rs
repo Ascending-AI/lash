@@ -203,6 +203,8 @@ pub use generated_profiles::{
     run_generated_sim_profile, run_generated_sim_profile_for_seeds,
 };
 pub use runtime_completion::SCHEDULER_OWNED_RUNTIME_COMPLETION_KINDS;
+#[cfg(test)]
+pub(crate) use runtime_proofs::prove_pending_tool_completion_on as prove_pending_tool_completion_for_invariants;
 
 use agent_contracts::*;
 use attempt_probe::*;

@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct RuntimeScenarioCoverage {
     pub(crate) test_name: &'static str,
+    pub(crate) declared_test: fn(),
     pub(crate) display_name: &'static str,
     pub(crate) owned_invariant: &'static str,
 }
@@ -17,6 +18,7 @@ macro_rules! runtime_scenario_coverage {
     ($test_fn:ident, $display_name:literal, $owned_invariant:literal) => {
         RuntimeScenarioCoverage {
             test_name: stringify!($test_fn),
+            declared_test: $test_fn,
             display_name: $display_name,
             owned_invariant: $owned_invariant,
         }
@@ -92,6 +94,7 @@ fn runtime_scenario_coverage_metadata_is_unique_and_complete() {
     assert_eq!(RUNTIME_SCENARIO_COVERAGE.len(), 10);
     let mut names = BTreeSet::new();
     for coverage in RUNTIME_SCENARIO_COVERAGE {
+        let _declared_test = coverage.declared_test;
         assert!(
             coverage.test_name.starts_with("runtime_scenario_"),
             "unexpected Runtime Scenario test name {}",

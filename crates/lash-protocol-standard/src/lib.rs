@@ -9,8 +9,9 @@
 //! - The [`StandardProtocolPluginFactory`] plugin that claims the
 //!   protocol-driver slot so the runtime can run standard-protocol
 //!   sessions.
-//! - The `batch` tool that composes parallel native tool calls (only
-//!   exposed when this protocol stack is installed).
+//! - The `batch` protocol sugar: the driver expands each `batch` call into
+//!   the step's one tool group beside the response's native calls, and folds
+//!   the members' results back into one batch result (ADR 0116 §2).
 
 use lash_sansio::TurnId;
 use std::sync::Arc;
@@ -42,21 +43,56 @@ pub mod scenario_contracts;
 use batch::batch_tool_definition;
 use lash_core::{
     CheckpointKind, DriverAction, DriverContextView, LlmOutputPart, LlmResponse,
-    ProtocolBuildInput, SessionError, ToolOutcome, TurnDriverConfig, TurnDriverPreamble,
-    facade_support::ToolInvocation, facade_support::TurnFinish, facade_support::TurnOutcome,
-    facade_support::TurnStop, facade_support::normalized_response_parts,
-    facade_support::reasoning_part,
+    ProtocolBuildInput, SessionError, TurnDriverConfig, TurnDriverPreamble,
+    facade_support::TurnFinish, facade_support::TurnOutcome, facade_support::TurnStop,
+    facade_support::normalized_response_parts, facade_support::reasoning_part,
 };
 use serde_json::Value;
 
 #[cfg(test)]
-use lash_core::{ToolCall, ToolContract, ToolManifest, ToolProvider};
+use lash_core::{ToolCall, ToolContract, ToolManifest, ToolOutcome, ToolProvider};
 
 const STANDARD_EXECUTION_TITLE: &str = "Execution";
-const STANDARD_EXECUTION_SECTION: &str = "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (up to 25); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed.";
-
-const BATCH_MAX_TOOL_CALLS: usize = 25;
 const STANDARD_PROTOCOL_PLUGIN_ID: &str = "standard_protocol";
+
+/// The execution section of the prompt, naming `batch` and its maximum only
+/// when the sugar is offered.
+fn standard_execution_section(batch: BatchSugar) -> String {
+    match batch {
+        BatchSugar::Enabled { max_members } => format!(
+            "Call tools directly with their declared JSON arguments. Use `batch` for two or more independent calls (at most {max_members} per batch); make dependent calls after their inputs return. Check each batch result’s success flag before using its value. Answer in prose only when no tool is needed."
+        ),
+        BatchSugar::Disabled => "Call tools directly with their declared JSON arguments. Make independent calls together; make dependent calls after their inputs return. Answer in prose only when no tool is needed.".to_string(),
+    }
+}
+
+/// The hard ceiling on members per `batch` call. A configured maximum above
+/// it is refused when the plugin builds.
+pub const BATCH_MEMBER_CEILING: usize = 64;
+
+/// Whether the driver offers `batch`, and with how many members per call.
+///
+/// `batch` is protocol sugar, not a tool: the driver expands each call into
+/// the step's one tool group beside the response's native calls, so every
+/// member starts before any finishes, and folds the members' results into one
+/// batch result. It is not a Tool Catalog entry, so tool membership does not
+/// apply to it and RLM cells and processes cannot call it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BatchSugar {
+    /// `batch` is offered, with at most `max_members` members per call.
+    Enabled { max_members: std::num::NonZeroUsize },
+    /// `batch` is not offered. A call named `batch` is an ordinary unknown
+    /// tool.
+    Disabled,
+}
+
+impl Default for BatchSugar {
+    fn default() -> Self {
+        Self::Enabled {
+            max_members: std::num::NonZeroUsize::MIN.saturating_add(BATCH_MEMBER_CEILING - 1),
+        }
+    }
+}
 
 /// Plugin factory that installs the standard-protocol driver,
 /// session plugin, and native tool catalog.
@@ -71,6 +107,16 @@ pub struct StandardProtocolConfig {
     pub discovery: Option<lash_core::ToolDiscovery>,
     pub render: StandardRenderConfig,
     pub renderer: ToolOutputRendererSlot,
+    pub batch: BatchSugar,
+}
+
+impl StandardProtocolConfig {
+    /// Offer or withhold the `batch` sugar. A maximum above
+    /// [`BATCH_MEMBER_CEILING`] is refused when the plugin builds.
+    pub fn batch(mut self, sugar: BatchSugar) -> Self {
+        self.batch = sugar;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -95,6 +141,14 @@ impl PluginFactory for StandardProtocolPluginFactory {
     }
 
     fn build(&self, _ctx: &PluginSessionContext) -> Result<Arc<dyn SessionPlugin>, PluginError> {
+        if let BatchSugar::Enabled { max_members } = self.config.batch
+            && max_members.get() > BATCH_MEMBER_CEILING
+        {
+            return Err(PluginError::InvalidBatchMaximum {
+                requested: max_members.get(),
+                ceiling: BATCH_MEMBER_CEILING,
+            });
+        }
         Ok(Arc::new(StandardProtocolPlugin {
             config: self.config.clone(),
         }))
@@ -121,11 +175,11 @@ impl SessionPlugin for StandardProtocolPlugin {
             .protocol_driver(Arc::new(StandardProtocolDriver {
                 config: self.config.clone(),
             }))?;
-        reg.tools()
-            .orchestrating(standard_batch_orchestrating_tool())?;
         let discovery = self.config.discovery.clone();
+        let batch = self.config.batch;
         reg.tool_catalog().contribute(Arc::new(move |ctx| {
             validate_discovery(&ctx.tools, discovery.as_ref())?;
+            validate_batch_name(&ctx.tools, batch)?;
             Ok(Default::default())
         }));
         Ok(())
@@ -137,14 +191,30 @@ fn validate_discovery(
     discovery: Option<&lash_core::ToolDiscovery>,
 ) -> Result<(), PluginError> {
     if let Some(discovery) = discovery
-        && !tools.iter().any(|tool| {
-            tool.inline
-                && tool.activation != lash_core::ToolActivation::Internal
-                && tool.name == discovery.operation
-        })
+        && !tools
+            .iter()
+            .any(|tool| tool.inline && tool.name == discovery.operation)
     {
         return Err(PluginError::InvalidToolDiscovery {
             operation: discovery.operation.clone(),
+        });
+    }
+    Ok(())
+}
+
+/// While the sugar is offered, `batch` names it in every request, so a
+/// catalogue tool of that name could never be called: it is refused.
+fn validate_batch_name(
+    tools: &[lash_core::ToolManifest],
+    batch: BatchSugar,
+) -> Result<(), PluginError> {
+    if matches!(batch, BatchSugar::Enabled { .. })
+        && let Some(tool) = tools
+            .iter()
+            .find(|tool| tool.name == batch::BATCH_TOOL_NAME)
+    {
+        return Err(PluginError::ResidentToolDuplicateName {
+            name: tool.name.clone(),
         });
     }
     Ok(())
@@ -188,197 +258,43 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
     fn build_preamble(&self, input: ProtocolBuildInput) -> TurnDriverPreamble {
         let tool_names = input.tool_catalog.tool_names();
         let tool_names_fingerprint = input.tool_catalog.tool_names_fingerprint();
+        let catalog_specs = if self.config.discovery.is_some() {
+            input.tool_catalog.inline_tools().model_tool_specs()
+        } else {
+            input.tool_catalog.model_tool_specs()
+        };
+        let tool_specs = match self.config.batch {
+            BatchSugar::Enabled { max_members } => {
+                let definition = batch_tool_definition(max_members);
+                let model_tool = definition.contract().model_tool(&definition.manifest());
+                let mut specs = catalog_specs.as_ref().clone();
+                specs.push(lash_core::llm::types::LlmToolSpec {
+                    name: model_tool.name,
+                    description: model_tool.description,
+                    input_schema: model_tool.input_schema,
+                    output_schema: model_tool.output_schema,
+                });
+                Arc::new(specs)
+            }
+            BatchSugar::Disabled => catalog_specs,
+        };
         TurnDriverPreamble {
             config: TurnDriverConfig::chat(
                 Arc::new(StandardDriver {
                     discovery: self.config.discovery.is_some(),
+                    batch: self.config.batch,
                 }),
                 true,
             ),
-            tool_specs: if self.config.discovery.is_some() {
-                input.tool_catalog.inline_tools().model_tool_specs()
-            } else {
-                input.tool_catalog.model_tool_specs()
-            },
+            tool_specs,
             tool_names,
             tool_names_fingerprint,
             execution_title: Arc::from(STANDARD_EXECUTION_TITLE),
-            execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
+            execution_prompt: Arc::from(standard_execution_section(self.config.batch)),
             prompt_contributions: input.extra_prompt_contributions,
             writer_formats: input.writer_formats,
         }
     }
-}
-
-/// First-party facade support for hosts whose protocol driver is not Standard
-/// but which enable the native batch orchestrating operation in their builder
-/// configuration.
-///
-/// Pass this definition to
-/// [`lash_core::facade_support::PluginSpec::with_orchestrating_tool`] from the
-/// plugin installed on the facade builder. The definition's capability-bearing
-/// constructor remains sealed inside this crate.
-#[expect(
-    unsafe_code,
-    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
-)]
-pub fn standard_batch_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
-    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
-        Arc::new(StandardBatchOrchestratingTool);
-    // SAFETY: this crate owns the Standard batch tool contract and body.
-    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
-}
-
-struct StandardBatchOrchestratingTool;
-
-#[async_trait]
-impl lash_core::facade_support::OrchestratingToolImplementation for StandardBatchOrchestratingTool {
-    fn manifest(&self) -> lash_core::ToolManifest {
-        batch_tool_definition().manifest()
-    }
-
-    fn contract(&self) -> Arc<lash_core::ToolContract> {
-        Arc::new(batch_tool_definition().contract())
-    }
-
-    async fn execute(
-        &self,
-        args: &Value,
-        context: &lash_core::facade_support::OrchestrationContext<'_>,
-    ) -> ToolOutcome {
-        execute_orchestration(args, context).await
-    }
-}
-
-#[derive(Debug)]
-struct BatchCallSpec {
-    index: usize,
-    tool: String,
-    parameters: Value,
-}
-
-async fn execute_orchestration(
-    args: &Value,
-    context: &lash_core::facade_support::OrchestrationContext<'_>,
-) -> ToolOutcome {
-    let specs = match parse_batch_specs(args) {
-        Ok(specs) => specs,
-        Err(err) => return err,
-    };
-
-    let mut immediate_outcomes = Vec::new();
-    let mut parallel_specs = Vec::new();
-
-    let mut specs = specs.into_iter();
-    for spec in specs.by_ref().take(BATCH_MAX_TOOL_CALLS) {
-        if spec.tool == "batch" {
-            immediate_outcomes.push(BatchResultRow::failure(
-                spec.index,
-                spec.tool,
-                serde_json::json!("Tool 'batch' is not allowed inside batch"),
-            ));
-            continue;
-        }
-        let Some(manifest) = context.callable_tool_manifest(&spec.tool) else {
-            let error = format!("Tool '{}' is unavailable in this session", spec.tool);
-            immediate_outcomes.push(BatchResultRow::failure(spec.index, spec.tool, error.into()));
-            continue;
-        };
-        parallel_specs.push((
-            spec.index,
-            ToolInvocation::new(
-                format!(
-                    "{}:{:02}",
-                    context.tool_call_id().unwrap_or("batch"),
-                    spec.index
-                ),
-                manifest.id,
-                spec.parameters,
-            ),
-        ));
-    }
-
-    let mut parallel_outcomes = context
-        .call_tool_batch(
-            parallel_specs
-                .iter()
-                .map(|(_, invocation)| invocation.clone())
-                .collect(),
-        )
-        .await;
-    for ((index, invocation), outcome) in
-        parallel_specs.into_iter().zip(parallel_outcomes.drain(..))
-    {
-        let tool_label = invocation.tool_id.to_string();
-        let tool_record = outcome.record.unwrap_or(lash_core::ToolCallRecord {
-            call_id: Some(invocation.id),
-            tool: tool_label,
-            args: invocation.args,
-            output: outcome.output,
-        });
-        let value = tool_record.output.value_for_projection();
-        immediate_outcomes.push(if tool_record.output.is_success() {
-            BatchResultRow::success(index, tool_record.tool, value)
-        } else {
-            BatchResultRow::failure(index, tool_record.tool, value)
-        });
-    }
-
-    for spec in specs {
-        immediate_outcomes.push(BatchResultRow::failure(
-            spec.index,
-            spec.tool,
-            serde_json::json!("Maximum of 25 tool calls allowed in batch"),
-        ));
-    }
-
-    immediate_outcomes.sort_by_key(|outcome| outcome.index);
-    ToolOutcome::ok(serde_json::json!({
-        "results": immediate_outcomes,
-    }))
-}
-
-fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
-    let Some(raw_calls) = args.get("tool_calls").and_then(|value| value.as_array()) else {
-        return Err(ToolOutcome::err_fmt(
-            "Missing required parameter: tool_calls",
-        ));
-    };
-    if raw_calls.is_empty() {
-        return Err(ToolOutcome::err_fmt(
-            "Invalid tool_calls: expected at least one call",
-        ));
-    }
-
-    let mut specs = Vec::with_capacity(raw_calls.len());
-    for (index, item) in raw_calls.iter().enumerate() {
-        let Some(object) = item.as_object() else {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Invalid tool_calls[{index}]: expected object with tool and parameters"
-            )));
-        };
-        let Some(tool) = object
-            .get("tool")
-            .and_then(|value| value.as_str())
-            .map(str::trim)
-            .filter(|tool| !tool.is_empty())
-        else {
-            return Err(ToolOutcome::err_fmt(format_args!(
-                "Invalid tool_calls[{index}].tool: expected non-empty string"
-            )));
-        };
-        let parameters = object
-            .get("parameters")
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!({}));
-        specs.push(BatchCallSpec {
-            index,
-            tool: tool.to_string(),
-            parameters,
-        });
-    }
-
-    Ok(specs)
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -386,13 +302,14 @@ fn parse_batch_specs(args: &Value) -> Result<Vec<BatchCallSpec>, ToolOutcome> {
 // ─────────────────────────────────────────────────────────────────────
 
 /// Protocol driver for the Standard protocol. Consumes native
-/// tool-call envelopes from the LLM, dispatches them via
-/// `PendingWork::Tools`, and splices reasoning parts into the
-/// assistant message so provider replay metadata preserves
-/// chain-of-thought ordering.
+/// tool-call envelopes from the LLM, expands `batch` sugar into the step's
+/// one tool group and dispatches it via `PendingWork::Tools`, and splices
+/// reasoning parts into the assistant message so provider replay metadata
+/// preserves chain-of-thought ordering.
 #[derive(Default)]
 pub struct StandardDriver {
     discovery: bool,
+    batch: BatchSugar,
 }
 
 #[derive(Clone, Debug)]
@@ -704,6 +621,9 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                         args,
                         replay: call.replay,
                     };
+                    // A `batch` wrapper is listed whenever the sugar is on,
+                    // and its members resolve against the session's callable
+                    // catalog, not the request's listed tools.
                     if self.discovery
                         && !request.tools.iter().any(|tool| tool.name == call.tool_name)
                     {
@@ -711,10 +631,16 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                             lash_core::ToolFailure::runtime(
                                 lash_core::ToolFailureClass::Unavailable,
                                 "unknown_tool",
-                                format!(
-                                    "Tool `{}` was not listed in this request; use a listed discovery operation or batch.",
-                                    call.tool_name
-                                ),
+                                match self.batch {
+                                    BatchSugar::Enabled { .. } => format!(
+                                        "Tool `{}` was not listed in this request; use a listed discovery operation or batch.",
+                                        call.tool_name
+                                    ),
+                                    BatchSugar::Disabled => format!(
+                                        "Tool `{}` was not listed in this request; use a listed discovery operation.",
+                                        call.tool_name
+                                    ),
+                                },
                             ),
                         );
                         refused.push(refused_tool_call_completion(
@@ -730,12 +656,29 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 }
             }
         }
+        let expansion = match self.batch {
+            BatchSugar::Enabled { max_members } => batch::expand(calls, max_members),
+            BatchSugar::Disabled => batch::Expansion {
+                calls,
+                ..batch::Expansion::default()
+            },
+        };
+        let calls = expansion.calls;
+        refused.extend(expansion.refused.into_iter().map(|(call, output)| {
+            refused_tool_call_completion(
+                call.call_id,
+                call.tool_name,
+                call.args,
+                output,
+                call.replay,
+            )
+        }));
         if !refused.is_empty() {
             let completed = refused;
             actions.push(DriverAction::ReportToolCalls {
                 completed: completed.clone(),
             });
-            if calls.is_empty() {
+            if calls.is_empty() && expansion.plan.is_empty() {
                 actions.extend(self.handle_tool_results(ctx, completed));
                 return actions;
             }
@@ -755,8 +698,19 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
                 },
             )]));
         }
-        actions.push(DriverAction::Start(PendingWork::Tools { calls }));
+        actions.push(DriverAction::Start(PendingWork::Tools {
+            calls,
+            expansion: expansion.plan,
+        }));
         actions
+    }
+
+    fn fold_tool_results(
+        &self,
+        plan: &lash_core::sansio::ToolExpansionPlan,
+        completed: Vec<CompletedToolCall>,
+    ) -> Vec<CompletedToolCall> {
+        batch::fold(plan, completed)
     }
 
     fn handle_tool_results(

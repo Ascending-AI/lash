@@ -761,7 +761,6 @@ fn law_billed_completion() -> crate::DirectCompletion {
                         http_status: Some(503),
                         provider_request_id: None,
                         retry_after: None,
-                        diagnostic: None,
                     }),
                     evidence: None,
                     generation_disposition: None,

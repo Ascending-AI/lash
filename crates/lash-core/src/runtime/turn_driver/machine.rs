@@ -169,7 +169,7 @@ impl RuntimeTurnDriver<'_> {
                     self.handle_execution_environment_sync_effect(&mut machine, id, &event_tx)
                         .await?;
                 }
-                Effect::ToolCalls { id, calls } => {
+                Effect::ToolCalls { id, calls, .. } => {
                     self.handle_tool_calls_effect(&mut machine, id, calls, &event_tx)
                         .await?;
                 }

@@ -280,6 +280,7 @@ TEST_RUN_REQUESTS = {
     "//crates/lash-protocol-standard:native_tools__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-protocol-standard:protocol_scenarios__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-protocol-standard:render_cache_law__test": {"cpu_count": 2, "memory_kb": 1048576},
+    "//crates/lash-protocol-standard:tool_batch_parallelism__test": {"cpu_count": 2, "memory_kb": 1048576},
     "//crates/lash-provider-anthropic:charge_safety__test": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-provider-anthropic:charge_safety__test__fv_0e80edc8": {"cpu_count": 1, "memory_kb": 1048576},
     "//crates/lash-provider-anthropic:lash-provider-anthropic__unit_test": {"cpu_count": 1, "memory_kb": 1048576},

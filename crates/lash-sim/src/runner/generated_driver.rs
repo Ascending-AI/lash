@@ -263,10 +263,19 @@ pub(super) async fn run_generated_workload(
     // from the serialized trace (see `RUN_ONLY_ORACLES`).
     let mut content = world.content_evidence().await?;
     content.extend(drive_attempt_usage_probe(workload.seed).await?);
+    // The global invariants judge the finished history: the trace and every
+    // engine's final store (FIG-4086).
+    let history = world
+        .global_history(&format!("generated/{}", workload.profile), &events)
+        .await
+        .map_err(FixedScriptRunnerError::Runtime)?;
+    let invariants = crate::invariants::check(&history);
+    invariants.print_quarantined();
     let mut oracles = vec![
         live_provider_failure_coverage(&live_failure_facts),
         crate::content_oracle::durable_content(&content),
         crate::content_oracle::failed_attempt_usage_ledgered(&content),
+        invariants.verdict(),
     ];
     oracles.extend(crate::oracles::generated_trace_oracles(
         &events,

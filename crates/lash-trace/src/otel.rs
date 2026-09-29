@@ -693,7 +693,6 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
             if let Some(code) = &error.code {
                 attrs.push(KeyValue::new(attr::LASH_ERROR_CODE, code.clone()));
             }
-            attrs.push(KeyValue::new(attr::ERROR_MESSAGE, error.message.clone()));
             attrs.push(KeyValue::new(attr::LASH_ERROR_RETRYABLE, error.retryable));
             push_payload_json(
                 &mut attrs,
@@ -701,7 +700,6 @@ fn event_attributes(record: &TraceRecord, options: &OtelTraceOptions) -> Vec<Key
                 attr::LASH_LLM_STREAM_SUMMARY_JSON,
                 stream_summary,
             );
-            push_payload_json(&mut attrs, options, attr::LASH_ERROR_RAW, &error.raw);
             push_payload_json(
                 &mut attrs,
                 options,
@@ -1235,7 +1233,7 @@ fn error_status(record: &TraceRecord) -> Status {
             outcome: crate::TraceRlmStepOutcome::Failure { diagnostic },
             ..
         } => Status::error(diagnostic.clone()),
-        TraceEvent::LlmCallFailed { error, .. } => Status::error(error.message.clone()),
+        TraceEvent::LlmCallFailed { .. } => Status::error("provider call failed"),
         TraceEvent::ToolCallCompleted { name, .. } => {
             Status::error(format!("tool call failed: {name}"))
         }
