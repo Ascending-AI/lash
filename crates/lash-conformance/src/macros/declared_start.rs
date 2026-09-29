@@ -40,14 +40,21 @@ macro_rules! declared_start_tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
             let (_guard, tier) = $fixture;
-            // A law that hangs fails with its own output rather than
-            // silencing the whole target at its timeout.
+            // The deadlock watchdog, and no part of the law: the law's waits
+            // have no deadline, so a run a loaded pool slows is waited for.
+            // A law that never ends is a hang, and the watchdog fails it
+            // with its own output before the target's timeout silences the
+            // whole target. It is far above any law's run, loaded or not.
             tokio::time::timeout(
                 std::time::Duration::from_secs(240),
                 $crate::registration_macro_support::$law(tier),
             )
             .await
-            .expect(concat!(stringify!($law), " finishes within its bound"));
+            .expect(concat!(
+                "deadlock watchdog: ",
+                stringify!($law),
+                " hung on a wait that never ended"
+            ));
         }
     };
 }

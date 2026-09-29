@@ -28,9 +28,12 @@ const PARENT_INPUT: &str = "declared-start law: spawn the children";
 /// The definition key of the subagent child's `SessionTurn` process.
 const SUBAGENT_DEFINITION: &str = "lash-subagent-session-turn";
 
-/// How long a law waits for a fact a healthy run reaches in well under a
-/// second, before it fails rather than hangs.
-const PATIENCE: Duration = Duration::from_secs(60);
+/// How often a law re-reads the registry for a registration: nothing ticks
+/// on a process the law cannot name yet. It is a cadence, not a deadline; a
+/// law's waits have none, so a run slowed by a loaded pool is waited for and
+/// never read as a missing fact. A wait that never ends is a hang, which the
+/// runner's deadlock watchdog reports.
+const REREAD: Duration = Duration::from_millis(20);
 
 fn child_task(index: usize) -> String {
     format!("declared-start child {index}: answer your literal")
@@ -221,11 +224,12 @@ struct Script {
     /// The parent's step after its tool results waits here.
     followup_gate: Gate,
     /// When set, a child's first step waits until this many children have
-    /// started: the barrier that proves they run at once.
+    /// started: the barrier that proves they run at once. A batch that
+    /// serialized its children never fills it, since the first child holds
+    /// its answer until its siblings start: the law hangs, and the runner's
+    /// deadlock watchdog reports it.
     barrier: Option<usize>,
     started: tokio::sync::watch::Sender<usize>,
-    /// Children whose barrier never filled.
-    serialized: AtomicUsize,
     /// The tool results the parent's follow-up step saw.
     parent_saw: std::sync::Mutex<Vec<String>>,
 }
@@ -242,7 +246,6 @@ impl Script {
             followup_gate: Gate::new(true),
             barrier: None,
             started: tokio::sync::watch::channel(0).0,
-            serialized: AtomicUsize::new(0),
             parent_saw: std::sync::Mutex::new(Vec::new()),
         }
     }
@@ -257,9 +260,9 @@ impl Script {
     /// Waits until children have taken `steps` model steps between them.
     async fn child_steps(&self, steps: usize) {
         let mut started = self.started.subscribe();
-        tokio::time::timeout(PATIENCE, started.wait_for(|started| *started >= steps))
+        started
+            .wait_for(|started| *started >= steps)
             .await
-            .unwrap_or_else(|_| panic!("children take {steps} steps"))
             .unwrap_or_else(|_| panic!("the script outlives its children"));
     }
 
@@ -366,12 +369,10 @@ impl Script {
         }
         if let Some(width) = self.barrier {
             let mut started = self.started.subscribe();
-            if tokio::time::timeout(PATIENCE, started.wait_for(|started| *started >= width))
+            started
+                .wait_for(|started| *started >= width)
                 .await
-                .is_err()
-            {
-                self.serialized.fetch_add(1, Ordering::SeqCst);
-            }
+                .unwrap_or_else(|_| panic!("the script outlives its children"));
         }
         self.child_gate.passed().await;
         match self.producer {
@@ -447,6 +448,11 @@ struct World {
     factories: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
     store: Arc<dyn crate::RuntimeStore>,
     registry: Arc<dyn crate::ProcessRegistry>,
+    /// The runtime's own wait on [`Self::registry`]: it wakes on the watch's
+    /// change ticks, and re-reads on its work cadence for a terminal written
+    /// outside the watch (Restate's process workflow writes through the
+    /// engine's own registry handle).
+    awaiter: crate::ProcessRegistryAwaiter,
     faults: crate::testing::ProcessRegistryFaults,
     process_work: crate::ProcessWorkWiring,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
@@ -563,6 +569,8 @@ impl World {
         )
         .expect("build the declared-start process worker");
         let registry = Arc::clone(watched.registry());
+        let awaiter =
+            crate::ProcessRegistryAwaiter::new(Arc::clone(&registry), watched.hub().clone());
         let process_work = tier.runner.process_work(watched, worker);
         Self {
             store: crate::conformance::law_session_store(tier.stores.as_ref(), &session_id).await,
@@ -571,6 +579,7 @@ impl World {
             host,
             factories,
             registry,
+            awaiter,
             faults,
             process_work,
             runner: Arc::clone(&tier.runner),
@@ -650,7 +659,7 @@ impl World {
         self.runner
             .run_turn(self.admitted(), self.attempt(Some(answers)))
             .await;
-        answer(&mut answered).await
+        answer(&mut answered)
     }
 
     /// Runs the turn until `crash` fires, then redelivers it, and returns the
@@ -664,7 +673,7 @@ impl World {
                 self.attempt(Some(answers)),
             )
             .await;
-        answer(&mut answered).await
+        answer(&mut answered)
     }
 
     /// Lets every child answer its step. A cancelled child that answers still
@@ -732,48 +741,45 @@ impl World {
         children.into_iter().next().expect("one child")
     }
 
-    /// Waits until `process_id` is terminal and returns its record.
+    /// Waits on `process_id`'s terminal and returns its record.
+    ///
+    /// The wait is the runtime's registry awaiter, with no deadline: a
+    /// child whose terminal a loaded pool delays is waited for, never read
+    /// as a child without one. A child that never ends is a hang, which the
+    /// runner's deadlock watchdog reports.
     async fn terminal(&self, process_id: &crate::ProcessId) -> crate::ProcessRecord {
-        let reached = tokio::time::timeout(PATIENCE, async {
-            loop {
-                let record = self
-                    .registry
-                    .get_process(process_id)
-                    .await
-                    .expect("read the child")
-                    .expect("the child is registered");
-                if record.is_terminal() {
-                    return record;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        })
-        .await;
-        match reached {
-            Ok(record) => record,
-            Err(_) => {
-                let record = self.registry.get_process(process_id).await;
+        self.awaiter
+            .await_terminal(process_id)
+            .await
+            .unwrap_or_else(|error| {
                 panic!(
-                    "{}: the child reaches its terminal; it stands at {record:#?}",
+                    "{}: the child {process_id} ends in a terminal it can be read at: {error:?}",
                     self.session_id
                 )
-            }
-        }
+            });
+        let record = self
+            .registry
+            .get_process(process_id)
+            .await
+            .expect("read the child")
+            .expect("the child is registered");
+        assert!(
+            record.is_terminal(),
+            "{}: the child the awaiter saw end reads terminal: {record:#?}",
+            self.session_id
+        );
+        record
     }
 
     /// Waits until the law's session has started `count` children.
     async fn started(&self, count: usize) -> Vec<crate::ProcessRecord> {
-        tokio::time::timeout(PATIENCE, async {
-            loop {
-                let children = self.children().await;
-                if children.len() >= count {
-                    return children;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+        loop {
+            let children = self.children().await;
+            if children.len() >= count {
+                return children;
             }
-        })
-        .await
-        .unwrap_or_else(|_| panic!("{}: {count} children start", self.session_id))
+            tokio::time::sleep(REREAD).await;
+        }
     }
 
     /// The external children this world's probe declared.
@@ -800,27 +806,13 @@ impl World {
     /// it, and returns it.
     async fn probe_until(
         &self,
-        what: &str,
         settled: impl Fn(&crate::ProcessRecord) -> bool,
     ) -> crate::ProcessRecord {
-        let reached = tokio::time::timeout(PATIENCE, async {
-            loop {
-                if let Some(probe) = self.probes().await.into_iter().find(|probe| settled(probe)) {
-                    return probe;
-                }
-                tokio::time::sleep(Duration::from_millis(20)).await;
+        loop {
+            if let Some(probe) = self.probes().await.into_iter().find(|probe| settled(probe)) {
+                return probe;
             }
-        })
-        .await;
-        match reached {
-            Ok(probe) => probe,
-            Err(_) => {
-                let probes = self.probes().await;
-                panic!(
-                    "{}: {what}; the probes stand at {probes:#?}",
-                    self.session_id
-                )
-            }
+            tokio::time::sleep(REREAD).await;
         }
     }
 
@@ -834,11 +826,12 @@ impl World {
     }
 }
 
-async fn answer(answers: &mut tokio::sync::mpsc::UnboundedReceiver<Answer>) -> Answer {
-    tokio::time::timeout(PATIENCE, answers.recv())
-        .await
-        .unwrap_or_else(|_| panic!("the tier's runner answers the law's turn"))
-        .unwrap_or_else(|| panic!("the tier's runner ran the law's turn"))
+/// The answer of the turn the tier's runner has run: a runner returns once
+/// the attempt that answers ended, so the answer is already sent.
+fn answer(answers: &mut tokio::sync::mpsc::UnboundedReceiver<Answer>) -> Answer {
+    answers.try_recv().unwrap_or_else(|error| {
+        panic!("the tier's runner ran the law's turn to its answer: {error}")
+    })
 }
 
 /// `attempt`, dying at its next await once `crash` fired.
@@ -1252,9 +1245,8 @@ pub async fn declared_start_cancel_at_each_point(tier: DeclaredStartTier) {
     {
         let world = world.clone();
         tokio::spawn(async move {
-            world
-                .probe_until("the probe's child registers", |_| true)
-                .await;
+            // Once the probe's child registers, the turn is cancelled.
+            world.probe_until(|_| true).await;
             world.request_cancel().await;
         });
     }
@@ -1425,7 +1417,7 @@ pub async fn declared_start_early_terminal_resolves_before_wait(tier: DeclaredSt
             redrive,
         )
         .await;
-    let turn = finished(&world, answer(&mut answered).await);
+    let turn = finished(&world, answer(&mut answered));
     assert_answered_the_child(&world, &turn);
     world.only_child().await;
     assert_eq!(world.script.child_calls(), 1, "the child ran once");
@@ -1488,11 +1480,6 @@ pub async fn batch_of_spawns_overlaps(tier: DeclaredStartTier) {
         )
         .await;
         let turn = finished(&world, world.run().await);
-        assert_eq!(
-            world.script.serialized.load(Ordering::SeqCst),
-            0,
-            "width {width}: every child started before any finished"
-        );
         assert_eq!(
             world.children().await.len(),
             width,
@@ -1642,17 +1629,14 @@ pub async fn declared_start_discarded_retry_launches_nothing(tier: DeclaredStart
     {
         let world = world.clone();
         tokio::spawn(async move {
-            world
-                .probe_until("the probe's child registers", |_| true)
-                .await;
+            // Once the probe's child registers, the turn is cancelled.
+            world.probe_until(|_| true).await;
             world.request_cancel().await;
         });
     }
     let _ = world.run().await;
     let probe = world
-        .probe_until("the cancelled wait cancels its child", |probe| {
-            probe.cancel_request.is_some()
-        })
+        .probe_until(|probe| probe.cancel_request.is_some())
         .await;
     let probes = world.probes().await;
     assert_eq!(probes.len(), 1, "one child: {probes:#?}");
