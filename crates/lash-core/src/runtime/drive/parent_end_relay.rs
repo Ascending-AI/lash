@@ -17,8 +17,8 @@
 
 use std::sync::Arc;
 
-use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy};
-use crate::store::{ObligationId, ObligationKey, ObligationLedger};
+use super::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
+use crate::store::{ObligationKey, ObligationLedger};
 use crate::{Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate, apply_parent_end_plan};
 
 /// The `ParentEnd` relay: the kind's ledger, plus the registry and process
@@ -86,15 +86,11 @@ impl ObligationRelay for ParentEndRelay {
     /// build cannot read is the undecodable case — then run the same body
     /// the producer's own apply runs.
     ///
-    /// `id` is the claim's fencing identity, not the delivery's: the
-    /// delivery dedupes on the plan's own per-child keys, so a second claim
-    /// over one row applies once.
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    /// The delivery's id and token are the claim's fencing identity, not
+    /// the delivery's: it dedupes on the plan's own per-child keys, so a
+    /// second claim over one row applies once.
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::ParentEnd {
             parent_kind,
             parent_id,
@@ -152,8 +148,8 @@ mod tests {
     use crate::engine::RelayPass;
     use crate::runtime::drive::relay::{RelayVerdict, deliver_now, relay_due};
     use crate::store::{
-        ClaimToken, ClaimedObligation, ObligationKind, ObligationSettlement, SettleOutcome,
-        StallReason, StalledObligation, StoreError, UndecodableObligation,
+        ClaimToken, ClaimedObligation, ObligationId, ObligationKind, ObligationSettlement,
+        SettleOutcome, StallReason, StalledObligation, StoreError, UndecodableObligation,
     };
     use crate::testing::TestClock;
 
@@ -323,12 +319,8 @@ mod tests {
             }
         }
 
-        async fn deliver(
-            &self,
-            id: &ObligationId,
-            _key: &ObligationKey,
-            _attempt: u32,
-        ) -> Result<(), DeliveryFailure> {
+        async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+            let ObligationDelivery { id, .. } = delivery;
             self.deliveries.lock().expect("deliveries").push(id.clone());
             self.outcome.lock().expect("outcome").clone()
         }

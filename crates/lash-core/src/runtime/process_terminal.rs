@@ -16,8 +16,8 @@
 
 use std::sync::Arc;
 
-use crate::runtime::drive::relay::{DeliveryFailure, ObligationRelay};
-use crate::store::{ObligationId, ObligationKey, ObligationLedger};
+use crate::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+use crate::store::{ObligationKey, ObligationLedger};
 use crate::{PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
 /// The `ProcessTerminal` relay over one deployment's process registry and
@@ -61,12 +61,8 @@ impl ObligationRelay for ProcessTerminalRelay {
         self.ledger.as_ref()
     }
 
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::ProcessTerminal { process_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a {} key on the process_terminal ledger",

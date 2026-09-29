@@ -20,12 +20,14 @@ use std::sync::Arc;
 
 use crate::engine::ScopeCloseSink;
 use crate::store::{
-    ObligationId, ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError,
+    ObligationKey, ObligationKind, ObligationLedger, RootTerminal, StoreError,
     scope_close_obligation_id,
 };
 use crate::{Clock, DeploymentStore};
 
-use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now};
+use super::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
+};
 
 /// One deployment's scope-close relay: the `session_roots` obligation
 /// ledger it claims from, the catalog it reads terminal evidence from, and
@@ -89,12 +91,8 @@ impl ObligationRelay for ScopeCloseRelay {
         self.policy
     }
 
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::ScopeClose { session_id, root } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a scope-close delivery was handed a {} key",

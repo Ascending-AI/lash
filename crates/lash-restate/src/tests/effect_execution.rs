@@ -141,11 +141,14 @@ pub(super) async fn start_delivery_refuses_externally_owned_rows() {
     for id in [&ext_first_id, &ext_second_id] {
         let failure = lash_core::runtime::drive::relay::ObligationRelay::deliver(
             &relay,
-            &lash_core::store::process_start_obligation_id(id),
-            &lash_core::store::ObligationKey::ProcessStart {
-                process_id: id.clone(),
+            lash_core::runtime::drive::relay::ObligationDelivery {
+                id: &lash_core::store::process_start_obligation_id(id),
+                key: &lash_core::store::ObligationKey::ProcessStart {
+                    process_id: id.clone(),
+                },
+                token: &lash_core::store::ClaimToken::mint(),
+                attempt: 1,
             },
-            0,
         )
         .await
         .expect_err("an externally-owned row is refused, not delivered");

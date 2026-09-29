@@ -34,7 +34,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::drive::relay::{
-    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
 };
 use crate::session_close::{SessionCloseError, close_session};
 use crate::store::session_delete::{SessionCleanup, SessionDeleteLedger, SessionDeleteObligation};
@@ -403,12 +403,8 @@ impl ObligationRelay for SessionDeleteRelay {
         self.policy
     }
 
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::SessionDelete { session_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a {} key on the session_delete ledger",

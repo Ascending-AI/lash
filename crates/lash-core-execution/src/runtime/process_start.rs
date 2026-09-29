@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::runtime::drive::relay::{DeliveryFailure, ObligationRelay, deliver_now};
+use crate::runtime::drive::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, deliver_now,
+};
 use crate::store::{
-    ClaimToken, ObligationId, ObligationKey, ObligationLedger, ObligationSettlement,
-    process_start_obligation_id,
+    ClaimToken, ObligationKey, ObligationLedger, ObligationSettlement, process_start_obligation_id,
 };
 use crate::{Clock, PluginError, ProcessRegistry, ProcessWorkSubstrate};
 
@@ -124,12 +125,8 @@ impl ObligationRelay for ProcessStartRelay {
         self.ledger.as_ref()
     }
 
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::ProcessStart { process_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "a {} key on the process_start ledger",

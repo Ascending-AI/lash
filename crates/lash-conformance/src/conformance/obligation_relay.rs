@@ -26,7 +26,8 @@ use lash_core::runtime::artifact_cleanup::{
     SubscriptionRevisionStanding,
 };
 use lash_core::runtime::drive::relay::{
-    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now, relay_due,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
+    relay_due,
 };
 use lash_core::store::{
     ClaimToken, HolderId, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind,
@@ -196,12 +197,8 @@ impl ObligationRelay for ScriptedRelay {
         self.policy
     }
 
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, .. } = delivery;
         let label = key_label(key);
         self.attempts
             .lock()

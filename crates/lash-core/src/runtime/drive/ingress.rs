@@ -21,7 +21,8 @@
 use std::sync::Arc;
 
 use super::relay::{
-    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_claimed, deliver_now,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict,
+    deliver_claimed, deliver_now,
 };
 use crate::engine::EngineRefusal;
 pub use crate::engine::{FIRST_INGRESS_ATTEMPT, ingress_drive_request};
@@ -206,12 +207,8 @@ impl ObligationRelay for IngressRelay {
     /// Ask the row's session for `ingress:{item_id}:{attempt}`. The drive
     /// admits whatever the session holds, this row included, and its claim
     /// of the row settles the obligation.
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, attempt, .. } = delivery;
         let ObligationKey::Ingress {
             session_id,
             item_id,

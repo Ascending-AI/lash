@@ -91,16 +91,29 @@ pub trait ObligationRelay: Send + Sync {
         false
     }
 
-    /// Deliver obligation `id` on the row `key` names, on its `attempt`th
-    /// claim. Idempotent under a repeated `id`: the engine dedupes on a key
-    /// derived from it (and from `attempt`, for a kind whose consumer
-    /// settles, so a lapsed claim's retry is a new ask).
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        attempt: u32,
-    ) -> Result<(), DeliveryFailure>;
+    /// Deliver the obligation `delivery` names, under the claim that owns
+    /// this attempt. Idempotent under a repeated obligation id: the engine
+    /// dedupes on a key derived from it (and from the attempt, for a kind
+    /// whose consumer settles, so a lapsed claim's retry is a new ask).
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure>;
+}
+
+/// One delivery attempt's authority (ADR 0109 §1.4): the claimed obligation
+/// as the claim that owns the attempt holds it. The relay builds it from the
+/// [`ClaimedObligation`] it settles with, so a delivery's own writes (a
+/// control intent's acknowledgement or failure) compare the same token the
+/// relay's settlement does, however the claim was taken.
+#[derive(Clone, Copy, Debug)]
+pub struct ObligationDelivery<'a> {
+    /// The obligation delivered.
+    pub id: &'a ObligationId,
+    /// The row it names, decoded.
+    pub key: &'a ObligationKey,
+    /// The claim this attempt holds: a write fenced on it lands only while
+    /// no later claim retook the row.
+    pub token: &'a ClaimToken,
+    /// Which claim of the obligation this is, counting from 1.
+    pub attempt: u32,
 }
 
 /// How one claimed obligation settled.
@@ -207,7 +220,16 @@ async fn attempt(
                 claimed.attempts.saturating_sub(1)
             )))
         }
-        Ok(key) => relay.deliver(&claimed.id, key, claimed.attempts).await,
+        Ok(key) => {
+            relay
+                .deliver(ObligationDelivery {
+                    id: &claimed.id,
+                    key,
+                    token: &claimed.token,
+                    attempt: claimed.attempts,
+                })
+                .await
+        }
         Err(undecodable) => Err(DeliveryFailure::Undecodable(undecodable.detail.clone())),
     };
     let now_ms = clock.timestamp_ms();
@@ -433,12 +455,7 @@ mod tests {
             &self.0
         }
 
-        async fn deliver(
-            &self,
-            _id: &ObligationId,
-            _key: &ObligationKey,
-            _attempt: u32,
-        ) -> Result<(), DeliveryFailure> {
+        async fn deliver(&self, _: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
             Ok(())
         }
     }
@@ -552,16 +569,11 @@ mod tests {
             true
         }
 
-        async fn deliver(
-            &self,
-            id: &ObligationId,
-            _key: &ObligationKey,
-            attempt: u32,
-        ) -> Result<(), DeliveryFailure> {
+        async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
             self.asked
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .push((id.clone(), attempt));
+                .push((delivery.id.clone(), delivery.attempt));
             Ok(())
         }
     }
@@ -635,12 +647,7 @@ mod tests {
             &self.0
         }
 
-        async fn deliver(
-            &self,
-            _id: &ObligationId,
-            _key: &ObligationKey,
-            _attempt: u32,
-        ) -> Result<(), DeliveryFailure> {
+        async fn deliver(&self, _: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
             Err(DeliveryFailure::NotYet)
         }
     }

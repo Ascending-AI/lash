@@ -21,7 +21,41 @@ struct Control {
     /// timed out after the server acted.
     lose_resume_reply: AtomicBool,
     cancel_on_resume: Mutex<Option<(Arc<dyn crate::DeploymentStore>, RootIntentRequest)>>,
+    /// Sessions whose every release waits for a permit the law hands out.
+    release_gates: Mutex<Vec<(SessionId, Arc<ReleaseGate>)>>,
     events: Arc<Mutex<Vec<&'static str>>>,
+}
+/// Holds each release of one session's root until the law lets it through,
+/// counting the releases that reached it.
+struct ReleaseGate {
+    reached: AtomicUsize,
+    arrivals: tokio::sync::Notify,
+    permits: tokio::sync::Semaphore,
+}
+impl Default for ReleaseGate {
+    fn default() -> Self {
+        Self {
+            reached: AtomicUsize::new(0),
+            arrivals: tokio::sync::Notify::new(),
+            permits: tokio::sync::Semaphore::new(0),
+        }
+    }
+}
+impl ReleaseGate {
+    /// Wait until `count` releases reached the gate.
+    async fn reached(&self, count: usize) {
+        loop {
+            let arrival = self.arrivals.notified();
+            if self.reached.load(Ordering::SeqCst) >= count {
+                return;
+            }
+            arrival.await;
+        }
+    }
+    /// Let the release that has waited longest through.
+    fn open_one(&self) {
+        self.permits.add_permits(1);
+    }
 }
 #[async_trait::async_trait]
 impl SessionControlEngine for Control {
@@ -47,9 +81,25 @@ impl SessionControlEngine for Control {
     }
     async fn release_root(
         &self,
-        _: &RootRef,
+        root: &RootRef,
         _: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal> {
+        let gate = self
+            .release_gates
+            .lock()
+            .expect("release gates")
+            .iter()
+            .find(|(session, _)| *session == root.session)
+            .map(|(_, gate)| Arc::clone(gate));
+        if let Some(gate) = gate {
+            gate.reached.fetch_add(1, Ordering::SeqCst);
+            gate.arrivals.notify_waiters();
+            gate.permits
+                .acquire()
+                .await
+                .expect("the gate is never closed")
+                .forget();
+        }
         if self.permanent.load(Ordering::SeqCst) {
             return Err(EngineRefusal::Permanent {
                 code: crate::RuntimeErrorCode::PluginSessionManager,
@@ -287,6 +337,14 @@ impl Fixture {
         }
     }
     async fn verb(&self, verb: RootVerb) -> Result<ControlIntent, RootIntentRefused> {
+        self.verb_at(verb, 2).await
+    }
+    /// `verb` recorded at `now_ms`, which is also when its obligation is due.
+    async fn verb_at(
+        &self,
+        verb: RootVerb,
+        now_ms: u64,
+    ) -> Result<ControlIntent, RootIntentRefused> {
         self.factory
             .open_root_intent(
                 &RootIntentRequest {
@@ -295,7 +353,7 @@ impl Fixture {
                     park: self.park.park_id,
                     verb,
                 },
-                2,
+                now_ms,
             )
             .await
     }
@@ -309,6 +367,7 @@ impl Fixture {
                     permanent: AtomicBool::new(false),
                     lose_resume_reply: AtomicBool::new(false),
                     cancel_on_resume: Mutex::new(None),
+                    release_gates: Mutex::new(Vec::new()),
                     events: events.clone(),
                 }),
                 AtomicUsize::new(0),
@@ -2159,6 +2218,14 @@ pub async fn a_failing_child_cancel_never_wedges_its_roots_cancel_or_fork(
 /// compares its obligation's claim. A delivery whose claim lapsed and was
 /// retaken by another relay neither acknowledges nor fails the intent; the
 /// live claim does.
+///
+/// FIG-4186: the relay hands each delivery the claim that owns its attempt,
+/// never one it looks up by obligation id. One relay's due page holds A then
+/// B; A's release waits while both claims lapse and the same relay's due
+/// index retakes them under fresh tokens. The page's stale B then runs
+/// before the fresh one: it writes under its own lapsed token, so it settles
+/// nothing, and each fresh claim's delivery settles its intent. A row claimed straight from the ledger
+/// delivers through the relay too.
 pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
@@ -2219,6 +2286,126 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
         })
     ));
     assert!(!f.parts.epoch().await.control_pending);
+    assert_eq!(
+        f.intents
+            .settle(&id, &fresh.token, ObligationSettlement::Delivered, 6)
+            .await
+            .expect("the live claim settles"),
+        SettleOutcome::Applied
+    );
+
+    // One relay, one page: A is due before B.
+    let a = Fixture::new(prefix, "retaken-page-a", &host, &stores).await;
+    let b = Fixture::new(prefix, "retaken-page-b", &host, &stores).await;
+    let intent_a = a.verb_at(RootVerb::Cancel, 10).await.expect("cancel A");
+    let intent_b = b.verb_at(RootVerb::Cancel, 11).await.expect("cancel B");
+    let (work, close) = a.control(false, false);
+    let gate_a = Arc::new(ReleaseGate::default());
+    let gate_b = Arc::new(ReleaseGate::default());
+    work.0.release_gates.lock().expect("release gates").extend([
+        (a.parts.session_id.clone(), Arc::clone(&gate_a)),
+        (b.parts.session_id.clone(), Arc::clone(&gate_b)),
+    ]);
+    let clock = Arc::new(ManualClock(std::sync::atomic::AtomicU64::new(20)));
+    let relay = Arc::new(a.relay(&work, &close, Arc::clone(&clock) as Arc<dyn crate::Clock>));
+    let stale = {
+        let relay = Arc::clone(&relay);
+        let clock = Arc::clone(&clock);
+        tokio::spawn(async move {
+            lash_core::runtime::drive::relay::relay_due(
+                relay.as_ref(),
+                clock.as_ref(),
+                NonZeroUsize::MIN.saturating_add(63),
+            )
+            .await
+            .expect("a due page over the law's stores")
+        })
+    };
+    gate_a.reached(1).await;
+    // Both claims lapse while A's release waits, and the same relay's due
+    // index retakes both under fresh tokens.
+    let ttl = lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    clock.0.store(20 + ttl + 1, Ordering::SeqCst);
+    let mut fresh = lash_core::runtime::drive::relay::ObligationRelay::ledger(relay.as_ref())
+        .claim_due(20 + ttl + 1, ttl, NonZeroUsize::MIN.saturating_add(63))
+        .await
+        .expect("due claim");
+    fresh.sort_by_key(|claimed| claimed.id != *intent_a.obligation.as_ref().expect("armed"));
+    let [fresh_a, fresh_b]: [ClaimedObligation; 2] =
+        fresh.try_into().expect("both lapsed claims are retaken");
+    assert_eq!((fresh_a.attempts, fresh_b.attempts), (2, 2));
+    // The stale page runs on: its A, then its B, each under its own claim.
+    gate_a.open_one();
+    gate_b.open_one();
+    assert_eq!(
+        stale.await.expect("the stale page"),
+        RelayPass {
+            claimed: 2,
+            claim_lost: 2,
+            ..RelayPass::default()
+        },
+        "each stale delivery wrote under its own lapsed claim"
+    );
+    assert_eq!(
+        b.intent_state(intent_b.id).await,
+        ControlIntentState::Pending,
+        "the stale B delivery never settles the intent its fresh claim holds"
+    );
+    assert!(b.parts.epoch().await.control_pending);
+    assert_eq!(
+        a.intent_state(intent_a.id).await,
+        ControlIntentState::Pending
+    );
+    // Each fresh claim's own delivery settles its intent.
+    gate_a.open_one();
+    gate_b.open_one();
+    for (fixture, intent, fresh) in [(&a, &intent_a, fresh_a), (&b, &intent_b, fresh_b)] {
+        assert_eq!(
+            lash_core::runtime::drive::relay::deliver_claimed(
+                relay.as_ref(),
+                fresh,
+                clock.as_ref()
+            )
+            .await
+            .expect("the fresh delivery"),
+            lash_core::runtime::drive::relay::RelayVerdict::Delivered
+        );
+        assert!(matches!(
+            fixture.intent_state(intent.id).await,
+            ControlIntentState::Acknowledged { .. }
+        ));
+        assert_eq!(
+            fixture.obligation(intent).await,
+            Some(ObligationState::Delivered)
+        );
+        assert!(!fixture.parts.epoch().await.control_pending);
+    }
+
+    // A row claimed straight from the ledger delivers through the relay: the
+    // delivery carries the claim, whoever took it.
+    let c = Fixture::new(prefix, "ledger-claimed", &host, &stores).await;
+    let intent_c = c.verb_at(RootVerb::Cancel, 12).await.expect("cancel C");
+    let claimed = c
+        .intents
+        .claim(
+            intent_c.obligation.as_ref().expect("armed"),
+            &crate::store::ClaimToken::mint(),
+            lash_core::ClockWallTime::timestamp_ms(clock.as_ref()),
+            60_000,
+        )
+        .await
+        .expect("claim")
+        .expect("due");
+    assert_eq!(
+        lash_core::runtime::drive::relay::deliver_claimed(relay.as_ref(), claimed, clock.as_ref())
+            .await
+            .expect("delivery"),
+        lash_core::runtime::drive::relay::RelayVerdict::Delivered
+    );
+    assert!(matches!(
+        c.intent_state(intent_c.id).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
 }
 
 /// S8-C (ADR 0109 §1.4, §3): an intent whose engine half keeps failing is

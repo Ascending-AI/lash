@@ -237,10 +237,14 @@ pub trait ObligationRelay: Send + Sync {
     fn ledger(&self) -> &dyn ObligationLedger;   // its kind is the relay's kind
     fn policy(&self) -> RelayPolicy;
     /// Idempotent under a repeated id: the engine dedupes on a key derived
-    /// from `id`.
-    async fn deliver(&self, id: &ObligationId, key: &ObligationKey)
-        -> Result<(), DeliveryFailure>;
+    /// from `delivery.id`.
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure>;
 }
+
+/// One attempt's authority, built from the claimed row the relay settles
+/// with: a delivery's own fenced writes compare this token.
+pub struct ObligationDelivery<'a> { pub id: &'a ObligationId, pub key: &'a ObligationKey,
+    pub token: &'a ClaimToken, pub attempt: u32 }
 
 pub enum RelayVerdict { Delivered, Retried { due_at_ms: u64 }, Stalled(StallReason),
     ClaimLost, NotDue }

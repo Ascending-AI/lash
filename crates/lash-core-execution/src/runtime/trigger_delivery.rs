@@ -9,8 +9,8 @@
 //! Nothing re-emits the occurrence: a replayed emit would only find the
 //! reservation already held.
 
-use crate::runtime::drive::relay::{DeliveryFailure, ObligationRelay};
-use crate::store::{ObligationId, ObligationKey, ObligationLedger};
+use crate::runtime::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay};
+use crate::store::{ObligationKey, ObligationLedger};
 use crate::triggers::{TriggerDeliveryRecoveryError, TriggerRouter};
 use std::sync::Arc;
 
@@ -37,12 +37,8 @@ impl ObligationRelay for TriggerDeliveryRelay {
         self.ledger.as_ref()
     }
 
-    async fn deliver(
-        &self,
-        _id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { key, .. } = delivery;
         let ObligationKey::TriggerDelivery {
             occurrence_id,
             subscription_id,

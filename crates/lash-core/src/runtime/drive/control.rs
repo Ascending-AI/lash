@@ -13,10 +13,11 @@
 //! drive is asked of a [`SessionWorkEngine`], and the scope owner is a
 //! [`ScopeCloseSink`].
 //!
-//! **Claim fencing.** A delivery acts under the claim its relay took: the
-//! acknowledgement and the failure it writes compare the obligation's claim
-//! token, so a delivery whose claim lapsed and was retaken never settles the
-//! intent under the newer claim.
+//! **Claim fencing.** A delivery acts under the claim that owns its attempt
+//! ([`ObligationDelivery`]), however that claim was taken: the
+//! acknowledgement and the failure it writes compare that claim's token, so a
+//! delivery whose claim lapsed and was retaken never settles the intent under
+//! the newer claim.
 //!
 //! **A failed engine half.** A retryable failure keeps the intent open and
 //! hands the obligation back for its next attempt; while a cancel or fork is
@@ -45,20 +46,19 @@
 //! and a cancel or fork supersedes every redrive of the root still open, so
 //! a redrive never resumes a root after it re-parked or ended.
 
-use std::collections::BTreeMap;
-use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use super::relay::{DeliveryFailure, ObligationRelay, RelayPolicy, deliver_now};
+use super::relay::{
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, deliver_now,
+};
 use super::scope_close::{ScopeCloseAttempt, deliver_scope_close};
 use crate::engine::{
     DriveRequestId, EngineAck, EngineRefusal, RootRef, ScopeCloseSink, SessionControlEngine,
 };
 use crate::store::{
-    ClaimToken, ClaimedObligation, ControlIntent, ControlIntentId, ControlIntentKind,
-    ControlIntentState, IntentApplication, IntentSettle, ObligationId, ObligationKey,
-    ObligationKind, ObligationLedger, ObligationSettlement, ObligationStanding, SettleOutcome,
-    StalledObligation, StoreError, scope_close_obligation_id,
+    ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState, IntentApplication,
+    IntentSettle, ObligationId, ObligationKey, ObligationLedger, StoreError,
+    scope_close_obligation_id,
 };
 use crate::{Clock, DeploymentStore, SessionWorkEngine};
 
@@ -71,9 +71,9 @@ pub fn intent_drive_request(intent: ControlIntentId) -> DriveRequestId {
 }
 
 /// The `ControlIntent` relay (ADR 0109 §3): delivers an intent's engine half
-/// and its follow-on drive under the claim its ledger took.
+/// and its follow-on drive under the claim that owns the delivery attempt.
 pub struct ControlIntentRelay {
-    ledger: ClaimRecordingLedger,
+    ledger: Arc<dyn ObligationLedger>,
     stores: Arc<dyn DeploymentStore>,
     work: Arc<dyn SessionWorkEngine>,
     scopes: Arc<dyn ScopeCloseSink>,
@@ -99,7 +99,7 @@ impl ControlIntentRelay {
         clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
-            ledger: ClaimRecordingLedger::new(ledger),
+            ledger,
             stores,
             work,
             scopes,
@@ -230,28 +230,27 @@ impl ControlIntentRelay {
 #[async_trait::async_trait]
 impl ObligationRelay for ControlIntentRelay {
     fn ledger(&self) -> &dyn ObligationLedger {
-        &self.ledger
+        self.ledger.as_ref()
     }
 
     fn policy(&self) -> RelayPolicy {
         self.policy
     }
 
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    /// Apply the intent's engine half under `delivery`'s claim: its
+    /// acknowledgement and its failure compare that claim's token, and its
+    /// attempt decides whether a retryable failure is the last one.
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery {
+            id,
+            key,
+            token,
+            attempt,
+        } = delivery;
         let ObligationKey::ControlIntent { intent_id } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "the control-intent relay cannot deliver a {} obligation",
                 key.kind()
-            )));
-        };
-        let Some(claim) = self.ledger.take_claim(id) else {
-            return Err(DeliveryFailure::Retryable(format!(
-                "obligation {id} reached its delivery without a claim this relay took"
             )));
         };
         let application = match self
@@ -287,7 +286,7 @@ impl ObligationRelay for ControlIntentRelay {
         match self.engine_half(&intent).await {
             Ok(()) => match self
                 .stores
-                .acknowledge_intent(intent.id, &claim.token, at_ms())
+                .acknowledge_intent(intent.id, token, at_ms())
                 .await
                 .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?
             {
@@ -298,12 +297,11 @@ impl ObligationRelay for ControlIntentRelay {
                 // At the ceiling a retryable failure closes the intent for
                 // good, as a permanent one does, so the session it holds is
                 // released; the relay stalls the obligation.
-                let exhausted =
-                    failure.retryable && claim.attempts >= self.policy.attempt_ceiling.get();
+                let exhausted = failure.retryable && attempt >= self.policy.attempt_ceiling.get();
                 let open = failure.retryable && !exhausted;
                 let settled = match self
                     .stores
-                    .record_intent_failure(intent.id, &claim.token, &failure.message, open, at_ms())
+                    .record_intent_failure(intent.id, token, &failure.message, open, at_ms())
                     .await
                     .map_err(|error| DeliveryFailure::Retryable(error.to_string()))?
                 {
@@ -448,119 +446,5 @@ async fn release_root_engine_half(
             );
             Ok(())
         }
-    }
-}
-
-/// A ledger that remembers the claim each obligation was delivered under:
-/// [`ObligationRelay::deliver`] names only the obligation, and the intent
-/// writes a delivery makes compare the claim's token and read its attempt.
-struct ClaimRecordingLedger {
-    inner: Arc<dyn ObligationLedger>,
-    claims: Mutex<BTreeMap<ObligationId, Claim>>,
-}
-
-struct Claim {
-    token: ClaimToken,
-    attempts: u32,
-}
-
-impl ClaimRecordingLedger {
-    fn new(inner: Arc<dyn ObligationLedger>) -> Self {
-        Self {
-            inner,
-            claims: Mutex::new(BTreeMap::new()),
-        }
-    }
-
-    fn record(&self, claimed: &ClaimedObligation) {
-        self.claims
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(
-                claimed.id.clone(),
-                Claim {
-                    token: claimed.token.clone(),
-                    attempts: claimed.attempts,
-                },
-            );
-    }
-
-    fn take_claim(&self, id: &ObligationId) -> Option<Claim> {
-        self.claims
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .remove(id)
-    }
-}
-
-#[async_trait::async_trait]
-impl ObligationLedger for ClaimRecordingLedger {
-    fn kind(&self) -> ObligationKind {
-        self.inner.kind()
-    }
-
-    async fn arm(
-        &self,
-        key: &ObligationKey,
-        now_ms: u64,
-    ) -> Result<Option<ObligationId>, StoreError> {
-        self.inner.arm(key, now_ms).await
-    }
-
-    async fn claim_due(
-        &self,
-        now_ms: u64,
-        claim_ttl_ms: u64,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<ClaimedObligation>, StoreError> {
-        let claimed = self.inner.claim_due(now_ms, claim_ttl_ms, limit).await?;
-        for obligation in &claimed {
-            self.record(obligation);
-        }
-        Ok(claimed)
-    }
-
-    async fn claim(
-        &self,
-        id: &ObligationId,
-        token: &ClaimToken,
-        now_ms: u64,
-        claim_ttl_ms: u64,
-    ) -> Result<Option<ClaimedObligation>, StoreError> {
-        let claimed = self.inner.claim(id, token, now_ms, claim_ttl_ms).await?;
-        if let Some(obligation) = &claimed {
-            self.record(obligation);
-        }
-        Ok(claimed)
-    }
-
-    async fn settle(
-        &self,
-        id: &ObligationId,
-        token: &ClaimToken,
-        settlement: ObligationSettlement,
-        now_ms: u64,
-    ) -> Result<SettleOutcome, StoreError> {
-        self.inner.settle(id, token, settlement, now_ms).await
-    }
-
-    async fn rearm(&self, id: &ObligationId, now_ms: u64) -> Result<bool, StoreError> {
-        self.inner.rearm(id, now_ms).await
-    }
-
-    async fn list_stalled(
-        &self,
-        after: Option<&ObligationId>,
-        limit: NonZeroUsize,
-    ) -> Result<Vec<StalledObligation>, StoreError> {
-        self.inner.list_stalled(after, limit).await
-    }
-
-    async fn count_stalled(&self) -> Result<u64, StoreError> {
-        self.inner.count_stalled().await
-    }
-
-    async fn standing(&self, id: &ObligationId) -> Result<Option<ObligationStanding>, StoreError> {
-        self.inner.standing(id).await
     }
 }

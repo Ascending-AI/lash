@@ -11,7 +11,8 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lash_core::drive::relay::{
-    DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now, relay_due,
+    DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now,
+    relay_due,
 };
 use lash_core::runtime::artifact_cleanup::{
     ArtifactCleanupPorts, ArtifactCleanupRelay, StoreSetAuthorities,
@@ -467,17 +468,12 @@ impl ObligationRelay for DyingPass {
         self.inner.policy()
     }
 
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
-        let applied = self.inner.deliver(id, key, attempt).await;
-        if *key != self.frame {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let applied = self.inner.deliver(delivery).await;
+        if *delivery.key != self.frame {
             return applied;
         }
-        self.applied.send_replace(Some(id.clone()));
+        self.applied.send_replace(Some(delivery.id.clone()));
         std::future::pending().await
     }
 }

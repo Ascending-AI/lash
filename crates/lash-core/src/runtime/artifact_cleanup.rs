@@ -13,8 +13,8 @@
 
 use std::sync::Arc;
 
-use super::drive::relay::{DeliveryFailure, ObligationRelay, RelayPolicy};
-use crate::store::{ArtifactCleanupLedger, ObligationId, ObligationKey, ObligationLedger};
+use super::drive::relay::{DeliveryFailure, ObligationDelivery, ObligationRelay, RelayPolicy};
+use crate::store::{ArtifactCleanupLedger, ObligationKey, ObligationLedger};
 use crate::{
     ArtifactCarry, ArtifactCleanup, ArtifactCleanupPlan, ArtifactName, ArtifactReferrer,
     ArtifactStoreError, ArtifactStoreId, DefinitionRevisionId, EffectHost, JournalReplay,
@@ -467,12 +467,8 @@ impl ObligationRelay for ArtifactCleanupRelay {
         self.policy
     }
 
-    async fn deliver(
-        &self,
-        id: &ObligationId,
-        key: &ObligationKey,
-        _attempt: u32,
-    ) -> Result<(), DeliveryFailure> {
+    async fn deliver(&self, delivery: ObligationDelivery<'_>) -> Result<(), DeliveryFailure> {
+        let ObligationDelivery { id, key, .. } = delivery;
         let ObligationKey::ArtifactCleanup { referrer } = key else {
             return Err(DeliveryFailure::Undecodable(format!(
                 "the artifact-cleanup relay was handed a {} key",

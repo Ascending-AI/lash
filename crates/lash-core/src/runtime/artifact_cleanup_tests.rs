@@ -3,9 +3,10 @@ use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
 use super::*;
+use crate::runtime::drive::relay::ObligationDelivery;
 use crate::store::{
-    ClaimToken, ClaimedObligation, ObligationKind, ObligationSettlement, ObligationStanding,
-    SettleOutcome, StalledObligation, StoreError,
+    ClaimToken, ClaimedObligation, ObligationId, ObligationKind, ObligationSettlement,
+    ObligationStanding, SettleOutcome, StalledObligation, StoreError,
 };
 use crate::{ArtifactCleanupPlan, ExecutionScope, HostArtifactPin, ReferrerClaim};
 
@@ -441,7 +442,23 @@ impl Harness {
 
     async fn deliver(&self, cleanup: ArtifactCleanup) -> Result<(), DeliveryFailure> {
         let (id, key) = self.arm(cleanup);
-        self.relay.deliver(&id, &key, 1).await
+        self.deliver_row(&id, &key).await
+    }
+
+    /// The relay's first attempt at the row `id` and `key` name.
+    async fn deliver_row(
+        &self,
+        id: &ObligationId,
+        key: &ObligationKey,
+    ) -> Result<(), DeliveryFailure> {
+        self.relay
+            .deliver(ObligationDelivery {
+                id,
+                key,
+                token: &ClaimToken::new("artifact-cleanup-harness"),
+                attempt: 1,
+            })
+            .await
     }
 
     /// What every store applied since the last look: (env, modules, engine).
@@ -485,8 +502,7 @@ async fn a_row_another_relay_settled_is_delivered_without_touching_a_store() {
     };
     assert_eq!(
         harness
-            .relay
-            .deliver(&ObligationId::new("core:gone"), &key, 1)
+            .deliver_row(&ObligationId::new("core:gone"), &key)
             .await,
         Ok(())
     );
@@ -888,7 +904,7 @@ async fn cleanup_never_counts_an_undecodable_edge_as_absent() {
             },
         });
     assert!(matches!(
-        harness.relay.deliver(&id, &key, 1).await,
+        harness.deliver_row(&id, &key).await,
         Err(DeliveryFailure::Undecodable(error)) if error.contains("synthetic_next")
     ));
     assert!(
