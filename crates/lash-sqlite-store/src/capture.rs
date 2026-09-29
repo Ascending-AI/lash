@@ -70,6 +70,30 @@ fn turn_row(
     .map_err(sqlite_error)
 }
 
+/// A later root adopted this physical turn: an owed follow-on's recovery
+/// runs as a root of its own (FIG-3946), on a fresh journal. The earlier
+/// root's staging belonged to the execution that was lost, so it goes with
+/// its writers, the base restarts with the adopting root's checkpoints, and
+/// the turn reads recovered.
+fn adopt_turn_conn(
+    conn: &Connection,
+    session: &SessionId,
+    turn: &TurnId,
+    root: &TurnId,
+) -> Result<TurnRow, StoreError> {
+    for statement in [SQL.frames.delete_turn.sql(), SQL.writers.delete_turn.sql()] {
+        conn.execute(statement, params![session.as_str(), turn.as_str()])
+            .map_err(sqlite_error)?;
+    }
+    conn.execute(
+        SQL.turns.adopt.sql(),
+        params![session.as_str(), turn.as_str(), root.as_str()],
+    )
+    .map_err(sqlite_error)?;
+    turn_row(conn, session, turn)?
+        .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))
+}
+
 fn partial_row(
     conn: &Connection,
     session: &SessionId,
@@ -334,6 +358,9 @@ pub(crate) fn seal_capture_conn(
     let session = &request.turn.session_id;
     let turn = &request.turn.turn_id;
     crate::persistence::ensure_session_not_deleted_conn(conn, session)?;
+    if let Some(fence) = &request.drive_fence {
+        crate::persistence::require_fence_conn(conn, session, fence)?;
+    }
     if let Some((partial, committed)) = partial_row(conn, session, turn)? {
         return Ok(if committed.is_some() {
             SealedCapture::Committed(partial)
@@ -346,11 +373,12 @@ pub(crate) fn seal_capture_conn(
         params![session.as_str(), turn.as_str(), request.root.as_str()],
     )
     .map_err(sqlite_error)?;
-    let (root, base, next, recovered) = turn_row(conn, session, turn)?
+    let mut row = turn_row(conn, session, turn)?
         .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-    if root != request.root.as_str() {
-        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+    if row.0 != request.root.as_str() {
+        row = adopt_turn_conn(conn, session, turn, &request.root)?;
     }
+    let (_, base, next, recovered) = row;
     let through = unsigned(next)?.saturating_sub(1);
     if let Some(recorded) = request.recorded_watermark
         && through < recorded
@@ -521,6 +549,7 @@ pub(crate) fn seal_root_terminal_capture_conn(
         root: root.clone(),
         reason,
         recorded_watermark: None,
+        drive_fence: None,
     };
     let partial = seal_capture_conn(conn, &request, now, worker_lost)?.into_partial();
     conn.execute(
@@ -566,11 +595,12 @@ impl TurnCaptureStore for Store {
                         params![session.as_str(), turn.as_str(), request.root.as_str()],
                     )
                     .map_err(sqlite_error)?;
-                    let (root, base, _, _) = turn_row(tx, session, turn)?
+                    let mut row = turn_row(tx, session, turn)?
                         .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-                    if root != request.root.as_str() {
-                        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+                    if row.0 != request.root.as_str() {
+                        row = adopt_turn_conn(tx, session, turn, &request.root)?;
                     }
+                    let (_, base, _, _) = row;
                     let epoch = match latest_epoch(tx, session, turn, request.invocation.as_str())?
                     {
                         Some((previous, _)) => {

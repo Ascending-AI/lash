@@ -3,6 +3,9 @@
 //! their transactions: epochs fence and retract per invocation, a seal is
 //! first-writer-wins and fences the whole turn, and a turn's commit publishes
 //! its sealed partial and drops the turn's staging.
+//!
+//! It keeps no drive epochs, so a seal's drive fence is not checked here: a
+//! double that fences its drives checks the fence beside its own epochs.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -51,6 +54,17 @@ impl CaptureTurn {
             writers: BTreeMap::new(),
             frames: Vec::new(),
         }
+    }
+
+    /// A later root adopted this physical turn: an owed follow-on's recovery
+    /// runs as a root of its own, on a fresh journal. The earlier root's
+    /// staging goes with its writers, and the base restarts.
+    fn adopt(&mut self, root: TurnId) {
+        self.root = root;
+        self.base = CaptureBase(0);
+        self.recovered = true;
+        self.writers.clear();
+        self.frames.clear();
     }
 
     fn latest(&self, invocation: &CaptureInvocationKey) -> Option<(u32, WriterState)> {
@@ -226,10 +240,7 @@ impl TurnCaptureStore for InMemoryTurnCapture {
             ))
             .or_insert_with(|| CaptureTurn::new(request.root.clone()));
         if turn.root != request.root {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "TurnCapture",
-                message: "root mismatch".to_string(),
-            });
+            turn.adopt(request.root.clone());
         }
         let epoch = match turn.latest(&request.invocation) {
             Some((previous, _)) => {
@@ -419,10 +430,7 @@ impl TurnCaptureStore for InMemoryTurnCapture {
             .entry(key.clone())
             .or_insert_with(|| CaptureTurn::new(request.root.clone()));
         if turn.root != request.root {
-            return Err(StoreError::StoredDataCorrupt {
-                record_kind: "TurnCapture",
-                message: "root mismatch".to_string(),
-            });
+            turn.adopt(request.root.clone());
         }
         let through = turn.next_sequence.saturating_sub(1);
         if let Some(recorded) = request.recorded_watermark

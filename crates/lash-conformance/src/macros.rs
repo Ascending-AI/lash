@@ -22,6 +22,8 @@ macro_rules! turn_capture_tests {
             (capture_retention_waits_for_deletion, "retention"),
             (capture_deletion_reclaims_staging_frames, "deletion"),
             (capture_lost_root_seals_the_acknowledged_prefix, "lost-root"),
+            (capture_a_later_root_adopts_the_turn, "adopted-turn"),
+            (capture_a_superseded_execution_seals_nothing, "superseded-seal"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

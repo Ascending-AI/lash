@@ -273,6 +273,13 @@ pub struct SealTurnCapture {
     /// reference. The seal must cover it, or the call fails
     /// `CaptureSealBelowWatermark`.
     pub recorded_watermark: Option<u64>,
+    /// The drive fence of the execution that seals, checked as its commit's
+    /// is (ADR 0105 §9): an execution a successor superseded seals nothing.
+    /// `None` for the root-terminal writes, which fence by their own
+    /// transaction. Never serialized: a fence is decoded only from a
+    /// recorded drive verdict.
+    #[serde(skip)]
+    pub drive_fence: Option<super::DriveFence>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

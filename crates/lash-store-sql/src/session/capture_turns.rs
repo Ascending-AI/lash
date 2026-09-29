@@ -16,6 +16,8 @@ crate::statements! {
                   WHERE session_id = ?1 AND turn_id = ?2";
         mark_recovered = "UPDATE turn_capture_turns SET recovered = 1
                   WHERE session_id = ?1 AND turn_id = ?2";
+        adopt = "UPDATE turn_capture_turns SET root = ?3, base = 0, recovered = 1
+                  WHERE session_id = ?1 AND turn_id = ?2";
         delete = "DELETE FROM turn_capture_turns WHERE session_id = ?1 AND turn_id = ?2";
         delete_session = "DELETE FROM turn_capture_turns WHERE session_id = ?1";
     }

@@ -369,6 +369,7 @@ impl LashRuntime {
         scoped_effect_controller: &ScopedEffectController<'_>,
         trace_turn_id: &TurnId,
         recorded_watermark: Option<u64>,
+        drive_fence: Option<&DriveFence>,
         observer: &TurnObserver,
     ) -> Result<Option<lash_sansio::StoppedPartial>, RuntimeError> {
         let TurnOutcome::Stopped(stop) = outcome else {
@@ -388,6 +389,7 @@ impl LashRuntime {
                 root,
                 reason: lash_sansio::StopReason::of_stop(stop),
                 recorded_watermark,
+                drive_fence: drive_fence.cloned(),
             })
             .await
             .map_err(runtime_error_from_store_commit)?;
@@ -616,6 +618,7 @@ impl LashRuntime {
                 scoped_effect_controller,
                 &trace_turn_id,
                 capture_watermark,
+                drive_fence,
                 observer,
             )
             .await?;

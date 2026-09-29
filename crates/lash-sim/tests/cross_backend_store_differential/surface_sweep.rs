@@ -948,6 +948,7 @@ impl BackendRunner {
                         root: "surface-capture-turn".into(),
                         reason: lash_sansio::StopReason::UserCancel,
                         recorded_watermark: None,
+                        drive_fence: None,
                     })
                     .await?
                     .into_partial();

@@ -72,6 +72,37 @@ async fn turn_row(
         .map_err(store_sqlx_error)
 }
 
+/// A later root adopted this physical turn: an owed follow-on's recovery
+/// runs as a root of its own (FIG-3946), on a fresh journal. The earlier
+/// root's staging belonged to the execution that was lost, so it goes with
+/// its writers, the base restarts with the adopting root's checkpoints, and
+/// the turn reads recovered.
+async fn adopt_turn(
+    tx: &mut Transaction<'_, Postgres>,
+    session: &SessionId,
+    turn: &TurnId,
+    root: &TurnId,
+) -> Result<TurnRow, StoreError> {
+    for statement in [SQL.frames.delete_turn.sql(), SQL.writers.delete_turn.sql()] {
+        sqlx::query(statement)
+            .bind(session.as_str())
+            .bind(turn.as_str())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    sqlx::query(SQL.turns.adopt.sql())
+        .bind(session.as_str())
+        .bind(turn.as_str())
+        .bind(root.as_str())
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    turn_row(tx, session, turn)
+        .await?
+        .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))
+}
+
 async fn partial_row(
     tx: &mut Transaction<'_, Postgres>,
     session: &SessionId,
@@ -344,6 +375,9 @@ async fn seal_capture_tx(
     let session = &request.turn.session_id;
     let turn = &request.turn.turn_id;
     crate::runtime_persistence::ensure_session_not_deleted_tx(tx, session).await?;
+    if let Some(fence) = &request.drive_fence {
+        crate::runtime_persistence::drive_epoch::require_fence_tx(tx, session, fence).await?;
+    }
     if let Some((partial, committed)) = partial_row(tx, session, turn).await? {
         return Ok(if committed.is_some() {
             SealedCapture::Committed(partial)
@@ -358,12 +392,13 @@ async fn seal_capture_tx(
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    let (root, base, next, recovered) = turn_row(tx, session, turn)
+    let mut row = turn_row(tx, session, turn)
         .await?
         .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-    if root != request.root.as_str() {
-        return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+    if row.0 != request.root.as_str() {
+        row = adopt_turn(tx, session, turn, &request.root).await?;
     }
+    let (_, base, next, recovered) = row;
     let through = unsigned(next)?.saturating_sub(1);
     if let Some(recorded) = request.recorded_watermark
         && through < recorded
@@ -517,6 +552,7 @@ pub(crate) async fn seal_root_terminal_capture_tx(
         root: root.clone(),
         reason,
         recorded_watermark: None,
+        drive_fence: None,
     };
     let partial = seal_capture_tx(tx, &request, now, worker_lost)
         .await?
@@ -563,12 +599,13 @@ impl TurnCaptureStore for PostgresSessionStore {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let (root, base, _, _) = turn_row(&mut tx, session, turn)
+        let mut row = turn_row(&mut tx, session, turn)
             .await?
             .ok_or_else(|| stored_data_corrupt("TurnCapture", "missing turn row"))?;
-        if root != request.root.as_str() {
-            return Err(stored_data_corrupt("TurnCapture", "root mismatch"));
+        if row.0 != request.root.as_str() {
+            row = adopt_turn(&mut tx, session, turn, &request.root).await?;
         }
+        let (_, base, _, _) = row;
         let base = CaptureBase(
             u32::try_from(unsigned(base)?)
                 .map_err(|_| stored_data_corrupt("TurnCapture", "base overflow"))?,

@@ -193,6 +193,7 @@ pub async fn capture_reset_fences_old_epoch(factory: Arc<dyn SessionStoreFactory
             root: first.turn.turn_id,
             reason: StopReason::UserCancel,
             recorded_watermark: None,
+            drive_fence: None,
         })
         .await
         .expect("seal");
@@ -246,6 +247,7 @@ pub async fn capture_successor_resets_inherited_epoch(
             root: turn.turn_id,
             reason: StopReason::UserCancel,
             recorded_watermark: None,
+            drive_fence: None,
         })
         .await
         .expect("seal")
@@ -292,6 +294,7 @@ pub async fn capture_base_advance_removes_old_tail(
             root: turn.turn_id.clone(),
             reason: StopReason::UserCancel,
             recorded_watermark: None,
+            drive_fence: None,
         })
         .await
         .expect("seal")
@@ -313,6 +316,7 @@ pub async fn capture_seal_is_first_writer_wins(factory: Arc<dyn SessionStoreFact
         root: turn.turn_id.clone(),
         reason: StopReason::UserCancel,
         recorded_watermark: Some(ack.last_sequence),
+        drive_fence: None,
     };
     let sealed = store
         .seal_turn_capture(&request)
@@ -324,6 +328,7 @@ pub async fn capture_seal_is_first_writer_wins(factory: Arc<dyn SessionStoreFact
         store
             .seal_turn_capture(&SealTurnCapture {
                 recorded_watermark: Some(u64::MAX),
+                drive_fence: None,
                 ..request
             })
             .await
@@ -370,6 +375,7 @@ pub async fn capture_commit_publishes_exact_partial(
             root: turn.turn_id.clone(),
             reason: StopReason::UserCancel,
             recorded_watermark: None,
+            drive_fence: None,
         })
         .await
         .expect("seal")
@@ -409,7 +415,8 @@ pub async fn capture_commit_publishes_exact_partial(
                 turn,
                 root: partial.id.root.clone(),
                 reason: StopReason::ProcessLoss,
-                recorded_watermark: None
+                recorded_watermark: None,
+                drive_fence: None,
             })
             .await
             .expect("seal replay"),
@@ -441,6 +448,7 @@ pub async fn capture_retention_waits_for_deletion(
             root: turn.turn_id.clone(),
             reason: StopReason::UserCancel,
             recorded_watermark: None,
+            drive_fence: None,
         })
         .await
         .expect("seal")
@@ -585,4 +593,155 @@ pub async fn capture_lost_root_seals_the_acknowledged_prefix(
         panic!("expected the acknowledged text, got {:?}", partial.items);
     };
     assert_eq!(text, "partial");
+}
+
+/// A later root adopts a physical turn an earlier root staged (an owed
+/// follow-on's recovery runs as a root of its own, on a fresh journal): the
+/// earlier root's staging and writers go, the base restarts, the turn reads
+/// recovered, and the seal names the adopting root.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_a_later_root_adopts_the_turn(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    let (store, turn) = fixture(factory, label).await;
+    writer(store.as_ref(), &turn).await;
+    store
+        .advance_capture_base(&CaptureBaseAdvance {
+            turn: turn.clone(),
+            to: CaptureBase(1),
+        })
+        .await
+        .expect("advance the earlier root's base");
+    let earlier = writer(store.as_ref(), &turn).await;
+    assert_eq!(earlier.base, CaptureBase(1));
+    let stale = StreamBlockIdentity::new("stale", 0);
+    append(
+        store.as_ref(),
+        &earlier,
+        0,
+        vec![
+            CaptureFrame::TextStart {
+                block: stale.clone(),
+            },
+            CaptureFrame::TextDelta {
+                block: stale,
+                text: "from the lost execution".into(),
+            },
+        ],
+    )
+    .await;
+
+    let adopting = lash_core::TurnId::from(format!("follow-on:{}#0", turn.turn_id));
+    let lease = store
+        .open_capture_writer(&OpenCaptureWriter {
+            turn: turn.clone(),
+            root: adopting.clone(),
+            invocation: CaptureInvocationKey("llm".into()),
+        })
+        .await
+        .expect("the adopting root opens its writer");
+    assert_eq!(lease.base, CaptureBase(0), "the base restarts");
+    assert!(lease.inherited.is_empty(), "nothing is inherited");
+    assert!(matches!(
+        store
+            .append_capture_batch(&CaptureBatch {
+                lease: earlier.lease_ref(),
+                batch_ordinal: 1,
+                frames: text_frames(),
+            })
+            .await,
+        Err(StoreError::CaptureWriterFenced { .. } | StoreError::CaptureBaseStale { .. })
+    ));
+    let ack = append(store.as_ref(), &lease, 0, text_frames()).await;
+    let partial = store
+        .seal_turn_capture(&SealTurnCapture {
+            turn: turn.clone(),
+            root: adopting.clone(),
+            reason: StopReason::UserCancel,
+            recorded_watermark: Some(ack.last_sequence),
+            drive_fence: None,
+        })
+        .await
+        .expect("seal under the adopting root")
+        .into_partial();
+    assert_eq!(partial.id.root, adopting);
+    assert_eq!(partial.id.base, CaptureBase(0));
+    assert!(partial.recovered_after_process_loss);
+    assert_eq!(
+        partial.coverage,
+        lash_sansio::CaptureCoverage::AcknowledgedPrefix
+    );
+    assert!(
+        matches!(
+            partial.items.as_slice(),
+            [PartialItem::Text { text, .. }] if text == "partial"
+        ),
+        "only the adopting root's text: {:?}",
+        partial.items
+    );
+}
+
+/// A stop's seal is fenced like its commit (ADR 0105 §9): once a successor
+/// raised the session's drive epoch, the superseded execution seals nothing,
+/// so a later drive of the same root still captures its turn. The current
+/// fence seals.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance assertions require fixture setup"
+)]
+pub async fn capture_a_superseded_execution_seals_nothing(
+    factory: Arc<dyn SessionStoreFactory>,
+    label: &str,
+) {
+    use crate::store::{AdmissionId, DriveEpochSeal, RootStartNonce};
+
+    let (store, turn) = fixture(factory, label).await;
+    let seal = |admission: &'static str, observed: u64| {
+        let store = Arc::clone(&store);
+        let session = turn.session_id.clone();
+        async move {
+            match store
+                .seal_drive_epoch(
+                    &session,
+                    &AdmissionId::new(admission),
+                    observed,
+                    &RootStartNonce::new(admission),
+                )
+                .await
+                .expect("seal the drive epoch")
+            {
+                DriveEpochSeal::Sealed(fence) => fence,
+                other => panic!("the admission seals: {other:?}"),
+            }
+        }
+    };
+    let stale = seal("first#0", 0).await;
+    let current = seal("successor#0", stale.epoch()).await;
+    let lease = writer(store.as_ref(), &turn).await;
+    let ack = append(store.as_ref(), &lease, 0, text_frames()).await;
+    let request = SealTurnCapture {
+        turn: turn.clone(),
+        root: turn.turn_id.clone(),
+        reason: StopReason::UserCancel,
+        recorded_watermark: Some(ack.last_sequence),
+        drive_fence: Some(stale),
+    };
+    assert!(matches!(
+        store.seal_turn_capture(&request).await,
+        Err(StoreError::StaleDriveFence { .. })
+    ));
+    let next = writer(store.as_ref(), &turn).await;
+    append(store.as_ref(), &next, 0, text_frames()).await;
+    store
+        .seal_turn_capture(&SealTurnCapture {
+            drive_fence: Some(current),
+            recorded_watermark: None,
+            ..request
+        })
+        .await
+        .expect("the current fence seals");
 }
