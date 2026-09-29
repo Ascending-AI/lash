@@ -741,3 +741,13 @@ The plan's open questions, as ruled on 2026-09-24:
   directly declare commands instead.
 - **Cost: boxed controller futures.** The controller uses async trait futures;
   the Restate implementation records each operation at its own durable boundary.
+
+## Amendment (FIG-3562, 2026-09-29): determinism binds drives, not tool bodies
+
+[ADR 0116](0116-tools-are-opaque.md) deletes orchestrating bodies, so the D20 peek "before an orchestrating
+body" has no subject. A tool child's drive peeks before each attempt only.
+The determinism of this ADR binds drivers and engines. It never bound opaque
+tool bodies, and the body lint that policed orchestrating bodies is deleted.
+The `batch` expansion runs in the standard protocol driver, as a pure
+function of the recorded response and the turn's admitted configuration
+([ADR 0116](0116-tools-are-opaque.md) §2.1).

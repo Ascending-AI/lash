@@ -151,3 +151,10 @@ temperature-only, so a check built on today's capability model would silently na
 temperature and miss exactly the failure it was written for. That needs a typed seed
 capability first, and until then the disposition report tells a host what happened after the
 call rather than guessing before it.
+
+## Amendment (FIG-3562, 2026-09-29): `ToolSessionAdmin` is gone
+
+[ADR 0116](0116-tools-are-opaque.md) deletes `ToolSessionAdmin` with the other body capability clients. The
+sentence above that names it is historical. The clamping rule stands for the
+observational-memory workers and for direct requests a tool issues through
+`AttemptContext::direct_completions`.

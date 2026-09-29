@@ -354,3 +354,19 @@ A tool host migrates in four steps:
    `execute_attempt_by_id`, `execute_internal`, and `execute_internal_by_id`
    are gone. Callers that held a tool ID resolve the manifest with
    `resolve_manifest_by_id` and call `execute` once.
+
+## Amendment (FIG-3562, 2026-09-29): one execution capability class
+
+[ADR 0116](0116-tools-are-opaque.md) collapses integrator class 3's three execution capability classes to one.
+Tool hosts implement `ToolProvider::execute(ToolCall) -> ToolAttemptOutcome`,
+and every executable tool registers as a `ToolProvider`.
+`InternalProcessToolImplementation`, `InternalProcessToolDef`,
+`InternalProcessToolCall`, `OrchestratingToolImplementation`,
+`OrchestratingToolDef`, `ToolRegistrations::internal`,
+`PluginSpec::with_internal_tool` and `with_orchestrating_tool` are deleted, and
+item 3 of the plugin-authoring amendment is superseded. `ToolContext` is no
+longer exported, and nor are the body capability clients `ToolDispatchClient`,
+`ToolSessionAdmin`, `ToolTriggerClient` and `ToolProcessEventClient`.
+`lash::tools` exports nothing that reaches dispatch, process administration
+or an effect controller. `ToolActivation` and the manifest's `activation`
+field are deleted.

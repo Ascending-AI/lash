@@ -165,3 +165,14 @@ starts too: a closed scope starts nothing.
     refused.
 - A start that must outlive its scope is `Detached`. There is no other way
   to escape a scope.
+
+## Amendment (FIG-3562, 2026-09-29): declared starts and their cancellation
+
+A `DeclaredStart` ([ADR 0116](0116-tools-are-opaque.md) §3) is a start like any other. Its lifetime is the
+host policy's decision against the declaring attempt's `StartCx`, journaled
+in the declaration, and `spawn_agent` uses `lifetime::starter`. Two
+cancellations sit beside the lifetime without changing it. The parked call's
+cancel obligation cancels the child when the call is cancelled or its
+deadline elapses, and a scope close still cancels every `Until` child that
+remains. A retention hold keeps the child's row until its consumer has
+incorporated the result ([ADR 0116](0116-tools-are-opaque.md) §3.6).
