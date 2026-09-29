@@ -573,7 +573,8 @@ class BazelTestContractTests(unittest.TestCase):
             (ROOT / ".github/actions/bazel-shared-cache/action.yml").read_text(encoding="utf-8"),
             Loader=yaml.BaseLoader,
         )
-        self.assertNotIn("inputs", action)
+        self.assertEqual({"jobs"}, set(action["inputs"]))
+        self.assertEqual("32", action["inputs"]["jobs"]["default"])
         self.assertEqual(
             {"repository-cache-key", "repository-cache-hit", "output-base-key", "output-base-hit"},
             set(action["outputs"]),
