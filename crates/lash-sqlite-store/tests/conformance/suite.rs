@@ -1126,9 +1126,3 @@ lash_conformance::retention_tests!({
     let factory = backend.store().await as Arc<dyn DeploymentStore>;
     (backend, factory)
 });
-
-lash_conformance::turn_capture_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
-    let factory = backend.session_store_factory() as Arc<dyn DeploymentStore>;
-    (backend, factory)
-});

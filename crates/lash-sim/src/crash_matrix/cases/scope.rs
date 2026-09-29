@@ -287,7 +287,6 @@ fn host_root_terminal(
             stop: None,
         },
         head_revision: None,
-        stopped_partial: None,
         at_ms: world.now_ms(),
     }
 }

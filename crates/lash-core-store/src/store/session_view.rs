@@ -131,12 +131,6 @@ carries_session_field! {
     TurnParkWrite => |request| &request.session_id;
     SessionMeta => |request| &request.session_id;
     AttachmentIntent => |request| &request.session_id;
-    OpenCaptureWriter => |request| &request.turn.session_id;
-    CaptureBatch => |request| &request.lease.turn.session_id;
-    CaptureAttemptReset => |request| &request.lease.turn.session_id;
-    CaptureBaseAdvance => |request| &request.turn.session_id;
-    SealTurnCapture => |request| &request.turn.session_id;
-    StoppedPartialReadRequest => |request| &request.session_id;
 }
 
 /// One view forwarder per session-scoped entry; nothing for a catalog entry.

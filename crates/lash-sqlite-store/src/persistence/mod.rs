@@ -153,7 +153,6 @@ pub(crate) use admission::{
     admit_at_checkpoint_sqlite, admit_root_sqlite, open_session_command_run_sqlite,
 };
 mod drive_epoch;
-pub(crate) use drive_epoch::require_fence_conn;
 mod ingress_settlement;
 mod maintenance;
 mod queued_work;

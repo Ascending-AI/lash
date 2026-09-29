@@ -143,9 +143,6 @@ pub const TABLES: &[&str] = &[
     turn_ingress::turn_park_events::TABLE,
     turn_ingress::turn_parks::TABLE,
     session::checkpoint_blob_refs::TABLE,
-    session::capture_frames::TABLE,
-    session::capture_turns::TABLE,
-    session::capture_writers::TABLE,
     session::deleted_sessions::TABLE,
     session::fleet_format::TABLE,
     session::fork_lineage::TABLE,
@@ -156,7 +153,6 @@ pub const TABLES: &[&str] = &[
     session::node_anchors::TABLE,
     session::release_stamp::TABLE,
     session::sessions::TABLE,
-    session::stopped_partials::TABLE,
     session::turn_commits::TABLE,
     session::usage_deltas::TABLE,
     session::usage_delta_holes::TABLE,
@@ -200,10 +196,6 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(process::segment_handovers::SegmentHandoverStatements::NEUTRAL);
     statements.extend_from_slice(process::tombstones::TombstoneStatements::NEUTRAL);
     statements.extend_from_slice(session::fork_lineage::ForkLineageStatements::NEUTRAL);
-    statements.extend_from_slice(session::capture_turns::CaptureTurnStatements::NEUTRAL);
-    statements.extend_from_slice(session::capture_writers::CaptureWriterStatements::NEUTRAL);
-    statements.extend_from_slice(session::capture_frames::CaptureFrameStatements::NEUTRAL);
-    statements.extend_from_slice(session::stopped_partials::StoppedPartialStatements::NEUTRAL);
     statements.extend_from_slice(session::graph_nodes::GraphNodeStatements::NEUTRAL);
     statements.extend_from_slice(session::meta::SessionMetaStatements::NEUTRAL);
     statements.extend_from_slice(

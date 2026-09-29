@@ -10,7 +10,6 @@ pub(super) fn warn_process_registry_not_wired(path: &'static str) {
     );
 }
 
-#[allow(clippy::result_large_err)]
 pub(super) async fn delete_session_from_catalog(
     catalog: &DatabaseLocation,
     session_id: &SessionId,
@@ -223,8 +222,6 @@ pub(super) async fn delete_session_from_catalog(
             )
             .map_err(sqlite_error)?;
             let turn_ingress = crate::turn_ingress::turn_ingress_sql();
-            report.removed_capture_frame_count =
-                crate::capture::delete_session_capture_conn(tx, &session_id)?;
             crate::conn::cached_execute(
                 tx,
                 turn_ingress.queued_batches.delete_by_session.sql(),

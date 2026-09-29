@@ -625,11 +625,6 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // under the version freeze). A catalog provisioned before the change rejects
 // both kinds; recreate it.
 //
-// Version 141 also holds staged turn capture, writer epochs, frame rows and
-// sealed stopped partials (ADR 0114, FIG-433, changed in place under the
-// version freeze). A catalog provisioned before them fails the open-time
-// shape check; recreate it.
-//
 // Version 141 also seeds the `lash_fleet_format` row among `schema.sql`'s seed
 // rows, and `lash migrate` seeds it on every run (FIG-4075, changed in place
 // under the version freeze): an open reads `F` and never records it, so a
@@ -1441,8 +1436,6 @@ mod attachments;
 mod backend;
 #[path = "postgres/blobs.rs"]
 mod blobs;
-#[path = "postgres/capture.rs"]
-mod capture;
 #[path = "postgres/connection_sql.rs"]
 mod connection_sql;
 #[path = "postgres/evidence_retention.rs"]

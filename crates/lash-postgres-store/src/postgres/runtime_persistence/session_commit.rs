@@ -1005,7 +1005,6 @@ impl PostgresStore {
             )
             .await?;
         }
-        crate::capture::commit_capture_tx(&mut tx, commit, now).await?;
         let mut result = plan.result(checkpoint_ref, manifest);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;
         {

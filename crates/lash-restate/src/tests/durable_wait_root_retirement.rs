@@ -315,7 +315,6 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
             },
             head_revision: Some(2),
             at_ms: 1,
-            stopped_partial: None,
         })
         .await
         .expect("close the committed root's scope");
@@ -327,7 +326,6 @@ pub(super) async fn retiring_a_root_never_cancels_a_terminal_its_commit_still_pu
             cause: RootTerminalCause::SubstrateLost { cancelled_by: None },
             head_revision: None,
             at_ms: 1,
-            stopped_partial: None,
         })
         .await
         .expect("close the lost root's scope");

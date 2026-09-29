@@ -43,7 +43,6 @@ fn persistence_types_are_nameable(
         drive_fence: None,
         root_terminal: None,
         park_root: None,
-        stopped_partial: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,
         current_frame_node_id: None,

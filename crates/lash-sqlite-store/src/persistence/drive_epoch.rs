@@ -58,7 +58,7 @@ pub(crate) fn drive_epoch_conn(
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the
 /// caller's transaction.
-pub(crate) fn require_fence_conn(
+pub(super) fn require_fence_conn(
     conn: &Connection,
     session_id: &SessionId,
     fence: &DriveFence,

@@ -23,7 +23,6 @@ pub mod artifact_referrer;
 pub mod attachments;
 pub mod await_event_identity;
 pub mod build_generation;
-pub mod capture;
 pub mod chronological;
 pub mod compat;
 pub mod effect_identity;

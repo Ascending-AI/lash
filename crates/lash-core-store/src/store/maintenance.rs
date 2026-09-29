@@ -71,8 +71,6 @@ pub struct SessionBlobReclaimReport {
     pub enumerated_blob_count: usize,
     pub retained_blob_count: usize,
     pub deleted_blob_count: usize,
-    /// Capture staging frames removed with the deleted session.
-    pub removed_capture_frame_count: usize,
 }
 
 /// Which arm of the success side a completed maintenance pass landed on.
@@ -140,7 +138,7 @@ impl MaintenanceReport for VacuumReport {
 
 impl MaintenanceReport for SessionBlobReclaimReport {
     fn reclaimed_count(&self) -> usize {
-        self.deleted_blob_count + self.removed_capture_frame_count
+        self.deleted_blob_count
     }
 }
 

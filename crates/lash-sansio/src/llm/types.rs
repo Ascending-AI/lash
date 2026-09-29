@@ -1269,18 +1269,6 @@ impl StreamBlockIdentity {
     }
 }
 
-/// Attempt-local identity of one tool call's arguments in a turn capture
-/// frame.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ToolInputIdentity {
-    /// Attempt-local, dense from 0, in order of first appearance. It is the
-    /// identity when the provider has not yet sent a call id.
-    pub ordinal: u64,
-    pub call_id: Option<String>,
-    pub tool_name: Option<String>,
-    pub item_id: Option<String>,
-}
-
 #[derive(Clone, Debug)]
 pub enum LlmStreamEvent {
     /// A retry is starting from the original request. Consumers must discard

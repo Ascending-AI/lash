@@ -27,7 +27,6 @@ postgres crates/lash-postgres-store/src/postgres/migrate.rs::migrate_on  # its o
 postgres crates/lash-postgres-store/src/preflight.rs::schema_status  # preflight's tolerant shape classification reads the catalog and writes nothing
 postgres crates/lash-postgres-store/src/preflight/walk.rs::read_only_snapshot  # opens a REPEATABLE READ READ ONLY snapshot for the durable walk
 postgres crates/lash-postgres-store/src/postgres/runtime_persistence/history.rs::read_tx  # opens a REPEATABLE READ READ ONLY snapshot for history reads
-postgres crates/lash-postgres-store/src/postgres/capture.rs::read_stopped_partial  # reads a stopped turn's partial output
 postgres crates/lash-postgres-store/src/postgres/process_registry/park_feed.rs::process_park_feed  # reads a page of the process park feed under a share-locked horizon
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::get_process_by_start_key  # reads the process a start key names
 postgres crates/lash-postgres-store/src/postgres/process_registry.rs::processes_changed_since  # reads a page of process changes under the compaction horizon

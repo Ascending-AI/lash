@@ -174,13 +174,6 @@ pub struct RootTerminal {
     /// from a deletion tombstone.
     pub head_revision: Option<u64>,
     pub at_ms: u64,
-    /// The stopped partial the terminal transaction sealed and committed for
-    /// the root's active physical turn, when a root-terminal write ended it
-    /// without a turn commit (ADR 0114 §4.4): identity and facts, never
-    /// payload. `None` for a committed terminal, whose partial rides its
-    /// turn report.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stopped_partial: Option<lash_sansio::StoppedPartialSummary>,
 }
 
 impl RootTerminal {
@@ -250,7 +243,6 @@ impl RootTerminalWrite {
             root: self.root,
             head_revision: Some(head_revision),
             at_ms,
-            stopped_partial: None,
         }
     }
 }
@@ -340,7 +332,6 @@ impl RootTerminal {
             cause,
             head_revision,
             at_ms,
-            stopped_partial: None,
         })
     }
 }

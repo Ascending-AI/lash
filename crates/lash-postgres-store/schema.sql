@@ -276,54 +276,6 @@ CREATE INDEX IF NOT EXISTS idx_lash_runtime_turn_commits_failure_evidence
     ON lash_runtime_turn_commits(session_id, committed_at_ms, turn_id)
     WHERE failure_evidence;
 
-CREATE TABLE IF NOT EXISTS lash_turn_capture_turns (
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    root TEXT NOT NULL,
-    base BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_turn_capture_turns_base CHECK (base >= 0),
-    next_sequence BIGINT NOT NULL DEFAULT 1 CONSTRAINT ck_turn_capture_turns_next_sequence CHECK (next_sequence >= 1),
-    recovered BIGINT NOT NULL DEFAULT 0 CONSTRAINT ck_turn_capture_turns_recovered CHECK (recovered IN (0, 1)),
-    PRIMARY KEY (session_id, turn_id)
-);
-CREATE TABLE IF NOT EXISTS lash_turn_capture_writers (
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    invocation TEXT NOT NULL,
-    attempt_epoch BIGINT NOT NULL CONSTRAINT ck_turn_capture_writers_attempt_epoch CHECK (attempt_epoch >= 0),
-    state TEXT NOT NULL CONSTRAINT ck_turn_capture_writers_state CHECK (state IN ('live', 'retracted', 'fenced')),
-    PRIMARY KEY (session_id, turn_id, invocation, attempt_epoch)
-);
-CREATE TABLE IF NOT EXISTS lash_turn_capture_frames (
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    sequence BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_sequence CHECK (sequence >= 1),
-    base BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_base CHECK (base >= 0),
-    invocation TEXT NOT NULL,
-    attempt_epoch BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_attempt_epoch CHECK (attempt_epoch >= 0),
-    batch_ordinal BIGINT NOT NULL CONSTRAINT ck_turn_capture_frames_batch_ordinal CHECK (batch_ordinal >= 0),
-    frame_json TEXT NOT NULL,
-    PRIMARY KEY (session_id, turn_id, sequence),
-    UNIQUE (session_id, turn_id, invocation, attempt_epoch, batch_ordinal, sequence)
-);
-CREATE INDEX IF NOT EXISTS idx_lash_turn_capture_frames_batch ON lash_turn_capture_frames
-    (session_id, turn_id, invocation, attempt_epoch, batch_ordinal);
-CREATE TABLE IF NOT EXISTS lash_stopped_partials (
-    session_id TEXT NOT NULL,
-    turn_id TEXT NOT NULL,
-    root TEXT NOT NULL,
-    base BIGINT NOT NULL CONSTRAINT ck_stopped_partials_base CHECK (base >= 0),
-    sealed_through BIGINT NOT NULL CONSTRAINT ck_stopped_partials_sealed_through CHECK (sealed_through >= 0),
-    reason TEXT NOT NULL,
-    recovered BIGINT NOT NULL CONSTRAINT ck_stopped_partials_recovered CHECK (recovered IN (0, 1)),
-    digest TEXT NOT NULL,
-    partial_json TEXT NOT NULL,
-    body_bytes BIGINT NOT NULL CONSTRAINT ck_stopped_partials_body_bytes CHECK (body_bytes >= 0),
-    sealed_at_ms BIGINT NOT NULL,
-    committed_at_ms BIGINT,
-    PRIMARY KEY (session_id, turn_id),
-    UNIQUE (session_id, root)
-);
-
 CREATE TABLE IF NOT EXISTS lash_turn_cancel_requests (
     session_id TEXT NOT NULL,
     turn_id TEXT NOT NULL,

@@ -4,8 +4,6 @@ use crate::TurnId;
 use crate::facade_support::SessionGraphFacadeOps;
 pub mod artifact_cleanup;
 pub mod attachment_manifest;
-mod capture;
-mod capture_memory;
 pub mod catalog;
 mod checkpoint;
 pub mod namespace;
@@ -69,7 +67,6 @@ pub use record_schema_version::{
     ensure_supported_record_schema_version, ensure_supported_schema_version,
 };
 
-pub use crate::capture::reduce_capture;
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use crate::session_store_factory_types::SessionLookup;
 pub use admission_plan::{
@@ -88,13 +85,6 @@ pub use attachment_manifest::{
     MAX_ATTACHMENT_DELETE_ATTEMPTS, StoredAttachmentCondemnation,
     decode_attachment_condemnation_record, decode_attachment_owner,
 };
-pub use capture::{
-    CAPTURE_BATCH_MAX_BYTES, CAPTURE_BATCH_MAX_FRAMES, CaptureAck, CaptureAttemptReset,
-    CaptureBaseAdvance, CaptureBatch, CaptureFrame, CaptureFrameKey, CaptureInvocationKey,
-    CaptureWriterLease, CaptureWriterLeaseRef, OpenCaptureWriter, SealTurnCapture, SealedCapture,
-    StoppedPartialRead, StoppedPartialReadRequest, TurnCaptureStore,
-};
-pub use capture_memory::InMemoryTurnCapture;
 pub use catalog::SessionCatalogStore;
 pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
@@ -180,7 +170,7 @@ pub use runtime_commit::{
     AppendRequestIdentity, FrameTransition, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SemanticBoundaryOperation, StoppedPartialCommit, TurnCommitFailureCause, TurnCommitOutcome,
+    SemanticBoundaryOperation, TurnCommitFailureCause, TurnCommitOutcome,
     decode_runtime_commit_receipt, decode_runtime_commit_receipt_for_fleet,
     ensure_supported_receipt_version, ensure_supported_receipt_version_for_fleet,
     frames_left_by_commit, validate_turn_commit_outcome_code,
@@ -628,7 +618,6 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement,
             adopted_intent_rows,
             committed_attachment_ids,
-            stopped_partial,
         } = self;
         debug_assert!(
             ingress.is_none()
@@ -641,7 +630,6 @@ impl RuntimeCommit {
                 && failure_evidence.is_empty()
                 && outcome.is_none()
                 && committed_attachment_ids.is_empty()
-                && stopped_partial.is_none()
                 && root_terminal.is_none()
                 && park_root.is_none()
                 && frame_transition.is_none(),
@@ -841,7 +829,6 @@ impl RuntimeCommit {
             turn_cancel_closure_settlement: None,
             adopted_intent_rows: 0,
             committed_attachment_ids: Vec::new(),
-            stopped_partial: None,
         })
     }
 
@@ -1732,11 +1719,10 @@ pub trait FleetFormatStore: Send + Sync {
 /// [`TurnInputStore`] (pending turn-input lifecycle), [`QueuedWorkStore`]
 /// (queued-work ingress and claiming), [`DriveEpochStore`] (the drive epoch a
 /// session drive's seal raises, FIG-3600), [`RootStore`] (logical roots'
-/// terminal evidence and input bindings), [`TurnCaptureStore`] (a physical
-/// turn's capture frames and its sealed stopped partial, ADR 0114) and
-/// [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
-/// domain: claims granted by the input and queue segments settle atomically
-/// in [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
+/// terminal evidence and input bindings) and [`StoreMaintenance`]
+/// (vacuum/GC). The segments share one transactional domain: claims granted by
+/// the input and queue segments settle atomically in
+/// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
 /// store contract.
 ///
@@ -1761,7 +1747,6 @@ pub trait RuntimeStore:
     + QueuedWorkStore
     + DriveEpochStore
     + RootStore
-    + TurnCaptureStore
     + StoreMaintenance
 {
 }
@@ -1776,7 +1761,6 @@ impl<T> RuntimeStore for T where
         + QueuedWorkStore
         + DriveEpochStore
         + RootStore
-        + TurnCaptureStore
         + StoreMaintenance
         + ?Sized
 {

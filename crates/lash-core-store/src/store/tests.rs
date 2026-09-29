@@ -996,10 +996,6 @@ fn decorator_surface_covers_every_component_trait_method() {
         "DriveEpochStore",
     ));
     declared.extend(declared_methods(include_str!("root.rs"), "RootStore"));
-    declared.extend(declared_methods(
-        include_str!("capture.rs"),
-        "TurnCaptureStore",
-    ));
     assert!(
         declared.contains_key("commit_runtime_state")
             && declared.contains_key("vacuum")

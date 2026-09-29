@@ -97,7 +97,7 @@ pub use llm::capability::{
     ModelCapability, ModelEffortValidationCategory, ModelEffortValidationError,
     ReasoningCapability, ReasoningEncoding, ReasoningIntent, ReasoningSelection,
 };
-pub use llm::types::{LlmTerminalReason, ProviderFailureKind, ToolInputIdentity};
+pub use llm::types::{LlmTerminalReason, ProviderFailureKind};
 pub use plugin::{
     CheckpointKind, PluginMessage, PluginRuntimeEvent, PromptContribution, PromptContributionBody,
     PromptContributionGate,

@@ -1906,17 +1906,6 @@ lash_conformance::retention_tests!({
     (database_lock, Arc::new(storage.session_store_factory()))
 });
 
-lash_conformance::turn_capture_tests!({
-    let Some((database_lock, storage)) = storage().await else {
-        return;
-    };
-    reset(storage.pool()).await;
-    (
-        database_lock,
-        Arc::new(storage.session_store_factory()) as Arc<dyn DeploymentStore>,
-    )
-});
-
 mod root_control {
     use super::*;
     lash_conformance::drive_admission_tests!(@laws [] {

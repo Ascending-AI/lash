@@ -269,31 +269,6 @@ pub struct RuntimeCommit {
     /// stamping the commit's intent time and copying the earliest proven
     /// upload evidence recorded under any session.
     pub committed_attachment_ids: Vec<crate::AttachmentId>,
-    /// The sealed partial this commit publishes (ADR 0114 §3.3). The backend
-    /// checks that its seal row exists with this id and digest, marks it
-    /// committed, and deletes the turn's staging frames and writer rows, all
-    /// in the commit's transaction. A commit of a turn that did not stop
-    /// carries `None`. Its transaction still deletes the turn's staging,
-    /// because the commit witnesses settlement.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub stopped_partial: Option<StoppedPartialCommit>,
-}
-
-/// The reference a commit names its sealed partial by: identity and digest,
-/// never payload.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct StoppedPartialCommit {
-    pub id: lash_sansio::StoppedPartialId,
-    pub digest: lash_sansio::StoppedPartialDigest,
-}
-
-impl StoppedPartialCommit {
-    pub fn of(partial: &lash_sansio::StoppedPartial) -> Self {
-        Self {
-            id: partial.id.clone(),
-            digest: partial.digest,
-        }
-    }
 }
 
 #[cfg(any(test, feature = "testing"))]

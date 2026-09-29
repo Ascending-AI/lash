@@ -95,7 +95,7 @@ pub(crate) async fn root_terminal_conn(
     let (Some(kind), Some(cause_json), Some(at_ms)) = (kind, cause_json, at_ms) else {
         return Ok(None);
     };
-    let mut terminal = RootTerminal::from_stored(
+    RootTerminal::from_stored(
         session_id.clone(),
         root.clone(),
         &kind,
@@ -104,10 +104,8 @@ pub(crate) async fn root_terminal_conn(
             .map(|revision| u64_from_sql("RootTerminal", "terminal_head_revision", revision))
             .transpose()?,
         u64_from_sql("RootTerminal", "terminal_at_ms", at_ms)?,
-    )?;
-    terminal.stopped_partial =
-        crate::capture::committed_root_summary_conn(conn, session_id, root).await?;
-    Ok(Some(terminal))
+    )
+    .map(Some)
 }
 
 /// Write `terminal` in the caller's transaction, deciding it against the
@@ -119,52 +117,21 @@ pub(crate) async fn root_terminal_conn(
 /// wrote, every row still bound to the root is released open at its own
 /// position. No row stays bound to a root that has terminal evidence.
 pub(crate) async fn write_root_terminal_conn(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    conn: &mut PgConnection,
     terminal: &RootTerminal,
 ) -> Result<(), StoreError> {
-    let stored = root_terminal_conn(&mut *tx, &terminal.session_id, &terminal.root).await?;
+    let stored = root_terminal_conn(conn, &terminal.session_id, &terminal.root).await?;
     if decide_root_terminal_write(stored.as_ref(), terminal)?
         == RootTerminalWriteDecision::AlreadyWritten
     {
-        return release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms)
+        return release_root_rows_conn(conn, &terminal.session_id, &terminal.root, terminal.at_ms)
             .await;
-    }
-    let reason = match &terminal.cause {
-        RootTerminalCause::Committed { .. } | RootTerminalCause::SessionDeleted { .. } => None,
-        RootTerminalCause::SubstrateLost {
-            cancelled_by: Some(_),
-        } => Some(lash_sansio::StopReason::UserCancel),
-        RootTerminalCause::SubstrateLost { cancelled_by: None } => {
-            Some(lash_sansio::StopReason::ProcessLoss)
-        }
-        RootTerminalCause::OperatorCancelled { .. } | RootTerminalCause::Forked { .. } => {
-            Some(lash_sansio::StopReason::Other {
-                cause: lash_sansio::OtherStopCause::OperatorCancellation,
-            })
-        }
-        // The run's own typed refusal ended the root without a turn commit
-        // (FIG-4018): a partial the stopped turn already sealed commits with
-        // the terminal, and otherwise the refusal seals what the turn staged.
-        RootTerminalCause::Refused { .. } => Some(lash_sansio::StopReason::Other {
-            cause: lash_sansio::OtherStopCause::RuntimeFailure,
-        }),
-    };
-    if let Some(reason) = reason {
-        crate::capture::seal_root_terminal_capture_tx(
-            tx,
-            &terminal.session_id,
-            &terminal.root,
-            reason,
-            terminal.at_ms,
-            matches!(terminal.cause, RootTerminalCause::SubstrateLost { .. }),
-        )
-        .await?;
     }
     let sql = session_roots_sql();
     sqlx::query(sql.roots.insert_open.sql())
         .bind(terminal.session_id.as_str())
         .bind(terminal.root.as_str())
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?;
     let columns = terminal.to_stored()?;
@@ -180,7 +147,7 @@ pub(crate) async fn write_root_terminal_conn(
                 .transpose()?,
         )
         .bind(sql_i64("terminal instant", columns.at_ms)?)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await
         .map_err(store_sqlx_error)?
         .rows_affected();
@@ -193,7 +160,7 @@ pub(crate) async fn write_root_terminal_conn(
     // A terminal root owes its scope close (ADR 0109 §3): the terminal
     // transaction arms the row's obligation, due at the terminal instant.
     crate::obligation_ledger::arm_obligation_id_tx(
-        &mut *tx,
+        conn,
         &lash_core_execution::store::ObligationKey::ScopeClose {
             session_id: terminal.session_id.clone(),
             root: terminal.root.clone(),
@@ -205,7 +172,7 @@ pub(crate) async fn write_root_terminal_conn(
         columns.at_ms,
     )
     .await?;
-    release_root_rows_conn(tx, &terminal.session_id, &terminal.root, terminal.at_ms).await
+    release_root_rows_conn(conn, &terminal.session_id, &terminal.root, terminal.at_ms).await
 }
 
 /// Release every row of either admission table `root` still holds, in the
@@ -415,7 +382,6 @@ async fn end_unanswered_root_tx(
         cause,
         head_revision: None,
         at_ms,
-        stopped_partial: None,
     };
     sqlx::query(
         crate::session_sql::session_sql()
@@ -464,10 +430,9 @@ async fn end_unanswered_root_tx(
     }
     // The terminal write applies the root's cancel request's `undelivered`
     // disposition to open input addressed to a turn the root ends
-    // (FIG-3927 §2.4, FIG-3946), and seals the root's stopped partial
-    // (ADR 0114 §4.4); the reread carries the partial's summary.
+    // (FIG-3927 §2.4, FIG-3946).
     write_root_terminal_conn(&mut *tx, &terminal).await?;
-    root_terminal_conn(&mut *tx, session, root).await
+    Ok(Some(terminal))
 }
 
 /// Decode a root's recorded admission (`session_roots.admission_json`).
@@ -913,7 +878,6 @@ pub(crate) async fn begin_session_close_tx(
                     cause: RootTerminalCause::SessionDeleted { intent: intent.id },
                     head_revision: None,
                     at_ms,
-                    stopped_partial: None,
                 },
             )
             .await?;
