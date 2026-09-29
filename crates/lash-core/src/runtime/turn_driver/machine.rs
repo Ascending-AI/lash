@@ -128,6 +128,12 @@ impl RuntimeTurnDriver<'_> {
                         self.turn_pipeline.state_mut().token_usage = cumulative.clone();
                         self.latest_prompt_usage = nonzero_usage(usage.clone());
                     }
+                    // A machine that finished writes its `Error` right before
+                    // the stopped outcome: it is the stop's terminal too, and
+                    // publishes after the commit (ADR 0114 §4.3).
+                    if machine.is_done() && matches!(event, SessionStreamEvent::Error { .. }) {
+                        event_tx.hold_terminal();
+                    }
                     self.emit_recorded(&event_tx, event);
                 }
                 Effect::Progress {

@@ -26,6 +26,17 @@ async fn stop_harness(
     tools: Arc<dyn lash_core::ToolProvider>,
     transport: TestProvider,
 ) -> StopHarness {
+    // The session's durable store: what the turn's capture writes.
+    let store = double_unbound_store(double).await;
+    Box::pin(stop_harness_over(double, tools, transport, store)).await
+}
+
+async fn stop_harness_over(
+    double: &lash_restate_test::RestateTestBackend,
+    tools: Arc<dyn lash_core::ToolProvider>,
+    transport: TestProvider,
+    store: Arc<dyn lash_core::RuntimePersistence>,
+) -> StopHarness {
     let backend = double.lash_backend();
     let config = test_runtime_host_config(&backend);
     let driver_store = double_unbound_store(double).await;
@@ -40,8 +51,6 @@ async fn stop_harness(
         driver_store,
     );
     let host = EmbeddedRuntimeHost::new(config);
-    // The session's durable store: what the turn's capture writes.
-    let store = double_unbound_store(double).await;
     let runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),
         tools,
@@ -439,4 +448,103 @@ async fn a_stop_keeps_response_text_that_was_never_streamed() {
     assert_eq!(*state, CutState::Complete);
     assert_eq!(call.call_id, "call-1");
     assert_announced_after_outcome(&events, partial);
+}
+
+/// Records each session event with the runtime commits its store had applied
+/// when the host received it.
+#[derive(Clone)]
+struct CommitOrderSink {
+    store: Arc<lash_core::testing::runtime_helpers::RecordingStore>,
+    events: Arc<StdMutex<Vec<(SessionStreamEvent, usize)>>>,
+}
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::EventSink for CommitOrderSink {
+    async fn emit(&self, event: SessionStreamEvent) {
+        let commits = *self.store.runtime_commit_count.lock_recover();
+        self.events.lock_recover().push((event, commits));
+    }
+}
+
+/// A provider failure stops the turn through the machine, which writes its
+/// `Error` right before the stopped outcome. Both are the stop's terminal:
+/// neither reaches the host before the commit that seals the partial
+/// (ADR 0114 §4.3).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_provider_failure_publishes_its_error_after_the_commit() {
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let store = double_unbound_recording_store(&double).await;
+    let StopHarness { mut runtime, .. } = Box::pin(stop_harness_over(
+        &double,
+        Arc::new(EchoTool),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Err(lash_core::llm::transport::LlmTransportError::new(
+                "the provider refused",
+            )
+            .with_retry_verdict(lash_core::llm::transport::TransportRetryVerdict::Forbidden)),
+        }]),
+        Arc::clone(&store) as Arc<dyn lash_core::RuntimePersistence>,
+    ))
+    .await;
+    let sink = CommitOrderSink {
+        store: Arc::clone(&store),
+        events: Arc::default(),
+    };
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("provider-failure"),
+        ))
+        .await
+        .expect("open the scope's handler");
+    let turn = runtime
+        .drive_turn(
+            TurnInput::text("fail"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()).with_events(&sink),
+        )
+        .await
+        .expect("the turn assembles");
+    handler.close().await.expect("close the scope's handler");
+
+    assert_eq!(turn.outcome, TurnOutcome::Stopped(TurnStop::ProviderError));
+    let partial = turn
+        .stopped_partial
+        .as_ref()
+        .expect("a stopped turn reports its sealed partial");
+    assert_eq!(
+        partial.reason,
+        StopReason::Other {
+            cause: lash_sansio::OtherStopCause::ProviderFailure
+        }
+    );
+    let events = sink.events.lock_recover().clone();
+    let terminal: Vec<_> = events
+        .iter()
+        .filter(|(event, _)| {
+            matches!(
+                event,
+                SessionStreamEvent::Error { .. }
+                    | SessionStreamEvent::TurnOutcome { .. }
+                    | SessionStreamEvent::StoppedPartialAvailable { .. }
+            )
+        })
+        .collect();
+    assert!(
+        matches!(
+            terminal.as_slice(),
+            [
+                (SessionStreamEvent::Error { .. }, _),
+                (SessionStreamEvent::TurnOutcome { .. }, _),
+                (SessionStreamEvent::StoppedPartialAvailable { .. }, _),
+            ]
+        ),
+        "the terminal in order: {terminal:?}"
+    );
+    for (event, commits) in terminal {
+        assert!(
+            *commits >= 1,
+            "the host received {event:?} before the turn's commit"
+        );
+    }
 }
