@@ -121,6 +121,8 @@ pub(crate) enum RuntimePerfScenario {
     HighTrafficLoadSqlite,
     HighTrafficKneeSqlite,
     ResidentGraphAppendCurve,
+    FrameResidencyCurveSqlite,
+    FrameResidencyCurvePostgres,
 }
 
 // The harness wiring facts the builders read once per scenario: which
@@ -344,7 +346,7 @@ impl RuntimePerfScenario {
         Self::HighTrafficKneeSqlite,
     ];
 
-    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 53] = [
+    pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 55] = [
         runtime_perf_metadata!(
             Standard,
             "standard",
@@ -770,6 +772,26 @@ impl RuntimePerfScenario {
             false
         ),
         runtime_perf_metadata!(
+            FrameResidencyCurveSqlite,
+            "frame_residency_curve_sqlite",
+            Standard,
+            RuntimeScenario,
+            "Measures reopened 64-row frame heap and commit latency over 0, 1,000, 8,000, and 32,000 prior SQLite rows.",
+            Durable,
+            StableDurableTurn,
+            false
+        ),
+        runtime_perf_metadata!(
+            FrameResidencyCurvePostgres,
+            "frame_residency_curve_postgres",
+            Standard,
+            RuntimeScenario,
+            "Measures reopened 64-row frame heap and commit latency over 0, 1,000, 8,000, and 32,000 prior PostgreSQL rows.",
+            Durable,
+            StableDurableTurn,
+            false
+        ),
+        runtime_perf_metadata!(
             ResidentGraphAppendCurve,
             "resident_graph_append_curve",
             Standard,
@@ -778,7 +800,7 @@ impl RuntimePerfScenario {
             false
         ),
     ];
-    pub(crate) const KNOWN: [Self; 53] = runtime_perf_known_scenarios();
+    pub(crate) const KNOWN: [Self; 55] = runtime_perf_known_scenarios();
     // Durable scenarios are intentionally opt-in (or selected by `all`) so the
     // main-push quick profile remains provider- and database-free.
     pub(crate) const DEFAULTS: [Self; RUNTIME_PERF_DEFAULT_COUNT] =
@@ -827,7 +849,10 @@ impl RuntimePerfScenario {
     }
 
     pub(crate) fn uses_postgres(self) -> bool {
-        matches!(self, Self::DurableCheckpointCurvePostgres)
+        matches!(
+            self,
+            Self::DurableCheckpointCurvePostgres | Self::FrameResidencyCurvePostgres
+        )
     }
 
     pub(crate) fn is_high_traffic(self) -> bool {
@@ -906,7 +931,7 @@ impl RuntimePerfScenario {
     }
 }
 
-const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 53] {
+const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 55] {
     [
         RuntimePerfScenario::METADATA[0].scenario,
         RuntimePerfScenario::METADATA[1].scenario,
@@ -961,6 +986,8 @@ const fn runtime_perf_known_scenarios() -> [RuntimePerfScenario; 53] {
         RuntimePerfScenario::METADATA[50].scenario,
         RuntimePerfScenario::METADATA[51].scenario,
         RuntimePerfScenario::METADATA[52].scenario,
+        RuntimePerfScenario::METADATA[53].scenario,
+        RuntimePerfScenario::METADATA[54].scenario,
     ]
 }
 

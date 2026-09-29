@@ -294,6 +294,25 @@ async fn run_once_inner(
         RuntimePerfScenario::LiveReplayPressure => {
             return run_once_live_replay_pressure(chat_turns).await;
         }
+        RuntimePerfScenario::FrameResidencyCurveSqlite
+        | RuntimePerfScenario::FrameResidencyCurvePostgres => {
+            let postgres_url = if scenario.uses_postgres() {
+                Some(configured_postgres_database_url().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "{} requires LASH_POSTGRES_DATABASE_URL or DATABASE_URL",
+                        scenario.name()
+                    )
+                })?)
+            } else {
+                None
+            };
+            return Box::pin(run_once_frame_residency_curve(
+                scenario,
+                chat_turns,
+                postgres_url.as_deref(),
+            ))
+            .await;
+        }
         RuntimePerfScenario::ResidentGraphAppendCurve => {
             return run_once_resident_graph_append_curve(chat_turns).await;
         }

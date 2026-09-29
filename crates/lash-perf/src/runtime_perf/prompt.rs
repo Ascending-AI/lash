@@ -177,7 +177,9 @@ pub(crate) fn benchmark_prompt(scenario: RuntimePerfScenario, turn_index: usize)
         | RuntimePerfScenario::DurableQueuedWorkContentionSqlite
         | RuntimePerfScenario::DurableCheckpointCurveSqlite
         | RuntimePerfScenario::DurableCheckpointCurvePostgres
-        | RuntimePerfScenario::ResidentGraphAppendCurve => {
+        | RuntimePerfScenario::ResidentGraphAppendCurve
+        | RuntimePerfScenario::FrameResidencyCurveSqlite
+        | RuntimePerfScenario::FrameResidencyCurvePostgres => {
             unreachable!("direct-dispatch scenarios construct their own operations")
         }
         RuntimePerfScenario::StoreHardeningHotPaths => {
