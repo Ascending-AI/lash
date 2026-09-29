@@ -332,7 +332,7 @@ impl ArtifactCleanupRelay {
                     )
                     .await
                     .map_err(PluginError::from),
-                ArtifactStoreId::LashlangModule => self
+                store if *store == ArtifactStoreId::module() => self
                     .ports
                     .modules
                     .acquire_module_artifact(&claim, &name.artifact_ref)
@@ -345,6 +345,11 @@ impl ArtifactCleanupRelay {
                         .map_err(retryable("engine store"))?
                         .acquire_engine_artifact(&claim, &name.artifact_ref)
                         .await
+                }
+                store => {
+                    return Err(DeliveryFailure::Undecodable(format!(
+                        "unknown artifact store for retained start: {store:?}"
+                    )));
                 }
             };
             match acquired {
