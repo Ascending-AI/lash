@@ -111,12 +111,15 @@ crate::statements! {
                AND obligation_due_at_ms <= ?4
              RETURNING obligation_id, obligation_attempts, referrer_kind, referrer_id";
 
-        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
-        /// its backoff: a producer's own immediate attempt.
+        /// Claim obligation `?1` under token `?2` until `?3`: a `due` row
+        /// whatever its backoff (a producer's own immediate attempt), or a
+        /// claim `?2` already holds, its claimant re-deriving it after an
+        /// interruption, which keeps its attempt count.
         obligation_claim = "UPDATE artifact_cleanup_obligations
              SET obligation_state = 'claimed', obligation_claim_token = ?2,
-                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
-             WHERE obligation_id = ?1 AND obligation_state = 'due'
+                 obligation_attempts = obligation_attempts + CASE WHEN obligation_state = 'due' THEN 1 ELSE 0 END, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND (obligation_state = 'due'
+                  OR (obligation_state = 'claimed' AND obligation_claim_token = ?2))
              RETURNING obligation_id, obligation_attempts, referrer_kind, referrer_id";
 
         /// Settle claim `?2` on obligation `?1` delivered: the row is

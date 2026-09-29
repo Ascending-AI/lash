@@ -62,6 +62,7 @@ impl ObligationLedger for Ledger {
     async fn claim(
         &self,
         _id: &ObligationId,
+        _token: &ClaimToken,
         _now_ms: u64,
         _claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {

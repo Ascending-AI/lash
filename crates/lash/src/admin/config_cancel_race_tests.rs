@@ -40,10 +40,11 @@ impl ObligationLedger for PausedAskLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> std::result::Result<Option<ClaimedObligation>, lash_core::StoreError> {
-        self.inner.claim(id, now_ms, claim_ttl_ms).await
+        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(

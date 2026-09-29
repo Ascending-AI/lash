@@ -209,8 +209,9 @@ pub(crate) fn arm_obligation_id_tx(
 /// [`SqliteObligationLedger::claim`] inside a transaction the caller already
 /// holds (FIG-3975): the admission that arms the row claims its obligation
 /// in the same commit, so the producer's immediate ask owes no second store
-/// round-trip. `token` is the transaction's minted claim token and
-/// `until_ms` its expiry. `None` when `id` is not due — as `claim` answers.
+/// round-trip. `token` is the claimant's token and `until_ms` its expiry.
+/// `None` when `id` is neither due nor claimed under `token` — as `claim`
+/// answers.
 pub(crate) fn claim_obligation_tx(
     conn: &rusqlite::Connection,
     sql: ObligationSql<'static>,
@@ -321,6 +322,7 @@ impl ObligationLedger for SqliteObligationLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
@@ -330,7 +332,7 @@ impl ObligationLedger for SqliteObligationLedger {
             "obligation claim expiry",
             now_ms.saturating_add(claim_ttl_ms),
         )?;
-        let token = ClaimToken::mint();
+        let token = token.clone();
         let bound = token.clone();
         let id = id.as_str().to_owned();
         let row = self
@@ -671,10 +673,13 @@ impl ObligationLedger for SqliteArtifactCleanupLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
-        self.for_id(id)?.claim(id, now_ms, claim_ttl_ms).await
+        self.for_id(id)?
+            .claim(id, token, now_ms, claim_ttl_ms)
+            .await
     }
 
     async fn settle(

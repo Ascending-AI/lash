@@ -214,7 +214,12 @@ impl Deployment {
     async fn deliver(&self, kind: ObligationKind, id: &ObligationId) {
         let ledger = self.backend.obligation_ledger(kind);
         let claimed = ledger
-            .claim(id, self.now(), 60_000)
+            .claim(
+                id,
+                &lash_core::store::ClaimToken::mint(),
+                self.now(),
+                60_000,
+            )
             .await
             .expect("claim")
             .expect("due");
@@ -430,7 +435,12 @@ async fn a_lapsed_claim_is_retaken_within_its_bound() {
     deployment
         .backend
         .obligation_ledger(ObligationKind::SessionDelete)
-        .claim(&delete, claimed_at, policy.claim_ttl_ms)
+        .claim(
+            &delete,
+            &lash_core::store::ClaimToken::mint(),
+            claimed_at,
+            policy.claim_ttl_ms,
+        )
         .await
         .expect("claim")
         .expect("a relay that dies holding its claim");

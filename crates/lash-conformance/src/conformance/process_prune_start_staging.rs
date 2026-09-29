@@ -644,10 +644,11 @@ impl crate::ObligationLedger for RelayOnEnd {
     async fn claim(
         &self,
         id: &crate::ObligationId,
+        token: &crate::ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<crate::ClaimedObligation>, crate::StoreError> {
-        self.inner.claim(id, now_ms, claim_ttl_ms).await
+        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(

@@ -377,10 +377,23 @@ pub fn scope_close_obligation_id(session_id: &SessionId, root: &TurnId) -> Oblig
 pub struct ClaimToken(String);
 
 impl ClaimToken {
-    /// A fresh token.
+    /// A fresh token: a claimant that cannot come back to its claim (a
+    /// relay pass, a producer's in-process attempt).
     #[must_use]
     pub fn mint() -> Self {
         Self(uuid::Uuid::new_v4().simple().to_string())
+    }
+
+    /// The token `claimant` claims obligation `id` under: the same whenever
+    /// the same claimant derives it, so a claimant that reruns after an
+    /// interruption (a journaled step whose answer was lost) finds its own
+    /// claim again through [`ObligationLedger::claim`]. `claimant` names one
+    /// claimant for the life of the obligation — a journaled step's stable
+    /// identity — and never a pass or a process, so a claim another relay
+    /// retook, which carries that relay's minted token, is never its own.
+    #[must_use]
+    pub fn derive(claimant: &str, id: &ObligationId) -> Self {
+        Self(format!("{claimant}@{id}"))
     }
 
     /// The token stored as `text`.
@@ -578,11 +591,18 @@ pub trait ObligationLedger: Send + Sync {
         limit: NonZeroUsize,
     ) -> Result<Vec<ClaimedObligation>, StoreError>;
 
-    /// Claim `id` for immediate delivery. `None` unless it is `due` (at any
-    /// time: a producer's own attempt does not wait for a backoff).
+    /// Claim `id` under the caller's `token` for a delivery it runs itself,
+    /// held for `claim_ttl_ms`: a `due` row at any time (a producer's own
+    /// attempt does not wait for a backoff), or a claim `token` already
+    /// holds. The second is a claimant re-deriving its own claim after an
+    /// interruption took the answer of the claim that stamped it (ADR 0109
+    /// §1.3): the claim's expiry is refreshed and its attempt count kept.
+    /// `None` otherwise: the row is delivered, stalled, or claimed under
+    /// another token, so a claim some other relay retook stays its own.
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError>;

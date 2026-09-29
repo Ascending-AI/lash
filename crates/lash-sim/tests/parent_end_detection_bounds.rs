@@ -285,7 +285,12 @@ async fn a_lapsed_claim_is_retaken_on_the_next_tick() {
     let claimed_at = world.clock.timestamp_ms();
     let stale = world
         .ledger
-        .claim(&obligation, claimed_at, ttl_ms)
+        .claim(
+            &obligation,
+            &lash_core::store::ClaimToken::mint(),
+            claimed_at,
+            ttl_ms,
+        )
         .await
         .expect("claim the due obligation")
         .expect("a due obligation claims");
@@ -501,7 +506,12 @@ async fn the_due_index_serves_the_earliest_due_row_first() {
 
     let claim_a = world
         .ledger
-        .claim(&obligation_a, world.clock.timestamp_ms(), 60_000)
+        .claim(
+            &obligation_a,
+            &lash_core::store::ClaimToken::mint(),
+            world.clock.timestamp_ms(),
+            60_000,
+        )
         .await
         .expect("claim a")
         .expect("a is due");

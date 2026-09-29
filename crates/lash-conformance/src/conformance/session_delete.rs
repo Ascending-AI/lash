@@ -42,7 +42,7 @@ async fn settle_by_hand(
     now_ms: u64,
 ) {
     let claimed = ledger
-        .claim(id, now_ms, 60_000)
+        .claim(id, &crate::store::ClaimToken::mint(), now_ms, 60_000)
         .await
         .expect("claim the obligation")
         .expect("the obligation is due");
@@ -247,7 +247,7 @@ pub async fn session_delete_counts_only_the_sessions_undelivered_cleanup(
     )
     .await;
     plan_ledger
-        .claim(&plans[2], now, 60_000)
+        .claim(&plans[2], &crate::store::ClaimToken::mint(), now, 60_000)
         .await
         .expect("claim the drain's plan")
         .expect("the drain's plan is due");

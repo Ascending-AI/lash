@@ -173,7 +173,12 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
         out.push(format!("settle {alias} -> {outcome:?}"));
     }
     let retried = ledger
-        .claim(&ids["b"], FAR + 1_000, 60_000)
+        .claim(
+            &ids["b"],
+            &lash_core::store::ClaimToken::mint(),
+            FAR + 1_000,
+            60_000,
+        )
         .await
         .expect("claim immediately")
         .expect("a due row is claimed immediately, backoff or not");
@@ -182,7 +187,12 @@ async fn ingress_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
         retried.attempts
     ));
     let again = ledger
-        .claim(&ids["b"], FAR + 1_001, 60_000)
+        .claim(
+            &ids["b"],
+            &lash_core::store::ClaimToken::mint(),
+            FAR + 1_001,
+            60_000,
+        )
         .await
         .expect("claim a claimed row");
     out.push(format!("claim b again -> {}", again.is_some()));

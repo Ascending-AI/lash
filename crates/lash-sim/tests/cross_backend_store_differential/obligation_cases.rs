@@ -153,7 +153,12 @@ async fn ledger_transcript(stores: &dyn StoreSet, prefix: &str) -> Transcript {
         .collect::<Vec<_>>();
     out.push(format!("claim_due before backoff -> {early:?}"));
     let immediate = ledger
-        .claim(&ids["b"], T0 + 1_000, 60_000)
+        .claim(
+            &ids["b"],
+            &lash_core::store::ClaimToken::mint(),
+            T0 + 1_000,
+            60_000,
+        )
         .await
         .expect("immediate claim");
     out.push(format!(
@@ -480,7 +485,12 @@ async fn process_start_transcript(
         &residue.digest(&process_ids()).await,
     ));
     let immediate = ledger
-        .claim(&ids["b"], T0 + 1_000, 60_000)
+        .claim(
+            &ids["b"],
+            &lash_core::store::ClaimToken::mint(),
+            T0 + 1_000,
+            60_000,
+        )
         .await
         .expect("immediate claim");
     out.push(format!(

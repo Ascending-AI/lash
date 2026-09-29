@@ -47,10 +47,11 @@ impl<L: ?Sized + ObligationLedger> ObligationLedger for DuePasses<L> {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> std::result::Result<Option<ClaimedObligation>, StoreError> {
-        self.inner.claim(id, now_ms, claim_ttl_ms).await
+        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(

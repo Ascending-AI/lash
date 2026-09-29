@@ -180,11 +180,30 @@ pub struct CrashSite {
 pub struct CrashPlan {
     rules: Vec<CrashRule>,
     random: Option<RandomCrashes>,
+    /// Scripted cancellations: a rule's point names the frame before which
+    /// the server cancels the invocation instead of dropping its attempt.
+    cancels: Vec<CrashRule>,
 }
 
 impl CrashPlan {
     pub fn add(&mut self, rule: CrashRule) {
         self.rules.push(rule);
+    }
+
+    pub fn add_cancel(&mut self, rule: CrashRule) {
+        self.cancels.push(rule);
+    }
+
+    /// Whether the server cancels the invocation before it applies `site`'s
+    /// frame. The attempt lives on: the frame is applied after the cancel
+    /// signal, so the handler meets the cancellation ahead of that frame's
+    /// answer.
+    pub fn should_cancel(&mut self, site: &CrashSite) -> bool {
+        if let Some(rule) = self.cancels.iter_mut().find(|rule| rule.matches(site)) {
+            rule.times -= 1;
+            return true;
+        }
+        false
     }
 
     pub fn set_random(&mut self, random: Option<RandomCrashes>) {
@@ -194,6 +213,7 @@ impl CrashPlan {
     pub fn clear(&mut self) {
         self.rules.clear();
         self.random = None;
+        self.cancels.clear();
     }
 
     /// Whether the attempt dies before the server applies `site`'s frame.

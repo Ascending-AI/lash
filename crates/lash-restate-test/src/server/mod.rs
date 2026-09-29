@@ -970,6 +970,16 @@ impl RestateTestServer {
         self.shared.lock().crash_plan.add(rule);
     }
 
+    /// Script a cancellation: when an attempt sends the frame `rule`'s point
+    /// names (the crash points' vocabulary), the server cancels the
+    /// invocation as the admin API does just before it applies that frame.
+    /// The attempt is not dropped: its SDK meets the cancel signal ahead of
+    /// the frame's answer, so a cancel before a run's result is the engine's
+    /// cancellation taking that run's answer after its closure ran.
+    pub fn cancel_on(&self, rule: CrashRule) {
+        self.shared.lock().crash_plan.add_cancel(rule);
+    }
+
     /// Crash attempts at random frames, seeded by the server's seed.
     pub fn crash_randomly(&self, random: Option<RandomCrashes>) {
         self.shared.lock().crash_plan.set_random(random);

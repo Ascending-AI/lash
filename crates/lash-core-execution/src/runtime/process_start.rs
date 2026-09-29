@@ -56,9 +56,14 @@ impl ProcessStartRelay {
     /// Claim `process_id`'s armed start row for a delivery the caller runs
     /// itself and settles with [`Self::settle_start`] — the own-commit rule
     /// of [`Self::deliver_start`] split across an engine that must journal
-    /// each step (ADR 0109 §1.5). The token is journaled by the caller and
-    /// handed back for the settle; `None` means the row was not due — a
-    /// prior attempt claimed, delivered or stalled it.
+    /// each step (ADR 0109 §1.5). The claim's token is derived from
+    /// `claimant`, the journaled step's stable identity, so the step run
+    /// again after an interruption took its answer (the engine cancelling
+    /// the invocation at the claim's await) derives the same token and takes
+    /// its own claim back rather than stranding it until it lapses. The
+    /// token is journaled by the caller and handed back for the settle;
+    /// `None` means the row is neither due nor this claimant's — another
+    /// relay claimed, delivered or stalled it.
     ///
     /// # Errors
     ///
@@ -66,11 +71,14 @@ impl ProcessStartRelay {
     pub async fn claim_start(
         &self,
         process_id: &crate::ProcessId,
+        claimant: &str,
     ) -> Result<Option<ClaimToken>, crate::StoreError> {
+        let id = process_start_obligation_id(process_id);
         let claimed = self
             .ledger
             .claim(
-                &process_start_obligation_id(process_id),
+                &id,
+                &ClaimToken::derive(claimant, &id),
                 self.clock.timestamp_ms(),
                 self.policy().claim_ttl_ms,
             )

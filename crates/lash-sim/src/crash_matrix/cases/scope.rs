@@ -110,7 +110,12 @@ async fn claim_scope_close_before_restart(
         Some(ObligationState::Claimed) => {}
         Some(ObligationState::Due) => {
             if ledger
-                .claim(&id, world.now_ms(), 60_000)
+                .claim(
+                    &id,
+                    &lash_core::store::ClaimToken::mint(),
+                    world.now_ms(),
+                    60_000,
+                )
                 .await
                 .map_err(|error| format!("claim scope-close obligation `{id}`: {error}"))?
                 .is_none()

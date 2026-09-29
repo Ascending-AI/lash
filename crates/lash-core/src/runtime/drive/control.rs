@@ -523,10 +523,11 @@ impl ObligationLedger for ClaimRecordingLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
-        let claimed = self.inner.claim(id, now_ms, claim_ttl_ms).await?;
+        let claimed = self.inner.claim(id, token, now_ms, claim_ttl_ms).await?;
         if let Some(obligation) = &claimed {
             self.record(obligation);
         }

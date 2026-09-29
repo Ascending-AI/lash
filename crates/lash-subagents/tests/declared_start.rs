@@ -71,6 +71,19 @@ impl lash_conformance::ConformanceTurnRunner for DoubleTurnRunner {
             .expect("the double crashes and redrives the law's turn");
     }
 
+    /// The double cancels the invocation whose run named `…{step}` proposes
+    /// its result, just before storing it.
+    fn cancel_at_step_answer(&self, step: &str) -> Option<lash_conformance::ScriptedCancels> {
+        let server = self.backend.server();
+        server.cancel_on(lash_restate_test::CrashRule::new(
+            lash_restate_test::CrashPoint::BeforeRunResultEnding {
+                suffix: step.to_owned(),
+            },
+        ));
+        let backend = self.backend.clone();
+        Some(Arc::new(move || backend.server().stats().scripted_cancels))
+    }
+
     /// Children run in the double's process workflow: the worker is
     /// installed there, and the runtime's own port only observes the
     /// registry that workflow writes terminals into.

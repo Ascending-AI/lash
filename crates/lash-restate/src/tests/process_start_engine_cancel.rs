@@ -111,13 +111,16 @@ pub(super) async fn a_cancel_at_the_registration_await_still_submits_the_registe
     );
 }
 
-/// FIG-4127: the cancellation lands on the claim's await after the claim was
-/// taken, and the token it withholds is lost. The start still submits the
-/// run; the lost claim lapses to the relay, which finds it submitted.
+/// FIG-4127, FIG-4131: the cancellation lands on the claim's await after the
+/// claim was taken, and withholds the token it answered. The start still
+/// submits the run, and the claim step run again re-derives the token and
+/// takes its own claim back, so the start settles the row `Delivered` before
+/// it returns — one claim, no lapse, no relay pass.
 #[tokio::test]
 pub(super) async fn a_cancel_at_the_claim_await_still_submits_the_start() {
     let start = CancelledStart::new().await;
     start.context.cancel_after_next_run("process-start-claim");
+    let began_ms = start.stores.clock.timestamp_ms();
 
     let outcome = start
         .run("engine-cancel-at-claim")
@@ -133,10 +136,23 @@ pub(super) async fn a_cancel_at_the_claim_await_still_submits_the_start() {
     let stored = the_only_process(start.stores.registry.as_ref()).await;
     assert_eq!(record.id, stored.id);
     assert!(stored.external_ref.is_some() && stored.cancel_request.is_none());
+    assert!(
+        start.stores.clock.timestamp_ms().saturating_sub(began_ms)
+            < lash_core::runtime::drive::relay::RelayPolicy::default().claim_ttl_ms,
+        "the start ran inside one claim lapse"
+    );
     assert_eq!(
-        start.start_obligation(&stored.id).await,
-        lash_core::store::ObligationState::Claimed,
-        "the claim whose token the cancellation withheld is the relay's to retake"
+        start
+            .stores
+            .start_ledger
+            .standing(&lash_core::store::process_start_obligation_id(&stored.id))
+            .await
+            .expect("read the start obligation"),
+        Some(lash_core::store::ObligationStanding {
+            state: lash_core::store::ObligationState::Delivered,
+            attempts: 1,
+        }),
+        "the rerun claim step takes back its own claim and the start delivers the row"
     );
 }
 

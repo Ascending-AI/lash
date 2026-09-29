@@ -87,7 +87,7 @@ async fn deliver_by_hand(
 ) {
     let ledger = core.backend.obligation_ledger(kind);
     let claimed = ledger
-        .claim(id, now_ms(), 60_000)
+        .claim(id, &lash_core::store::ClaimToken::mint(), now_ms(), 60_000)
         .await
         .expect("claim")
         .expect("due");

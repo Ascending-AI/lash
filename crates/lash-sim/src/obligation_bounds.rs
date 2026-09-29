@@ -333,6 +333,7 @@ async fn a_lapsed_claim_is_retaken_within_its_ttl_and_one_tick() {
             .obligation_ledger(ObligationKind::ControlIntent)
             .claim(
                 world.intent.obligation.as_ref().expect("armed"),
+                &lash_core::store::ClaimToken::mint(),
                 world.clock.timestamp_ms(),
                 policy.claim_ttl_ms,
             )

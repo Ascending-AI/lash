@@ -117,11 +117,12 @@ impl ObligationLedger for IngressLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
         for table in &self.tables {
-            if let Some(claimed) = table.ledger.claim(id, now_ms, claim_ttl_ms).await? {
+            if let Some(claimed) = table.ledger.claim(id, token, now_ms, claim_ttl_ms).await? {
                 return Ok(Some(claimed));
             }
         }

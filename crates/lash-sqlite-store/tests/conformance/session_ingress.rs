@@ -81,7 +81,12 @@ async fn admission_folds_the_producer_round_into_one_commit() {
     for claimed in &ingress_claims {
         assert!(
             ledger
-                .claim(&claimed.id, 0, 60_000)
+                .claim(
+                    &claimed.id,
+                    &lash_core_execution::store::ClaimToken::mint(),
+                    0,
+                    60_000
+                )
                 .await
                 .expect("reclaim the obligation")
                 .is_none(),

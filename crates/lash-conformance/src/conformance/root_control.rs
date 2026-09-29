@@ -1771,7 +1771,12 @@ pub async fn a_parked_session_is_asked_to_drive_only_through_its_ingress_obligat
     // unsettled.
     let claim = f
         .intents
-        .claim(cancel.obligation.as_ref().expect("armed"), 3, 0)
+        .claim(
+            cancel.obligation.as_ref().expect("armed"),
+            &crate::store::ClaimToken::mint(),
+            3,
+            0,
+        )
         .await
         .expect("claim")
         .expect("due");
@@ -2162,7 +2167,7 @@ pub async fn a_delivery_whose_claim_was_retaken_never_settles_its_intent(
     // A relay claims it with a claim that lapses at once...
     let stale = f
         .intents
-        .claim(&id, 3, 0)
+        .claim(&id, &crate::store::ClaimToken::mint(), 3, 0)
         .await
         .expect("claim")
         .expect("due");

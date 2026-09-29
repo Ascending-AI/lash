@@ -132,6 +132,7 @@ impl ObligationLedger for GatedScopeCloseLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
@@ -144,7 +145,7 @@ impl ObligationLedger for GatedScopeCloseLedger {
             }
             self.gate.waiting.fetch_sub(1, Ordering::SeqCst);
         }
-        let claimed = self.inner.claim(id, now_ms, claim_ttl_ms).await?;
+        let claimed = self.inner.claim(id, token, now_ms, claim_ttl_ms).await?;
         self.gate.grant(&claimed);
         Ok(claimed)
     }

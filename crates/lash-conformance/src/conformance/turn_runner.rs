@@ -163,6 +163,10 @@ pub enum SegmentRecovery {
     SubstrateLost,
 }
 
+/// How many cancellations a [`ConformanceTurnRunner::cancel_at_step_answer`]
+/// script has delivered.
+pub type ScriptedCancels = Arc<dyn Fn() -> u64 + Send + Sync>;
+
 /// Runs a [`ConformanceTurnAttempt`] where the tier runs turns.
 #[async_trait::async_trait]
 pub trait ConformanceTurnRunner: Send + Sync {
@@ -213,6 +217,16 @@ pub trait ConformanceTurnRunner: Send + Sync {
         _crash: ConformanceCrash,
     ) {
         panic!("this tier's turn runner cannot crash a turn from outside its attempt");
+    }
+
+    /// Scripts the tier's engine to cancel the next invocation whose
+    /// journaled step's name ends with `step`, just before the engine records
+    /// that step's answer: the engine's cancellation taking the answer of a
+    /// step whose closure already ran. Answers a count of the cancellations
+    /// the script delivered so far, or `None` when this runner's engine
+    /// cannot script one (a live server), and the law has nothing to force.
+    fn cancel_at_step_answer(&self, _step: &str) -> Option<ScriptedCancels> {
+        None
     }
 
     /// The law finished one scenario and reads nothing of it again. A tier

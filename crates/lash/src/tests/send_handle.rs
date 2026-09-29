@@ -452,12 +452,13 @@ impl lash_core::store::ObligationLedger for HeldScopeCloses {
     async fn claim(
         &self,
         id: &lash_core::store::ObligationId,
+        token: &lash_core::store::ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> std::result::Result<Option<lash_core::store::ClaimedObligation>, lash_core::StoreError>
     {
         self.held().await;
-        self.inner.claim(id, now_ms, claim_ttl_ms).await
+        self.inner.claim(id, token, now_ms, claim_ttl_ms).await
     }
 
     async fn settle(

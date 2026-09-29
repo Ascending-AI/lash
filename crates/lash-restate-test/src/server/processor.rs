@@ -113,6 +113,9 @@ pub struct Stats {
     pub suspensions: u64,
     pub retries: u64,
     pub crashes: u64,
+    /// Cancellations a [`cancel_on`](super::RestateTestServer::cancel_on)
+    /// rule delivered.
+    pub scripted_cancels: u64,
     pub timers_fired: u64,
 }
 
@@ -769,6 +772,10 @@ impl State {
         if self.crash_plan.should_crash(&site, draw) {
             self.crash(sh, key);
             return Flow::Stop;
+        }
+        if self.crash_plan.should_cancel(&site) {
+            self.stats.scripted_cancels += 1;
+            self.cancel(sh, key);
         }
         match self.apply_frame(sh, key, number, frame) {
             Ok(flow) => flow,

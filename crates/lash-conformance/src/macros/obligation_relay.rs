@@ -12,6 +12,11 @@ macro_rules! obligation_relay_tests {
         $crate::obligation_relay_tests!(@catalogue $fixture; [
             (arming_takes_only_an_idle_row, "obligation-arm"),
             (the_claim_token_fences_settlement, "obligation-fencing"),
+            (a_claimant_rederives_its_own_claim, "obligation-rederive"),
+            (
+                a_stale_claimant_cannot_take_back_a_retaken_claim,
+                "obligation-stale-claimant"
+            ),
             (a_retryable_failure_backs_off, "obligation-backoff"),
             (the_attempt_ceiling_stalls, "obligation-ceiling"),
             (

@@ -25,8 +25,9 @@ use lash_core::runtime::drive::relay::{
     DeliveryFailure, ObligationRelay, RelayPolicy, RelayVerdict, deliver_now, relay_due,
 };
 use lash_core::store::{
-    HolderId, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
-    ObligationSettlement, ObligationState, RecoveryLeaderStore, SettleOutcome, StallReason,
+    ClaimToken, HolderId, LeaseClaim, LeaseName, ObligationId, ObligationKey, ObligationKind,
+    ObligationLedger, ObligationSettlement, ObligationState, RecoveryLeaderStore, SettleOutcome,
+    StallReason,
 };
 use lash_core::testing::TestClock;
 use lash_sansio::SessionId;
@@ -363,6 +364,161 @@ pub async fn the_claim_token_fences_settlement(fixture: ObligationLawFixture) {
     );
 }
 
+/// A claimant re-derives its own claim (FIG-4131): a claim taken under a
+/// token the claimant derives is taken back by the same claimant after an
+/// interruption lost the claim's answer — its attempt count kept, its expiry
+/// refreshed — and settled at once, well before the claim would lapse. No
+/// other claimant's token takes it, live.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn a_claimant_rederives_its_own_claim(fixture: ObligationLawFixture) {
+    let ledger = ledger_of(&fixture);
+    let (key, id) = armed_session(&fixture, ledger.as_ref(), "rederive", T0).await;
+    let token = ClaimToken::derive("claim-step", &id);
+    let first = ledger
+        .claim(&id, &token, T0, 60_000)
+        .await
+        .expect("claim under the derived token")
+        .expect("a due row is claimed");
+    assert_eq!(
+        (first.attempts, &first.token, first.key.as_ref().ok()),
+        (1, &token, Some(&key))
+    );
+    // The claim's answer is lost; the claimant runs again, well inside the
+    // claim's lapse.
+    let again = ledger
+        .claim(
+            &id,
+            &ClaimToken::derive("claim-step", &id),
+            T0 + 1_000,
+            60_000,
+        )
+        .await
+        .expect("re-derive the claim")
+        .expect("the claimant takes its own claim back");
+    assert_eq!(
+        (again.attempts, &again.token),
+        (1, &token),
+        "re-deriving a claim is not a new attempt"
+    );
+    for other in [
+        ClaimToken::derive("another-claim-step", &id),
+        ClaimToken::mint(),
+    ] {
+        assert!(
+            ledger
+                .claim(&id, &other, T0 + 1_001, 60_000)
+                .await
+                .expect("another claimant's claim")
+                .is_none(),
+            "a live claim is not another claimant's"
+        );
+    }
+    assert!(
+        !ledger
+            .claim_due(T0 + 60_999, 60_000, page(64))
+            .await
+            .expect("a due pass inside the refreshed claim")
+            .iter()
+            .any(|claimed| claimed.id == id),
+        "re-deriving refreshed the claim's expiry, so no due pass retakes it"
+    );
+    assert_eq!(
+        ledger
+            .settle(&id, &token, ObligationSettlement::Delivered, T0 + 1_002)
+            .await
+            .expect("settle the re-derived claim"),
+        SettleOutcome::Applied
+    );
+    assert_eq!(
+        ledger.standing(&id).await.expect("standing after delivery"),
+        Some(crate::store::ObligationStanding {
+            state: ObligationState::Delivered,
+            attempts: 1,
+        }),
+        "delivered by the one claim, with no lapse and no retake"
+    );
+    assert!(
+        ledger
+            .claim(&id, &token, T0 + 1_003, 60_000)
+            .await
+            .expect("claim a delivered row")
+            .is_none(),
+        "a delivered row is nobody's to claim"
+    );
+}
+
+/// A claimant whose claim lapsed and was retaken cannot take it back or
+/// settle it (FIG-4131): re-derivation finds only a claim its own token still
+/// holds, so the fence of ADR 0109 stands. Once the retaking relay handed the
+/// row back due, the claimant's next claim is a new attempt.
+#[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
+pub async fn a_stale_claimant_cannot_take_back_a_retaken_claim(fixture: ObligationLawFixture) {
+    let ledger = ledger_of(&fixture);
+    let (_, id) = armed_session(&fixture, ledger.as_ref(), "stale-claimant", T0).await;
+    let stale = ClaimToken::derive("claim-step", &id);
+    ledger
+        .claim(&id, &stale, T0, 1_000)
+        .await
+        .expect("the first claim")
+        .expect("a due row is claimed");
+    let retaken = ledger
+        .claim_due(T0 + 1_000, 60_000, page(64))
+        .await
+        .expect("retake the lapsed claim")
+        .into_iter()
+        .find(|claimed| claimed.id == id)
+        .expect("the lapsed claim is retaken");
+    assert_eq!(retaken.attempts, 2);
+    assert_ne!(retaken.token, stale);
+    assert!(
+        ledger
+            .claim(&id, &stale, T0 + 1_001, 1_000)
+            .await
+            .expect("the stale claimant re-derives")
+            .is_none(),
+        "a retaken claim is not the stale claimant's to take back"
+    );
+    assert_eq!(
+        ledger
+            .settle(&id, &stale, ObligationSettlement::Delivered, T0 + 1_002)
+            .await
+            .expect("the stale claimant settles"),
+        SettleOutcome::ClaimLost,
+        "the stale claimant cannot settle the retaken claim"
+    );
+    assert_eq!(
+        ledger
+            .state(&id)
+            .await
+            .expect("state after the stale settle"),
+        Some(ObligationState::Claimed)
+    );
+    assert_eq!(
+        ledger
+            .settle(
+                &id,
+                &retaken.token,
+                ObligationSettlement::Retry {
+                    due_at_ms: T0 + 2_000,
+                    error: "retried".to_owned(),
+                },
+                T0 + 1_003,
+            )
+            .await
+            .expect("the retaking relay hands the row back"),
+        SettleOutcome::Applied
+    );
+    let fresh = ledger
+        .claim(&id, &stale, T0 + 1_004, 1_000)
+        .await
+        .expect("claim the due row")
+        .expect("a due row is claimed");
+    assert_eq!(
+        fresh.attempts, 3,
+        "a due row claimed again is a new attempt, whoever takes it"
+    );
+}
+
 /// A retryable failure hands the claim back due after the capped
 /// exponential backoff; the relay does not touch it before then.
 #[expect(clippy::expect_used, reason = "conformance law: each step is asserted")]
@@ -614,7 +770,12 @@ pub async fn a_rearm_returns_a_stalled_obligation_to_due(fixture: ObligationLawF
         "only a stalled obligation re-arms"
     );
     let reclaimed = ledger
-        .claim(&id, clock.timestamp_ms(), 60_000)
+        .claim(
+            &id,
+            &crate::store::ClaimToken::mint(),
+            clock.timestamp_ms(),
+            60_000,
+        )
         .await
         .expect("claim the re-armed obligation")
         .expect("a re-armed obligation is due");
@@ -704,7 +865,7 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
         let id = ingress_obligation_id(input.as_str());
         async move {
             ingress
-                .claim(&id, now, 3_600_000)
+                .claim(&id, &ClaimToken::mint(), now, 3_600_000)
                 .await
                 .expect("claim the obligation")
                 .expect("the obligation is due")
@@ -787,7 +948,7 @@ pub async fn withdrawing_an_open_input_delivers_its_ingress_obligation(
         );
         assert!(
             ingress
-                .claim(&id, now, 3_600_000)
+                .claim(&id, &ClaimToken::mint(), now, 3_600_000)
                 .await
                 .expect("claim the settled obligation")
                 .is_none(),

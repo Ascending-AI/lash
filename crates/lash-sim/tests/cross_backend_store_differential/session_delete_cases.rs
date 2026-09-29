@@ -97,6 +97,7 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
                 .obligation
                 .as_ref()
                 .expect("the close armed its obligation"),
+            &lash_core::store::ClaimToken::mint(),
             T0 + 1,
             60_000,
         )
@@ -201,7 +202,12 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
     ));
     let plan_ledger = stores.obligation_ledger(ObligationKind::ParentEnd);
     let claimed = plan_ledger
-        .claim(&plan_ids[0], T0, 60_000)
+        .claim(
+            &plan_ids[0],
+            &lash_core::store::ClaimToken::mint(),
+            T0,
+            60_000,
+        )
         .await
         .expect("claim")
         .expect("due");
@@ -216,7 +222,12 @@ async fn session_delete_transcript(stores: &dyn StoreSet, prefix: &str) -> Trans
         .expect("deliver the session scope's plan");
     let scope_ledger = stores.obligation_ledger(ObligationKind::ScopeClose);
     let claimed = scope_ledger
-        .claim(&scope_closes[0], T0, 60_000)
+        .claim(
+            &scope_closes[0],
+            &lash_core::store::ClaimToken::mint(),
+            T0,
+            60_000,
+        )
         .await
         .expect("claim")
         .expect("due");

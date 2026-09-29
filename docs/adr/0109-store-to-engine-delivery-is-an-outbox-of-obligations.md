@@ -108,8 +108,10 @@ CREATE INDEX idx_<table>_obligation_stalled ON <table>(obligation_id)
 The due read is `WHERE obligation_state IN ('due','claimed') AND
 obligation_due_at_ms <= :now ORDER BY obligation_due_at_ms, obligation_id
 LIMIT :n`, which also retakes a lapsed claim. PostgreSQL adds `FOR UPDATE SKIP
-LOCKED`. Claiming sets `claimed`, a fresh token, `attempts + 1` and
-`due_at = now + claim_ttl`. Rows are never read by scanning the table.
+LOCKED`. Claiming sets `claimed`, the claimant's token, `attempts + 1` and
+`due_at = now + claim_ttl`: a due pass mints a fresh token, and a claim by id
+takes the token its caller names (§1.3). Rows are never read by scanning the
+table.
 
 ### 1.2 Kinds
 
@@ -171,9 +173,11 @@ pub trait ObligationLedger: Send + Sync {
     /// returned claimed with `key: Err`, never failing the page.
     async fn claim_due(&self, now_ms: u64, claim_ttl_ms: u64, limit: NonZeroUsize)
         -> Result<Vec<ClaimedObligation>, StoreError>;
-    /// Claim one `due` row by id (immediate delivery). `None` if it is not due.
-    async fn claim(&self, id: &ObligationId, now_ms: u64, claim_ttl_ms: u64)
-        -> Result<Option<ClaimedObligation>, StoreError>;
+    /// Claim one row by id under the caller's `token`: a `due` row
+    /// (immediate delivery), or a claim `token` already holds (re-derived).
+    /// `None` otherwise.
+    async fn claim(&self, id: &ObligationId, token: &ClaimToken, now_ms: u64,
+        claim_ttl_ms: u64) -> Result<Option<ClaimedObligation>, StoreError>;
     /// Settle a claim; `ClaimLost` when the token no longer matches.
     async fn settle(&self, id: &ObligationId, token: &ClaimToken,
         settlement: ObligationSettlement, now_ms: u64) -> Result<SettleOutcome, StoreError>;
@@ -184,6 +188,23 @@ pub trait ObligationLedger: Send + Sync {
     async fn count_stalled(&self) -> Result<u64, StoreError>;
 }
 ```
+
+**Claims are re-derivable by their claimant (FIG-4131).** A claim by id
+names its claimant's token, and `ClaimToken::derive(claimant, id)` gives a
+claimant that can run again after an interruption the same token every time:
+a journaled step derives it from its own stable identity (its journal name).
+The by-id claim takes a `due` row, or takes back a claim that token already
+holds — its expiry refreshed, its attempt count kept, so it is the same
+attempt — and nothing else. A claimant whose claim's answer was lost (the
+engine cancelling its invocation at the claim's await) so finds its own claim
+again and settles it,
+rather than stranding it until it lapses and a due pass retakes it. The fence
+is unchanged: a due pass retaking a lapsed claim stamps a minted token, so
+the old claimant can neither take that claim back nor settle it, and a
+settle still compares the token. A claimant that runs once — a relay pass, a
+producer's in-process `deliver_now` — mints its token: nothing of it survives
+an interruption to claim again, and a producer's repeated attempt must find
+an earlier one's claim held and ask nothing (§3).
 
 Each store answers `StoreSet::obligation_ledger(kind) -> Arc<dyn
 ObligationLedger>` over per-table statements in
@@ -478,7 +499,9 @@ lost immediate attempt; the row is delivered once and nothing re-arms it.
 The engine's cancellation of that journaled claimant (its call's group
 decided the call's cancel) never ends a registered start short of its send
 (FIG-4127, FIG-4128): a step whose answer the cancellation took runs again,
-a claim whose token it took stays for the relay while the send goes on, and
+the claim step's token is derived from that step's journal name so its rerun
+takes back the claim the first run took and the start settles it `Delivered`
+at once (FIG-4131), and
 a cancellation at the send's own await proves nothing refused, so it is no
 `StartFailed` compensation. A `StartFailed` request that finds a run already
 holding the row goes to that run's `cancel` handler.
@@ -639,3 +662,40 @@ Item 14: `ArtifactCleanup` is an obligation kind in the landed vocabulary.
 cleanup and compatibility. Generation drain is not deployment drain; this ADR's
 status reflects implemented obligation lanes, while 1.0 compatibility work
 remains in ADR 0115.
+
+## Amendment (FIG-4131, 2026-09-29)
+
+Claims are re-derivable by their claimant (§1.3). `ObligationLedger::claim`
+takes the caller's token, and its statement takes a `due` row or a claim that
+token already holds, keeping the attempt count. The sites that claim a row
+and use it in separate steps were reviewed:
+
+- Restate's declared start (§3, *ProcessStart*) claims in a journaled step,
+  sends in a later one, and settles in a third. Its token is derived from the
+  claim step's journal name, so the step rerun after the engine's
+  cancellation took its answer takes the claim back, and the start settles
+  the row `Delivered` before it returns (law
+  `declared_start_cancel_at_the_claim_answer_delivers_the_start`, on the
+  double's in-process and replay tiers; the ledger laws
+  `a_claimant_rederives_its_own_claim` and
+  `a_stale_claimant_cannot_take_back_a_retaken_claim` on SQLite and
+  PostgreSQL).
+  Before this, the row stayed claimed until the lapse and a due pass
+  (`claimed_at + claim_ttl + T`, 71 s).
+- Ingress keeps a minted token. Its claim and ask run in the producer's own
+  call. A waiter attaches to, or starts, the drive `ingress:{item}:{attempt}`
+  of the claim's attempt by its idempotency key, so a stranded claim does not
+  hold it up. A producer's repeated attempt must not ask while an earlier
+  claim holds (the parked-session law, D19).
+- `ArtifactCleanup` rows are claimed only by due passes. A pass that stops
+  mid-row is gone with its process, so no claimant exists to re-derive it,
+  and the lapse is the recovery the fence requires.
+
+No production configuration lacks the recovery pass. Every deployment
+that serves Lash's Restate handlers installs `CoreSessionDriver`, which owns
+reconciliation, and its engine runs the tick every 10 s. Due claims run on
+every deployment on PostgreSQL and on the elected leader on SQLite. A
+`NoSessionWork` deployment runs no tick, but it runs no drives or starts
+either. A stranded claim was therefore a delay, not a leak. The claimant now
+settles its own claim, so the declared start does not depend on any
+recovery pass.

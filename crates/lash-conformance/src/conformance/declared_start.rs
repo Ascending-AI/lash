@@ -1306,6 +1306,62 @@ pub async fn declared_start_retention_hold_blocks_prune_until_consumed(tier: Dec
     );
 }
 
+/// FIG-4131: the engine's cancellation of the start's invocation takes the
+/// answer of the step that claimed the child's `ProcessStart` obligation,
+/// after its closure took the claim. The claim is the step's own: the step
+/// run again derives the same token and takes it back, so the start settles
+/// the row `Delivered` itself — well inside one claim lapse, with no relay
+/// pass retaking it — and the child it sent reaches its terminal.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn declared_start_cancel_at_the_claim_answer_delivers_the_start(tier: DeclaredStartTier) {
+    let Some(cancels) = tier.runner.cancel_at_step_answer(".process-start-claim:v1") else {
+        return;
+    };
+    let clock = tier.stores.clock();
+    let began_ms = clock.timestamp_ms();
+    let world = World::new(&tier, "cancel-at-claim-answer", Shape::one_child()).await;
+    let turn = world.run().await;
+    let child = world.only_child().await;
+    let child = world.terminal(&child.id).await;
+    assert_eq!(
+        cancels(),
+        1,
+        "the engine's cancellation took the claim step's answer once"
+    );
+    let start = tier
+        .stores
+        .obligation_ledger(crate::store::ObligationKind::ProcessStart)
+        .standing(&crate::store::process_start_obligation_id(&child.id))
+        .await
+        .expect("read the child's start obligation")
+        .expect("registration armed the child's start obligation");
+    let elapsed_ms = clock.timestamp_ms().saturating_sub(began_ms);
+    let lapse_ms = lash_core::drive::relay::RelayPolicy::default().claim_ttl_ms;
+    assert!(
+        elapsed_ms < lapse_ms,
+        "the law ran inside one claim lapse ({elapsed_ms} ms of {lapse_ms} ms), so no relay \
+         could have retaken the claim"
+    );
+    assert_eq!(
+        (start.state, start.attempts),
+        (crate::store::ObligationState::Delivered, 1),
+        "the rerun claim step took its own claim back and the start delivered the row, \
+         within the one claim: {child:#?}"
+    );
+    assert!(
+        child.external_ref.is_some(),
+        "the start sent the child's run: {child:#?}"
+    );
+    assert_eq!(
+        world.script.child_calls(),
+        1,
+        "the child ran once: {turn:?}"
+    );
+}
+
 /// A child that finishes before the parent parks on it still resolves the
 /// call: the parent is crashed when the child starts, and redriven only once
 /// the child's terminal is recorded.

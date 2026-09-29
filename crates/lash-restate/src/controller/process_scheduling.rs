@@ -89,10 +89,14 @@ where
     //
     // The engine's cancellation of this invocation (the call's group decided
     // its cancel) may surface at the claim's await after the claim was taken,
-    // and the token it withholds is lost. The claim is then retried, which
-    // takes the row only if the first closure never ran, and the start goes on
-    // to its send either way: the call's abandonment cancels the child, and
-    // only a submitted run can honour that cancel (FIG-4127).
+    // and withhold the token it answered. The claim then runs again, and the
+    // start goes on to its send either way: the call's abandonment cancels
+    // the child, and only a submitted run can honour that cancel (FIG-4127).
+    // The claim's token is derived from this claim step's identity, the same
+    // on both runs and on every replay, so the rerun takes back the claim the
+    // first run took and the settle below delivers the row at once rather
+    // than leaving it claimed until the relay retakes it (FIG-4131).
+    let claimant = process_command_journal_name(invocation, "process-start-claim");
     let claim_token = match &starts {
         Some(starts) => {
             let Json(token) = run_past_engine_cancel(
@@ -102,9 +106,10 @@ where
                 || {
                     let starts = Arc::clone(starts);
                     let claimed_id = process_id.clone();
+                    let claimant = claimant.clone();
                     async move {
                         starts
-                            .claim_start(&claimed_id)
+                            .claim_start(&claimed_id, &claimant)
                             .await
                             .map(|token| token.map(|token| token.as_str().to_owned()))
                             .map_err(|error| error.to_string())

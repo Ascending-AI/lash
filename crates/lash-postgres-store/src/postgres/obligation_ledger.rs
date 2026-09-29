@@ -437,6 +437,7 @@ impl ObligationLedger for PostgresObligationLedger {
     async fn claim(
         &self,
         id: &ObligationId,
+        token: &ClaimToken,
         now_ms: u64,
         claim_ttl_ms: u64,
     ) -> Result<Option<ClaimedObligation>, StoreError> {
@@ -445,7 +446,6 @@ impl ObligationLedger for PostgresObligationLedger {
             "obligation claim expiry",
             now_ms.saturating_add(claim_ttl_ms),
         )?;
-        let token = ClaimToken::mint();
         let row = sqlx::query(sql.claim.sql())
             .bind(id.as_str())
             .bind(token.as_str())
@@ -453,7 +453,7 @@ impl ObligationLedger for PostgresObligationLedger {
             .fetch_optional(&self.pool)
             .await
             .map_err(store_sqlx_error)?;
-        row.map(|row| read_claim(self.kind, &row, &token))
+        row.map(|row| read_claim(self.kind, &row, token))
             .transpose()
     }
 

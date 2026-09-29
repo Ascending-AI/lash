@@ -362,6 +362,7 @@ impl crate::store::ObligationLedger for UnavailableArtifactCleanup {
     async fn claim(
         &self,
         _: &crate::store::ObligationId,
+        _: &crate::store::ClaimToken,
         _: u64,
         _: u64,
     ) -> Result<Option<crate::store::ClaimedObligation>, crate::StoreError> {

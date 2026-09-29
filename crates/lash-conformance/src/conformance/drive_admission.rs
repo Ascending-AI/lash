@@ -297,7 +297,12 @@ pub async fn admission_delivers_every_row_it_binds(
         let ingress = Arc::clone(&ingress);
         async move {
             ingress
-                .claim(&ingress_obligation_id(&item), now, 3_600_000)
+                .claim(
+                    &ingress_obligation_id(&item),
+                    &crate::store::ClaimToken::mint(),
+                    now,
+                    3_600_000,
+                )
                 .await
                 .expect("claim the obligation")
                 .expect("the obligation is due")

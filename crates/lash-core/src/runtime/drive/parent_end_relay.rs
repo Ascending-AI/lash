@@ -227,6 +227,7 @@ mod tests {
         async fn claim(
             &self,
             id: &ObligationId,
+            _token: &ClaimToken,
             _now_ms: u64,
             _claim_ttl_ms: u64,
         ) -> Result<Option<ClaimedObligation>, StoreError> {

@@ -17,7 +17,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 
 use crate::Clock;
 use crate::store::{
-    ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
+    ClaimToken, ClaimedObligation, ObligationId, ObligationKey, ObligationKind, ObligationLedger,
     ObligationSettlement, SettleOutcome, StallReason, StoreError,
 };
 
@@ -264,9 +264,17 @@ pub async fn deliver_now(
     clock: &dyn Clock,
 ) -> Result<RelayVerdict, StoreError> {
     let policy = relay.policy();
+    // Each producer attempt is a claimant of its own: a repeated attempt
+    // finds the claim an earlier one took still held and asks nothing
+    // (ADR 0109 §3), so the token is minted, never derived.
     let Some(claimed) = relay
         .ledger()
-        .claim(id, clock.timestamp_ms(), policy.claim_ttl_ms)
+        .claim(
+            id,
+            &ClaimToken::mint(),
+            clock.timestamp_ms(),
+            policy.claim_ttl_ms,
+        )
         .await?
     else {
         return Ok(RelayVerdict::NotDue);
@@ -372,6 +380,7 @@ mod tests {
         async fn claim(
             &self,
             _id: &ObligationId,
+            _token: &ClaimToken,
             _now_ms: u64,
             _claim_ttl_ms: u64,
         ) -> Result<Option<ClaimedObligation>, StoreError> {

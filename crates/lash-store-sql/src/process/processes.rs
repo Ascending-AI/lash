@@ -166,12 +166,15 @@ crate::statements! {
                AND obligation_due_at_ms <= ?4
              RETURNING obligation_id, obligation_attempts, process_id";
 
-        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
-        /// its backoff: a producer's own immediate attempt.
+        /// Claim obligation `?1` under token `?2` until `?3`: a `due` row
+        /// whatever its backoff (a producer's own immediate attempt), or a
+        /// claim `?2` already holds, its claimant re-deriving it after an
+        /// interruption, which keeps its attempt count.
         obligation_claim = "UPDATE processes
              SET obligation_state = 'claimed', obligation_claim_token = ?2,
-                 obligation_attempts = obligation_attempts + 1, obligation_due_at_ms = ?3
-             WHERE obligation_id = ?1 AND obligation_state = 'due'
+                 obligation_attempts = obligation_attempts + CASE WHEN obligation_state = 'due' THEN 1 ELSE 0 END, obligation_due_at_ms = ?3
+             WHERE obligation_id = ?1 AND (obligation_state = 'due'
+                  OR (obligation_state = 'claimed' AND obligation_claim_token = ?2))
              RETURNING obligation_id, obligation_attempts, process_id";
 
         /// Settle claim `?2` on obligation `?1` delivered at `?3`.
@@ -284,12 +287,15 @@ crate::statements! {
                AND start_obligation_due_at_ms <= ?4
              RETURNING start_obligation_id, start_obligation_attempts, process_id";
 
-        /// Claim `due` obligation `?1` under token `?2` until `?3`, whatever
-        /// its backoff: a producer's own immediate attempt.
+        /// Claim obligation `?1` under token `?2` until `?3`: a `due` row
+        /// whatever its backoff (a producer's own immediate attempt), or a
+        /// claim `?2` already holds, its claimant re-deriving it after an
+        /// interruption, which keeps its attempt count.
         start_obligation_claim = "UPDATE processes
              SET start_obligation_state = 'claimed', start_obligation_claim_token = ?2,
-                 start_obligation_attempts = start_obligation_attempts + 1, start_obligation_due_at_ms = ?3
-             WHERE start_obligation_id = ?1 AND start_obligation_state = 'due'
+                 start_obligation_attempts = start_obligation_attempts + CASE WHEN start_obligation_state = 'due' THEN 1 ELSE 0 END, start_obligation_due_at_ms = ?3
+             WHERE start_obligation_id = ?1 AND (start_obligation_state = 'due'
+                  OR (start_obligation_state = 'claimed' AND start_obligation_claim_token = ?2))
              RETURNING start_obligation_id, start_obligation_attempts, process_id";
 
         /// Settle claim `?2` on obligation `?1` delivered at `?3`.

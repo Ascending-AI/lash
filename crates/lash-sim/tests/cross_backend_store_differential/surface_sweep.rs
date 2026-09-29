@@ -1836,7 +1836,12 @@ impl BackendRunner {
         let claimed = self
             .lifecycle_backend
             .obligation_ledger(lash_core::store::ObligationKind::ControlIntent)
-            .claim(&obligation, CLOSE_CLAIMED_AT_MS, 3_600_000)
+            .claim(
+                &obligation,
+                &lash_core::store::ClaimToken::mint(),
+                CLOSE_CLAIMED_AT_MS,
+                3_600_000,
+            )
             .await?
             .ok_or_else(|| StoreError::Backend("the close's obligation is not due".into()))?;
         self.surface.intent_claim = Some(claimed.token.clone());
