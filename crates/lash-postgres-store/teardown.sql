@@ -100,8 +100,6 @@ DROP TABLE IF EXISTS lash_process_observers CASCADE;
 
 DROP TABLE IF EXISTS lash_process_tombstones CASCADE;
 
-DROP TABLE IF EXISTS lash_process_artifact_cleanup CASCADE;
-
 DROP TABLE IF EXISTS lash_process_segment_handovers CASCADE;
 
 DROP TABLE IF EXISTS lash_parent_end_plans CASCADE;
@@ -120,9 +118,11 @@ DROP TABLE IF EXISTS lash_trigger_mutation_receipts CASCADE;
 
 DROP TABLE IF EXISTS lash_lashlang_artifacts CASCADE;
 
-DROP TABLE IF EXISTS lash_artifact_owners CASCADE;
+DROP TABLE IF EXISTS lash_artifact_referrer_edges CASCADE;
 
-DROP TABLE IF EXISTS lash_artifact_owner_retirements CASCADE;
+DROP TABLE IF EXISTS lash_artifact_referrer_fences CASCADE;
+
+DROP TABLE IF EXISTS lash_artifact_cleanup_obligations CASCADE;
 
 DROP TABLE IF EXISTS lash_release_stamp CASCADE;
 

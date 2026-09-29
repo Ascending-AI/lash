@@ -1,517 +1,309 @@
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+use lash_core_execution::{
+    ArtifactReferrer, ArtifactStoreError, ReferrerClaim, ResolvedArtifactCleanup,
+};
 use lash_store_sql::Dialect;
-use lash_store_sql::artifact::owner_retirements::OwnerRetirementStatements;
-use lash_store_sql::artifact::owners::OwnerStatements;
+use lash_store_sql::artifact::referrer_edges::ReferrerEdgeStatements;
+use lash_store_sql::artifact::referrer_fences::ReferrerFenceStatements;
+use sqlx::{Postgres, Row, Transaction};
 
 use crate::*;
 
 lash_store_sql::statements! {
-    /// `lash_artifact_owners` statements only PostgreSQL issues.
-    pub(crate) struct OwnerPostgresStatements @ "artifact_owner" {
-        /// Only PostgreSQL has them: SQLite reaches its bytes through the `artifact_refs`
-        /// pointer table and reclaims a blob instead.
-        delete_unowned_artifact = "DELETE FROM lashlang_artifacts AS artifact
+    pub(crate) struct ReferrerPostgresStatements @ "artifact_referrer_edge" {
+        delete_unreferenced = "DELETE FROM lashlang_artifacts AS artifact
              WHERE artifact.namespace = ?1 AND artifact.artifact_ref = ?2
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_owners AS owner
-                   WHERE owner.namespace = artifact.namespace
-                     AND owner.artifact_ref = artifact.artifact_ref
-               )";
-
-        /// The same reclaim over every reference in `?2`, issued once after a
-        /// retirement severs an owner's whole edge set.
-        delete_unowned_artifacts_for_owner = "DELETE FROM lashlang_artifacts AS artifact
-             WHERE artifact.namespace = ?1
-               AND artifact.artifact_ref = ANY(?2)
-               AND NOT EXISTS (
-                   SELECT 1 FROM artifact_owners AS owner
-                   WHERE owner.namespace = artifact.namespace
-                     AND owner.artifact_ref = artifact.artifact_ref
-               )";
-
-        /// Every artifact owner `?2`/`?3` holds in namespace `?1`, in a
-        /// stable order.
-        ///
-        /// The ordering is the fork, and it is load-bearing here: this
-        /// backend takes a per-artifact advisory lock for each row it reads,
-        /// so the read must hand them over in one order for every caller.
-        /// SQLite reclaims each reference under the single write lock it
-        /// already holds and has no lock order to keep.
-        select_owned_refs = "SELECT artifact_ref FROM artifact_owners
-             WHERE namespace = ?1 AND owner_kind = ?2 AND owner_id = ?3
-             ORDER BY artifact_ref";
+               AND NOT EXISTS (SELECT 1 FROM artifact_referrer_edges AS edge
+                   WHERE edge.namespace = artifact.namespace AND edge.artifact_ref = artifact.artifact_ref)";
     }
 }
 
 lash_store_sql::statements! {
-    /// `lash_lashlang_artifacts` statements. The table has no SQLite half —
-    /// SQLite reaches the same bytes through `blobs` and `artifact_refs` — so
-    /// every statement over it is PostgreSQL-only by construction.
     pub(crate) struct LashlangArtifactStatements @ "lashlang_artifact" {
-        /// Publish `?3` as artifact `?1`/`?2`. Publishing the same reference
-        /// twice is the same fact as publishing it once; the bytes are
-        /// content-addressed, so a conflict is the same bytes.
         insert_bytes = "INSERT INTO lashlang_artifacts (namespace, artifact_ref, artifact_bytes)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT (namespace, artifact_ref)
-             DO NOTHING";
-
-        /// Artifact `?1`/`?2`'s bytes.
-        ///
-        /// One name for one text: the publish path reads it back to prove
-        /// immutability and the get path reads it to serve a caller, and
-        /// before FIG-3387 those were two verbatim copies of this statement
-        /// in one module.
+             VALUES (?1, ?2, ?3) ON CONFLICT (namespace, artifact_ref) DO NOTHING";
         select_bytes = "SELECT artifact_bytes FROM lashlang_artifacts
              WHERE namespace = ?1 AND artifact_ref = ?2";
-
-        exists = "SELECT EXISTS (
-                 SELECT 1 FROM lashlang_artifacts
-                 WHERE namespace = ?1 AND artifact_ref = ?2
-             )";
-
-        /// One page of namespace `?1`'s artifacts after `?2`, at most `?3`
-        /// rows, ordered by the content-addressed reference so a preflight
-        /// walk resumes without a table-sized offset scan.
-        list_namespace_page = "SELECT artifact_ref, artifact_bytes
-             FROM lashlang_artifacts
-             WHERE namespace = ?1
-               AND (?2::text IS NULL OR artifact_ref > ?2::text)
-             ORDER BY artifact_ref
-             LIMIT ?3";
+        exists = "SELECT EXISTS (SELECT 1 FROM lashlang_artifacts
+             WHERE namespace = ?1 AND artifact_ref = ?2)";
+        list_namespace_page = "SELECT artifact_ref, artifact_bytes FROM lashlang_artifacts
+             WHERE namespace = ?1 AND (?2::text IS NULL OR artifact_ref > ?2::text)
+             ORDER BY artifact_ref LIMIT ?3";
     }
 }
 
-/// Every artifact-owner statement, rendered once.
 pub(crate) struct ArtifactSql {
-    /// `artifact_owners` statements both backends issue verbatim.
-    pub(crate) owners: OwnerStatements,
-    /// `artifact_owners` statements only PostgreSQL issues.
-    pub(crate) owners_postgres: OwnerPostgresStatements,
-    /// `artifact_owner_retirements` statements both backends issue verbatim.
-    pub(crate) retirements: OwnerRetirementStatements,
-    /// `lashlang_artifacts` statements, all of them PostgreSQL-only.
+    pub(crate) edges: ReferrerEdgeStatements,
+    pub(crate) fences: ReferrerFenceStatements,
+    pub(crate) postgres: ReferrerPostgresStatements,
     pub(crate) lashlang_artifacts: LashlangArtifactStatements,
 }
 
 static ARTIFACT_SQL: LazyLock<ArtifactSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     ArtifactSql {
-        owners: OwnerStatements::render(dialect),
-        owners_postgres: OwnerPostgresStatements::render(dialect),
-        retirements: OwnerRetirementStatements::render(dialect),
+        edges: ReferrerEdgeStatements::render(dialect),
+        fences: ReferrerFenceStatements::render(dialect),
+        postgres: ReferrerPostgresStatements::render(dialect),
         lashlang_artifacts: LashlangArtifactStatements::render(dialect),
     }
 });
 
-/// The artifact-owner statements, rendered once at first use.
 pub(crate) fn artifact_sql() -> &'static ArtifactSql {
     &ARTIFACT_SQL
 }
 
-/// Logical keyspaces multiplexed onto `lash_lashlang_artifacts`.
 pub(crate) const MODULE_ARTIFACT_NAMESPACE: &str = "lashlang_module";
-const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
+pub(crate) const PROCESS_ENV_NAMESPACE: &str = "process_execution_env";
 
-/// A refusal raised inside the shared artifact-owner helpers, kept typed so
-/// both the lashlang and the process-execution-env boundaries classify it by
-/// variant rather than by message text.
-enum ArtifactStoreFailure {
-    /// The write named an owner a permanent retirement fence has closed.
-    OwnerRetired,
-    /// A transfer named a destination owner already fenced by retirement.
-    DestinationOwnerRetired,
-    /// A transfer found neither the staging owner's edge nor the
-    /// destination's.
-    StagingEdgeMissing { artifact: String },
-    /// Any other backend failure; the message is the whole diagnostic.
-    Backend(String),
+fn backend(error: impl ToString) -> ArtifactStoreError {
+    ArtifactStoreError::Backend(error.to_string())
 }
 
-impl ArtifactStoreFailure {
-    fn into_plugin_error(self) -> lash_core_execution::PluginError {
-        match self {
-            Self::OwnerRetired => {
-                lash_core_execution::runtime::process::artifact_owner_retired_error()
-            }
-            Self::DestinationOwnerRetired => {
-                lash_core_execution::runtime::process::artifact_destination_owner_retired_error()
-            }
-            Self::StagingEdgeMissing { artifact } => {
-                lash_core_execution::runtime::process::artifact_staging_edge_missing_error(artifact)
-            }
-            Self::Backend(message) => lash_core_execution::PluginError::Session(message),
-        }
-    }
+pub(crate) async fn lock_referrer_tx(
+    conn: &mut sqlx::PgConnection,
+    referrer: &ArtifactReferrer,
+) -> Result<(), sqlx::Error> {
+    let key = format!(
+        "lash-artifact-referrer:{}:{}",
+        referrer.kind().as_str(),
+        referrer.canonical_id()
+    );
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind(key)
+    .execute(conn)
+    .await
+    .map(|_| ())
+}
 
-    fn into_artifact_store_error(self) -> lash_core_execution::ArtifactStoreError {
-        match self {
-            Self::OwnerRetired => lash_core_execution::ArtifactStoreError::OwnerRetired,
-            Self::DestinationOwnerRetired => {
-                lash_core_execution::ArtifactStoreError::DestinationOwnerRetired
-            }
-            Self::StagingEdgeMissing { artifact } => {
-                lash_core_execution::ArtifactStoreError::StagingEdgeMissing { artifact }
-            }
-            Self::Backend(message) => lash_core_execution::ArtifactStoreError::Backend(message),
-        }
-    }
+async fn lock_artifact_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    namespace: &str,
+    artifact_ref: &str,
+) -> Result<(), ArtifactStoreError> {
+    let key = format!("lash-artifact:{namespace}:{artifact_ref}");
+    sqlx::query(
+        crate::connection_sql::connection_sql()
+            .lock_xact_by_text
+            .sql(),
+    )
+    .bind(key)
+    .execute(&mut **tx)
+    .await
+    .map_err(backend)?;
+    Ok(())
+}
+
+async fn is_fenced_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    referrer: &ArtifactReferrer,
+) -> Result<bool, ArtifactStoreError> {
+    sqlx::query_scalar(artifact_sql().fences.select_is_fenced.sql())
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(backend)
 }
 
 impl PostgresLashlangArtifactStore {
-    async fn lock_owner(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        owner_kind: &str,
-        owner_id: &str,
-    ) -> Result<(), sqlx::Error> {
-        let key = format!("lash-artifact-owner:{owner_kind}:{owner_id}");
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(key)
-        .execute(&mut **tx)
-        .await
-        .map(|_| ())
-    }
-
-    /// Serialize every mutation of one logical artifact at a stable PostgreSQL
-    /// advisory-lock key. Row locks are insufficient because both the bytes row
-    /// and its final owner edge may legitimately disappear during release.
-    async fn lock_artifact(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        namespace: &str,
-        artifact_ref: &str,
-    ) -> Result<(), sqlx::Error> {
-        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
-        sqlx::query(
-            crate::connection_sql::connection_sql()
-                .lock_xact_by_text
-                .sql(),
-        )
-        .bind(key)
-        .execute(&mut **tx)
-        .await
-        .map(|_| ())
-    }
-
-    async fn publish_namespaced_bytes(
+    async fn write_namespaced(
         &self,
         namespace: &str,
         artifact_ref: &str,
-        bytes: &[u8],
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreFailure> {
-        let (owner_kind, owner_id) = owner
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut tx = self
-            .pool
-            .begin()
+        bytes: Option<&[u8]>,
+        claim: &ReferrerClaim,
+    ) -> Result<(), ArtifactStoreError> {
+        let mut tx = self.pool.begin().await.map_err(backend)?;
+        lock_referrer_tx(&mut tx, claim.referrer())
             .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_owner(&mut tx, owner_kind, &owner_id)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_artifact(&mut tx, namespace, artifact_ref)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let retired: bool = sqlx::query_scalar(artifact_sql().retirements.select_is_retired.sql())
-            .bind(owner_kind)
-            .bind(&owner_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if retired {
-            return Err(ArtifactStoreFailure::OwnerRetired);
+            .map_err(backend)?;
+        if is_fenced_tx(&mut tx, claim.referrer()).await? {
+            return Err(ArtifactStoreError::ReferrerEnded {
+                referrer: claim.referrer().clone(),
+            });
         }
-        sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(bytes)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let stored: Vec<u8> =
-            sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+        lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
+        if let Some(cleanup) = claim.guard_cleanup() {
+            let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+            crate::obligation_ledger::arm_cleanup_tx(&mut tx, &cleanup, now)
+                .await
+                .map_err(ArtifactStoreError::from)?;
+        }
+        if let Some(bytes) = bytes {
+            sqlx::query(artifact_sql().lashlang_artifacts.insert_bytes.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .bind(bytes)
+                .execute(&mut *tx)
+                .await
+                .map_err(backend)?;
+            let stored: Vec<u8> =
+                sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
+                    .bind(namespace)
+                    .bind(artifact_ref)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .map_err(backend)?;
+            if stored != bytes {
+                return Err(ArtifactStoreError::Immutable {
+                    artifact_ref: artifact_ref.to_owned(),
+                });
+            }
+        } else {
+            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
                 .bind(namespace)
                 .bind(artifact_ref)
                 .fetch_one(&mut *tx)
                 .await
-                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if stored != bytes {
-            return Err(ArtifactStoreFailure::Backend(format!(
-                "artifact `{artifact_ref}` in namespace `{namespace}` is immutable"
-            )));
+                .map_err(backend)?;
+            if !exists {
+                return Err(ArtifactStoreError::ArtifactMissing {
+                    artifact_ref: artifact_ref.to_owned(),
+                });
+            }
         }
-        sqlx::query(artifact_sql().owners.insert_edge.sql())
+        sqlx::query(artifact_sql().edges.insert_edge.sql())
             .bind(namespace)
             .bind(artifact_ref)
-            .bind(owner_kind)
-            .bind(owner_id)
+            .bind(claim.referrer().kind().as_str())
+            .bind(claim.referrer().canonical_id())
             .execute(&mut *tx)
             .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
+            .map_err(backend)?;
+        tx.commit().await.map_err(backend)
     }
 
-    async fn get_namespaced_bytes(
+    async fn end_namespaced(
+        &self,
+        namespace: &str,
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        let mut tx = self.pool.begin().await.map_err(backend)?;
+        let mut referrers: Vec<ArtifactReferrer> = cleanup
+            .carries
+            .iter()
+            .map(|carry| carry.to.clone())
+            .collect();
+        referrers.push(cleanup.referrer.clone());
+        referrers.sort_by_key(|referrer| {
+            format!(
+                "lash-artifact-referrer:{}:{}",
+                referrer.kind().as_str(),
+                referrer.canonical_id()
+            )
+        });
+        referrers.dedup();
+        for referrer in &referrers {
+            lock_referrer_tx(&mut tx, referrer).await.map_err(backend)?;
+        }
+        let edges = sqlx::query(
+            artifact_sql()
+                .edges
+                .select_referrer_edges_in_namespace
+                .sql(),
+        )
+        .bind(namespace)
+        .bind(cleanup.referrer.kind().as_str())
+        .bind(cleanup.referrer.canonical_id())
+        .fetch_all(&mut *tx)
+        .await
+        .map_err(backend)?;
+        let source_refs: BTreeSet<String> = edges
+            .iter()
+            .map(|row| row.try_get::<String, _>(1).map_err(backend))
+            .collect::<Result<_, _>>()?;
+        let all_refs: BTreeSet<String> = source_refs
+            .iter()
+            .cloned()
+            .chain(
+                cleanup
+                    .carries
+                    .iter()
+                    .map(|carry| carry.artifact.artifact_ref.clone()),
+            )
+            .collect();
+        for artifact_ref in &all_refs {
+            lock_artifact_tx(&mut tx, namespace, artifact_ref).await?;
+        }
+        let now = crate::support::postgres_transaction_epoch_ms(&mut tx)
+            .await
+            .map_err(ArtifactStoreError::from)?;
+        sqlx::query(artifact_sql().fences.insert_fence.sql())
+            .bind(cleanup.referrer.kind().as_str())
+            .bind(cleanup.referrer.canonical_id())
+            .bind(crate::support::clamp_epoch_ms(now))
+            .execute(&mut *tx)
+            .await
+            .map_err(backend)?;
+        for carry in &cleanup.carries {
+            if is_fenced_tx(&mut tx, &carry.to).await? {
+                continue;
+            }
+            let artifact_ref = &carry.artifact.artifact_ref;
+            let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(backend)?;
+            if !exists {
+                return Err(ArtifactStoreError::CarryArtifactMissing {
+                    artifact_ref: artifact_ref.clone(),
+                    to: carry.to.clone(),
+                });
+            }
+            sqlx::query(artifact_sql().edges.insert_edge.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .bind(carry.to.kind().as_str())
+                .bind(carry.to.canonical_id())
+                .execute(&mut *tx)
+                .await
+                .map_err(backend)?;
+        }
+        sqlx::query(
+            artifact_sql()
+                .edges
+                .delete_referrer_edges_in_namespace
+                .sql(),
+        )
+        .bind(namespace)
+        .bind(cleanup.referrer.kind().as_str())
+        .bind(cleanup.referrer.canonical_id())
+        .execute(&mut *tx)
+        .await
+        .map_err(backend)?;
+        for artifact_ref in &source_refs {
+            sqlx::query(artifact_sql().postgres.delete_unreferenced.sql())
+                .bind(namespace)
+                .bind(artifact_ref)
+                .execute(&mut *tx)
+                .await
+                .map_err(backend)?;
+        }
+        tx.commit().await.map_err(backend)
+    }
+
+    async fn get_namespaced(
         &self,
         namespace: &str,
         artifact_ref: &str,
-    ) -> Result<Option<Vec<u8>>, sqlx::Error> {
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         sqlx::query_scalar(artifact_sql().lashlang_artifacts.select_bytes.sql())
             .bind(namespace)
             .bind(artifact_ref)
             .fetch_optional(&self.pool)
             .await
-    }
-
-    async fn retain_namespaced_bytes(
-        &self,
-        namespace: &str,
-        artifact_ref: &str,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreFailure> {
-        let (owner_kind, owner_id) = owner
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_owner(&mut tx, owner_kind, &owner_id)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_artifact(&mut tx, namespace, artifact_ref)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let retired: bool = sqlx::query_scalar(artifact_sql().retirements.select_is_retired.sql())
-            .bind(owner_kind)
-            .bind(&owner_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if retired {
-            return Err(ArtifactStoreFailure::OwnerRetired);
-        }
-        let exists: bool = sqlx::query_scalar(artifact_sql().lashlang_artifacts.exists.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if !exists {
-            return Err(ArtifactStoreFailure::Backend(format!(
-                "missing artifact `{artifact_ref}`"
-            )));
-        }
-        sqlx::query(artifact_sql().owners.insert_edge.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(owner_kind)
-            .bind(owner_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
-    }
-
-    async fn transfer_namespaced_owner(
-        &self,
-        namespace: &str,
-        artifact_ref: &str,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreFailure> {
-        let (from_kind, from_id) = from
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let (to_kind, to_id) = to
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut locks = [(from_kind, from_id.as_str()), (to_kind, to_id.as_str())];
-        locks.sort_unstable();
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        for (kind, id) in locks {
-            Self::lock_owner(&mut tx, kind, id)
-                .await
-                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        }
-        Self::lock_artifact(&mut tx, namespace, artifact_ref)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let retired: bool = sqlx::query_scalar(artifact_sql().retirements.select_is_retired.sql())
-            .bind(to_kind)
-            .bind(&to_id)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if retired {
-            return Err(ArtifactStoreFailure::DestinationOwnerRetired);
-        }
-        let source_exists: bool =
-            sqlx::query_scalar(artifact_sql().owners.select_edge_exists.sql())
-                .bind(namespace)
-                .bind(artifact_ref)
-                .bind(from_kind)
-                .bind(&from_id)
-                .fetch_one(&mut *tx)
-                .await
-                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        if !source_exists {
-            let destination_exists: bool =
-                sqlx::query_scalar(artifact_sql().owners.select_edge_exists.sql())
-                    .bind(namespace)
-                    .bind(artifact_ref)
-                    .bind(to_kind)
-                    .bind(&to_id)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-            if destination_exists {
-                tx.commit()
-                    .await
-                    .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-                return Ok(());
-            }
-            return Err(ArtifactStoreFailure::StagingEdgeMissing {
-                artifact: format!("artifact `{artifact_ref}`"),
-            });
-        }
-        sqlx::query(artifact_sql().owners.insert_edge.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(to_kind)
-            .bind(&to_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        sqlx::query(artifact_sql().owners.delete_edge.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(from_kind)
-            .bind(from_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
-    }
-
-    async fn release_namespaced_owner(
-        &self,
-        namespace: &str,
-        artifact_ref: &str,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreFailure> {
-        let (owner_kind, owner_id) = owner
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_owner(&mut tx, owner_kind, &owner_id)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_artifact(&mut tx, namespace, artifact_ref)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        sqlx::query(artifact_sql().owners.delete_edge.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .bind(owner_kind)
-            .bind(owner_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        sqlx::query(artifact_sql().owners_postgres.delete_unowned_artifact.sql())
-            .bind(namespace)
-            .bind(artifact_ref)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
-    }
-
-    async fn retire_namespaced_owner(
-        &self,
-        namespace: &str,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), ArtifactStoreFailure> {
-        if !matches!(owner, lash_core_execution::ArtifactOwner::Execution(_)) {
-            return Err(ArtifactStoreFailure::Backend(
-                "only execution artifact owners can be retired".to_string(),
-            ));
-        }
-        let (owner_kind, owner_id) = owner
-            .storage_parts()
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        Self::lock_owner(&mut tx, owner_kind, &owner_id)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        sqlx::query(artifact_sql().retirements.insert_retirement.sql())
-            .bind(owner_kind)
-            .bind(&owner_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        let mut artifact_refs: Vec<String> =
-            sqlx::query_scalar(artifact_sql().owners_postgres.select_owned_refs.sql())
-                .bind(namespace)
-                .bind(owner_kind)
-                .bind(&owner_id)
-                .fetch_all(&mut *tx)
-                .await
-                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        artifact_refs.dedup();
-        for artifact_ref in &artifact_refs {
-            Self::lock_artifact(&mut tx, namespace, artifact_ref)
-                .await
-                .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        }
-        sqlx::query(artifact_sql().owners.delete_owner_edges.sql())
-            .bind(namespace)
-            .bind(owner_kind)
-            .bind(owner_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        sqlx::query(
-            artifact_sql()
-                .owners_postgres
-                .delete_unowned_artifacts_for_owner
-                .sql(),
-        )
-        .bind(namespace)
-        .bind(&artifact_refs)
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))?;
-        tx.commit()
-            .await
-            .map_err(|error| ArtifactStoreFailure::Backend(error.to_string()))
+            .map_err(backend)
     }
 }
 
@@ -534,80 +326,60 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore 
 
     async fn publish_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
         bytes: &[u8],
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+    ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
-            return Err(lash_core_execution::ArtifactStoreError::Backend(
+            return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
             ));
         }
-        let publication_pause = self
+        let pause = self
             .publication_pause
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .take();
-        if let Some(pause) = publication_pause {
+        if let Some(pause) = pause {
             pause.pause().await;
         }
-        self.publish_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref, bytes, owner)
+        self.write_namespaced(MODULE_ARTIFACT_NAMESPACE, module_ref, Some(bytes), claim)
             .await
-            .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
 
-    async fn retain_module_artifact(
+    async fn acquire_module_artifact(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.retain_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref, owner)
+    ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(ArtifactStoreError::Encode(
+                "invalid module reference".into(),
+            ));
+        }
+        self.write_namespaced(MODULE_ARTIFACT_NAMESPACE, module_ref, None, claim)
             .await
-            .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
 
-    async fn transfer_module_artifact(
+    async fn end_module_referrer(
         &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.transfer_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref, from, to)
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_namespaced(MODULE_ARTIFACT_NAMESPACE, cleanup)
             .await
-            .map_err(ArtifactStoreFailure::into_artifact_store_error)
-    }
-
-    async fn release_module_artifact(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &str,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.release_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref, owner)
-            .await
-            .map_err(ArtifactStoreFailure::into_artifact_store_error)
-    }
-
-    async fn retire_module_artifact_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
-        self.retire_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, owner)
-            .await
-            .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
 
     async fn get_module_artifact(
         &self,
         module_ref: &str,
-    ) -> Result<Option<Vec<u8>>, lash_core_execution::ArtifactStoreError> {
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(module_ref) {
-            return Err(lash_core_execution::ArtifactStoreError::Backend(
+            return Err(ArtifactStoreError::Encode(
                 "invalid module reference".into(),
             ));
         }
-        self.get_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref)
+        self.get_namespaced(MODULE_ARTIFACT_NAMESPACE, module_ref)
             .await
-            .map_err(|err| lash_core_execution::ArtifactStoreError::Backend(err.to_string()))
     }
 }
 
@@ -615,66 +387,55 @@ impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore 
 impl lash_core_execution::ProcessExecutionEnvStore for PostgresLashlangArtifactStore {
     async fn publish_process_execution_env(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
         bytes: &[u8],
-    ) -> Result<(), lash_core_execution::PluginError> {
+    ) -> Result<(), ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core_execution::PluginError::Invoke(
+            return Err(ArtifactStoreError::Encode(
                 "invalid process execution environment reference".into(),
             ));
         }
         if !env_ref.matches_store_bytes(bytes) {
-            return Err(lash_core_execution::PluginError::Session(format!(
-                "process execution environment bytes do not match `{env_ref}`"
-            )));
+            return Err(ArtifactStoreError::Immutable {
+                artifact_ref: env_ref.as_str().to_owned(),
+            });
         }
-        self.publish_namespaced_bytes(PROCESS_ENV_NAMESPACE, env_ref.as_str(), bytes, owner)
+        self.write_namespaced(PROCESS_ENV_NAMESPACE, env_ref.as_str(), Some(bytes), claim)
             .await
-            .map_err(ArtifactStoreFailure::into_plugin_error)
     }
 
-    async fn transfer_process_execution_env(
+    async fn acquire_process_execution_env(
         &self,
-        from: &lash_core_execution::ArtifactOwner,
-        to: &lash_core_execution::ArtifactOwner,
+        claim: &ReferrerClaim,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.transfer_namespaced_owner(PROCESS_ENV_NAMESPACE, env_ref.as_str(), from, to)
+    ) -> Result<(), ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
+            return Err(ArtifactStoreError::Encode(
+                "invalid process execution environment reference".into(),
+            ));
+        }
+        self.write_namespaced(PROCESS_ENV_NAMESPACE, env_ref.as_str(), None, claim)
             .await
-            .map_err(ArtifactStoreFailure::into_plugin_error)
     }
 
-    async fn release_process_execution_env(
+    async fn end_process_env_referrer(
         &self,
-        owner: &lash_core_execution::ArtifactOwner,
-        env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.release_namespaced_owner(PROCESS_ENV_NAMESPACE, env_ref.as_str(), owner)
-            .await
-            .map_err(ArtifactStoreFailure::into_plugin_error)
-    }
-
-    async fn retire_process_execution_env_owner(
-        &self,
-        owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lash_core_execution::PluginError> {
-        self.retire_namespaced_owner(PROCESS_ENV_NAMESPACE, owner)
-            .await
-            .map_err(ArtifactStoreFailure::into_plugin_error)
+        cleanup: &ResolvedArtifactCleanup,
+    ) -> Result<(), ArtifactStoreError> {
+        self.end_namespaced(PROCESS_ENV_NAMESPACE, cleanup).await
     }
 
     async fn get_process_execution_env(
         &self,
         env_ref: &lash_core_execution::ProcessExecutionEnvRef,
-    ) -> Result<Option<Vec<u8>>, lash_core_execution::PluginError> {
+    ) -> Result<Option<Vec<u8>>, ArtifactStoreError> {
         if !crate::namespace::is_valid_opaque_key(env_ref.as_str()) {
-            return Err(lash_core_execution::PluginError::Invoke(
+            return Err(ArtifactStoreError::Encode(
                 "invalid process execution environment reference".into(),
             ));
         }
-        self.get_namespaced_bytes(PROCESS_ENV_NAMESPACE, env_ref.as_str())
+        self.get_namespaced(PROCESS_ENV_NAMESPACE, env_ref.as_str())
             .await
-            .map_err(|err| lash_core_execution::PluginError::Session(err.to_string()))
     }
 }

@@ -1,6 +1,105 @@
 use super::*;
 use crate::session_sql::session_sql;
 
+async fn apply_frame_transition_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    transition: &lash_core_execution::store::FrameTransition,
+    now_ms: u64,
+) -> Result<(), StoreError> {
+    use lash_core_execution::{ArtifactReferrer, ArtifactStoreId};
+    let ended = ArtifactReferrer::FrameEnvironment(transition.ended.clone());
+    let successor = ArtifactReferrer::FrameEnvironment(transition.successor.clone());
+    let mut referrers = [ended.clone(), successor.clone()];
+    referrers.sort_by_key(|referrer| {
+        format!(
+            "lash-artifact-referrer:{}:{}",
+            referrer.kind().as_str(),
+            referrer.canonical_id()
+        )
+    });
+    for referrer in &referrers {
+        crate::artifact_store::lock_referrer_tx(&mut **tx, referrer)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    let sql = crate::artifact_store::artifact_sql();
+    let successor_fenced: bool = sqlx::query_scalar(sql.fences.select_is_fenced.sql())
+        .bind(successor.kind().as_str())
+        .bind(successor.canonical_id())
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    if successor_fenced {
+        return Err(StoreError::ArtifactReferrerEnded {
+            referrer: successor,
+        });
+    }
+    let mut carries = transition
+        .carries
+        .iter()
+        .map(|artifact| {
+            let namespace = match &artifact.store {
+                ArtifactStoreId::LashlangModule => {
+                    Ok(crate::artifact_store::MODULE_ARTIFACT_NAMESPACE)
+                }
+                ArtifactStoreId::ProcessEnv => Ok(crate::artifact_store::PROCESS_ENV_NAMESPACE),
+                ArtifactStoreId::Engine(_) => Err(StoreError::Backend(
+                    "frame carry names an engine artifact".into(),
+                )),
+            }?;
+            Ok((namespace, artifact.artifact_ref.as_str()))
+        })
+        .collect::<Result<Vec<_>, StoreError>>()?;
+    carries.sort_unstable();
+    carries.dedup();
+    for (namespace, artifact_ref) in &carries {
+        let key = format!("lash-artifact:{namespace}:{artifact_ref}");
+        sqlx::query(
+            crate::connection_sql::connection_sql()
+                .lock_xact_by_text
+                .sql(),
+        )
+        .bind(key)
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    }
+    for (namespace, artifact_ref) in carries {
+        let source_edge: bool = sqlx::query_scalar(sql.edges.select_edge_exists.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .bind(ended.kind().as_str())
+            .bind(ended.canonical_id())
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if !source_edge {
+            return Err(StoreError::ArtifactCarryMissing {
+                artifact_ref: artifact_ref.to_owned(),
+                to: successor,
+            });
+        }
+        sqlx::query(sql.edges.insert_edge.sql())
+            .bind(namespace)
+            .bind(artifact_ref)
+            .bind(successor.kind().as_str())
+            .bind(successor.canonical_id())
+            .execute(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    }
+    sqlx::query(sql.fences.insert_fence.sql())
+        .bind(ended.kind().as_str())
+        .bind(ended.canonical_id())
+        .bind(crate::support::clamp_epoch_ms(now_ms))
+        .execute(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    crate::obligation_ledger::arm_cleanup_tx(&mut **tx, &transition.ended_cleanup(), now_ms)
+        .await?;
+    Ok(())
+}
+
 #[async_trait::async_trait]
 impl SessionCommitStore for PostgresSessionStore {
     async fn committed_turn_exists(
@@ -795,6 +894,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 expected: commit.expected_head_revision,
                 actual: actual_now,
             });
+        }
+        if let Some(transition) = &commit.frame_transition {
+            apply_frame_transition_tx(&mut tx, transition, now).await?;
         }
         sqlx::query(session_sql().meta.touch_last_commit.sql())
             .bind(commit.session_id.as_str())

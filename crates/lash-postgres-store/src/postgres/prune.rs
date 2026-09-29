@@ -1,9 +1,10 @@
 use crate::*;
-use lash_core_execution::ProcessArtifactCleanup;
+use lash_core_execution::{ArtifactCleanup, ArtifactReferrer};
+use lash_sansio::ProcessId;
 
 pub(super) async fn prune_process_rows_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    cleanups: &[ProcessArtifactCleanup],
+    process_ids: &[ProcessId],
     pruned_at_ms: i64,
 ) -> Result<ProcessPruneReport, PluginError> {
     // Candidate process rows remain locked from selection through this
@@ -12,11 +13,6 @@ pub(super) async fn prune_process_rows_tx(
     // Events are deleted explicitly for the report count; the final set-based
     // process delete cascades observers, leases, handovers, and terminal wake
     // deliveries through their existing foreign keys.
-    let cleanup_json = cleanups
-        .iter()
-        .map(serde_json::to_string)
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(process_decode_error)?;
     let (pruned_events, pruned_processes) = sqlx::query_as::<_, (i64, i64)>(
         crate::process_sql::process_sql()
             .registry_postgres
@@ -24,29 +20,53 @@ pub(super) async fn prune_process_rows_tx(
             .sql(),
     )
     .bind(
-        cleanups
+        process_ids
             .iter()
-            .map(|cleanup| cleanup.process_id.as_str())
+            .map(ProcessId::as_str)
             .collect::<Vec<_>>(),
     )
     .bind(pruned_at_ms)
-    .bind(cleanup_json)
     .fetch_one(&mut **tx)
     .await
     .map_err(plugin_sqlx_error)?;
 
-    if pruned_processes != cleanups.len() as i64 {
+    if pruned_processes != process_ids.len() as i64 {
         return Err(PluginError::Session(format!(
             "process prune candidate/tombstone divergence: expected {}, deleted {pruned_processes}",
-            cleanups.len()
+            process_ids.len()
         )));
+    }
+
+    for process_id in process_ids {
+        let referrer = ArtifactReferrer::ProcessRecord(process_id.clone());
+        crate::artifact_store::lock_referrer_tx(&mut **tx, &referrer)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        sqlx::query(
+            crate::artifact_store::artifact_sql()
+                .fences
+                .insert_fence
+                .sql(),
+        )
+        .bind(referrer.kind().as_str())
+        .bind(referrer.canonical_id())
+        .bind(pruned_at_ms)
+        .execute(&mut **tx)
+        .await
+        .map_err(plugin_sqlx_error)?;
+        crate::obligation_ledger::arm_cleanup_tx(
+            &mut **tx,
+            &ArtifactCleanup::ended(referrer, Vec::new(), None),
+            u64::try_from(pruned_at_ms).unwrap_or(0),
+        )
+        .await
+        .map_err(|error| PluginError::Session(error.to_string()))?;
     }
 
     Ok(ProcessPruneReport {
         pruned_processes: pruned_processes as usize,
         pruned_events: pruned_events as usize,
         pruned_trigger_deliveries: 0,
-        artifact_cleanup_acknowledgements: Vec::new(),
     })
 }
 
@@ -106,19 +126,8 @@ mod tests {
         .await
         .expect("read process clock before divergent prune");
 
-        let cleanup = ProcessArtifactCleanup::from_record(
-            &registry
-                .get_process(&process_id)
-                .await
-                .expect("read process before divergent prune")
-                .expect("the completed process is retained"),
-        );
-        let ghost = ProcessArtifactCleanup {
-            process_id: ghost_id,
-            ..cleanup.clone()
-        };
         let mut tx = storage.pool().begin().await.expect("begin divergent prune");
-        let error = prune_process_rows_tx(&mut tx, &[cleanup, ghost], 123_456)
+        let error = prune_process_rows_tx(&mut tx, &[process_id.clone(), ghost_id], 123_456)
             .await
             .expect_err("candidate/tombstone divergence must abort the prune transaction");
         assert!(

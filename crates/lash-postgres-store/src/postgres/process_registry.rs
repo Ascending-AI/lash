@@ -1008,25 +1008,6 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
 }
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRetention for PostgresProcessRegistry {
-    async fn pending_process_artifact_cleanup(
-        &self,
-    ) -> Result<Vec<lash_core_execution::ProcessArtifactCleanup>, PluginError> {
-        let rows: Vec<String> = sqlx::query_scalar(process_sql().cleanup.list_pending.sql())
-            .fetch_all(&self.pool)
-            .await
-            .map_err(plugin_sqlx_error)?;
-        rows.into_iter()
-            .map(|json| serde_json::from_str(&json).map_err(process_decode_error))
-            .collect()
-    }
-
-    async fn complete_process_artifact_cleanup(
-        &self,
-        process_id: &ProcessId,
-    ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
-        prune_api::complete_process_artifact_cleanup(self, process_id).await
-    }
-
     async fn compact_process_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

@@ -1,232 +1,186 @@
 use super::*;
+use lash_core_execution::{
+    ArtifactReferrer, HostArtifactPin, ModuleArtifactStore as _, ReferrerClaim,
+    ResolvedArtifactCleanup,
+};
 
-/// `process <name>(root: str) -> str { finish root }` — the fixture only has to
-/// be a distinct publishable module; what it computes is never read.
-fn artifact(process_name: &str) -> lashlang::ModuleArtifact {
-    use lashlang::testing::ast_builders as b;
+fn host_pin() -> (ArtifactReferrer, ReferrerClaim) {
+    let referrer = ArtifactReferrer::HostPin(HostArtifactPin::mint());
+    let claim = ReferrerClaim::unguarded(referrer.clone()).expect("host pin is unguarded");
+    (referrer, claim)
+}
 
-    let program = b::module(
-        vec![b::process_returning(
-            process_name,
-            vec![b::param("root", lashlang::TypeExpr::Str)],
-            lashlang::TypeExpr::Str,
-            b::finish(b::var("root")),
-        )],
-        Vec::new(),
-    );
-    lashlang::ModuleArtifact::from_program(program).expect("build module artifact")
+fn end(referrer: ArtifactReferrer) -> ResolvedArtifactCleanup {
+    ResolvedArtifactCleanup {
+        referrer,
+        carries: Vec::new(),
+    }
 }
 
 async fn lock_artifact_mutations<'a>(
     storage: &'a PostgresStorage,
-    artifact_ref: &lashlang::ModuleRef,
+    artifact_ref: &str,
 ) -> sqlx::Transaction<'a, sqlx::Postgres> {
     let mut tx = storage.pool().begin().await.expect("begin blocker");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
         .bind(format!("lash-artifact:lashlang_module:{artifact_ref}"))
         .execute(&mut *tx)
         .await
-        .expect("lock exact artifact mutation key");
+        .expect("lock artifact mutation key");
     tx
 }
 
-/// Block until another backend is parked on a heavyweight lock inside an
-/// artifact mutation, which is the only observable proof that the spawned task
-/// has already taken every uncontended lock ahead of that point.
-async fn wait_until_a_mutation_waits_at_its_serialization_point(storage: &PostgresStorage) {
+async fn wait_until_a_mutation_waits(storage: &PostgresStorage) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
         let waiting: bool = sqlx::query_scalar(
-            "SELECT EXISTS (
-                 SELECT 1 FROM pg_stat_activity
-                 WHERE pid <> pg_backend_pid()
-                   AND datname = current_database()
-                   AND state = 'active'
-                   AND wait_event_type = 'Lock'
-                   AND (
-                       query LIKE '%pg_advisory_xact_lock%'
-                       OR query LIKE '%DELETE FROM lash_lashlang_artifacts AS artifact%'
-                   )
-             )",
+            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+             WHERE pid <> pg_backend_pid() AND datname = current_database()
+               AND state = 'active' AND wait_event_type = 'Lock'
+               AND query LIKE '%pg_advisory_xact_lock%')",
         )
         .fetch_one(storage.pool())
         .await
-        .expect("inspect mutation lock wait state");
+        .expect("inspect lock wait");
         if waiting {
             return;
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "mutation did not reach its artifact serialization point"
+            "mutation did not reach its artifact lock"
         );
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_artifact_release_observes_owner_that_commits_ahead_of_it() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres artifact race: database URL is not set");
+async fn postgres_referrer_end_preserves_an_edge_committed_ahead_of_it() {
+    let Some((_lock, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
-    let store =
-        lashlang::LashlangArtifacts::new(std::sync::Arc::new(storage.lashlang_artifact_store()));
-    let module = artifact("race");
-    let owner_a = lash_core_execution::ArtifactOwner::host("artifact-race-a");
-    let owner_b = lash_core_execution::ArtifactOwner::host("artifact-race-b");
+    let store = storage.lashlang_artifact_store();
+    let (a, a_claim) = host_pin();
+    let (b, _) = host_pin();
+    let artifact_ref = "artifact-race-preserve";
     store
-        .publish_module_artifact(&owner_a, &module)
+        .publish_module_artifact(&a_claim, artifact_ref, b"bytes")
         .await
-        .expect("publish owner A");
+        .expect("publish first edge");
 
-    let mut publisher = lock_artifact_mutations(&storage, module.module_ref()).await;
+    let mut publisher = lock_artifact_mutations(&storage, artifact_ref).await;
     sqlx::query(
-        "INSERT INTO lash_artifact_owners
-         (namespace, artifact_ref, owner_kind, owner_id)
-         VALUES ('lashlang_module', $1, 'host', 'artifact-race-b')",
+        "INSERT INTO lash_artifact_referrer_edges
+        (namespace, artifact_ref, referrer_kind, referrer_id)
+        VALUES ('lashlang_module', $1, $2, $3)",
     )
-    .bind(module.module_ref().as_str())
+    .bind(artifact_ref)
+    .bind(b.kind().as_str())
+    .bind(b.canonical_id())
     .execute(&mut *publisher)
     .await
-    .expect("stage uncommitted owner B edge");
+    .expect("stage second edge");
 
-    let releasing_store = store.clone();
-    let module_ref = module.module_ref().clone();
-    let release = tokio::spawn(async move {
-        releasing_store
-            .release_module_artifact(&owner_a, &module_ref)
-            .await
-    });
-    wait_until_a_mutation_waits_at_its_serialization_point(&storage).await;
-    assert!(
-        !release.is_finished(),
-        "release must wait behind the mutation lock"
-    );
-    publisher.commit().await.expect("commit owner B");
-    release
-        .await
-        .expect("join release")
-        .expect("release owner A");
-
-    assert!(
+    let ending = store.clone();
+    let end_a = tokio::spawn(async move { ending.end_module_referrer(&end(a)).await });
+    wait_until_a_mutation_waits(&storage).await;
+    publisher.commit().await.expect("commit second edge");
+    end_a.await.expect("join end").expect("end first referrer");
+    assert_eq!(
         store
-            .get_module_artifact(module.module_ref())
+            .get_module_artifact(artifact_ref)
             .await
-            .expect("read B-owned artifact")
-            .is_some(),
-        "the owner that committed ahead of release must keep the bytes live"
+            .expect("read bytes"),
+        Some(b"bytes".to_vec())
     );
     store
-        .release_module_artifact(&owner_b, module.module_ref())
+        .end_module_referrer(&end(b))
         .await
-        .expect("release owner B");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_concurrent_final_artifact_releases_converge_to_absent_bytes() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres artifact race: database URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    let store =
-        lashlang::LashlangArtifacts::new(std::sync::Arc::new(storage.lashlang_artifact_store()));
-    let module = artifact("releases");
-    let owner_a = lash_core_execution::ArtifactOwner::host("final-release-a");
-    let owner_b = lash_core_execution::ArtifactOwner::host("final-release-b");
-    store
-        .publish_module_artifact(&owner_a, &module)
-        .await
-        .expect("publish owner A");
-    store
-        .retain_module_artifact(&owner_b, module.module_ref())
-        .await
-        .expect("retain owner B");
-    let blocker = lock_artifact_mutations(&storage, module.module_ref()).await;
-    let left_store = store.clone();
-    let left_ref = module.module_ref().clone();
-    let left = tokio::spawn(async move {
-        left_store
-            .release_module_artifact(&owner_a, &left_ref)
-            .await
-    });
-    let right_store = store.clone();
-    let right_ref = module.module_ref().clone();
-    let right = tokio::spawn(async move {
-        right_store
-            .release_module_artifact(&owner_b, &right_ref)
-            .await
-    });
-    tokio::task::yield_now().await;
-    assert!(!left.is_finished() && !right.is_finished());
-    blocker.commit().await.expect("release mutation gate");
-    left.await.expect("join A").expect("release A");
-    right.await.expect("join B").expect("release B");
+        .expect("end second referrer");
     assert!(
         store
-            .get_module_artifact(module.module_ref())
+            .get_module_artifact(artifact_ref)
             .await
-            .expect("read after final releases")
+            .expect("read reclaimed bytes")
             .is_none()
     );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_artifact_retirement_fences_a_late_publisher() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres artifact race: database URL is not set");
+async fn postgres_concurrent_final_referrer_ends_reclaim_bytes() {
+    let Some((_lock, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
-    let store =
-        lashlang::LashlangArtifacts::new(std::sync::Arc::new(storage.lashlang_artifact_store()));
-    let module = artifact("process late(root: str) -> str { finish root }");
-    let owner = lash_core_execution::ArtifactOwner::execution(
-        lash_core_execution::ExecutionScope::runtime_operation("late-publisher"),
-    );
+    let store = storage.lashlang_artifact_store();
+    let (a, a_claim) = host_pin();
+    let (b, b_claim) = host_pin();
+    let artifact_ref = "artifact-race-final";
     store
-        .publish_module_artifact(&owner, &module)
+        .publish_module_artifact(&a_claim, artifact_ref, b"bytes")
         .await
-        .expect("publish the execution-owned artifact retirement will sever");
-    let blocker = lock_artifact_mutations(&storage, module.module_ref()).await;
-    let retiring_store = store.clone();
-    let retiring_owner = owner.clone();
-    let retirement = tokio::spawn(async move {
-        retiring_store
-            .retire_module_artifact_owner(&retiring_owner)
-            .await
-    });
-    // Retirement takes the owner lock before the exact artifact key the
-    // blocker holds. Once it is parked on that key it owns the owner lock, so
-    // the publisher below queues behind a retirement that commits first. A
-    // publisher that took the owner lock first would be an earlier,
-    // legitimately successful publication that retirement then severs.
-    wait_until_a_mutation_waits_at_its_serialization_point(&storage).await;
-    assert!(
-        !retirement.is_finished(),
-        "retirement must wait at the exact artifact serialization key"
-    );
-    let publishing_store = store.clone();
-    let publishing_module = module.clone();
-    let publish = tokio::spawn(async move {
-        publishing_store
-            .publish_module_artifact(&owner, &publishing_module)
-            .await
-    });
-    tokio::task::yield_now().await;
-    assert!(!publish.is_finished(), "publisher must wait for retirement");
-    blocker.commit().await.expect("release exact artifact key");
-    retirement
+        .expect("publish");
+    store
+        .acquire_module_artifact(&b_claim, artifact_ref)
         .await
-        .expect("join retirement")
-        .expect("commit retirement fence");
-    assert!(publish.await.expect("join publisher").is_err());
+        .expect("acquire");
+    let blocker = lock_artifact_mutations(&storage, artifact_ref).await;
+    let left_store = store.clone();
+    let left = tokio::spawn(async move { left_store.end_module_referrer(&end(a)).await });
+    let right_store = store.clone();
+    let right = tokio::spawn(async move { right_store.end_module_referrer(&end(b)).await });
+    wait_until_a_mutation_waits(&storage).await;
+    blocker.commit().await.expect("release lock");
+    left.await
+        .expect("join first end")
+        .expect("end first referrer");
+    right
+        .await
+        .expect("join second end")
+        .expect("end second referrer");
     assert!(
         store
-            .get_module_artifact(module.module_ref())
+            .get_module_artifact(artifact_ref)
             .await
-            .expect("read after late publisher")
+            .expect("read reclaimed bytes")
+            .is_none()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn postgres_referrer_fence_refuses_a_late_publisher() {
+    let Some((_lock, storage)) = storage().await else {
+        return;
+    };
+    reset(storage.pool()).await;
+    let store = storage.lashlang_artifact_store();
+    let (referrer, claim) = host_pin();
+    let artifact_ref = "artifact-race-late";
+    store
+        .publish_module_artifact(&claim, artifact_ref, b"bytes")
+        .await
+        .expect("publish");
+    let blocker = lock_artifact_mutations(&storage, artifact_ref).await;
+    let ending = store.clone();
+    let retirement = tokio::spawn(async move { ending.end_module_referrer(&end(referrer)).await });
+    wait_until_a_mutation_waits(&storage).await;
+    let publishing = store.clone();
+    let late = tokio::spawn(async move {
+        publishing
+            .publish_module_artifact(&claim, artifact_ref, b"bytes")
+            .await
+    });
+    blocker.commit().await.expect("release lock");
+    retirement.await.expect("join end").expect("fence referrer");
+    assert!(matches!(
+        late.await.expect("join late publish"),
+        Err(lash_core_execution::ArtifactStoreError::ReferrerEnded { .. })
+    ));
+    assert!(
+        store
+            .get_module_artifact(artifact_ref)
+            .await
+            .expect("read reclaimed bytes")
             .is_none()
     );
 }
