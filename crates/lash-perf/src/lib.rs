@@ -16,6 +16,7 @@ pub mod latency;
 pub mod perf_support;
 pub mod runtime_perf;
 pub mod string_scaling;
+pub mod workload;
 
 /// Allocation instrumentation used by the runtime performance harness.
 #[cfg(feature = "dhat-heap")]

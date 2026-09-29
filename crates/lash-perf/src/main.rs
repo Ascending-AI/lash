@@ -138,6 +138,16 @@ struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 enum Command {
+    /// Regenerate the strict synthetic workload v1 JSON Schema.
+    WorkloadSchema {
+        #[arg(long, value_name = "SCHEMA.json")]
+        out: std::path::PathBuf,
+    },
+    /// Validate a synthetic workload without starting any services.
+    WorkloadValidate {
+        #[arg(long, value_name = "WORKLOAD.json")]
+        file: std::path::PathBuf,
+    },
     /// Measure TypeScript string loops in the VM and enforce their scaling budget.
     StringScaling {
         /// Write the measurements and budget results to this JSON file.
@@ -226,6 +236,20 @@ fn tokio_thread_stack_bytes(args: &Args) -> usize {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     match &args.command {
+        Some(Command::WorkloadSchema { out }) => {
+            let schema = serde_json::to_string_pretty(&lash_perf::workload::schema())?;
+            std::fs::write(out, format!("{schema}\n"))?;
+            return Ok(());
+        }
+        Some(Command::WorkloadValidate { file }) => {
+            let workload = lash_perf::workload::Workload::parse(&std::fs::read_to_string(file)?)?;
+            println!(
+                "validated workload v1: {} sessions, {} fields with provenance",
+                workload.spec().sessions,
+                workload.spec().provenance.fields.len()
+            );
+            return Ok(());
+        }
         Some(Command::StringScaling { out }) => {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()

@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 49,
-  "cargo_target_count": 188,
+  "cargo_target_count": 189,
   "feature_lane_units": [
     {
       "features": [],
@@ -8600,6 +8600,20 @@
       "features": [],
       "kind": "bin-unit-test",
       "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_b2a0aba8",
+      "package": "lash-perf"
+    },
+    {
+      "features": [
+        "dhat-heap"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-perf:workload__test__fv_687c66e0",
+      "package": "lash-perf"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash-perf:workload__test__fv_b2a0aba8",
       "package": "lash-perf"
     },
     {
@@ -19169,7 +19183,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 249,
+  "generated_label_count": 250,
   "packages": [
     {
       "declared_features": [
@@ -19860,8 +19874,11 @@
         "async-trait",
         "chrono",
         "clap",
+        "crc32fast",
         "dhat",
+        "flate2",
         "futures-util",
+        "jsonschema",
         "lash-internal-conformance",
         "lash-internal-core",
         "lash-internal-lashlang",
@@ -19881,10 +19898,13 @@
         "lash-internal-typescript",
         "lash-runtime",
         "libc",
+        "rand_chacha",
         "reqwest",
         "restate-sdk",
+        "schemars",
         "serde",
         "serde_json",
+        "sha2",
         "stats_alloc",
         "tempfile",
         "tokio",
@@ -19932,13 +19952,20 @@
           "kind": "bin-unit-test",
           "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
           "tags": []
+        },
+        {
+          "cargo": "workload",
+          "kind": "test",
+          "label": "//crates/lash-perf:workload__test",
+          "tags": []
         }
       ],
       "test_batch": {
         "label": "//crates/lash-perf:test_batch",
         "members": [
           "//crates/lash-perf:lash-perf__bin__unit_test",
-          "//crates/lash-perf:tool_batch_baseline__bin__unit_test"
+          "//crates/lash-perf:tool_batch_baseline__bin__unit_test",
+          "//crates/lash-perf:workload__test"
         ]
       }
     },

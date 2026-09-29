@@ -1,0 +1,1454 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WorkloadSpec",
+  "type": "object",
+  "required": [
+    "arrival",
+    "attachments",
+    "collection",
+    "compact_every_turns",
+    "cron",
+    "delete_per_turn",
+    "drain_timeout_s",
+    "external_occurrences_per_turn",
+    "fault_window_s",
+    "faults",
+    "format_version",
+    "generator",
+    "history_prefill_turns",
+    "host_process_starts_per_turn",
+    "input_bytes",
+    "inventory",
+    "llm_requests_per_turn",
+    "minimum_completed_turns",
+    "model_code_pool",
+    "observation",
+    "processes",
+    "promotion_reads_per_turn",
+    "prompt_bytes",
+    "provenance",
+    "provider",
+    "provider_output_bytes",
+    "queued",
+    "rotate_after_turns",
+    "saturation_rates_per_session_s",
+    "saturation_step_s",
+    "seed",
+    "sessions",
+    "steady_s",
+    "tool_argument_bytes",
+    "tool_result_bytes",
+    "tools",
+    "topology",
+    "trigger_edits_per_turn",
+    "turn_cancel_share",
+    "turns_per_session_s",
+    "warmup_s"
+  ],
+  "properties": {
+    "arrival": {
+      "type": "string",
+      "pattern": "^poisson_open_loop$"
+    },
+    "attachments": {
+      "$ref": "#/definitions/Attachments"
+    },
+    "collection": {
+      "$ref": "#/definitions/Collection"
+    },
+    "compact_every_turns": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "cron": {
+      "$ref": "#/definitions/Cron"
+    },
+    "delete_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "drain_timeout_s": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "external_occurrences_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "fault_window_s": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "faults": {
+      "$ref": "#/definitions/Faults"
+    },
+    "format_version": {
+      "type": "integer",
+      "format": "uint32",
+      "maximum": 1.0,
+      "minimum": 1.0
+    },
+    "generator": {
+      "$ref": "#/definitions/GeneratorVersion"
+    },
+    "history_prefill_turns": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "host_process_starts_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "input_bytes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/ByteSize"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "inventory": {
+      "$ref": "#/definitions/Inventory"
+    },
+    "llm_requests_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "minimum_completed_turns": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "model_code_pool": {
+      "$ref": "#/definitions/ModelCodePool"
+    },
+    "observation": {
+      "$ref": "#/definitions/Observation"
+    },
+    "processes": {
+      "$ref": "#/definitions/Processes"
+    },
+    "promotion_reads_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "prompt_bytes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/ByteSize"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "provenance": {
+      "$ref": "#/definitions/Provenance"
+    },
+    "provider": {
+      "$ref": "#/definitions/Provider"
+    },
+    "provider_output_bytes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/ByteSize"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "queued": {
+      "$ref": "#/definitions/Queued"
+    },
+    "rotate_after_turns": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "saturation_rates_per_session_s": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "format": "double",
+        "exclusiveMinimum": 0.0
+      },
+      "minItems": 1
+    },
+    "saturation_step_s": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "seed": {
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "sessions": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "steady_s": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "tool_argument_bytes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/ByteSize"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "tool_result_bytes": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/ByteSize"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "tools": {
+      "$ref": "#/definitions/Tools"
+    },
+    "topology": {
+      "$ref": "#/definitions/Topology"
+    },
+    "trigger_edits_per_turn": {
+      "type": "number",
+      "format": "double",
+      "minimum": 0.0
+    },
+    "turn_cancel_share": {
+      "type": "number",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "turns_per_session_s": {
+      "type": "number",
+      "format": "double",
+      "exclusiveMinimum": 0.0
+    },
+    "warmup_s": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Attachments": {
+      "type": "object",
+      "required": [
+        "aggregate_bytes",
+        "count",
+        "explicit_reads_per_blob",
+        "turn_share"
+      ],
+      "properties": {
+        "aggregate_bytes": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": [
+              {
+                "$ref": "#/definitions/ByteSize"
+              },
+              {
+                "$ref": "#/definitions/Probability"
+              }
+            ],
+            "maxItems": 2,
+            "minItems": 2
+          },
+          "minItems": 1
+        },
+        "count": {
+          "$ref": "#/definitions/Distribution"
+        },
+        "explicit_reads_per_blob": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "turn_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ByteSize": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 128.0
+    },
+    "Collection": {
+      "type": "object",
+      "required": [
+        "bootstrap_resamples",
+        "comparison_repetitions",
+        "confidence",
+        "journal_sample_s",
+        "recovery_stable_s",
+        "retention_s",
+        "scrape_s"
+      ],
+      "properties": {
+        "bootstrap_resamples": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "comparison_repetitions": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "confidence": {
+          "type": "number",
+          "format": "double",
+          "exclusiveMaximum": 1.0,
+          "exclusiveMinimum": 0.0
+        },
+        "journal_sample_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "recovery_stable_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "retention_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "scrape_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Cron": {
+      "type": "object",
+      "required": [
+        "cadence_s",
+        "jitter",
+        "subscriptions"
+      ],
+      "properties": {
+        "cadence_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "jitter": {
+          "type": "string",
+          "pattern": "^seeded_phase$"
+        },
+        "subscriptions": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Distribution": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": [
+          {
+            "$ref": "#/definitions/Positive"
+          },
+          {
+            "$ref": "#/definitions/Probability"
+          }
+        ],
+        "maxItems": 2,
+        "minItems": 2
+      },
+      "minItems": 1
+    },
+    "Faults": {
+      "type": "object",
+      "required": [
+        "restate_restart_delay_s",
+        "restate_restart_s",
+        "rolling_deploy_s",
+        "rolling_worker_pause_s",
+        "worker_kill_s",
+        "worker_restart_delay_s"
+      ],
+      "properties": {
+        "restate_restart_delay_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "restate_restart_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "rolling_deploy_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "rolling_worker_pause_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "worker_kill_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "worker_restart_delay_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "GeneratorVersion": {
+      "type": "object",
+      "required": [
+        "algorithm",
+        "version"
+      ],
+      "properties": {
+        "algorithm": {
+          "type": "string",
+          "pattern": "^ChaCha20$"
+        },
+        "version": {
+          "type": "integer",
+          "format": "uint32",
+          "maximum": 1.0,
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Inventory": {
+      "type": "object",
+      "required": [
+        "figments_sha",
+        "lash_sha"
+      ],
+      "properties": {
+        "figments_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "lash_sha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelCodePool": {
+      "type": "object",
+      "required": [
+        "execution_memory_mib",
+        "queue_limit",
+        "workers_per_lash_worker"
+      ],
+      "properties": {
+        "execution_memory_mib": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "queue_limit": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "workers_per_lash_worker": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Observation": {
+      "type": "object",
+      "required": [
+        "pending_reads_per_turn",
+        "poll_ms",
+        "process_prune_s",
+        "projector_idle_s",
+        "projector_poll_s",
+        "reconnect_share",
+        "streams_per_turn",
+        "subscription_reconcile_s",
+        "workflow_read_sets_per_start"
+      ],
+      "properties": {
+        "pending_reads_per_turn": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "poll_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "process_prune_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "projector_idle_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "projector_poll_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "reconnect_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "streams_per_turn": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "subscription_reconcile_s": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "workflow_read_sets_per_start": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Positive": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 1.0
+    },
+    "Probability": {
+      "type": "number",
+      "format": "double",
+      "maximum": 1.0,
+      "minimum": 0.0
+    },
+    "Processes": {
+      "type": "object",
+      "required": [
+        "await_share",
+        "cancel_share",
+        "fanout",
+        "park_share",
+        "signal_share",
+        "turn_share",
+        "wake_delay_ms"
+      ],
+      "properties": {
+        "await_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "cancel_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "fanout": {
+          "$ref": "#/definitions/Distribution"
+        },
+        "park_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "signal_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "turn_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "wake_delay_ms": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Provenance": {
+      "type": "object",
+      "required": [
+        "attachment_max",
+        "default",
+        "fields",
+        "maximum_drain_batch",
+        "pg_connections",
+        "polling",
+        "process_prune",
+        "restate_partitions",
+        "worker_shape"
+      ],
+      "properties": {
+        "attachment_max": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^I$"
+        },
+        "fields": {
+          "type": "object",
+          "required": [
+            "/arrival",
+            "/attachments/aggregate_bytes",
+            "/attachments/count",
+            "/attachments/explicit_reads_per_blob",
+            "/attachments/turn_share",
+            "/collection/bootstrap_resamples",
+            "/collection/comparison_repetitions",
+            "/collection/confidence",
+            "/collection/journal_sample_s",
+            "/collection/recovery_stable_s",
+            "/collection/retention_s",
+            "/collection/scrape_s",
+            "/compact_every_turns",
+            "/cron/cadence_s",
+            "/cron/jitter",
+            "/cron/subscriptions",
+            "/delete_per_turn",
+            "/drain_timeout_s",
+            "/external_occurrences_per_turn",
+            "/fault_window_s",
+            "/faults/restate_restart_delay_s",
+            "/faults/restate_restart_s",
+            "/faults/rolling_deploy_s",
+            "/faults/rolling_worker_pause_s",
+            "/faults/worker_kill_s",
+            "/faults/worker_restart_delay_s",
+            "/format_version",
+            "/generator/algorithm",
+            "/generator/version",
+            "/history_prefill_turns",
+            "/host_process_starts_per_turn",
+            "/input_bytes",
+            "/inventory/figments_sha",
+            "/inventory/lash_sha",
+            "/llm_requests_per_turn",
+            "/minimum_completed_turns",
+            "/model_code_pool/execution_memory_mib",
+            "/model_code_pool/queue_limit",
+            "/model_code_pool/workers_per_lash_worker",
+            "/observation/pending_reads_per_turn",
+            "/observation/poll_ms",
+            "/observation/process_prune_s",
+            "/observation/projector_idle_s",
+            "/observation/projector_poll_s",
+            "/observation/reconnect_share",
+            "/observation/streams_per_turn",
+            "/observation/subscription_reconcile_s",
+            "/observation/workflow_read_sets_per_start",
+            "/processes/await_share",
+            "/processes/cancel_share",
+            "/processes/fanout",
+            "/processes/park_share",
+            "/processes/signal_share",
+            "/processes/turn_share",
+            "/processes/wake_delay_ms",
+            "/promotion_reads_per_turn",
+            "/prompt_bytes",
+            "/provider/chunks",
+            "/provider/latency_ms",
+            "/provider/max_concurrent",
+            "/provider/retryable_first_attempt_share",
+            "/provider/stream_share",
+            "/provider_output_bytes",
+            "/queued/active_turn_share",
+            "/queued/cancel_share",
+            "/queued/inputs_per_turn",
+            "/queued/maximum_drain_batch",
+            "/rotate_after_turns",
+            "/saturation_rates_per_session_s",
+            "/saturation_step_s",
+            "/seed",
+            "/sessions",
+            "/steady_s",
+            "/tool_argument_bytes",
+            "/tool_result_bytes",
+            "/tools/batches",
+            "/tools/callback_ms",
+            "/tools/fanout",
+            "/tools/parallel_share",
+            "/tools/turn_share",
+            "/topology/bandwidth_mbps",
+            "/topology/garage_cpu",
+            "/topology/garage_memory_mib",
+            "/topology/network_jitter_ms",
+            "/topology/one_way_delay_ms",
+            "/topology/pg_connections_per_worker",
+            "/topology/pg_cpu",
+            "/topology/pg_memory_mib",
+            "/topology/replication",
+            "/topology/restate_cpu",
+            "/topology/restate_memory_mib",
+            "/topology/restate_nodes",
+            "/topology/restate_partitions",
+            "/topology/worker_cpu",
+            "/topology/worker_memory_mib",
+            "/topology/workers",
+            "/trigger_edits_per_turn",
+            "/turn_cancel_share",
+            "/turns_per_session_s",
+            "/warmup_s"
+          ],
+          "properties": {
+            "/arrival": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/attachments/aggregate_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/attachments/count": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/attachments/explicit_reads_per_blob": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/attachments/turn_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/bootstrap_resamples": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/comparison_repetitions": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/confidence": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/journal_sample_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/recovery_stable_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/retention_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/collection/scrape_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/compact_every_turns": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/cron/cadence_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/cron/jitter": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/cron/subscriptions": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/delete_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/drain_timeout_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/external_occurrences_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/fault_window_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/restate_restart_delay_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/restate_restart_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/rolling_deploy_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/rolling_worker_pause_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/worker_kill_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/faults/worker_restart_delay_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/format_version": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/generator/algorithm": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/generator/version": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/history_prefill_turns": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/host_process_starts_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/input_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/inventory/figments_sha": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/inventory/lash_sha": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/llm_requests_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/minimum_completed_turns": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/model_code_pool/execution_memory_mib": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/model_code_pool/queue_limit": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/model_code_pool/workers_per_lash_worker": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/pending_reads_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/poll_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/process_prune_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/projector_idle_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/projector_poll_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/reconnect_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/streams_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/subscription_reconcile_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/observation/workflow_read_sets_per_start": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/await_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/cancel_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/fanout": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/park_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/signal_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/turn_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/processes/wake_delay_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/promotion_reads_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/prompt_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider/chunks": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider/latency_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider/max_concurrent": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider/retryable_first_attempt_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider/stream_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/provider_output_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/queued/active_turn_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/queued/cancel_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/queued/inputs_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/queued/maximum_drain_batch": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/rotate_after_turns": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/saturation_rates_per_session_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/saturation_step_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/seed": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/sessions": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/steady_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tool_argument_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tool_result_bytes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tools/batches": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tools/callback_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tools/fanout": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tools/parallel_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/tools/turn_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/bandwidth_mbps": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/garage_cpu": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/garage_memory_mib": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/network_jitter_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/one_way_delay_ms": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/pg_connections_per_worker": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/pg_cpu": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/pg_memory_mib": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/replication": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/restate_cpu": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/restate_memory_mib": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/restate_nodes": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/restate_partitions": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/worker_cpu": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/worker_memory_mib": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/topology/workers": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/trigger_edits_per_turn": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/turn_cancel_share": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/turns_per_session_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            },
+            "/warmup_s": {
+              "type": "string",
+              "pattern": "^[IV](: .+)?$"
+            }
+          },
+          "additionalProperties": false
+        },
+        "maximum_drain_batch": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "pg_connections": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "polling": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "process_prune": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "restate_partitions": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        },
+        "worker_shape": {
+          "type": "string",
+          "pattern": "^[IV](: .+)?$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Provider": {
+      "type": "object",
+      "required": [
+        "chunks",
+        "latency_ms",
+        "max_concurrent",
+        "retryable_first_attempt_share",
+        "stream_share"
+      ],
+      "properties": {
+        "chunks": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "latency_ms": {
+          "$ref": "#/definitions/Distribution"
+        },
+        "max_concurrent": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "retryable_first_attempt_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "stream_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Queued": {
+      "type": "object",
+      "required": [
+        "active_turn_share",
+        "cancel_share",
+        "inputs_per_turn",
+        "maximum_drain_batch"
+      ],
+      "properties": {
+        "active_turn_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "cancel_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "inputs_per_turn": {
+          "type": "number",
+          "format": "double",
+          "minimum": 0.0
+        },
+        "maximum_drain_batch": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Tools": {
+      "type": "object",
+      "required": [
+        "batches",
+        "callback_ms",
+        "fanout",
+        "parallel_share",
+        "turn_share"
+      ],
+      "properties": {
+        "batches": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "callback_ms": {
+          "$ref": "#/definitions/Distribution"
+        },
+        "fanout": {
+          "$ref": "#/definitions/Distribution"
+        },
+        "parallel_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        },
+        "turn_share": {
+          "type": "number",
+          "format": "double",
+          "maximum": 1.0,
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "Topology": {
+      "type": "object",
+      "required": [
+        "bandwidth_mbps",
+        "garage_cpu",
+        "garage_memory_mib",
+        "network_jitter_ms",
+        "one_way_delay_ms",
+        "pg_connections_per_worker",
+        "pg_cpu",
+        "pg_memory_mib",
+        "replication",
+        "restate_cpu",
+        "restate_memory_mib",
+        "restate_nodes",
+        "restate_partitions",
+        "worker_cpu",
+        "worker_memory_mib",
+        "workers"
+      ],
+      "properties": {
+        "bandwidth_mbps": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "garage_cpu": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "garage_memory_mib": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "network_jitter_ms": {
+          "type": "number",
+          "format": "double",
+          "minimum": 0.0
+        },
+        "one_way_delay_ms": {
+          "type": "number",
+          "format": "double",
+          "minimum": 0.0
+        },
+        "pg_connections_per_worker": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "pg_cpu": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "pg_memory_mib": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "replication": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "restate_cpu": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "restate_memory_mib": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "restate_nodes": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "restate_partitions": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "worker_cpu": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "worker_memory_mib": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        },
+        "workers": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 1.0
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

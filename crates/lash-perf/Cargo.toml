@@ -50,6 +50,12 @@ async-trait = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true, features = ["derive", "env"] }
 futures-util = { workspace = true }
+jsonschema = { workspace = true }
+schemars = { workspace = true }
+sha2 = { workspace = true }
+rand_chacha = "=0.9.0"
+flate2 = "=1.1.9"
+crc32fast = "=1.5.0"
 reqwest = { workspace = true, features = ["json", "rustls", "http2"] }
 restate-sdk = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

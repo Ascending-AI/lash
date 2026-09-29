@@ -30,6 +30,9 @@ lash_rust_library(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -59,6 +62,9 @@ lash_rust_unit_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -80,6 +86,12 @@ lash_rust_binary(
     declared_features = [
         "default",
         "dhat-heap",
+    ],
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
     extra_compile_data = [],
@@ -105,6 +117,9 @@ lash_rust_unit_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
@@ -123,6 +138,12 @@ lash_rust_binary(
     declared_features = [
         "default",
         "dhat-heap",
+    ],
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline"),
     extra_compile_data = [],
@@ -148,10 +169,35 @@ lash_rust_unit_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline", "//crates/lash-perf:tool_batch_baseline__bin__unit_test"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     library = ":lash-perf",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    tags = [],
+    version = "0.0.0-dev",
+)
+
+lash_rust_integration_test(
+    name = "workload__test",
+    crate_features = [
+        "default",
+    ],
+    crate_name = "workload",
+    crate_root = "tests/workload.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test"),
+    extra_compile_data = [],
+    library = ":lash-perf",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    rustc_env = {},
     tags = [],
     version = "0.0.0-dev",
 )
@@ -165,6 +211,7 @@ lash_batch_test(
     tests = [
         ":lash-perf__bin__unit_test",
         ":tool_batch_baseline__bin__unit_test",
+        ":workload__test",
     ],
 )
 
@@ -200,6 +247,12 @@ lash_rust_feature_binary(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     include_dev_deps = False,
     library = "//crates/lash-perf:lash-perf__fv_687c66e0",
@@ -226,6 +279,12 @@ lash_rust_feature_binary(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     include_dev_deps = False,
     library = "//crates/lash-perf:lash-perf__fv_b2a0aba8",
@@ -253,6 +312,9 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_687c66e0"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     library = "//crates/lash-perf:lash-perf__fv_687c66e0",
     library_crate_name = "lash_perf",
@@ -277,6 +339,9 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__bin__unit_test__fv_b2a0aba8"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     library = "//crates/lash-perf:lash-perf__fv_b2a0aba8",
     library_crate_name = "lash_perf",
@@ -302,6 +367,9 @@ lash_rust_feature_library(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -327,6 +395,9 @@ lash_rust_feature_library(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -354,6 +425,9 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_687c66e0"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -381,6 +455,9 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "lash_perf", "//crates/lash-perf:lash-perf__unit_test__fv_b2a0aba8"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [
         "//:perf_guard_budgets",
         "//:perf_duration_level_shifts",
@@ -408,6 +485,12 @@ lash_rust_feature_binary(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     include_dev_deps = False,
     library = "//crates/lash-perf:lash-perf__fv_687c66e0",
@@ -434,6 +517,12 @@ lash_rust_feature_binary(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline"),
+    compile_data_patterns = [
+        "workloads/*.json",
+    ],
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     include_dev_deps = False,
     library = "//crates/lash-perf:lash-perf__fv_b2a0aba8",
@@ -461,6 +550,9 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline", "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_687c66e0"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     library = "//crates/lash-perf:lash-perf__fv_687c66e0",
     library_crate_name = "lash_perf",
@@ -485,11 +577,65 @@ lash_rust_feature_test(
         "dhat-heap",
     ],
     exec_properties = sized_exec_properties("lash-perf", "tool_batch_baseline", "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_b2a0aba8"),
+    data_exclude = [
+        "workloads/fixtures/*.json",
+    ],
     extra_compile_data = [],
     library = "//crates/lash-perf:lash-perf__fv_b2a0aba8",
     library_crate_name = "lash_perf",
     manifest_dir = "crates/lash-perf",
     package_name = "lash-perf",
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1d9fd943", "//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_19c2d941", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_86d01075", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_fec59b43", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_ac903a72"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "workload__test__fv_687c66e0",
+    crate_features = [
+        "dhat-heap",
+    ],
+    crate_name = "workload",
+    crate_root = "tests/workload.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_687c66e0"),
+    extra_compile_data = [],
+    library = "//crates/lash-perf:lash-perf__fv_687c66e0",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
+    tags = [
+        "feature-lane",
+        "manual",
+    ],
+    extra_deps = {"@crates//:dhat-0.3.3": "dhat"},
+    variant_deps = {"//crates/lash": "//crates/lash:lash__fv_1d9fd943", "//crates/lash-conformance": "//crates/lash-conformance:lash-conformance__fv_19c2d941", "//crates/lash-llm-transport": "//crates/lash-llm-transport:lash-llm-transport__fv_396997f7", "//crates/lash-protocol-rlm": "//crates/lash-protocol-rlm:lash-protocol-rlm__fv_86d01075", "//crates/lash-provider-openai": "//crates/lash-provider-openai:lash-provider-openai__fv_0fdc3c8c", "//crates/lash-restate-test": "//crates/lash-restate-test:lash-restate-test__fv_115f5643", "//crates/lash-sqlite-store": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995", "//crates/lash-subagents": "//crates/lash-subagents:lash-subagents__fv_fec59b43", "//crates/lash-typescript": "//crates/lash-typescript:lash-typescript__fv_ac903a72"},
+    version = "0.0.0-dev",
+)
+
+lash_rust_feature_test(
+    name = "workload__test__fv_b2a0aba8",
+    crate_features = [],
+    crate_name = "workload",
+    crate_root = "tests/workload.rs",
+    declared_features = [
+        "default",
+        "dhat-heap",
+    ],
+    exec_properties = sized_exec_properties("lash-perf", "workload", "//crates/lash-perf:workload__test__fv_b2a0aba8"),
+    extra_compile_data = [],
+    library = "//crates/lash-perf:lash-perf__fv_b2a0aba8",
+    library_crate_name = "lash_perf",
+    manifest_dir = "crates/lash-perf",
+    package_name = "lash-perf",
+    srcs_patterns = ["src/**/*.rs", "tests/**/*.rs", "examples/**/*.rs", "shared/**/*.rs"],
     tags = [
         "feature-lane",
         "manual",

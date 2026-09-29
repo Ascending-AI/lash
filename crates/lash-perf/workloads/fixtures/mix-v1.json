@@ -1,0 +1,195 @@
+{
+  "samples": 25000,
+  "sigma": 6,
+  "minimum_tolerance": 0.001,
+  "distributions": {
+    "history_prefill_turns": [
+      [
+        0,
+        0.5
+      ],
+      [
+        50,
+        0.4
+      ],
+      [
+        500,
+        0.1
+      ]
+    ],
+    "prompt_bytes": [
+      [
+        2048,
+        0.6
+      ],
+      [
+        16384,
+        0.3
+      ],
+      [
+        131072,
+        0.1
+      ]
+    ],
+    "input_bytes": [
+      [
+        1024,
+        0.6
+      ],
+      [
+        8192,
+        0.3
+      ],
+      [
+        65536,
+        0.1
+      ]
+    ],
+    "tool_argument_bytes": [
+      [
+        256,
+        0.7
+      ],
+      [
+        4096,
+        0.25
+      ],
+      [
+        32768,
+        0.05
+      ]
+    ],
+    "tool_result_bytes": [
+      [
+        1024,
+        0.7
+      ],
+      [
+        16384,
+        0.25
+      ],
+      [
+        262144,
+        0.05
+      ]
+    ],
+    "provider_output_bytes": [
+      [
+        1024,
+        0.8
+      ],
+      [
+        8192,
+        0.2
+      ]
+    ],
+    "tool_fanout": [
+      [
+        1,
+        0.6
+      ],
+      [
+        4,
+        0.3
+      ],
+      [
+        16,
+        0.1
+      ]
+    ],
+    "callback_ms": [
+      [
+        10,
+        0.7
+      ],
+      [
+        100,
+        0.25
+      ],
+      [
+        1000,
+        0.05
+      ]
+    ],
+    "process_fanout": [
+      [
+        1,
+        0.7
+      ],
+      [
+        4,
+        0.25
+      ],
+      [
+        8,
+        0.05
+      ]
+    ],
+    "attachment_count": [
+      [
+        1,
+        0.9
+      ],
+      [
+        3,
+        0.1
+      ]
+    ],
+    "attachment_aggregate": [
+      [
+        65536,
+        0.6
+      ],
+      [
+        262144,
+        0.3
+      ],
+      [
+        3145728,
+        0.1
+      ]
+    ],
+    "latency_ms": [
+      [
+        50,
+        0.2
+      ],
+      [
+        500,
+        0.5
+      ],
+      [
+        2000,
+        0.25
+      ],
+      [
+        10000,
+        0.05
+      ]
+    ]
+  },
+  "shares": {
+    "tools": 0.4,
+    "processes": 0.15,
+    "overlap": 0.06,
+    "attachments": 0.1,
+    "parallel": 0.8,
+    "park": 0.25,
+    "await": 1,
+    "signal": 0.1,
+    "process_cancel": 0.01,
+    "queued": 0.2,
+    "queued_active": 0.5,
+    "queued_cancel": 0.1,
+    "llm": 0.5,
+    "host": 0.1,
+    "occurrences": 0.05,
+    "trigger_edits": 0.01,
+    "promotion_reads": 0.01,
+    "cancel": 0.01,
+    "delete": 0.01,
+    "reconnect": 0.05,
+    "stream": 0.5,
+    "retry": 0.005
+  }
+}

@@ -186,5 +186,15 @@
     "compile_data": [
       "assets/index.html"
     ]
+  },
+  "crates/lash-perf": {
+    "compile_data": [
+      "workloads/*.json"
+    ],
+    "test_data": {
+      "workload": [
+        "workloads/fixtures/*.json"
+      ]
+    }
   }
 }
