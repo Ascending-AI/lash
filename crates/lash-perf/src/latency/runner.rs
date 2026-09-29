@@ -25,7 +25,6 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
-use lash_core::SessionCatalogStore as _;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 

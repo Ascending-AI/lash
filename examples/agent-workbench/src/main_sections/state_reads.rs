@@ -4,6 +4,7 @@ use lash::SessionId;
 pub(crate) struct StateProjectionReads {
     pub(crate) read_view: lash::persistence::SessionReadView,
     pub(crate) history_store: lash::persistence::SessionStore,
+    pub(crate) has_durable_head: bool,
     pub(crate) cursor: SessionCursor,
     pub(crate) pending_turn_inputs: Vec<lash::PendingTurnInputRead>,
     pub(crate) queued_work: Vec<lash::persistence::QueuedWorkBatch>,
@@ -41,13 +42,29 @@ impl AppState {
             self.session_store_factory.clone();
         let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
             .map_err(lash::EmbedError::Store)?;
-        let state = lash::persistence::load_session_window_state(
-            &store,
-            lash::persistence::WindowSelector::Current,
-        )
-        .await
-        .map_err(lash::EmbedError::Store)?
-        .map(|loaded| loaded.state)
+        let absent = matches!(
+            lash::persistence::SessionCatalogStore::lookup_session(
+                self.session_store_factory.as_ref(),
+                session_id,
+            )
+            .await
+            .map_err(lash::EmbedError::Store)?,
+            lash::persistence::SessionLookup::Absent
+        );
+        let state = if absent {
+            None
+        } else {
+            match lash::persistence::load_session_window_state(
+                &store,
+                lash::persistence::WindowSelector::Current,
+            )
+            .await
+            {
+                Ok(loaded) => loaded.map(|loaded| loaded.state),
+                Err(lash::persistence::StoreError::SessionNotFound { .. }) => None,
+                Err(error) => return Err(lash::EmbedError::Store(error)),
+            }
+        }
         .unwrap_or_else(|| {
             // A session with no durable head yet: the same empty state the
             // `/api/state` projection falls back to, so an observer that
@@ -97,14 +114,31 @@ pub(crate) async fn read_state_projection(
         state.session_store_factory.clone();
     let store = lash::persistence::SessionStore::new(runtime_store, session_id.clone())
         .map_err(AppError::internal)?;
-    let persisted = lash::persistence::load_session_window_state(
-        &store,
-        lash::persistence::WindowSelector::Current,
-    )
-    .await
-    .map_err(AppError::internal)?
-    .map(|loaded| loaded.state)
-    .unwrap_or_else(|| {
+    let catalog_absent = matches!(
+        lash::persistence::SessionCatalogStore::lookup_session(
+            state.session_store_factory.as_ref(),
+            session_id,
+        )
+        .await
+        .map_err(AppError::internal)?,
+        lash::persistence::SessionLookup::Absent
+    );
+    let loaded = if catalog_absent {
+        None
+    } else {
+        match lash::persistence::load_session_window_state(
+            &store,
+            lash::persistence::WindowSelector::Current,
+        )
+        .await
+        {
+            Ok(loaded) => loaded.map(|loaded| loaded.state),
+            Err(lash::persistence::StoreError::SessionNotFound { .. }) => None,
+            Err(error) => return Err(AppError::internal(error)),
+        }
+    };
+    let has_durable_head = loaded.is_some();
+    let persisted = loaded.unwrap_or_else(|| {
         let mut persisted = lash::persistence::RuntimeSessionState::new(request.policy);
         persisted.session_id = SessionId::from(session_id.to_string());
         persisted
@@ -124,25 +158,37 @@ pub(crate) async fn read_state_projection(
     let cursor = state
         .core
         .observation_cursor(session_id, lash::observe::SessionRevision(revision));
-    let pending_turn_inputs = store
-        .list_pending_turn_inputs()
-        .await
-        .map_err(AppError::internal)?;
-    let queued_work = store
-        .list_open_queued_work()
-        .await
-        .map_err(AppError::internal)?;
-    let turn_input_applications = store
-        .list_turn_input_applications()
-        .await
-        .map_err(AppError::internal)?
-        .iter()
-        .map(Into::into)
-        .collect();
+    let pending_turn_inputs = if catalog_absent {
+        Vec::new()
+    } else {
+        store
+            .list_pending_turn_inputs()
+            .await
+            .map_err(AppError::internal)?
+    };
+    let queued_work = if catalog_absent {
+        Vec::new()
+    } else {
+        store
+            .list_open_queued_work()
+            .await
+            .map_err(AppError::internal)?
+    };
+    let turn_input_applications = if catalog_absent {
+        Vec::new()
+    } else {
+        store
+            .list_turn_input_applications()
+            .await
+            .map_err(AppError::internal)?
+            .iter()
+            .map(Into::into)
+            .collect()
+    };
     let usage = persisted.usage_report();
     let mut turn_failure_settlements = Vec::new();
     let mut after = None;
-    loop {
+    while !catalog_absent {
         let page = store
             .load_failure_evidence_page(
                 after.as_ref(),
@@ -159,6 +205,7 @@ pub(crate) async fn read_state_projection(
     Ok(StateProjectionReads {
         read_view: lash::persistence::SessionReadView::from_persisted_state(&persisted),
         history_store: store,
+        has_durable_head,
         cursor,
         pending_turn_inputs,
         queued_work,

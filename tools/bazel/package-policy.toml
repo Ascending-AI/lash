@@ -71,8 +71,8 @@ reason = "uses the Cargo-owned generated frontend asset workflow"
 packages = ["lash-sim"]
 kinds = ["test"]
 targets = ["cross_backend*"]
-tags = ["manual", "cargo-service-gate"]
-reason = "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service"
+tags = ["cargo-service-gate"]
+reason = "local differential and trait-surface checks run in the ordinary suite; ignored cross-backend cases run in the service job with PostgreSQL"
 
 # This binary carries the generated-simulation and minimizer fixture replays
 # (measured 182-418 s each under Cargo). The whole binary ran 227-300 s on the

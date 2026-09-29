@@ -364,6 +364,14 @@ fn reset_cron_close_preserves_a_concurrent_retirement_refusal() {
         )
         .await;
         let session_id = state.current_session_id();
+        drop(
+            state
+                .core
+                .session(&session_id)
+                .open()
+                .await
+                .expect("materialize session before concurrent retirement"),
+        );
         trigger_store.retire_on_next_list(&session_id);
 
         let error =

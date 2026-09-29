@@ -32,6 +32,7 @@ pub(crate) async fn app_state(
     let StateProjectionReads {
         read_view,
         history_store,
+        has_durable_head,
         cursor,
         pending_turn_inputs,
         queued_work,
@@ -58,7 +59,7 @@ pub(crate) async fn app_state(
         .collect::<BTreeSet<_>>();
     let mut committed_input_turn_ids = BTreeSet::new();
     let mut anchor = lash::persistence::HistoryAnchor::Head;
-    loop {
+    while has_durable_head {
         let page = history_store
             .load_ancestors(
                 anchor,

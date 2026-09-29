@@ -187,7 +187,7 @@ async fn stable_durable_sqlite_turn_scenarios_report_phases_and_store_calls() {
         }
         for counter in [
             "store_calls.commit_runtime_state",
-            "store_calls.load_session",
+            "store_calls.load_session_window",
             "durable_commit.logical_bytes",
             "durable_commit.logical_rows",
         ] {
@@ -346,6 +346,8 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
             RuntimePerfScenario::DurableQueuedWorkContentionSqlite,
             RuntimePerfScenario::HighTrafficLoadSqlite,
             RuntimePerfScenario::HighTrafficKneeSqlite,
+            RuntimePerfScenario::FrameResidencyCurveSqlite,
+            RuntimePerfScenario::FrameResidencyCurvePostgres,
         ]
     );
 
@@ -354,7 +356,11 @@ fn durable_representative_turn_inventory_is_backend_complete_and_opt_in() {
     for scenario in RuntimePerfScenario::DURABLE_REPRESENTATIVE_TURNS {
         assert_eq!(
             scenario.uses_postgres(),
-            scenario == RuntimePerfScenario::DurableCheckpointCurvePostgres,
+            matches!(
+                scenario,
+                RuntimePerfScenario::DurableCheckpointCurvePostgres
+                    | RuntimePerfScenario::FrameResidencyCurvePostgres
+            ),
             "{}",
             scenario.name()
         );
@@ -589,7 +595,7 @@ async fn durable_queued_work_contention_sqlite_smoke_reports_structure_and_count
         "each worker must observe the controller drive epoch"
     );
 
-    let claim_wait = &result.metric_samples_ms["durable_contention.claim_wait_ms"];
+    let claim_wait = &result.metric_samples_ms["durable_contention.root_admission_wait_ms"];
     let service = &result.metric_samples_ms["durable_contention.service_ms"];
     assert_eq!(
         claim_wait.len(),

@@ -159,7 +159,6 @@ lash_rust_integration_test(
     rustc_env = {},
     tags = [
         "cargo-service-gate",
-        "manual",
     ],
     version = "0.0.0-dev",
 )

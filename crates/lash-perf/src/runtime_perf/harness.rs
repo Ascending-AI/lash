@@ -10,7 +10,6 @@ use lash::{
     provider::{ProviderHandle, ProviderOptions, ProviderReliability},
     runtime::SessionSnapshot,
 };
-use lash_core::SessionCatalogStore as _;
 use lash_core::SessionHistoryRecord;
 use lash_llm_tools::LlmToolsPluginFactory;
 use lash_provider_openai::OpenAiCompatibleProvider;

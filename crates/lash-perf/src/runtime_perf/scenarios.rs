@@ -34,6 +34,7 @@ pub(crate) enum ScenarioPhaseContract {
     CheckpointCurve,
     QueuedWorkContention,
     HighTraffic,
+    FrameResidencyCurve,
 }
 
 // The shared `Scenario` suffix names the distinct perf harness kinds and reads
@@ -335,7 +336,7 @@ macro_rules! runtime_perf_metadata {
 
 impl RuntimePerfScenario {
     #[cfg(test)]
-    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 8] = [
+    pub(crate) const DURABLE_REPRESENTATIVE_TURNS: [Self; 10] = [
         Self::DurableStandardToolTurnSqlite,
         Self::DurableRlmCheckpointTurnSqlite,
         Self::DurableAgentChildTurnSqlite,
@@ -344,6 +345,8 @@ impl RuntimePerfScenario {
         Self::DurableQueuedWorkContentionSqlite,
         Self::HighTrafficLoadSqlite,
         Self::HighTrafficKneeSqlite,
+        Self::FrameResidencyCurveSqlite,
+        Self::FrameResidencyCurvePostgres,
     ];
 
     pub(crate) const METADATA: [RuntimePerfScenarioMetadata; 55] = [
@@ -778,7 +781,7 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures reopened 64-row frame heap and commit latency over 0, 1,000, 8,000, and 32,000 prior SQLite rows.",
             Durable,
-            StableDurableTurn,
+            FrameResidencyCurve,
             false
         ),
         runtime_perf_metadata!(
@@ -788,7 +791,7 @@ impl RuntimePerfScenario {
             RuntimeScenario,
             "Measures reopened 64-row frame heap and commit latency over 0, 1,000, 8,000, and 32,000 prior PostgreSQL rows.",
             Durable,
-            StableDurableTurn,
+            FrameResidencyCurve,
             false
         ),
         runtime_perf_metadata!(

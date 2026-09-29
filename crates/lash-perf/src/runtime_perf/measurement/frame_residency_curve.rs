@@ -4,6 +4,7 @@ use lash_sansio::SessionId;
 const PRIOR_HISTORY_ROWS: [usize; 4] = [0, 1_000, 8_000, 32_000];
 const CURRENT_FRAME_ROWS: usize = 64;
 const HEAP_ALLOWANCE_BYTES: i64 = 64 * 1024;
+// FIG-3843 owns the quiet-host rebaseline of this perf-gated latency law.
 const COMMIT_LATENCY_RATIO: f64 = 1.2;
 const SEED_BUDGET: lash_core::CommitBudget =
     lash_core::CommitBudget::bounded(64 * 1024 * 1024, 40_000);
@@ -14,6 +15,36 @@ struct FramePoint {
     decoded_rows: usize,
     commit_median_ms: f64,
     commit_samples_ms: Vec<f64>,
+}
+
+fn check_reopened_frame_residency(points: &[FramePoint]) -> anyhow::Result<()> {
+    let baseline = &points[0];
+    if baseline.live_heap_bytes <= 0 {
+        anyhow::bail!("frame residency heap allocator was not instrumented");
+    }
+    let heap_limit =
+        baseline.live_heap_bytes.unsigned_abs() as f64 * 0.01 + HEAP_ALLOWANCE_BYTES as f64;
+    for measured in points {
+        if measured.decoded_rows != CURRENT_FRAME_ROWS {
+            anyhow::bail!(
+                "{} prior rows decoded {} current-frame rows, expected {}",
+                measured.prior_rows,
+                measured.decoded_rows,
+                CURRENT_FRAME_ROWS
+            );
+        }
+        let heap_delta =
+            (measured.live_heap_bytes - baseline.live_heap_bytes).unsigned_abs() as f64;
+        if heap_delta > heap_limit {
+            anyhow::bail!(
+                "{} prior rows changed resident heap by {} bytes, limit {}",
+                measured.prior_rows,
+                heap_delta,
+                heap_limit
+            );
+        }
+    }
+    Ok(())
 }
 
 async fn open_catalog(
@@ -119,16 +150,27 @@ async fn point(
             lash_core::TurnBudget::Unbounded,
         ))
     };
-    append_messages(&mut state, &format!("prior-{prior_rows}"), prior_rows);
-    commit_state(catalog.as_ref(), &state).await?;
-    drop(state);
-    let mut state = load_frame(catalog.clone(), &session_id).await?;
-    open_next_frame(&mut state, prior_rows, 0)?;
-    commit_state(catalog.as_ref(), &state).await?;
+    if prior_rows == 0 {
+        append_messages(&mut state, "current-0-0", CURRENT_FRAME_ROWS - 1);
+        commit_state(catalog.as_ref(), &state).await?;
+    } else {
+        // The initial FrameOpen is one of the earlier rows.
+        append_messages(&mut state, &format!("prior-{prior_rows}"), prior_rows - 1);
+        if state.session_graph.nodes.len() != prior_rows {
+            anyhow::bail!("earlier history seed has the wrong row count");
+        }
+        commit_state(catalog.as_ref(), &state).await?;
+        drop(state);
+        state = load_frame(catalog.clone(), &session_id).await?;
+        open_next_frame(&mut state, prior_rows, 0)?;
+        commit_state(catalog.as_ref(), &state).await?;
+    }
     drop(state);
     drop(catalog);
 
     let catalog = open_catalog(scenario, sqlite_root, postgres_url).await?;
+    // Prime one-time decoder allocations before comparing resident windows.
+    drop(load_frame(catalog.clone(), &session_id).await?);
     let before = allocator_stats();
     let mut state = load_frame(catalog.clone(), &session_id).await?;
     let after = allocator_stats();
@@ -175,12 +217,10 @@ pub(super) async fn run_once_frame_residency_curve(
         None => None,
     };
     let database_url = postgres_database.as_ref().map(|database| database.url());
-    let command = format!(
-        "kiln run //crates/lash-perf:lash-perf__bin -- --runtime-perf-scenario {} --runtime-perf-turns {} --runtime-perf-runs 1 --runtime-perf-warmups 0",
-        scenario.name(),
-        chat_turns.max(3)
+    eprintln!(
+        "frame residency argv: {:?}",
+        std::env::args().collect::<Vec<_>>()
     );
-    eprintln!("frame residency command: {command}");
     let mut run = RunRecorder::start(scenario, PRIOR_HISTORY_ROWS.len());
     let mut points = Vec::with_capacity(PRIOR_HISTORY_ROWS.len());
     for (index, prior_rows) in PRIOR_HISTORY_ROWS.into_iter().enumerate() {
@@ -214,21 +254,8 @@ pub(super) async fn run_once_frame_residency_curve(
         );
         points.push(measured);
     }
+    check_reopened_frame_residency(&points)?;
     let baseline = &points[0];
-    let heap_limit =
-        baseline.live_heap_bytes.unsigned_abs() as f64 * 0.01 + HEAP_ALLOWANCE_BYTES as f64;
-    for measured in &points[1..] {
-        let heap_delta =
-            (measured.live_heap_bytes - baseline.live_heap_bytes).unsigned_abs() as f64;
-        if heap_delta > heap_limit {
-            anyhow::bail!(
-                "{} prior rows changed resident heap by {} bytes, limit {}",
-                measured.prior_rows,
-                heap_delta,
-                heap_limit
-            );
-        }
-    }
     let commit_ratio = points[3].commit_median_ms / baseline.commit_median_ms.max(f64::EPSILON);
     if commit_ratio > COMMIT_LATENCY_RATIO {
         anyhow::bail!("32,000-row commit median ratio {commit_ratio:.3} exceeds 1.2");
@@ -267,4 +294,31 @@ pub(super) async fn run_once_frame_residency_curve(
         metric_samples_ms,
         ..RunTail::default()
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn reopened_frame_heap_and_decoded_rows_ignore_prior_history() {
+        let root = make_temp_bench_dir("lash-frame-residency-unit")
+            .expect("create SQLite frame residency catalog");
+        let mut points = Vec::with_capacity(PRIOR_HISTORY_ROWS.len());
+        for prior_rows in PRIOR_HISTORY_ROWS {
+            points.push(
+                point(
+                    RuntimePerfScenario::FrameResidencyCurveSqlite,
+                    Some(&root),
+                    None,
+                    prior_rows,
+                    1,
+                )
+                .await
+                .expect("seed and reopen a fixed current frame"),
+            );
+        }
+        check_reopened_frame_residency(&points)
+            .expect("resident heap and decoded rows stay fixed across earlier history");
+    }
 }

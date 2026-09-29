@@ -18286,12 +18286,11 @@
         },
         {
           "cargo": "cross_backend_store_differential",
-          "cargo_only": "proves nothing without a live PostgreSQL or S3 server; the service jobs execute this label uncached against a real service",
+          "cargo_only": "local differential and trait-surface checks run in the ordinary suite; ignored cross-backend cases run in the service job with PostgreSQL",
           "kind": "test",
           "label": "//crates/lash-sim:cross_backend_store_differential__test",
           "tags": [
-            "cargo-service-gate",
-            "manual"
+            "cargo-service-gate"
           ]
         },
         {

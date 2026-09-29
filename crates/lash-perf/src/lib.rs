@@ -44,6 +44,11 @@ pub const ALLOCATION_MODE: &str = "dhat-heap+stats_alloc";
 pub static GLOBAL_ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> =
     &stats_alloc::INSTRUMENTED_SYSTEM;
 
+#[cfg(all(test, not(feature = "dhat-heap")))]
+#[global_allocator]
+static TEST_GLOBAL_ALLOCATOR: &stats_alloc::StatsAlloc<std::alloc::System> =
+    &stats_alloc::INSTRUMENTED_SYSTEM;
+
 /// A dhat heap profiler allocator with stats-alloc-compatible counters.
 #[cfg(feature = "dhat-heap")]
 #[derive(Debug)]
@@ -86,6 +91,10 @@ impl DhatStatsAllocator {
 
 #[cfg(feature = "dhat-heap")]
 pub static GLOBAL_ALLOCATOR: DhatStatsAllocator = DhatStatsAllocator::new();
+
+#[cfg(all(test, feature = "dhat-heap"))]
+#[global_allocator]
+static TEST_GLOBAL_ALLOCATOR: &DhatStatsAllocator = &GLOBAL_ALLOCATOR;
 
 #[cfg(feature = "dhat-heap")]
 #[expect(
