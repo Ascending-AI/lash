@@ -15,10 +15,21 @@ pub use lash_sansio::VersionRange;
 
 /// The one wire version of every Lash handler a build other than the
 /// caller's can serve.
+#[cfg(not(feature = "synthetic-next"))]
 pub const RESTATE_WIRE_VERSION: u32 = 1;
 
 /// The wire versions this build reads and answers.
+#[cfg(not(feature = "synthetic-next"))]
 pub const RESTATE_WIRE: VersionRange = VersionRange::exactly(RESTATE_WIRE_VERSION);
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) moves the wire to 2 and keeps
+/// answering N's version 1, so a call from either build selects 1.
+#[cfg(feature = "synthetic-next")]
+pub const RESTATE_WIRE_VERSION: u32 = 2;
+
+/// The synthetic N+1 reads and answers N's wire and its own.
+#[cfg(feature = "synthetic-next")]
+pub const RESTATE_WIRE: VersionRange = VersionRange::between(1, RESTATE_WIRE_VERSION);
 
 /// Every cross-build request. JSON `{"wire":{"min":1,"max":1},"body":…}`;
 /// the outer shape is frozen.

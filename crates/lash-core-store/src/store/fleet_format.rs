@@ -338,7 +338,18 @@ pub struct RecordUpcaster {
 /// generation, so no `N-1` payload can exist and no transform is owed yet.
 /// The slot exists so the first format bump hangs its transform in one
 /// visible place rather than teaching each decoder a new rule.
+#[cfg(not(feature = "synthetic-next"))]
 pub const RECORD_UPCASTERS: &[RecordUpcaster] = &[];
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) registers the permanent history
+/// upcaster of the session node body it bumps, so history N wrote stays
+/// readable after finalize through the surface's floor.
+#[cfg(feature = "synthetic-next")]
+pub const RECORD_UPCASTERS: &[RecordUpcaster] = &[RecordUpcaster {
+    constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
+    from_version: crate::session_graph::SESSION_NODE_BODY_SCHEMA_VERSION - 1,
+    upcast: crate::session_graph::upcast_synthetic_node_body,
+}];
 
 /// The identity of one registered durable surface — what a writer or reader
 /// asks `F` about.
@@ -392,12 +403,27 @@ impl SurfaceFormat {
 #[cfg(not(feature = "synthetic-next"))]
 const WRITER_PINS: &[WriterPin] = &[];
 
+/// Phase A's synthetic N+1 (ADR 0115 §6) pins, while `F` is N's epoch, each
+/// stored surface it bumps to the version N reads: before finalize N+1 writes
+/// only what N reads.
 #[cfg(feature = "synthetic-next")]
-const WRITER_PINS: &[WriterPin] = &[WriterPin {
-    constant: "SESSION_HEAD_META_SCHEMA_VERSION",
-    generation: 1,
-    version: super::SESSION_HEAD_META_SCHEMA_VERSION,
-}];
+const WRITER_PINS: &[WriterPin] = &[
+    WriterPin {
+        constant: "SESSION_HEAD_META_SCHEMA_VERSION",
+        generation: 1,
+        version: super::SESSION_HEAD_META_SCHEMA_VERSION,
+    },
+    WriterPin {
+        constant: "SESSION_NODE_BODY_SCHEMA_VERSION",
+        generation: 1,
+        version: crate::session_graph::SESSION_NODE_BODY_SCHEMA_VERSION - 1,
+    },
+    WriterPin {
+        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
+        generation: 1,
+        version: 1,
+    },
+];
 
 /// The [`SurfaceFormat`] a call site hands [`FleetFormat::writer_version`]
 /// names a registered surface and carries the constant's own value as its

@@ -20,7 +20,18 @@ use crate::RemoteProtocolError;
 /// One version wide: the build speaks exactly [`crate::REMOTE_PROTOCOL_VERSION`].
 /// A release that adds a version widens it and keeps the older version's
 /// encoders as down-conversions.
+#[cfg(not(feature = "synthetic-next"))]
 pub const REMOTE_PROTOCOL: VersionRange = VersionRange::exactly(crate::REMOTE_PROTOCOL_VERSION);
+
+/// Phase A's synthetic N+1 (ADR 0115 §6) speaks one version past N's, whose
+/// requests carry one added field
+/// ([`RemoteTurnInput::synthetic_next_note`](crate::RemoteTurnInput::synthetic_next_note)),
+/// and keeps N's version as a down-conversion that drops it.
+#[cfg(feature = "synthetic-next")]
+pub const REMOTE_PROTOCOL: VersionRange = VersionRange::between(
+    crate::REMOTE_PROTOCOL_VERSION,
+    crate::REMOTE_PROTOCOL_VERSION + 1,
+);
 
 /// One bootstrap message. JSON is tagged by `negotiation` and frozen.
 #[derive(

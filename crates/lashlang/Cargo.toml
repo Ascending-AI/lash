@@ -29,6 +29,10 @@ doctest = false
 # artifact stores) can hold their `LashlangArtifactStore` implementations to one
 # executable contract.
 testing = []
+# Phase A's synthetic N+1 build (ADR 0115 §6): the blocks beside the
+# constants it moves. Only lash-upgrade-harness enables it; no production
+# build does.
+synthetic-next = []
 
 [lints]
 workspace = true

@@ -39,9 +39,13 @@ workspace = true
 [dependencies]
 lash = { workspace = true, features = ["restate", "sqlite"] }
 lash-core = { workspace = true, features = ["testing"] }
+lash-core-store = { workspace = true }
 lash-postgres-store = { workspace = true }
+lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
 lash-restate = { workspace = true }
 anyhow = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 clap = { workspace = true, features = ["derive", "env"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -49,8 +53,6 @@ tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", 
 
 [dev-dependencies]
 tempfile = { workspace = true }
-lash-core-store = { workspace = true }
-sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "postgres"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-sqlite-store = { workspace = true, features = ["testing"] }

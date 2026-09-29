@@ -340,13 +340,60 @@ latency-gate:
     exit "$status"
   fi
 
+# Builds Phase A's two builds of head (ADR 0115 §6, FIG-3805) with Bazel: N
+# (the default build) and N+1 (the `synthetic-next` feature), each as a
+# `lash-upgrade-node` and a `lashctl`, copied into `<artifacts>/bin/n` and
+# `<artifacts>/bin/n+1`. Each feature variant's label is read from its
+# generated BUILD file, so a change to either build's feature set moves no
+# recipe.
+_upgrade-harness-builds artifacts:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  artifacts="{{artifacts}}"
+  mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
+  # variant <package> <target> <none|synthetic-next>: the target's feature
+  # binary built with no features, or with `synthetic-next` alone.
+  variant() {
+    awk -v target="$2" -v want="$3" '
+      /^lash_rust_feature_binary\(/ { block = 1; name = ""; features = "" }
+      block && name == "" && /^    name = "/ { split($0, part, "\""); name = part[2] }
+      block && /^    crate_features = \[\],/ { features = "none" }
+      block && /^    crate_features = \[$/ { getline; if ($0 ~ /^        "synthetic-next",$/) features = "synthetic-next" }
+      block && /^\)/ { if (index(name, target "__fv_") == 1 && features == want) print name; block = 0 }
+    ' "$1/BUILD.bazel"
+  }
+  node_n="$(variant crates/lash-upgrade-harness lash-upgrade-node__bin none)"
+  node_next="$(variant crates/lash-upgrade-harness lash-upgrade-node__bin synthetic-next)"
+  lashctl_next="$(variant crates/lashctl lashctl synthetic-next)"
+  for resolved in "$node_n" "$node_next" "$lashctl_next"; do
+    if [ -z "$resolved" ] || [ "$(printf '%s\n' "$resolved" | wc -l)" -ne 1 ]; then
+      echo "cannot resolve the Phase A feature variants: '$node_n' '$node_next' '$lashctl_next'" >&2
+      exit 1
+    fi
+  done
+  bazel_startup=()
+  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
+    bazel_startup=(--output_user_root="$BAZEL_OUTPUT_USER_ROOT")
+  fi
+  read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
+  bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
+    "//crates/lash-upgrade-harness:$node_next" \
+    "//crates/lash-upgrade-harness:$node_n" \
+    //crates/lashctl:lashctl \
+    "//crates/lashctl:$lashctl_next"
+  cp "bazel-bin/crates/lash-upgrade-harness/$node_next" "$artifacts/bin/n+1/lash-upgrade-node"
+  cp "bazel-bin/crates/lash-upgrade-harness/$node_n" "$artifacts/bin/n/lash-upgrade-node"
+  cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
+  cp "bazel-bin/crates/lashctl/$lashctl_next" "$artifacts/bin/n+1/lashctl"
+
 # Phase A's rolling upgrade (ADR 0115 §6, FIG-3805): head built twice, N
 # (the default build) and N+1 (the `synthetic-next` feature), run as separate
 # `lash-upgrade-node` processes over real PostgreSQL, a SQLite store directory
 # and one live `restate-server`. Bazel builds both nodes and lashctl. The
 # operator binary runs the PostgreSQL version, migrate, preflight and drain
 # steps; SQLite migrates on open. Finalize still waits for its lane; the
-# `phase_a` legs wait for their lanes. `LASH_POSTGRES_DATABASE_URL` reuses a
+# `phase_a` legs run under `just phase-a`. `LASH_POSTGRES_DATABASE_URL` reuses a
 # database the caller provides; otherwise a throwaway pg16 container serves
 # the run. Evidence (the step report and every node's log) lands under the
 # artifact directory, which `runbooks/rolling-upgrade/` judges.
@@ -360,21 +407,7 @@ e2e-rolling:
     *) artifacts="{{repo}}/$artifacts" ;;
   esac
   rm -rf "$artifacts"
-  mkdir -p "$artifacts/bin/n" "$artifacts/bin/n+1"
-  bazel_startup=()
-  if [ -n "${BAZEL_OUTPUT_USER_ROOT:-}" ]; then
-    bazel_startup=(--output_user_root="$BAZEL_OUTPUT_USER_ROOT")
-  fi
-  read -r -a bazel_flags <<< "${BAZEL_SHARED_CACHE_FLAGS:---config=shared}"
-  bazel "${bazel_startup[@]}" build "${bazel_flags[@]}" --remote_download_outputs=all \
-    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_10a0ebcb \
-    //crates/lash-upgrade-harness:lash-upgrade-node__bin__fv_11ec8a4e \
-    //crates/lashctl:lashctl \
-    //crates/lashctl:lashctl__fv_3f424e37
-  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_10a0ebcb "$artifacts/bin/n+1/lash-upgrade-node"
-  cp bazel-bin/crates/lash-upgrade-harness/lash-upgrade-node__bin__fv_11ec8a4e "$artifacts/bin/n/lash-upgrade-node"
-  cp bazel-bin/crates/lashctl/lashctl "$artifacts/bin/n/lashctl"
-  cp bazel-bin/crates/lashctl/lashctl__fv_3f424e37 "$artifacts/bin/n+1/lashctl"
+  just _upgrade-harness-builds "$artifacts"
   cargo test --locked -p lash-upgrade-harness --test rolling --no-run
 
   export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
@@ -392,6 +425,55 @@ e2e-rolling:
     "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
   else
     scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/e2e-rolling.log"
+  fi
+
+# Phase A's legs (ADR 0115 §6, FIG-3805) over the same two builds, real
+# PostgreSQL (each leg creates a database of its own) and one live
+# `restate-server` whose retries back off within a second, so a leg that
+# crashes or swaps a deployment sees Restate redeliver promptly. Name the
+# legs to run (`just phase-a negotiated_wire_both_directions`); with none,
+# every leg runs, and a leg whose lane has not landed fails by design.
+# `LASH_POSTGRES_DATABASE_URL` reuses a server the caller provides; otherwise
+# a throwaway pg16 container serves the run. Each leg's evidence lands under
+# the artifact directory.
+phase-a *legs:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  cd "{{repo}}"
+  artifacts="${LASH_PHASE_A_ARTIFACT_DIR:-target/functional-e2e-artifacts/phase-a}"
+  case "$artifacts" in
+    /*) ;;
+    *) artifacts="{{repo}}/$artifacts" ;;
+  esac
+  rm -rf "$artifacts"
+  just _upgrade-harness-builds "$artifacts"
+  cargo test --locked -p lash-upgrade-harness --test phase_a --no-run
+
+  export LASH_UPGRADE_NODE_N="$artifacts/bin/n/lash-upgrade-node"
+  export LASH_UPGRADE_NODE_NEXT="$artifacts/bin/n+1/lash-upgrade-node"
+  export LASH_UPGRADE_LASHCTL_N="$artifacts/bin/n/lashctl"
+  export LASH_UPGRADE_LASHCTL_NEXT="$artifacts/bin/n+1/lashctl"
+  export LASH_PHASE_A_ARTIFACT_DIR="$artifacts"
+  filters=()
+  for leg in {{legs}}; do
+    filters+=("$leg::$leg")
+  done
+  if [ "${#filters[@]}" -gt 0 ]; then
+    filters=(--exact "${filters[@]}")
+  fi
+  run=(
+    python3 scripts/ci/restate_suite.py serve --name phase-a
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__INITIAL_INTERVAL=50ms
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__EXPONENTIATION_FACTOR=2.0
+      --server-env RESTATE_DEFAULT_RETRY_POLICY__MAX_INTERVAL=1s
+      --keep-log "$artifacts/restate-server.log"
+      -- cargo test --locked -p lash-upgrade-harness --test phase_a
+      -- --include-ignored --test-threads 1 --nocapture "${filters[@]}"
+  )
+  if [ -n "${LASH_POSTGRES_DATABASE_URL:-}" ]; then
+    "${run[@]}" 2>&1 | tee "$artifacts/phase-a.log"
+  else
+    scripts/ci/with-service.sh pg16 -- "${run[@]}" 2>&1 | tee "$artifacts/phase-a.log"
   fi
 
 agent-workbench-attachment-usage-gate port='3030':

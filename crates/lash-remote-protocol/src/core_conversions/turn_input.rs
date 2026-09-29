@@ -104,6 +104,7 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
         let RemoteTurnInput {
             items,
             trace_turn_id,
+            ..
         } = value;
         let mut input = lash_core::TurnInput::items(
             items
@@ -173,6 +174,8 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
             trace_turn_id,
+            #[cfg(feature = "synthetic-next")]
+            synthetic_next_note: None,
         })
     }
 }
