@@ -168,6 +168,15 @@ agent-service-restate-e2e:
 agent-workbench-restate-e2e:
   bash "{{repo}}/scripts/agent-workbench-restate-e2e.sh"
 
+# FIG-4042: token-free RLM warning and frame-switch companion for the manual
+# workbench continue_as runbook. The provider responses are scripted in-process.
+workbench-continue-as-budget-gate:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kiln test //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test --test_arg=budget_warning --test_sharding_strategy=disabled --test_output=errors
+  kiln test //examples/agent-workbench:agent-workbench__unit_test --test_arg=continue_as_warning_override --test_sharding_strategy=disabled --test_output=errors
+  kiln test //crates/lash-protocol-rlm:protocol_drivers__test --test_arg=scripted_context_budget_warning_reaches_model_and_continue_as_carries_only_seed --test_sharding_strategy=disabled --test_output=errors
+
 # The regression gate for the Restate effect-group choreography. Its suites are
 # `#[ignore]`d because they need a Restate server, so this recipe is the only
 # thing that runs them: `scripts/ci/restate_suite.py` builds the test binary on
