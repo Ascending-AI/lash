@@ -807,6 +807,20 @@ async fn final_commit_opens_one_frame_for_two_agreeing_switch_authors() {
     let state = pipeline.into_final_state();
     let expected_frame_node_id =
         crate::session_graph::frame_node_id(&session_id, frame_key("frame-next").as_str());
+    // The session's first commit switches away from its first frame, which
+    // the same commit opens: it ends that frame at once (ADR 0113 §3.1).
+    let transition = store.runtime_commits()[0]
+        .frame_transition
+        .clone()
+        .expect("a first-turn switch ends the first frame");
+    assert_eq!(
+        Some(transition.ended.frame_node_id()),
+        opening_frame_node_id.as_ref()
+    );
+    assert_eq!(
+        transition.successor.frame_node_id(),
+        &expected_frame_node_id
+    );
     assert_eq!(
         state.current_frame_node_id.as_deref(),
         Some(expected_frame_node_id.as_str())
@@ -1923,12 +1937,12 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
 
     // Nothing is committed yet, so an open ends no frame.
     assert_eq!(
-        committed_frame_transition(&state, None, Vec::new(), &committing).unwrap(),
+        committed_frame_transition(&state, None, Vec::new(), &committing, &[]).unwrap(),
         None
     );
     state.mark_node_ids_persisted([crate::NodeId::new(committed.as_str().to_string())]);
     assert_eq!(
-        committed_frame_transition(&state, None, Vec::new(), &committing).unwrap(),
+        committed_frame_transition(&state, None, Vec::new(), &committing, &[]).unwrap(),
         None,
         "a commit that opens no frame ends none"
     );
@@ -1967,7 +1981,8 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
             &state,
             Some(committed.clone()),
             vec![carried.clone()],
-            &committing
+            &committing,
+            &[]
         )
         .unwrap(),
         Some(crate::store::FrameTransition {
@@ -1982,7 +1997,8 @@ fn a_committed_frame_open_clears_execution_state_and_ends_the_last_committed_fra
     let uncommitted = crate::FrameNodeId::new(opened_frame_a(&state)).unwrap();
     for named in [None, Some(uncommitted)] {
         assert_eq!(
-            committed_frame_transition(&state, named, vec![carried.clone()], &committing).unwrap(),
+            committed_frame_transition(&state, named, vec![carried.clone()], &committing, &[])
+                .unwrap(),
             Some(crate::store::FrameTransition {
                 ended: ended.clone(),
                 successor: opened.clone(),
@@ -2000,4 +2016,110 @@ fn opened_frame_a(state: &RuntimeSessionState) -> String {
         .and_then(|frame| frame.previous_frame_node_id.clone())
         .expect("frame b follows frame a")
         .into_inner()
+}
+
+#[test]
+fn a_first_commit_that_switches_ends_the_first_frame_it_opens() {
+    let clock = crate::SystemClock;
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("first-turn-switch"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+    };
+    state.ensure_agent_frame_initialized_with_clock(&clock);
+    let first = state
+        .current_frame_node_id
+        .clone()
+        .expect("the first frame");
+    super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("successor"), AgentFrameReason::continue_as()),
+        &clock,
+    )
+    .expect("open the successor");
+    let successor = state.current_frame_node_id.clone().expect("the successor");
+    let committing = crate::ExecutionScope::turn(&state.session_id, "first-turn");
+    let carried = crate::ArtifactName {
+        store: crate::ArtifactStoreId::LashlangModule,
+        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+    };
+    // The commit appends both frames' opens: the head holds no frame yet, so
+    // the first frame, whose edges the turn's cells acquired, ends here.
+    let appended = [
+        crate::NodeId::new(first.as_str().to_string()),
+        crate::NodeId::new(successor.as_str().to_string()),
+    ];
+    assert_eq!(
+        committed_frame_transition(
+            &state,
+            Some(first.clone()),
+            vec![carried.clone()],
+            &committing,
+            &appended,
+        )
+        .unwrap(),
+        Some(crate::store::FrameTransition {
+            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), first.clone()),
+            successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor.clone()),
+            carries: vec![carried.clone()],
+            gate: committing.journal_identity().unwrap(),
+        })
+    );
+    // A frame this commit does not append cannot be ended by it.
+    assert_eq!(
+        committed_frame_transition(&state, Some(first.clone()), vec![carried], &committing, &[])
+            .unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_registration_turn_then_a_switch_ends_the_committed_frame_with_its_carries() {
+    let clock = crate::SystemClock;
+    let mut state = RuntimeSessionState {
+        session_id: SessionId::from("registration-then-switch"),
+        ..RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED))
+    };
+    state.ensure_agent_frame_initialized_with_clock(&clock);
+    let first = state
+        .current_frame_node_id
+        .clone()
+        .expect("the first frame");
+    let registering = crate::ExecutionScope::turn(&state.session_id, "registering-turn");
+    // The registration turn's commit appends the first frame and switches
+    // nothing: it ends no frame.
+    let appended = [crate::NodeId::new(first.as_str().to_string())];
+    assert_eq!(
+        committed_frame_transition(&state, None, Vec::new(), &registering, &appended).unwrap(),
+        None
+    );
+    state.mark_node_ids_persisted(appended);
+
+    super::super::open_agent_frame_in_state_with_clock(
+        &mut state,
+        frame_request(frame_key("successor"), AgentFrameReason::continue_as()),
+        &clock,
+    )
+    .expect("the switching turn opens the successor");
+    let successor = state.current_frame_node_id.clone().expect("the successor");
+    let switching = crate::ExecutionScope::turn(&state.session_id, "switching-turn");
+    let carried = crate::ArtifactName {
+        store: crate::ArtifactStoreId::LashlangModule,
+        artifact_ref: "lashlang:v2:blake3:carried".to_string(),
+    };
+    assert_eq!(
+        committed_frame_transition(
+            &state,
+            Some(first.clone()),
+            vec![carried.clone()],
+            &switching,
+            &[crate::NodeId::new(successor.as_str().to_string())],
+        )
+        .unwrap(),
+        Some(crate::store::FrameTransition {
+            ended: crate::FrameEnvironmentId::new(state.session_id.clone(), first),
+            successor: crate::FrameEnvironmentId::new(state.session_id.clone(), successor),
+            carries: vec![carried],
+            gate: switching.journal_identity().unwrap(),
+        })
+    );
 }

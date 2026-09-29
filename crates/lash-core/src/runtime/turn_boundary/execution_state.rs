@@ -63,14 +63,17 @@ pub(super) async fn frame_switch_execution_state_update(
 /// to the state's current frame (ADR 0113 §3.1), gated on `committing`: the
 /// one execution that can still read what `ended` held.
 ///
-/// The ended frame is always the committed head's frame, the only one the
-/// store can end. A switch names the frame its turn was admitted on, and
-/// carries its seed's modules out of it when the store already holds that
-/// frame. Otherwise (no switch, or a turn admitted on a frame opened in
-/// resident state since the last commit) the commit ends the last committed
-/// frame and carries nothing: the carried modules hold edges of the
-/// uncommitted frame, not of the committed one. `None` when the commit opens
-/// no frame, or when there was no frame to end.
+/// The store ends only the committed head's frame, or, while the head holds
+/// no frame yet, the frame whose open this same commit appends (`appended`
+/// names the commit's nodes). A switch names the frame its turn was admitted
+/// on and carries its seed's modules out of it when the store can end that
+/// frame: the frame the head holds, or a session's first frame switched away
+/// from by its first commit, whose edges are fenced at once. Otherwise (no
+/// switch, or a turn admitted on a frame opened in resident state after a
+/// committed one) the commit ends the last committed frame and carries
+/// nothing: the carried modules hold edges of the uncommitted frame, not of
+/// the committed one. `None` when the commit opens no frame, or when there
+/// was no frame to end.
 ///
 /// # Errors
 ///
@@ -80,13 +83,22 @@ pub(in crate::runtime) fn committed_frame_transition(
     ended: Option<crate::FrameNodeId>,
     carries: Vec<crate::ArtifactName>,
     committing: &crate::ExecutionScope,
+    appended: &[crate::NodeId],
 ) -> Result<Option<crate::store::FrameTransition>, StoreError> {
     let Some(successor) = state.current_frame_node_id.clone() else {
         return Ok(None);
     };
-    let (ended, carries) = match ended.filter(|ended| is_committed(state, ended)) {
+    let committed = last_committed_frame(state);
+    let endable = |ended: &crate::FrameNodeId| {
+        is_committed(state, ended)
+            || (committed.is_none()
+                && appended
+                    .iter()
+                    .any(|node_id| node_id.as_str() == ended.as_str()))
+    };
+    let (ended, carries) = match ended.filter(endable) {
         Some(ended) => (ended, carries),
-        None => match last_committed_frame(state) {
+        None => match committed {
             Some(ended) => (ended, Vec::new()),
             None => return Ok(None),
         },

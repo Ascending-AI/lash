@@ -1005,6 +1005,7 @@ impl LashRuntime {
                 ended,
                 Vec::new(),
                 &committing,
+                &persisted_node_ids,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         }

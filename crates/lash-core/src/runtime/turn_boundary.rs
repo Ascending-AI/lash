@@ -763,12 +763,13 @@ impl TurnBoundary {
                 })
                 .unwrap_or(ended)
         });
-        let frame_transition = committed_frame_transition(state, ended, carries, &committing)?;
         let persisted_node_ids = graph
             .nodes()
             .iter()
             .map(|node| node.node_id.clone())
             .collect::<Vec<_>>();
+        let frame_transition =
+            committed_frame_transition(state, ended, carries, &committing, &persisted_node_ids)?;
         let mut commit =
             RuntimeCommit::persisted_state_with_graph_commit_and_staged_usage_and_budget(
                 state,
