@@ -340,8 +340,49 @@ where
                 None => run.await,
                 Some(live) => live.serve(run).await?,
             };
-            let Json(recorded) = journaled
-                .map_err(|error| process_command_journal_error("start registration", error))?;
+            let recorded = match journaled {
+                Ok(Json(recorded)) => recorded,
+                // The engine's cancellation of this invocation (the call's
+                // group decided its cancel) may surface at the step's await
+                // after the row committed. A registered child must still
+                // reach the engine: the call's abandonment cancels it, and
+                // only a submitted run can honour that cancel (FIG-4127). The
+                // start goes on with the row its key holds, read in a step of
+                // its own; with none, nothing registered. The row is taken as
+                // retained, so no compensation may touch it.
+                Err(error) if context::is_engine_cancellation(&error) => {
+                    let registry = Arc::clone(&registry);
+                    let start_key = start_key.clone();
+                    let Json(retained) = context
+                        .run_json_or_retry_send(
+                            process_command_journal_name(
+                                invocation,
+                                "process-start-register-after-cancel",
+                            ),
+                            async move {
+                                registry
+                                    .get_process_by_start_key(&start_key)
+                                    .await
+                                    .map_err(|error| error.to_string())
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            process_command_journal_error("start registration", error)
+                        })?;
+                    let Some(record) = retained else {
+                        return Err(process_command_journal_error("start registration", error));
+                    };
+                    Ok(lash_core::runtime::RegisteredProcessStart {
+                        env_ref: record.env_ref.clone(),
+                        record,
+                        disposition: lash_core::ProcessRegistrationDisposition::Existing,
+                    })
+                }
+                Err(error) => {
+                    return Err(process_command_journal_error("start registration", error));
+                }
+            };
             let started: lash_core::runtime::RegisteredProcessStart = recorded?;
             let disposition = started.disposition;
             let registration = registration.with_execution_env_ref(started.env_ref.clone());

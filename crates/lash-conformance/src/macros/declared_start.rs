@@ -7,19 +7,16 @@
 #[macro_export]
 macro_rules! declared_start_tests {
     ($(#[$attr:meta])* $fixture:block) => {
-        $crate::declared_start_tests!(@laws [$(#[$attr])*] [] $fixture);
+        $crate::declared_start_tests!(@laws [$(#[$attr])*] $fixture);
     };
-    (quarantine_cancel($reason:literal) $fixture:block) => {
-        $crate::declared_start_tests!(@laws [] [#[ignore = $reason]] $fixture);
-    };
-    (@laws [$($attr:tt)*] [$($cancel_attr:tt)*] $fixture:block) => {
+    (@laws [$($attr:tt)*] $fixture:block) => {
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_crash_at_every_launch_boundary);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             spawn_agent_record_carries_child_identity);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_timeout_cancels_the_child);
-        $crate::declared_start_tests!(@law [$($attr)* $($cancel_attr)*] $fixture;
+        $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_cancel_at_each_point);
         $crate::declared_start_tests!(@law [$($attr)*] $fixture;
             declared_start_retention_hold_blocks_prune_until_consumed);

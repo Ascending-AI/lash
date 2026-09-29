@@ -69,6 +69,14 @@ pub use segment_wait::{ProcessCancelRace, SignalWaitOutcome};
 pub(crate) use wake::guard_restate_context_future;
 pub(crate) use wake::{ClosureWakeRelay, guard_restate_run_future, relay_closure_wakes};
 
+/// Whether `error` is the engine's cancellation of this invocation. The SDK
+/// surfaces it once, at whichever await the handler is parked on when the
+/// signal lands, and journals the signal, so a replay meets it at the same
+/// await; every later journaled step completes as usual.
+pub(crate) fn is_engine_cancellation(error: &TerminalError) -> bool {
+    error.code() == 409
+}
+
 /// The future every turn-cancel race returns across this seam.
 ///
 /// `T` is what the guarded wait produces when it wins: `()` for a timer, a
@@ -1027,14 +1035,7 @@ macro_rules! impl_restate_controller_context {
                     );
                     let handle = request.send();
                     Box::pin(async move {
-                        // A journaled send that completes with a terminal
-                        // failure is proof of non-acceptance: the runtime
-                        // records the send as an entry, and a transient
-                        // condition (no connection, no reply yet) suspends and
-                        // retries the handler instead of completing the entry.
-                        // Anything that reaches here therefore names a decision,
-                        // not a silence.
-                        let handle = handle.await.map_err(ProcessWorkflowStartFailure::Rejected)?;
+                        let handle = handle.await.map_err(ProcessWorkflowStartFailure::of_send)?;
                         Ok(handle.invocation_id().to_owned())
                     })
                 }

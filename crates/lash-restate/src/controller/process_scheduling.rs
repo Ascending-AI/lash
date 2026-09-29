@@ -25,6 +25,22 @@ pub enum ProcessWorkflowStartFailure {
 }
 
 impl ProcessWorkflowStartFailure {
+    /// The failure the journaled send's await answered with. A terminal
+    /// failure there is proof of non-acceptance: the runtime records the send
+    /// as an entry, and a transient condition (no connection, no reply yet)
+    /// suspends and retries the handler instead of completing the entry. The
+    /// one exception is the engine's cancellation of the sending invocation
+    /// (the call's group decided its cancel): it surfaces at whatever the
+    /// handler awaits, and the send command it interrupted was journaled
+    /// before that await, so the run may well be accepted (FIG-4128).
+    pub fn of_send(error: TerminalError) -> Self {
+        if context::is_engine_cancellation(&error) {
+            Self::Ambiguous(error)
+        } else {
+            Self::Rejected(error)
+        }
+    }
+
     /// The underlying failure, whichever class it is.
     pub fn error(&self) -> &TerminalError {
         match self {
@@ -70,23 +86,33 @@ where
     // the settle after the send is the delivery's commit. A `None` relay or
     // a `None` claim — the row was already taken — leaves the reconcile pass
     // its row; the send below coalesces on the workflow key either way.
+    //
+    // The engine's cancellation of this invocation (the call's group decided
+    // its cancel) may surface at the claim's await after the claim was taken,
+    // and the token it withholds is lost. The claim is then retried, which
+    // takes the row only if the first closure never ran, and the start goes on
+    // to its send either way: the call's abandonment cancels the child, and
+    // only a submitted run can honour that cancel (FIG-4127).
     let claim_token = match &starts {
         Some(starts) => {
-            let starts = Arc::clone(starts);
-            let claimed_id = process_id.clone();
-            let Json(token) = context
-                .run_json_or_retry_send(
-                    process_command_journal_name(invocation, "process-start-claim"),
+            let Json(token) = run_past_engine_cancel(
+                context,
+                invocation,
+                ["process-start-claim", "process-start-claim-after-cancel"],
+                || {
+                    let starts = Arc::clone(starts);
+                    let claimed_id = process_id.clone();
                     async move {
                         starts
                             .claim_start(&claimed_id)
                             .await
                             .map(|token| token.map(|token| token.as_str().to_owned()))
                             .map_err(|error| error.to_string())
-                    },
-                )
-                .await
-                .map_err(|error| process_command_journal_error("start claim", error))?;
+                    }
+                },
+            )
+            .await
+            .map_err(|error| process_command_journal_error("start claim", error))?;
             token
         }
         None => None,
@@ -145,7 +171,6 @@ where
                             due_at_ms: 0,
                             error: submit_error.to_string(),
                         },
-                        "process-start-settle",
                     )
                     .await?;
                 }
@@ -154,7 +179,7 @@ where
             let compensation_registry = Arc::clone(&registry);
             let compensation_record = record.clone();
             let compensation_error = submit_error.to_string();
-            let Json(compensated) = context
+            let Json(compensation) = context
                 .run_json_or_retry_send(
                     process_command_journal_name(invocation, "process-start-compensate"),
                     async move {
@@ -172,7 +197,7 @@ where
                             )
                             .await
                             {
-                                Ok(()) => true,
+                                Ok(compensated) => Some(compensated),
                                 Err(error) => {
                                     tracing::error!(
                                         process_id = %compensation_record.id,
@@ -180,7 +205,7 @@ where
                                         %error,
                                         "Restate process submission failed and its start-failed compensation could not be written; recovery owns the row"
                                     );
-                                    false
+                                    None
                                 }
                             },
                         )
@@ -188,9 +213,32 @@ where
                 )
                 .await
                 .map_err(|error| process_command_journal_error("start compensation", error))?;
+            let compensated = compensation.is_some();
+            // The `StartFailed` request is terminal on the spot only for a row
+            // nothing runs. One a run already holds -- another delivery of the
+            // obligation started it -- keeps the request standing, and a
+            // standing request reaches a live run only through the workflow's
+            // `cancel` handler, as every other cancel does (FIG-4128).
+            if let Some(standing) = compensation.filter(|record| !record.is_terminal()) {
+                context
+                    .request_process_workflow_cancel(
+                        namespace,
+                        RestateProcessCancelRequest::from_record(&standing)?,
+                    )
+                    .await
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::new(
+                            RuntimeErrorCode::EngineProcessCancel,
+                            format!(
+                                "delivering process `{process_id}`'s start-failed cancel to its run failed: {error}"
+                            ),
+                        )
+                    })?;
+            }
             // The claim settles with the verdict the row ended at: the
-            // compensated row is terminal, so nothing remains to deliver;
-            // one whose compensation could not be written goes back due
+            // compensated row is terminal or held by its run, so nothing
+            // remains to deliver; one whose compensation could not be
+            // written goes back due
             // with the failure recorded for the reconcile pass.
             if let (Some(starts), Some(token)) = (&starts, claim_token.clone()) {
                 let settlement = if compensated {
@@ -201,16 +249,8 @@ where
                         error: submit_error.to_string(),
                     }
                 };
-                settle_start_claim(
-                    starts,
-                    context,
-                    invocation,
-                    &process_id,
-                    token,
-                    settlement,
-                    "process-start-settle",
-                )
-                .await?;
+                settle_start_claim(starts, context, invocation, &process_id, token, settlement)
+                    .await?;
             }
             return if compensated {
                 Err(submit_error.into())
@@ -225,9 +265,18 @@ where
         .stable(crate::LashService::ProcessWorkflow)
         .to_string();
     let settle_id = process_id.clone();
-    let Json(record) = context
-        .run_json_or_retry_send(
-            process_command_journal_name(invocation, "process-start-external-ref"),
+    let Json(record) = run_past_engine_cancel(
+        context,
+        invocation,
+        [
+            "process-start-external-ref",
+            "process-start-external-ref-after-cancel",
+        ],
+        || {
+            let registry = Arc::clone(&registry);
+            let process_id = process_id.clone();
+            let route = route.clone();
+            let invocation_id = invocation_id.clone();
             async move {
                 registry
                     .set_external_ref(
@@ -258,10 +307,11 @@ where
                         },
                         |record| Ok(Ok(record)),
                     )
-            },
-        )
-        .await
-        .map_err(|error| process_command_journal_error("start external reference", error))?;
+            }
+        },
+    )
+    .await
+    .map_err(|error| process_command_journal_error("start external reference", error))?;
     // The journaled send delivered the armed row; the claim settles
     // `Delivered` so the reconcile pass never submits it a second time.
     if let (Some(starts), Some(token)) = (&starts, claim_token) {
@@ -272,7 +322,6 @@ where
             &settle_id,
             token,
             lash_core::store::ObligationSettlement::Delivered,
-            "process-start-settle",
         )
         .await?;
     }
@@ -291,35 +340,76 @@ async fn settle_start_claim<'ctx, C>(
     process_id: &lash_core::ProcessId,
     token: String,
     settlement: lash_core::store::ObligationSettlement,
-    step: &'static str,
 ) -> Result<(), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
-    let starts = Arc::clone(starts);
-    let process_id = process_id.clone();
-    let Json(()) = context
-        .run_json_or_retry_send(process_command_journal_name(invocation, step), async move {
-            starts
-                .settle_start(
-                    &process_id,
-                    lash_core::store::ClaimToken::new(token),
-                    settlement,
-                )
-                .await
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| process_command_journal_error("start settle", error))?;
+    // A settle that already applied answers `ClaimLost` when it runs again.
+    let Json(()) = run_past_engine_cancel(
+        context,
+        invocation,
+        ["process-start-settle", "process-start-settle-after-cancel"],
+        || {
+            let starts = Arc::clone(starts);
+            let process_id = process_id.clone();
+            let token = lash_core::store::ClaimToken::new(token.clone());
+            let settlement = settlement.clone();
+            async move {
+                starts
+                    .settle_start(&process_id, token, settlement)
+                    .await
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            }
+        },
+    )
+    .await
+    .map_err(|error| process_command_journal_error("start settle", error))?;
     Ok(())
 }
 
+/// One journaled step of the scheduling boundary that the engine's
+/// cancellation of this invocation does not end: once registration
+/// committed, the start must reach the engine, or be compensated, whatever
+/// becomes of the call that issued it (FIG-4127). The cancellation surfaces
+/// once, at the step's await, whether or not its closure ran; the step then
+/// runs again under its second journal name, which every step here answers
+/// correctly after a first run whose answer was lost. A replay meets the
+/// cancellation at the same await and takes the same path.
+async fn run_past_engine_cancel<'ctx, C, T, Fut>(
+    context: &C,
+    invocation: &RuntimeEffectInvocation,
+    [operation, after_cancel]: [&str; 2],
+    step: impl Fn() -> Fut,
+) -> Result<Json<T>, TerminalError>
+where
+    C: RestateControllerContext<'ctx> + ?Sized,
+    T: serde::Serialize + serde::de::DeserializeOwned + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, String>> + Send + 'static,
+{
+    match context
+        .run_json_or_retry_send(process_command_journal_name(invocation, operation), step())
+        .await
+    {
+        Err(error) if context::is_engine_cancellation(&error) => {
+            context
+                .run_json_or_retry_send(
+                    process_command_journal_name(invocation, after_cancel),
+                    step(),
+                )
+                .await
+        }
+        journaled => journaled,
+    }
+}
+
+/// Request the `StartFailed` cancel of `record`'s row, answering the row as
+/// the request left it.
 async fn compensate_failed_process_submission(
     registry: &dyn ProcessRegistry,
     record: &ProcessRecord,
     submit_error: &str,
-) -> Result<(), PluginError> {
+) -> Result<ProcessRecord, PluginError> {
     registry
         .request_process_cancel(
             &record.id,
@@ -328,7 +418,6 @@ async fn compensate_failed_process_submission(
             None,
         )
         .await
-        .map(|_| ())
         .inspect_err(|_| {
             tracing::warn!(
                 process_id = %record.id,

@@ -475,6 +475,13 @@ must carry its own submission context (Restate's start `send`, with its
 execution context and causal invocation) claims the row itself, sends, and
 settles through the same ledger. The relay's due pass is the fallback for a
 lost immediate attempt; the row is delivered once and nothing re-arms it.
+The engine's cancellation of that journaled claimant (its call's group
+decided the call's cancel) never ends a registered start short of its send
+(FIG-4127, FIG-4128): a step whose answer the cancellation took runs again,
+a claim whose token it took stays for the relay while the send goes on, and
+a cancellation at the send's own await proves nothing refused, so it is no
+`StartFailed` compensation. A `StartFailed` request that finds a run already
+holding the row goes to that run's `cancel` handler.
 
 **Parks.** The parks arm no longer resumes a paused drive blindly: a pause
 after the engine's own retries is recorded as a turn park, and only a redrive
