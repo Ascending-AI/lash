@@ -92,6 +92,7 @@ mod session_delete;
 mod session_delete_blob_reclaim;
 mod session_graph_append;
 mod session_graph_state_machine;
+mod session_history;
 mod session_ingress;
 mod session_store_factory;
 mod session_store_factory_enumeration;
@@ -160,6 +161,7 @@ pub use served_process_start::SubagentFactories;
 pub use session_delete_blob_reclaim::*;
 pub use session_graph_append::*;
 pub use session_graph_state_machine::*;
+pub use session_history::*;
 pub use session_ingress::{
     SESSION_INGRESS_SESSION_ID, SessionIngressHandles, session_ingress_session_request,
 };
