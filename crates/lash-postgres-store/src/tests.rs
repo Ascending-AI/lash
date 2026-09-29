@@ -861,12 +861,12 @@ lash_conformance::checkpoint_admission_probe_tests!({
         "postgres-checkpoint-counter:{}",
         std::process::id()
     ));
-    let store = Arc::new(storage.session_store(&session_id));
+    let store = Arc::new(storage.store());
     let counting_store = Arc::clone(&store);
     let teardown_session = session_id.clone();
     (
         database_lock,
-        store as Arc<dyn RuntimePersistence>,
+        store as Arc<dyn lash_core_execution::RuntimeStore>,
         session_id,
         move || counting_store.checkpoint_admission_counts(),
         async move {
