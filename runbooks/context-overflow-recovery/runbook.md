@@ -20,11 +20,11 @@ turn is invisible to it.
 **Lash chooses no recovery policy.** Whether and when to compact, summarize, or restart
 stays host policy. The kernel's whole obligation is to stop hiding the reason.
 
-**No plugin recovery in this row (FIG-4029).** The row is an RLM session, and the
-standard-compaction plugin serves standard-protocol sessions only: an RLM session switches
-frames through the model-driven `continue_as`. Standard sessions own plugin recovery; it is
-covered by the `standard_compaction_persistence` tests in `crates/lash` until a
-standard-protocol row joins this runbook.
+**Standard plugin recovery (FIG-4030).** The companion also runs a standard-protocol
+session with the standard-compaction plugin. A native tool call supplies the oversized
+result. The plugin records the pending marker, summarizes the committed overflow,
+records completion, and opens a new compaction frame for the continuing turn.
+The RLM sessions retain their separate overflow-outcome checks.
 
 **Deterministic companion.** Run with a fresh artifact directory:
 
@@ -32,14 +32,12 @@ standard-protocol row joins this runbook.
 LASH_CONTEXT_OVERFLOW_ARTIFACT_DIR=<fresh-dir> just context-overflow-recovery-e2e
 ```
 
-It runs the scenario's single TypeScript row and writes it to
-`<artifact-dir>/context-overflow-recovery/typescript/`. **Do not set
-`LASH_RUNBOOK_DIALECT`.** This companion does read it — it uses the value as the artifact
-*directory name* — but the binary hardcodes both the cell delimiters and the checkpoint's
-`"dialect"` field to `typescript`. Setting it to anything else produces a directory named for
-a dialect over evidence that says `typescript`, i.e. it silently mislabels the artifacts
-rather than reproducing anything. ADR 0096 leaves one dialect; there is no second row to
-reproduce. It emits
+It writes the RLM TypeScript row to
+`<artifact-dir>/context-overflow-recovery/typescript/` and the standard-protocol
+checkpoint to `<artifact-dir>/context-overflow-recovery/standard/`. **Do not set
+`LASH_RUNBOOK_DIALECT`.** The companion rejects it. The RLM cell delimiters and
+checkpoint's `"dialect"` field both use the fixed TypeScript dialect. ADR 0096
+leaves no second RLM dialect to select. It emits
 `context-overflow-recovery e2e passed: rows=N` only after the focused contract test and
 every row's gates pass.
 
@@ -52,11 +50,10 @@ companion builds through the shared Bazel pool and runs the harness locally.
 Portable CI uses Cargo because it has no Kiln fork. Do not configure a live
 provider: a live model cannot be made to overflow on demand.
 
-**Two layers.** The scripted layer is the cell that calls the oversized tool and the cell
-that finishes: both must be cells the row's session can *execute*, because a foreign cell
-never commits and the turn then never reaches a terminal state — the row hangs rather than
-failing. The judged layer is everything above it: the outcome's identity and the continued
-session, neither of which is about the dialect at all.
+**Two layers.** The RLM scripted layer calls the oversized tool and finishes through
+TypeScript cells. The standard session uses a native tool call and plain assistant
+text. The judged layer checks the RLM outcomes and the standard plugin's durable
+recovery records and new frame.
 
 The dialect is fixed: TypeScript is the sole RLM dialect (ADR 0096) and the cells here are
 TypeScript. **Do not try to confirm a served dialect from this bundle.** The checkpoint's
@@ -154,6 +151,19 @@ judged.
 
 **Fail if:** the continued turn failed, overflowed again, or ran on a different session.
 
+## Phase 4 — Standard plugin recovery
+
+Read `standard_plugin_recovered` from the standard row's `03-observed.jsonl`.
+Require `protocol == "standard"`, a tool result of at least 256 KiB, at least four
+provider calls, and `overflow_stop == "context_overflow"`. Require
+`plugin_recovery_pending` and `plugin_recovery_completed` to be true,
+`plugin_recovery_summary_chars` to be positive, `recovery_frame_reason` to be
+`"compaction"`, and `recovery_frame_moved` to be true. The same session must
+continue successfully without another overflow and produce an assistant answer.
+
+**Fail if:** the standard protocol did not execute the tool, the plugin did not
+persist both records, the summary or new frame is absent, or the next turn fails.
+
 ## Scorecard
 
 Score at gate granularity, one row per independent requirement — a phase that states three
@@ -170,6 +180,9 @@ requirements cannot record which of them was observed if it is collapsed to one 
 | 2 | The public accessor agrees with the serialized outcome | | `03-observed.jsonl` |
 | 3 | The continued turn succeeds and does not overflow again, both arms | | `03-observed.jsonl` |
 | 3 | It runs on the same `session_id` as its overflow turn, both arms | | `03-observed.jsonl` |
+| 4 | Standard session overflows after a native tool call | | `standard/03-observed.jsonl` |
+| 4 | Plugin persists pending and completed recovery records and a summary | | `standard/03-observed.jsonl` |
+| 4 | Continuing turn runs in a new compaction frame and answers | | `standard/03-observed.jsonl` |
 
 Record the artifact directory and the companion's final line with the scorecard. There is
 no dialect to record: it is a compile-time constant, not an observation.
