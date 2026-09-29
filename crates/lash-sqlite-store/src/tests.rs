@@ -495,7 +495,10 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
         set_checkpoint_statement_trace(&store, true).await;
         let load_started = std::time::Instant::now();
         let loaded = store
-            .load_session_window(&state.session_id, lash_core_execution::WindowSelector::Current)
+            .load_session_window(
+                &state.session_id,
+                lash_core_execution::WindowSelector::Current,
+            )
             .await
             .expect("load checkpoint component bodies")
             .expect("stored checkpoint session");
@@ -941,11 +944,20 @@ async fn concurrent_admission_creates_both_sessions_in_one_catalog() {
     let first = request("admission-a");
     let second = request("admission-b");
     let (a, b) = tokio::join!(store.admit_session(&first), store.admit_session(&second));
-    assert!(matches!(a, Ok(lash_core_execution::SessionAdmission::Created)));
-    assert!(matches!(b, Ok(lash_core_execution::SessionAdmission::Created)));
+    assert!(matches!(
+        a,
+        Ok(lash_core_execution::SessionAdmission::Created)
+    ));
+    assert!(matches!(
+        b,
+        Ok(lash_core_execution::SessionAdmission::Created)
+    ));
     for session_id in [&first.session_id, &second.session_id] {
         assert!(matches!(
-            store.lookup_session(session_id).await.expect("lookup admitted session"),
+            store
+                .lookup_session(session_id)
+                .await
+                .expect("lookup admitted session"),
             lash_core_execution::SessionLookup::Live(_)
         ));
     }

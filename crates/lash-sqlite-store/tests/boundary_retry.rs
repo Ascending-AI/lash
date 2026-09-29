@@ -11,7 +11,10 @@ use lash_sqlite_store::SqliteStore;
 
 async fn loaded_state(store: &SqliteStore) -> RuntimeSessionState {
     let read = store
-        .load_session_window(&lash_sansio::SessionId::from("root"), WindowSelector::Current)
+        .load_session_window(
+            &lash_sansio::SessionId::from("root"),
+            WindowSelector::Current,
+        )
         .await
         .expect("load current window")
         .expect("committed session has a window");

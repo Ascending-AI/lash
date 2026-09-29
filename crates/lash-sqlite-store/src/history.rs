@@ -152,7 +152,12 @@ fn window(
         let last = match visible_header(conn, session, leaf.as_str())?.filter(|h| !h.tombstoned) {
             Some(last) => last,
             None if admitted => return Err(StoreError::TurnBaseNotRetained { revision }),
-            None => return Err(corrupt("SessionGraph", format!("leaf `{leaf}` is not readable"))),
+            None => {
+                return Err(corrupt(
+                    "SessionGraph",
+                    format!("leaf `{leaf}` is not readable"),
+                ));
+            }
         };
         if !admitted
             && meta.current_frame_node_id.as_ref().map(|id| id.as_str())
